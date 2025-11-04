@@ -13,15 +13,13 @@ Updated: 2025-11-03
 - GitHub hygiene: CODEOWNERS, PR/Issue templates, .gitattributes, README badges.
 
 ## In Progress
-- CSV import pipeline, normalization, and preview UI.
+- CSV import pipeline with normalization, preview table, and client cache.
 - CI/CD: finalize Netlify deploy previews after GitHub repo is connected.
 - Progress tracker (`progress.md`).
+- Firebase Functions scaffolding added; ready for CLI setup and TMDB secret.
 
 ## Next Up
-- Build CSV parser for watched/diary/ratings/watchlist/likes.
-- ZIP extraction in browser and routing of files to parsers.
-- Summary preview (counts by file, distinct films, watchlist size, likes).
-- Save canonicalized data to client cache (local state) ahead of Firestore integration.
+- Wire Stats to normalized data (ratings histogram, watches by year).
 
 ## Remaining (MVP)
 - Firestore schema + write flow for imported events and mappings.

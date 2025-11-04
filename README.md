@@ -44,6 +44,28 @@ npm run dev
 - Create Firestore (production rules in `plan.md`).
 - For Functions (later): store TMDB_API_KEY via `functions:secrets:set` and call TMDB in server code only.
 
+### Firebase CLI quickstart
+1) Install tools
+```pwsh
+npm i -g firebase-tools
+firebase login
+```
+2) Set your project ID in `.firebaserc` (replace YOUR_FIREBASE_PROJECT_ID)
+3) Configure secrets (from your shell; not checked into Git)
+```pwsh
+firebase functions:secrets:set TMDB_API_KEY
+```
+4) Deploy functions
+```pwsh
+cd functions
+npm install
+npm run build
+cd ..
+firebase deploy --only functions
+```
+5) Call the enrichment endpoint (example)
+GET https://us-central1-<project-id>.cloudfunctions.net/enrich?title=Heat&year=1995
+
 ## Notes
 - Admin route `/admin` placeholder for user management UI (to add later).
 - Import route `/import` parses Letterboxd CSVs (to implement next).

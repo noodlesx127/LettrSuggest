@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { normalizeData } from '@/lib/normalize';
+import { useImportData } from '@/lib/importStore';
 
 type ParsedData = {
   watched?: Record<string, string>[];
@@ -19,6 +20,7 @@ function parseCsv(text: string) {
 }
 
 export default function ImportPage() {
+  const { setFilms } = useImportData();
   const [data, setData] = useState<ParsedData>({});
   const [status, setStatus] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -75,11 +77,12 @@ export default function ImportPage() {
     try {
       const norm = normalizeData(next);
       setDistinct(norm.distinctFilms);
+      setFilms(norm.films);
       setStatus('Parsed and normalized');
     } catch (e: any) {
       setStatus('Parsed');
     }
-  }, []);
+  }, [setFilms]);
 
   const summary = useMemo(() => {
     const s: { label: string; count: number }[] = [];
@@ -153,6 +156,45 @@ export default function ImportPage() {
           </p>
         </div>
       )}
+
+      <PreviewTable />
     </AuthGate>
+  );
+}
+
+function PreviewTable() {
+  const { films } = useImportData();
+  if (!films || films.length === 0) return null;
+  const rows = films.slice(0, 10);
+  return (
+    <div className="mt-6 bg-white border rounded p-4">
+      <h2 className="font-medium mb-2">Preview (first 10 films)</h2>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="text-left p-2">Title</th>
+              <th className="text-left p-2">Year</th>
+              <th className="text-left p-2">Rating</th>
+              <th className="text-left p-2">Liked</th>
+              <th className="text-left p-2">Watchlist</th>
+              <th className="text-left p-2">Rewatch</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((f) => (
+              <tr key={f.uri} className="border-t">
+                <td className="p-2">{f.title || f.uri}</td>
+                <td className="p-2">{f.year ?? ''}</td>
+                <td className="p-2">{f.rating ?? ''}</td>
+                <td className="p-2">{f.liked ? '✓' : ''}</td>
+                <td className="p-2">{f.onWatchlist ? '✓' : ''}</td>
+                <td className="p-2">{f.rewatch ? '✓' : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
