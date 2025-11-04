@@ -3,16 +3,17 @@
 Updated: 2025-11-03
 
 ## Current Focus
-- Implement CSV import pipeline (support ZIP and individual CSVs/folder drag-and-drop). Parse and summarize before persisting.
+- Implement CSV import pipeline (ZIP + CSVs/folder drag-and-drop). Add normalization and preview before persisting.
 
 ## Completed
 - Project plan (`plan.md`) with architecture, data model, recommender design, CI/CD.
 - Stack confirmation (Next.js + TS + Tailwind + Firebase + Netlify).
 - Scaffold app (App Router, Tailwind, Firebase client guard for SSR, ECharts, auth pages, core pages).
 - CI: GitHub Actions workflow (lint, typecheck, build). Netlify config committed.
+- GitHub hygiene: CODEOWNERS, PR/Issue templates, .gitattributes, README badges.
 
 ## In Progress
-- CSV import pipeline and preview UI.
+- CSV import pipeline, normalization, and preview UI.
 - CI/CD: finalize Netlify deploy previews after GitHub repo is connected.
 - Progress tracker (`progress.md`).
 

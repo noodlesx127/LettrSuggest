@@ -1,7 +1,7 @@
 # LettrSuggest
 
 [![CI](https://github.com/noodlesx127/LettrSuggest/actions/workflows/ci.yml/badge.svg)](https://github.com/noodlesx127/LettrSuggest/actions/workflows/ci.yml)
-[![Netlify Status](https://api.netlify.com/api/v1/badges/00000000-0000-0000-0000-000000000000/deploy-status)](https://app.netlify.com/sites/YOUR-NETLIFY-SITE/deploys)
+[![Netlify Status](https://api.netlify.com/api/v1/badges/00000000-0000-0000-0000-000000000000/deploy-status)](https://app.netlify.com/sites/lettrsuggest/deploys)
 
 Personalized movie suggestions and rich stats from your Letterboxd data.
 
@@ -35,7 +35,8 @@ npm run dev
 - Set env vars in Netlify: the NEXT_PUBLIC_FIREBASE_* values. TMDB_API_KEY will be set as a Function secret later.
 
 ### Netlify
-- Replace the Netlify badge ID and site name in the README once your site is created.
+- Live site: https://lettrsuggest.netlify.app/
+- Replace the Netlify badge ID in the README badge (Site settings → Status badges) to show real-time deploy status.
 
 
 ## Firebase Setup (summary)
@@ -46,3 +47,9 @@ npm run dev
 ## Notes
 - Admin route `/admin` placeholder for user management UI (to add later).
 - Import route `/import` parses Letterboxd CSVs (to implement next).
+
+## Security & Secrets
+- Never commit secrets. Use `.env.local` for local dev and Netlify env vars for deploys.
+- Public client config lives behind `NEXT_PUBLIC_*`; do not expose server secrets (e.g., `TMDB_API_KEY`).
+- GitHub Actions runs a secret scan (`.github/workflows/secret-scan.yml`) using Gitleaks on every push/PR.
+- `.gitleaks.toml` allows NEXT_PUBLIC_* while flagging other keys.
