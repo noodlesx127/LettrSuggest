@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { ImportDataProvider } from '@/lib/importStore';
 
 export const metadata: Metadata = {
   title: 'LettrSuggest',
@@ -20,7 +21,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <a href="/admin" className="ml-auto text-sm text-gray-600 hover:text-gray-900">Admin</a>
           </nav>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+        <main className="mx-auto max-w-6xl px-4 py-6">
+          <ImportDataProvider>{children}</ImportDataProvider>
+        </main>
       </body>
     </html>
   );
