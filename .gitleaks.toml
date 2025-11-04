@@ -1,0 +1,12 @@
+# Allow NEXT_PUBLIC_* (intended to be public client config) but scan for other keys.
+title = "LettrSuggest Gitleaks Config"
+
+[allowlist]
+description = "Allow common false positives"
+regexes = [
+  '''NEXT_PUBLIC_[A-Z0-9_]+=*''',
+  '''(-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLIC KEY-----)''',
+]
+
+[rules]
+# Use default rules from gitleaks action; this file primarily adds allowlist overrides.

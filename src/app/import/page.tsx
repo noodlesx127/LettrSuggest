@@ -3,6 +3,7 @@ import AuthGate from '@/components/AuthGate';
 import { useCallback, useMemo, useState } from 'react';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
+import { normalizeData } from '@/lib/normalize';
 
 type ParsedData = {
   watched?: Record<string, string>[];
@@ -21,6 +22,7 @@ export default function ImportPage() {
   const [data, setData] = useState<ParsedData>({});
   const [status, setStatus] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [distinct, setDistinct] = useState<number | null>(null);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     setError(null);
@@ -70,7 +72,13 @@ export default function ImportPage() {
     }
 
     setData(next);
-    setStatus('Parsed');
+    try {
+      const norm = normalizeData(next);
+      setDistinct(norm.distinctFilms);
+      setStatus('Parsed and normalized');
+    } catch (e: any) {
+      setStatus('Parsed');
+    }
   }, []);
 
   const summary = useMemo(() => {
@@ -135,6 +143,11 @@ export default function ImportPage() {
               </li>
             ))}
           </ul>
+          {distinct != null && (
+            <p className="text-sm mt-2">
+              Distinct films detected: <span className="font-mono">{distinct.toLocaleString()}</span>
+            </p>
+          )}
           <p className="text-sm text-gray-600 mt-3">
             Next: we’ll normalize and enrich this data to power stats and suggestions.
           </p>

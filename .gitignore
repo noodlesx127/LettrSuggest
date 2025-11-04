@@ -13,6 +13,12 @@ out/
 # Local env
 .env*
 !.env.example
+firebase-service-account.json
+service-account.json
+.firebaserc.local
+.firebase/
+netlify.toml.local
+netlify.state.json
 
 # OS
 .DS_Store
