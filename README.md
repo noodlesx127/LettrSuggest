@@ -1,5 +1,8 @@
 # LettrSuggest
 
+[![CI](https://github.com/noodlesx127/LettrSuggest/actions/workflows/ci.yml/badge.svg)](https://github.com/noodlesx127/LettrSuggest/actions/workflows/ci.yml)
+[![Netlify Status](https://api.netlify.com/api/v1/badges/00000000-0000-0000-0000-000000000000/deploy-status)](https://app.netlify.com/sites/YOUR-NETLIFY-SITE/deploys)
+
 Personalized movie suggestions and rich stats from your Letterboxd data.
 
 ## Tech Stack
@@ -30,6 +33,10 @@ npm run dev
 ## Deployment
 - Connect GitHub repo to Netlify
 - Set env vars in Netlify: the NEXT_PUBLIC_FIREBASE_* values. TMDB_API_KEY will be set as a Function secret later.
+
+### Netlify
+- Replace the Netlify badge ID and site name in the README once your site is created.
+
 
 ## Firebase Setup (summary)
 - Enable Email/Password auth first. Keep Google as optional to enable later.
