@@ -1,0 +1,46 @@
+'use client';
+import { useForm } from 'react-hook-form';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+type FormData = { email: string; password: string };
+
+export default function RegisterPage() {
+  const { register, handleSubmit } = useForm<FormData>();
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  const onSubmit = async (data: FormData) => {
+    setError(null);
+    try {
+      if (!auth) throw new Error('Auth not initialized');
+      await createUserWithEmailAndPassword(auth, data.email, data.password);
+      router.push('/');
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to create account');
+    }
+  };
+
+  return (
+    <div className="max-w-sm">
+      <h1 className="text-xl font-semibold mb-4">Create account</h1>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+        <div>
+          <label className="block text-sm mb-1">Email</label>
+          <input {...register('email')} type="email" className="w-full border rounded px-3 py-2" required />
+        </div>
+        <div>
+          <label className="block text-sm mb-1">Password</label>
+          <input {...register('password')} type="password" className="w-full border rounded px-3 py-2" required />
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <button type="submit" className="px-4 py-2 bg-black text-white rounded">Create account</button>
+      </form>
+      <p className="text-sm mt-3">
+        Have an account? <a className="underline" href="/auth/login">Sign in</a>
+      </p>
+    </div>
+  );
+}
