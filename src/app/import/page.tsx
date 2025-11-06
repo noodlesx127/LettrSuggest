@@ -5,6 +5,10 @@ import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { normalizeData } from '@/lib/normalize';
 import { useImportData } from '@/lib/importStore';
+import { auth, db as fsdb } from '@/lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
+import { supabase } from '@/lib/supabaseClient';
+import { saveFilmsLocally } from '@/lib/db';
 
 type ParsedData = {
   watched?: Record<string, string>[];
@@ -20,7 +24,7 @@ function parseCsv(text: string) {
 }
 
 export default function ImportPage() {
-  const { setFilms } = useImportData();
+  const { films, setFilms } = useImportData();
   const [data, setData] = useState<ParsedData>({});
   const [status, setStatus] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -75,9 +79,11 @@ export default function ImportPage() {
 
     setData(next);
     try {
-      const norm = normalizeData(next);
+  const norm = normalizeData(next);
       setDistinct(norm.distinctFilms);
       setFilms(norm.films);
+  // Persist locally (IndexedDB)
+  await saveFilmsLocally(norm.films);
       setStatus('Parsed and normalized');
     } catch (e: any) {
       setStatus('Parsed');
@@ -158,6 +164,59 @@ export default function ImportPage() {
       )}
 
       <PreviewTable />
+
+      {films && films.length > 0 && (
+        <div className="mt-4">
+          <button
+            className="ml-3 px-4 py-2 bg-emerald-600 text-white rounded"
+            onClick={async () => {
+              try {
+                if (!supabase) throw new Error('Supabase not initialized');
+                const { data: sessionRes, error: sessErr } = await supabase.auth.getSession();
+                if (sessErr) throw sessErr;
+                const uid = sessionRes.session?.user?.id;
+                if (!uid) throw new Error('Not signed in');
+                // Upsert in batches to avoid payload limits
+                const batchSize = 500;
+                for (let i = 0; i < films.length; i += batchSize) {
+                  const chunk = films.slice(i, i + batchSize).map((f) => ({
+                    user_id: uid,
+                    uri: f.uri,
+                    title: f.title,
+                    year: f.year ?? null,
+                    rating: f.rating ?? null,
+                    rewatch: f.rewatch ?? null,
+                    last_date: f.lastDate ?? null,
+                    liked: f.liked ?? null,
+                    on_watchlist: f.onWatchlist ?? null,
+                  }));
+                  const { error } = await supabase.from('film_events').upsert(chunk, { onConflict: 'user_id,uri' });
+                  if (error) throw error;
+                }
+                setStatus('Saved to Supabase');
+              } catch (e: any) {
+                setError(e?.message ?? 'Failed to save to Supabase');
+              }
+            }}
+          >
+            Save to Supabase
+          </button>
+          <button
+            className="ml-3 px-4 py-2 bg-gray-200 rounded"
+            onClick={() => {
+              const blob = new Blob([JSON.stringify(films, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'lettrsuggest-films.json';
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            Export JSON
+          </button>
+        </div>
+      )}
     </AuthGate>
   );
 }

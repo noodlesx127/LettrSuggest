@@ -1,9 +1,8 @@
 'use client';
 import { useForm } from 'react-hook-form';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 
 type FormData = { email: string; password: string };
 
@@ -15,8 +14,9 @@ export default function RegisterPage() {
   const onSubmit = async (data: FormData) => {
     setError(null);
     try {
-      if (!auth) throw new Error('Auth not initialized');
-      await createUserWithEmailAndPassword(auth, data.email, data.password);
+      if (!supabase) throw new Error('Auth not initialized');
+      const { error } = await supabase.auth.signUp({ email: data.email, password: data.password });
+      if (error) throw error;
       router.push('/');
     } catch (e: any) {
       setError(e?.message ?? 'Failed to create account');
