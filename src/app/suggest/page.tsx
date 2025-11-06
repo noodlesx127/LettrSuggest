@@ -13,6 +13,10 @@ export default function SuggestPage() {
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Array<{ id: number; title: string; year?: string; reasons: string[] }> | null>(null);
   const [fallbackFilms, setFallbackFilms] = useState<FilmEvent[] | null>(null);
+  const [excludeGenres, setExcludeGenres] = useState<string>('');
+  const [yearMin, setYearMin] = useState<string>('');
+  const [yearMax, setYearMax] = useState<string>('');
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     const init = async () => {
@@ -31,25 +35,41 @@ export default function SuggestPage() {
       setLoading(true);
       if (!supabase) throw new Error('Supabase not initialized');
       if (!uid) throw new Error('Not signed in');
-      const uris = sourceFilms.map((f) => f.uri);
+      // Apply quick filters to source films
+      const gExclude = new Set(
+        excludeGenres
+          .split(',')
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean)
+      );
+      const yMin = Number(yearMin) || undefined;
+      const yMax = Number(yearMax) || undefined;
+      const filteredFilms = sourceFilms.filter((f) => {
+        if (yMin && f.year != null && f.year < yMin) return false;
+        if (yMax && f.year != null && f.year > yMax) return false;
+        return true; // genre filter will apply on candidates via overlap features
+      });
+      const uris = filteredFilms.map((f) => f.uri);
       const mappings = await getFilmMappings(uid, uris);
       // Candidates: try watchlist mapped films not yet liked/rated high
-      const candidateIds = sourceFilms
+      const candidateIds = filteredFilms
         .filter((f) => f.onWatchlist && mappings.get(f.uri))
         .map((f) => mappings.get(f.uri)!) as number[];
       // Fallback: if no watchlist candidates, pick first 100 mappings
       const allMappedIds = uris.map((u) => mappings.get(u)).filter(Boolean) as number[];
       const candidates = candidateIds.length ? candidateIds.slice(0, 200) : allMappedIds.slice(0, 200);
-      const lite = sourceFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
-      const suggestions = await suggestByOverlap({ userId: uid, films: lite, mappings, candidates });
-      // materialize titles/years for display
-      const details = await Promise.all(
-        suggestions.slice(0, 20).map(async (s) => {
-          const m = await fetchTmdbMovie(s.tmdbId).catch(() => null);
-          return { id: s.tmdbId, title: (m?.title ?? `#${s.tmdbId}`), year: m?.release_date?.slice(0, 4), reasons: s.reasons };
-        })
-      );
-      setItems(details.filter(Boolean) as any);
+      const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
+      const suggestions = await suggestByOverlap({
+        userId: uid,
+        films: lite,
+        mappings,
+        candidates,
+        excludeGenres: gExclude.size ? gExclude : undefined,
+        maxCandidates: 120,
+        concurrency: 8,
+      });
+      const details = suggestions.map((s) => ({ id: s.tmdbId, title: s.title ?? `#${s.tmdbId}`, year: s.release_date?.slice(0, 4), reasons: s.reasons }));
+      setItems(details);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to get suggestions');
     } finally {
@@ -99,9 +119,51 @@ export default function SuggestPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, sourceFilms.length]);
 
+  // Recompute when mapping updates are emitted
+  useEffect(() => {
+    const handler = () => {
+      setItems(null);
+      void runSuggest();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('lettr:mappings-updated', handler);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('lettr:mappings-updated', handler);
+      }
+    };
+  }, [runSuggest]);
+
   return (
     <AuthGate>
       <h1 className="text-xl font-semibold mb-4">Suggestions</h1>
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-xs text-gray-600">Exclude genres (comma)</label>
+          <input
+            value={excludeGenres}
+            onChange={(e) => setExcludeGenres(e.target.value)}
+            placeholder="e.g., horror, musical"
+            className="border rounded px-2 py-1 text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-600">Year min</label>
+          <input value={yearMin} onChange={(e) => setYearMin(e.target.value)} placeholder="e.g., 1990" className="border rounded px-2 py-1 text-sm w-24" />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-600">Year max</label>
+          <input value={yearMax} onChange={(e) => setYearMax(e.target.value)} placeholder="e.g., 2025" className="border rounded px-2 py-1 text-sm w-24" />
+        </div>
+        <button
+          className="ml-auto px-2 py-2 rounded border text-sm hover:bg-gray-50"
+          title="Recompute"
+          onClick={() => { setItems(null); setRefreshTick((x) => x + 1); void runSuggest(); }}
+        >
+          🔄 Refresh
+        </button>
+      </div>
       {loading && <p className="text-sm text-gray-600">Computing your recommendations…</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {items && (

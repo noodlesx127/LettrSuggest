@@ -74,16 +74,72 @@ function extractFeatures(movie: TMDBMovie) {
   return { genres, directors, cast, keywords };
 }
 
+// Basic timeout helper for fetches
+async function withTimeout<T>(p: Promise<T>, ms = 8000): Promise<T> {
+  return await Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
+
+// Fetch with simple cache: prefer Supabase row if present; if missing/partial, fetch from API and upsert
+export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null> {
+  try {
+    if (!supabase) return await withTimeout(fetchTmdbMovie(id));
+    const { data, error } = await supabase
+      .from('tmdb_movies')
+      .select('data')
+      .eq('tmdb_id', id)
+      .single();
+    if (!error && data && data.data) {
+      const cached = data.data as TMDBMovie;
+      // If cached has credits/keywords, use it directly
+      if ((cached.credits && cached.credits.cast && cached.credits.crew) || cached.keywords) {
+        return cached;
+      }
+      // Otherwise fall through to refetch enriched details
+    }
+  } catch {
+    // ignore cache errors
+  }
+  try {
+    const fresh = await withTimeout(fetchTmdbMovie(id));
+    // best-effort upsert
+    try { await upsertTmdbCache(fresh); } catch {}
+    return fresh;
+  } catch {
+    return null;
+  }
+}
+
+// Concurrency-limited async mapper
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const ret: R[] = new Array(items.length);
+  let next = 0;
+  const workers = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) break;
+      ret[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return ret;
+}
+
 export async function suggestByOverlap(params: {
   userId: string;
   films: FilmEventLite[];
   mappings: Map<string, number>;
   candidates: number[]; // tmdb ids to consider (e.g., from watchlist mapping or popular)
-}): Promise<Array<{ tmdbId: number; score: number; reasons: string[] }>> {
+  excludeGenres?: Set<string>;
+  maxCandidates?: number;
+  concurrency?: number;
+}): Promise<Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[] }>> {
   // Build user profile from liked/highly-rated mapped films
   const liked = params.films.filter((f) => (f.liked || (f.rating ?? 0) >= 4) && params.mappings.get(f.uri));
   const likedIds = liked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
-  const likedMovies = await Promise.all(likedIds.map((id) => fetchTmdbMovie(id).catch(() => null)));
+  const likedMovies = await Promise.all(likedIds.map((id) => fetchTmdbMovieCached(id)));
   const likedFeats = likedMovies.filter(Boolean).map((m) => extractFeatures(m as TMDBMovie));
 
   const weights = {
@@ -109,12 +165,16 @@ export async function suggestByOverlap(params: {
 
   const seenIds = new Set(likedIds);
 
-  const results: Array<{ tmdbId: number; score: number; reasons: string[] }> = [];
-  for (const cid of params.candidates) {
-    if (seenIds.has(cid)) continue; // skip already-liked
-    const m = await fetchTmdbMovie(cid).catch(() => null);
-    if (!m) continue;
+  const maxC = Math.min(params.maxCandidates ?? 80, params.candidates.length);
+  const pool = await mapLimit(params.candidates.slice(0, maxC), params.concurrency ?? 8, async (cid) => {
+    if (seenIds.has(cid)) return null; // skip already-liked
+    const m = await fetchTmdbMovieCached(cid);
+    if (!m) return null;
     const feats = extractFeatures(m);
+    // Exclude by genres early if requested
+    if (params.excludeGenres && feats.genres.some((g) => params.excludeGenres!.has(g.toLowerCase()))) {
+      return null;
+    }
     let score = 0;
     const reasons: string[] = [];
     const gHits = feats.genres.filter((g) => pref.genres.has(g));
@@ -137,8 +197,10 @@ export async function suggestByOverlap(params: {
       score += Math.min(5, kHits.length) * weights.keyword;
       reasons.push(`Keywords: ${kHits.slice(0, 5).join(', ')}`);
     }
-    if (score > 0) results.push({ tmdbId: cid, score, reasons });
-  }
+    if (score <= 0) return null;
+    return { tmdbId: cid, score, reasons, title: m.title, release_date: m.release_date, genres: feats.genres };
+  });
+  const results = pool.filter(Boolean) as Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[] }>;
   results.sort((a, b) => b.score - a.score);
   return results.slice(0, 20);
 }
