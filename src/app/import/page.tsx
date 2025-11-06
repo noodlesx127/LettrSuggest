@@ -1,13 +1,14 @@
 'use client';
 import AuthGate from '@/components/AuthGate';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { normalizeData } from '@/lib/normalize';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { searchTmdb, upsertFilmMapping, upsertTmdbCache } from '@/lib/enrich';
+import { searchTmdb, upsertFilmMapping, upsertTmdbCache, getFilmMappings } from '@/lib/enrich';
 import { saveFilmsLocally } from '@/lib/db';
+import type { FilmEvent } from '@/lib/normalize';
 
 type ParsedData = {
   watched?: Record<string, string>[];
@@ -28,6 +29,7 @@ export default function ImportPage() {
   const [status, setStatus] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [distinct, setDistinct] = useState<number | null>(null);
+  const [showMapper, setShowMapper] = useState(false);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     setError(null);
@@ -222,6 +224,12 @@ export default function ImportPage() {
             Save to Supabase
           </button>
           <button
+            className="ml-3 px-4 py-2 bg-blue-600 text-white rounded"
+            onClick={() => setShowMapper(true)}
+          >
+            Map to TMDB
+          </button>
+          <button
             className="ml-3 px-4 py-2 bg-gray-200 rounded"
             onClick={() => {
               const blob = new Blob([JSON.stringify(films, null, 2)], { type: 'application/json' });
@@ -237,6 +245,9 @@ export default function ImportPage() {
           </button>
         </div>
       )}
+      {showMapper && films && (
+        <MapperDrawer films={films} onClose={() => setShowMapper(false)} />)
+      }
     </AuthGate>
   );
 }
@@ -274,6 +285,190 @@ function PreviewTable() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function MapperDrawer({ films, onClose }: { films: FilmEvent[]; onClose: () => void }) {
+  const [uid, setUid] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [mapped, setMapped] = useState<Record<string, number>>({});
+  const [autoCount, setAutoCount] = useState(0);
+  const [selectedUri, setSelectedUri] = useState<string | null>(null);
+  const [searchQ, setSearchQ] = useState<string>('');
+  const [results, setResults] = useState<any[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        if (!supabase) throw new Error('Supabase not initialized');
+        const { data: sessionRes, error: sErr } = await supabase.auth.getSession();
+        if (sErr) throw sErr;
+        const u = sessionRes.session?.user?.id ?? null;
+        setUid(u);
+        if (!u) return;
+        const uris = films.map((f) => f.uri);
+        const m = await getFilmMappings(u, uris);
+        const rec: Record<string, number> = {};
+        for (const [k, v] of m.entries()) rec[k] = v;
+        setMapped(rec);
+      } catch (e: any) {
+        setError(e?.message ?? 'Failed to load mappings');
+      }
+    };
+    void init();
+  }, [films]);
+
+  const total = films.length;
+  const mappedKeys = Object.keys(mapped);
+  const mappedCount = mappedKeys.length;
+  const unmapped = films.filter((f) => mapped[f.uri] == null);
+
+  const autoMap = async () => {
+    if (!uid) return;
+    setLoading(true);
+    setError(null);
+    let success = 0;
+    try {
+      const N = Math.min(50, unmapped.length);
+      for (let i = 0; i < N; i += 1) {
+        const f = unmapped[i];
+        if (!f?.title) continue;
+        try {
+          const results = await searchTmdb(f.title, f.year ?? undefined);
+          const best = results?.[0];
+          if (best) {
+            await upsertTmdbCache(best);
+            await upsertFilmMapping(uid, f.uri, best.id);
+            setMapped((prev) => ({ ...prev, [f.uri]: best.id }));
+            success += 1;
+          }
+        } catch {
+          // ignore individual failures
+        }
+      }
+      setAutoCount(success);
+    } catch (e: any) {
+      setError(e?.message ?? 'Auto-map failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 border rounded bg-white p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-medium">TMDB Mapping</h2>
+        <button className="text-sm underline" onClick={onClose}>Close</button>
+      </div>
+      <p className="text-sm text-gray-700 mt-2">
+        {mappedCount}/{total} films mapped. Unmapped: {Math.max(total - mappedCount, 0)}
+      </p>
+      {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          className="px-3 py-2 bg-blue-600 text-white rounded disabled:opacity-60"
+          disabled={loading || !uid || unmapped.length === 0}
+          onClick={autoMap}
+        >
+          {loading ? 'Auto-mapping…' : 'Auto-map first 50'}
+        </button>
+        {autoCount > 0 && (
+          <span className="text-sm text-gray-600">Mapped {autoCount} just now</span>
+        )}
+      </div>
+      <div className="mt-4 max-h-64 overflow-auto text-sm">
+        <ul className="space-y-1">
+          {unmapped.slice(0, 25).map((f) => (
+            <li key={f.uri} className="flex items-center justify-between gap-2">
+              <span className="truncate">
+                {f.title} {f.year ? `(${f.year})` : ''}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-2 py-1 text-xs bg-gray-200 rounded"
+                  onClick={() => {
+                    setSelectedUri(f.uri);
+                    setSearchQ(f.title);
+                    setResults(null);
+                  }}
+                >
+                  Search & map
+                </button>
+                <span className="text-gray-500">Unmapped</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {unmapped.length > 25 && (
+          <p className="text-xs text-gray-500 mt-2">…and {unmapped.length - 25} more</p>
+        )}
+      </div>
+      {selectedUri && (
+        <div className="mt-4 border-t pt-4">
+          <h3 className="font-medium text-sm mb-2">Manual mapping</h3>
+          <div className="flex gap-2 items-center">
+            <input
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              placeholder="Search TMDB…"
+              className="border rounded px-2 py-1 flex-1"
+            />
+            <button
+              className="px-3 py-1 bg-black text-white text-sm rounded disabled:opacity-60"
+              disabled={searching || !searchQ}
+              onClick={async () => {
+                try {
+                  setSearching(true);
+                  const res = await searchTmdb(searchQ);
+                  setResults(res);
+                } catch (e) {
+                  setResults([]);
+                } finally {
+                  setSearching(false);
+                }
+              }}
+            >
+              {searching ? 'Searching…' : 'Search'}
+            </button>
+            <button className="text-sm underline" onClick={() => { setSelectedUri(null); setResults(null); }}>Cancel</button>
+          </div>
+          {results && (
+            <ul className="mt-3 space-y-2 text-sm">
+              {results.slice(0, 8).map((r: any) => (
+                <li key={r.id} className="flex items-center justify-between border rounded p-2">
+                  <div>
+                    <div className="font-medium">{r.title} {r.release_date ? `(${String(r.release_date).slice(0,4)})` : ''}</div>
+                    <div className="text-gray-600">TMDB ID: {r.id}</div>
+                  </div>
+                  <button
+                    className="px-2 py-1 bg-emerald-600 text-white rounded"
+                    onClick={async () => {
+                      if (!uid || !selectedUri) return;
+                      try {
+                        await upsertTmdbCache({ id: r.id, title: r.title, release_date: r.release_date, poster_path: r.poster_path, backdrop_path: r.backdrop_path, overview: r.overview });
+                        await upsertFilmMapping(uid, selectedUri, r.id);
+                        setMapped((prev) => ({ ...prev, [selectedUri]: r.id }));
+                        setSelectedUri(null);
+                        setResults(null);
+                      } catch (e) {
+                        // ignore
+                      }
+                    }}
+                  >
+                    Map
+                  </button>
+                </li>
+              ))}
+              {results.length === 0 && (
+                <li className="text-gray-600">No results</li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

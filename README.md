@@ -16,19 +16,23 @@ Personalized movie suggestions and rich stats from your Letterboxd data.
 ```pwsh
 npm install
 ```
-2. Create `.env.local` with Supabase client config
+2. Create `.env.local` with Supabase client config and TMDB server secret
 ```
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+# Server-only TMDB v4 Bearer token used by Next.js API routes
+TMDB_API_KEY=
 ```
-3. Run the dev server
+3. Initialize the database (once)
+- In Supabase SQL editor, run the contents of `supabase/schema.sql` to create tables and RLS policies.
+4. Run the dev server
 ```pwsh
 npm run dev
 ```
 
 ## Deployment
 - Connect GitHub repo to Netlify
-- Set env vars in Netlify: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY. Also set TMDB_API_KEY for the built-in Next.js API proxy.
+- Set env vars in Netlify: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `TMDB_API_KEY` (server secret for the built-in Next.js API proxy).
 
 ### Netlify
 - Live site: https://lettrsuggest.netlify.app/
@@ -41,8 +45,18 @@ npm run dev
 - Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY locally and on Netlify.
 
 ## Notes
-- Admin route `/admin` placeholder for user management UI (to add later).
-- Import route `/import` parses Letterboxd CSVs (to implement next).
+- Admin route `/admin` includes a simple TMDB search tool.
+- Import route `/import` supports ZIP or folder drag-and-drop, normalization, local preview, saving to Supabase, and TMDB mapping.
+
+## Usage
+1) Sign in or register via `/auth/login` or `/auth/register`.
+2) Go to `/import` and upload your Letterboxd export (ZIP or CSVs/folder).
+3) Review the preview, then click “Save to Supabase” to upsert into `film_events`.
+4) Click “Map to TMDB” to:
+	- Auto-map the first 50 titles (best-effort), and/or
+	- Manually search and map remaining titles.
+	Mappings are stored in `film_tmdb_map` and movie metadata cached in `tmdb_movies`.
+5) Open `/stats` to see charts; use “Load from Supabase” to render from your cloud data.
 
 ## Security & Secrets
 - Never commit secrets. Use `.env.local` for local dev and Netlify env vars for deploys.
@@ -50,17 +64,10 @@ npm run dev
 - GitHub Actions runs a secret scan (`.github/workflows/secret-scan.yml`) using Gitleaks on every push/PR.
 - `.gitleaks.toml` allows NEXT_PUBLIC_* while flagging other keys.
 
-## Supabase (optional)
-
-If you prefer Supabase for auth + database:
-
-- Add to your `.env.local` (see `.env.example`):
-	- `NEXT_PUBLIC_SUPABASE_URL`
-	- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- Do not expose the service_role key in the browser. Use it only in server-side code or managed functions.
-- We will add a `supabase/schema.sql` with tables and RLS policies for per-user data.
-
-In this project’s current state, all core features work fully client-side via IndexedDB; Supabase enables optional cloud sync and auth.
+## Supabase
+- Supabase is used for authentication and per-user data (with Row Level Security): `film_events`, `film_tmdb_map`.
+- Shared movie metadata cache lives in `tmdb_movies`.
+- Client also writes a local IndexedDB cache for quick reloads without hitting the network.
 
 ## TMDB Proxy (built-in)
 - Server routes: `/api/tmdb/search?query=Heat&year=1995`, `/api/tmdb/movie?id=123`
