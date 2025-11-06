@@ -5,7 +5,7 @@ Build a web app that uses a user’s Letterboxd export to
 1) suggest movies with clear, data-backed reasons and dynamic filters (exclude films/genres), and
 2) present rich stats and trends across their entire history.
 
-Hosting on Netlify, using Firebase for auth, data, and serverless functions. GitHub for source control and CI/CD.
+Hosting on Netlify, using Supabase for auth and database (optional cloud sync). GitHub for source control and CI/CD.
 
 ## Goals and MVP Scope
 - Import: Upload Letterboxd CSV zip/folder; parse watched, diary, ratings, watchlist, likes.
@@ -35,7 +35,7 @@ Stretch (post-MVP)
   - Firestore: user documents, film metadata cache, user vectors, events.
   - Cloud Functions: TMDB enrichment + scheduled cache warming.
   - Storage: optional for raw uploads.
-- Hosting: Netlify (Next.js adapter). Netlify env vars for Firebase config, TMDB API key. Use edge/runtime where possible.
+- Hosting: Netlify (Next.js adapter). Netlify env vars for Supabase config, TMDB API key (if using a proxy). Use edge/runtime where possible.
 - GitHub: trunk-based dev, PRs, Actions for lint/typecheck/test/build, Netlify deploy previews.
 
 ### Data Flow
@@ -79,7 +79,7 @@ Note: Use Letterboxd URI as temporary key until TMDB ID is known; maintain mappi
 - Watchlist analytics: age buckets; high-fit not-yet-watched.
 - Tech: Recharts (SSR-safe) or ECharts via dynamic import.
 
-## Firebase Setup
+## Supabase Setup
 - Create project; enable Authentication (Email/Password, Google optional).
 - Create Firestore (production mode); set rules to limit to uid == request.auth.uid.
 - Create Functions (Node 20 runtime). Secrets: TMDB_API_KEY.
@@ -122,12 +122,12 @@ service cloud.firestore {
 - Netlify CLI for deploy previews if GitHub App not used.
 
 ## Environment & Secrets
-- Local `.env.local`: Firebase client config; NEXT_PUBLIC_* only for public keys; no TMDB API key in client.
-- Netlify environment: Firebase client config + TMDB_API_KEY (Functions only).
-- Firebase Functions: use `functions:secrets:set TMDB_API_KEY`.
+ - Local `.env.local`: Supabase client config (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY).
+ - Netlify environment: Supabase client config.
+ - For a TMDB proxy, prefer Netlify Functions or Supabase Edge Functions with secrets.
 
 ## Milestones & Timeline (indicative)
-1. Day 1–2: Scaffold Next.js app, Firebase init, Netlify deploy, Auth.
+1. Day 1–2: Scaffold Next.js app, Supabase init, Netlify deploy, Auth.
 2. Day 3–4: CSV import, normalization, merge events; basic stats.
 3. Day 5–7: TMDB enrichment Function + Firestore cache.
 4. Day 8–9: Recommender v1 + explanations + filters.
@@ -141,5 +141,5 @@ service cloud.firestore {
 
 ## Next Steps
 - Confirm stack and scope above.
-- Initialize repo + CI + Netlify site + Firebase project.
+- Initialize repo + CI + Netlify site + Supabase project.
 - Implement CSV import + basic stats first; then enrichment + recommender.

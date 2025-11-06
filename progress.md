@@ -7,8 +7,8 @@ Updated: 2025-11-03
 
 ## Completed
 - Project plan (`plan.md`) with architecture, data model, recommender design, CI/CD.
-- Stack confirmation (Next.js + TS + Tailwind + Firebase + Netlify).
-- Scaffold app (App Router, Tailwind, Firebase client guard for SSR, ECharts, auth pages, core pages).
+ - Stack confirmation (Next.js + TS + Tailwind + Netlify + Supabase).
+ - Scaffold app (App Router, Tailwind, ECharts, auth pages, core pages).
 - CI: GitHub Actions workflow (lint, typecheck, build). Netlify config committed.
 - GitHub hygiene: CODEOWNERS, PR/Issue templates, .gitattributes, README badges.
 
@@ -29,5 +29,4 @@ Updated: 2025-11-03
 - Admin: placeholder user management (list users, roles) for later.
 
 ## Risks/Notes
-- Ensure Firebase only initializes on client to avoid SSR build errors (in place).
-- TMDB key kept server-side only (for later Functions work).
+ - Supabase handles auth; TMDB key to be used only in server-side proxy (Netlify or Supabase Edge) if added.
