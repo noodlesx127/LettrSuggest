@@ -30,36 +30,33 @@ Stretch (post-MVP)
 
 ## Technical Architecture
 - Frontend: Next.js (App Router) + TypeScript + Tailwind + React Query.
-- Backend: Firebase
+- Backend: Supabase (Postgres + Auth + RLS)
   - Auth: email/password + OAuth (Google) optional.
-  - Firestore: user documents, film metadata cache, user vectors, events.
-  - Cloud Functions: TMDB enrichment + scheduled cache warming.
-  - Storage: optional for raw uploads.
-- Hosting: Netlify (Next.js adapter). Netlify env vars for Supabase config, TMDB API key (if using a proxy). Use edge/runtime where possible.
+  - Database: tables for user profiles, film events, TMDB metadata cache, and user film URI→TMDB mappings.
+  - Edge Functions (optional): batch enrichment or long-running jobs.
+  - Storage (optional): raw uploads if needed.
+- Hosting: Netlify (Next.js adapter). Netlify env vars for Supabase config, TMDB API key (server-side only via API routes/Edge Functions). Use edge/runtime where possible.
 - GitHub: trunk-based dev, PRs, Actions for lint/typecheck/test/build, Netlify deploy previews.
 
 ### Data Flow
 1) User uploads CSVs
-2) Client parses and summarises
-3) Client sends canonicalized film events to Firestore or calls a Function for enrichment batch
-4) Function resolves TMDB IDs and fetches metadata; stores Film document cache
-5) Client requests recommendations; server computes (or client-side using cached metadata) and returns scored results + reasons
+2) Client parses and normalizes locally; optional client cache in IndexedDB
+3) Client upserts canonicalized film events to Supabase (RLS by user_id)
+4) Client/server resolves TMDB IDs (via API route) and upserts mappings + TMDB movie cache
+5) Client requests recommendations; compute client-side first using cached metadata; server-side scoring is optional
 6) Client renders stats directly from cached metadata + events
 
-### Data Model (Firestore)
-- users/{uid}
-  - profile: { displayName, createdAt }
-  - settings: { excludeGenres: string[], filters... }
-- users/{uid}/events/{filmUri}
-  - { uri, title, year, ratings[], diary[], liked: boolean, lastWatchedDate }
-- films/{tmdbId}
-  - { tmdbId, imdbId, title, year, genres[], keywords[], directors[], cast[], countries[], runtime }
-- users/{uid}/vectors/profile
-  - { featureWeights: { [feature]: weight }, updatedAt }
-- users/{uid}/recommendations/snapshots/{id}
-  - { createdAt, filters, top: [{ tmdbId, score, reasons: string[] }] }
+### Data Model (Supabase)
+- public.profiles
+  - { id uuid (auth.user id), email text, created_at timestamptz }
+- public.film_events (per-user film state)
+  - { user_id uuid, uri text, title text, year int, rating numeric, rewatch boolean, last_date text, liked boolean, on_watchlist boolean, updated_at timestamptz }
+- public.tmdb_movies (shared metadata cache)
+  - { tmdb_id bigint, data jsonb, updated_at timestamptz }
+- public.film_tmdb_map (per-user mapping from Letterboxd URI to TMDB id)
+  - { user_id uuid, uri text, tmdb_id bigint, updated_at timestamptz }
 
-Note: Use Letterboxd URI as temporary key until TMDB ID is known; maintain mapping in users/{uid}/mappings.
+Note: Use Letterboxd URI as temporary key until TMDB ID is known; maintain mapping in film_tmdb_map.
 
 ## Recommendation Design (Explainable)
 - Build feature vectors per film using:
@@ -81,30 +78,15 @@ Note: Use Letterboxd URI as temporary key until TMDB ID is known; maintain mappi
 
 ## Supabase Setup
 - Create project; enable Authentication (Email/Password, Google optional).
-- Create Firestore (production mode); set rules to limit to uid == request.auth.uid.
-- Create Functions (Node 20 runtime). Secrets: TMDB_API_KEY.
-- Optional Storage bucket for raw uploads.
+- Apply schema from `supabase/schema.sql` to create tables and RLS policies.
+- Store TMDB_API_KEY as environment secret; expose only to server-side code (Next.js API routes or Edge Functions).
 
-Firestore Security Rules (sketch)
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
-    }
-    match /films/{tmdbId} {
-      allow read: if true; // public metadata cache
-      allow write: if false; // only via Functions
-    }
-  }
-}
-```
+Row Level Security (RLS) is enabled on user-owned tables; policies restrict access to `auth.uid() = user_id`.
 
 ## Netlify Deployment
 - Connect GitHub repo to Netlify.
 - Build command: `npm run build` (Next.js) with adapter. Publish dir: `.next`/ Netlify adapter default.
-- Env vars: NEXT_PUBLIC_FIREBASE_*; FIREBASE_* (service account for Functions local use if needed); TMDB_API_KEY (stored as Netlify Secret, not exposed to client—Functions read it).
+- Env vars: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY; TMDB_API_KEY (stored as Netlify Secret, not exposed to client—API routes/Edge Functions read it).
 - Deploy Previews for PRs; Production on main branch.
 
 ## GitHub Workflow
