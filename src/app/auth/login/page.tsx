@@ -1,9 +1,8 @@
 'use client';
 import { useForm } from 'react-hook-form';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 
 type FormData = { email: string; password: string };
 
@@ -15,8 +14,9 @@ export default function LoginPage() {
   const onSubmit = async (data: FormData) => {
     setError(null);
     try {
-      if (!auth) throw new Error('Auth not initialized');
-      await signInWithEmailAndPassword(auth, data.email, data.password);
+      if (!supabase) throw new Error('Auth not initialized');
+      const { error } = await supabase.auth.signInWithPassword({ email: data.email, password: data.password });
+      if (error) throw error;
       router.push('/');
     } catch (e: any) {
       setError(e?.message ?? 'Failed to sign in');

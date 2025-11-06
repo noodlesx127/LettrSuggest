@@ -64,7 +64,7 @@ cd ..
 firebase deploy --only functions
 ```
 5) Call the enrichment endpoint (example)
-GET https://us-central1-<project-id>.cloudfunctions.net/enrich?title=Heat&year=1995
+GET https://us-east1-lettrsuggest.cloudfunctions.net/enrich?title=Heat&year=1995
 
 ## Notes
 - Admin route `/admin` placeholder for user management UI (to add later).
@@ -75,3 +75,15 @@ GET https://us-central1-<project-id>.cloudfunctions.net/enrich?title=Heat&year=1
 - Public client config lives behind `NEXT_PUBLIC_*`; do not expose server secrets (e.g., `TMDB_API_KEY`).
 - GitHub Actions runs a secret scan (`.github/workflows/secret-scan.yml`) using Gitleaks on every push/PR.
 - `.gitleaks.toml` allows NEXT_PUBLIC_* while flagging other keys.
+
+## Supabase (optional)
+
+If you prefer Supabase for auth + database:
+
+- Add to your `.env.local` (see `.env.example`):
+	- `NEXT_PUBLIC_SUPABASE_URL`
+	- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- Do not expose the service_role key in the browser. Use it only in server-side code or managed functions.
+- We will add a `supabase/schema.sql` with tables and RLS policies for per-user data.
+
+In this project’s current state, all core features work fully client-side via IndexedDB; Supabase enables optional cloud sync and auth.

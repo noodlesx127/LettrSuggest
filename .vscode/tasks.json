@@ -1,0 +1,35 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Install Supabase SDK",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"install",
+				"@supabase/supabase-js@^2.45.0"
+			],
+			"problemMatcher": [
+				"$eslint-stylish"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build after Supabase integration",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"lint&&npm",
+				"run",
+				"typecheck&&npm",
+				"run",
+				"build"
+			],
+			"problemMatcher": [
+				"$eslint-stylish"
+			],
+			"group": "build"
+		}
+	]
+}
