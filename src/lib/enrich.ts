@@ -142,3 +142,13 @@ export async function suggestByOverlap(params: {
   results.sort((a, b) => b.score - a.score);
   return results.slice(0, 20);
 }
+
+export async function deleteFilmMapping(userId: string, uri: string) {
+  if (!supabase) throw new Error('Supabase not initialized');
+  const { error } = await supabase
+    .from('film_tmdb_map')
+    .delete()
+    .eq('user_id', userId)
+    .eq('uri', uri);
+  if (error) throw error;
+}
