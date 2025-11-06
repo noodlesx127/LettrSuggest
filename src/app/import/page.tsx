@@ -30,6 +30,8 @@ export default function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [distinct, setDistinct] = useState<number | null>(null);
   const [showMapper, setShowMapper] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedCount, setSavedCount] = useState<number | null>(null);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     setError(null);
@@ -160,8 +162,8 @@ export default function ImportPage() {
         >
           Or drag-and-drop your export ZIP or the entire folder of CSVs here
         </div>
-        {status && <p className="text-sm text-gray-600">{status}</p>}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {status && <p className="text-sm text-gray-600" aria-live="polite">{status}</p>}
+        {error && <p className="text-sm text-red-600" aria-live="assertive">{error}</p>}
       </div>
 
       {summary.length > 0 && (
@@ -190,7 +192,8 @@ export default function ImportPage() {
       {films && films.length > 0 && (
         <div className="mt-4">
           <button
-            className="ml-3 px-4 py-2 bg-emerald-600 text-white rounded"
+            className="ml-3 px-4 py-2 bg-emerald-600 text-white rounded disabled:opacity-60"
+            disabled={saving}
             onClick={async () => {
               try {
                 if (!supabase) throw new Error('Supabase not initialized');
@@ -198,8 +201,14 @@ export default function ImportPage() {
                 if (sessErr) throw sessErr;
                 const uid = sessionRes.session?.user?.id;
                 if (!uid) throw new Error('Not signed in');
+                setSaving(true);
+                setError(null);
+                setSavedCount(0);
+                const total = films.length;
+                setStatus(`Saving to Supabase… 0/${total}`);
                 // Upsert in batches to avoid payload limits
                 const batchSize = 500;
+                let saved = 0;
                 for (let i = 0; i < films.length; i += batchSize) {
                   const chunk = films.slice(i, i + batchSize).map((f) => ({
                     user_id: uid,
@@ -214,15 +223,23 @@ export default function ImportPage() {
                   }));
                   const { error } = await supabase.from('film_events').upsert(chunk, { onConflict: 'user_id,uri' });
                   if (error) throw error;
+                  saved += chunk.length;
+                  setSavedCount(saved);
+                  setStatus(`Saving to Supabase… ${saved}/${total}`);
                 }
-                setStatus('Saved to Supabase');
+                setStatus(`Saved ${saved} films to Supabase`);
               } catch (e: any) {
                 setError(e?.message ?? 'Failed to save to Supabase');
+              } finally {
+                setSaving(false);
               }
             }}
           >
-            Save to Supabase
+            {saving ? 'Saving…' : 'Save to Supabase'}
           </button>
+          {saving && savedCount != null && (
+            <span className="ml-2 text-sm text-gray-600" aria-live="polite">{savedCount} saved…</span>
+          )}
           <button
             className="ml-3 px-4 py-2 bg-blue-600 text-white rounded"
             onClick={() => setShowMapper(true)}
