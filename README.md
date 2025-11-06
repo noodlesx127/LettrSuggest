@@ -28,7 +28,7 @@ npm run dev
 
 ## Deployment
 - Connect GitHub repo to Netlify
-- Set env vars in Netlify: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY. TMDB_API_KEY will be set where your proxy runs (Netlify or Supabase Edge) if you add one.
+- Set env vars in Netlify: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY. Also set TMDB_API_KEY for the built-in Next.js API proxy.
 
 ### Netlify
 - Live site: https://lettrsuggest.netlify.app/
@@ -61,3 +61,7 @@ If you prefer Supabase for auth + database:
 - We will add a `supabase/schema.sql` with tables and RLS policies for per-user data.
 
 In this project’s current state, all core features work fully client-side via IndexedDB; Supabase enables optional cloud sync and auth.
+
+## TMDB Proxy (built-in)
+- Server routes: `/api/tmdb/search?query=Heat&year=1995`, `/api/tmdb/movie?id=123`
+- Requires `TMDB_API_KEY` (TMDB v4 Bearer token) set in env. The key is never exposed to the browser.

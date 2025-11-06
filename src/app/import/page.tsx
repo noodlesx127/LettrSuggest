@@ -6,6 +6,7 @@ import JSZip from 'jszip';
 import { normalizeData } from '@/lib/normalize';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
+import { searchTmdb, upsertFilmMapping, upsertTmdbCache } from '@/lib/enrich';
 import { saveFilmsLocally } from '@/lib/db';
 
 type ParsedData = {
@@ -83,6 +84,27 @@ export default function ImportPage() {
   // Persist locally (IndexedDB)
   await saveFilmsLocally(norm.films);
       setStatus('Parsed and normalized');
+      // Lightweight enrichment: try top N films to seed cache
+      try {
+        const { data: sessionRes } = supabase ? await supabase.auth.getSession() : { data: { session: null } } as any;
+        const uid = sessionRes?.session?.user?.id;
+        const toTry = norm.films.slice(0, 25); // limit for now
+        for (const f of toTry) {
+          if (!f.title) continue;
+          try {
+            const results = await searchTmdb(f.title, f.year ?? undefined);
+            const best = results?.[0];
+            if (best) {
+              await upsertTmdbCache(best);
+              if (uid) await upsertFilmMapping(uid, f.uri, best.id);
+            }
+          } catch {
+            // ignore per-film errors
+          }
+        }
+      } catch {
+        // ignore enrichment errors, non-blocking
+      }
     } catch (e: any) {
       setStatus('Parsed');
     }

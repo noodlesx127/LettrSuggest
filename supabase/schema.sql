@@ -63,3 +63,33 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- TMDB metadata cache (no RLS; shared movie info)
+create table if not exists public.tmdb_movies (
+  tmdb_id bigint primary key,
+  data jsonb not null,
+  updated_at timestamp with time zone default now()
+);
+
+-- Map user's film URI to a TMDB id
+create table if not exists public.film_tmdb_map (
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  uri text not null,
+  tmdb_id bigint not null references public.tmdb_movies(tmdb_id) on delete cascade,
+  updated_at timestamp with time zone default now(),
+  primary key (user_id, uri)
+);
+
+alter table public.film_tmdb_map enable row level security;
+
+drop policy if exists "film_tmdb_map user read" on public.film_tmdb_map;
+create policy "film_tmdb_map user read" on public.film_tmdb_map
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "film_tmdb_map user upsert" on public.film_tmdb_map;
+create policy "film_tmdb_map user upsert" on public.film_tmdb_map
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "film_tmdb_map user update" on public.film_tmdb_map;
+create policy "film_tmdb_map user update" on public.film_tmdb_map
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
