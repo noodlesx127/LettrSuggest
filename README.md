@@ -7,7 +7,7 @@ Personalized movie suggestions and rich stats from your Letterboxd data.
 
 ## Tech Stack
 - Next.js (App Router) + TypeScript + Tailwind
-- Firebase (Auth, Firestore, Functions)
+- Supabase (Auth, Database, Edge Functions)
 - Netlify hosting
 - ECharts for charts
 
@@ -16,14 +16,10 @@ Personalized movie suggestions and rich stats from your Letterboxd data.
 ```pwsh
 npm install
 ```
-2. Create `.env.local` with Firebase client config
+2. Create `.env.local` with Supabase client config
 ```
-NEXT_PUBLIC_FIREBASE_API_KEY=
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
-NEXT_PUBLIC_FIREBASE_APP_ID=
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
 ```
 3. Run the dev server
 ```pwsh
@@ -32,39 +28,17 @@ npm run dev
 
 ## Deployment
 - Connect GitHub repo to Netlify
-- Set env vars in Netlify: the NEXT_PUBLIC_FIREBASE_* values. TMDB_API_KEY will be set as a Function secret later.
+- Set env vars in Netlify: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY. TMDB_API_KEY will be set where your proxy runs (Netlify or Supabase Edge) if you add one.
 
 ### Netlify
 - Live site: https://lettrsuggest.netlify.app/
 - Replace the Netlify badge ID in the README badge (Site settings → Status badges) to show real-time deploy status.
 
 
-## Firebase Setup (summary)
-- Enable Email/Password auth first. Keep Google as optional to enable later.
-- Create Firestore (production rules in `plan.md`).
-- For Functions (later): store TMDB_API_KEY via `functions:secrets:set` and call TMDB in server code only.
-
-### Firebase CLI quickstart
-1) Install tools
-```pwsh
-npm i -g firebase-tools
-firebase login
-```
-2) Set your project ID in `.firebaserc` (replace YOUR_FIREBASE_PROJECT_ID)
-3) Configure secrets (from your shell; not checked into Git)
-```pwsh
-firebase functions:secrets:set TMDB_API_KEY
-```
-4) Deploy functions
-```pwsh
-cd functions
-npm install
-npm run build
-cd ..
-firebase deploy --only functions
-```
-5) Call the enrichment endpoint (example)
-GET https://us-east1-lettrsuggest.cloudfunctions.net/enrich?title=Heat&year=1995
+## Supabase Setup (summary)
+- Enable Email/Password auth.
+- Run the SQL in `supabase/schema.sql` to create tables and RLS.
+- Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY locally and on Netlify.
 
 ## Notes
 - Admin route `/admin` placeholder for user management UI (to add later).

@@ -16,7 +16,7 @@ Updated: 2025-11-03
 - CSV import pipeline with normalization, preview table, and client cache.
 - CI/CD: finalize Netlify deploy previews after GitHub repo is connected.
 - Progress tracker (`progress.md`).
-- Firebase Functions scaffolding added; ready for CLI setup and TMDB secret.
+- Migrated to Supabase; removed Firebase Functions and related config.
 
 ## Next Up
 - Wire Stats to normalized data (ratings histogram, watches by year).
