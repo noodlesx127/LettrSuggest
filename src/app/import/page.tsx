@@ -5,8 +5,6 @@ import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { normalizeData } from '@/lib/normalize';
 import { useImportData } from '@/lib/importStore';
-import { auth, db as fsdb } from '@/lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
 import { supabase } from '@/lib/supabaseClient';
 import { saveFilmsLocally } from '@/lib/db';
 
