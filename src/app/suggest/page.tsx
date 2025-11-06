@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, suggestByOverlap, fetchTmdbMovie } from '@/lib/enrich';
+import type { FilmEvent } from '@/lib/normalize';
 
 export default function SuggestPage() {
   const { films } = useImportData();
@@ -11,6 +12,7 @@ export default function SuggestPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Array<{ id: number; title: string; year?: string; reasons: string[] }> | null>(null);
+  const [fallbackFilms, setFallbackFilms] = useState<FilmEvent[] | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -21,7 +23,7 @@ export default function SuggestPage() {
     void init();
   }, []);
 
-  const sourceFilms = useMemo(() => films ?? [], [films]);
+  const sourceFilms = useMemo(() => (films && films.length ? films : (fallbackFilms ?? [])), [films, fallbackFilms]);
 
   const runSuggest = async () => {
     try {
@@ -55,19 +57,53 @@ export default function SuggestPage() {
     }
   };
 
+  // Fallback: if no local films, load from Supabase once
+  useEffect(() => {
+    const maybeLoad = async () => {
+      try {
+        if (!supabase || !uid) return;
+        if (films && films.length) return;
+        const { data, error } = await supabase
+          .from('film_events')
+          .select('uri,title,year,rating,rewatch,last_date,liked,on_watchlist')
+          .eq('user_id', uid)
+          .limit(5000);
+        if (error) throw error;
+        if (data && data.length) {
+          const mapped = data.map((r) => ({
+            uri: r.uri,
+            title: r.title,
+            year: r.year ?? null,
+            rating: r.rating ?? undefined,
+            rewatch: r.rewatch ?? undefined,
+            lastDate: r.last_date ?? undefined,
+            liked: r.liked ?? undefined,
+            onWatchlist: r.on_watchlist ?? undefined,
+          })) as FilmEvent[];
+          setFallbackFilms(mapped);
+        }
+      } catch (e) {
+        // swallow for now; suggestions can still run with 0 films
+      }
+    };
+    void maybeLoad();
+  }, [uid, films]);
+
+  // Auto-run suggestions when we have user and films
+  useEffect(() => {
+    if (!uid) return;
+    if (sourceFilms.length === 0) return;
+    if (loading) return;
+    if (items !== null) return;
+    void runSuggest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, sourceFilms.length]);
+
   return (
     <AuthGate>
       <h1 className="text-xl font-semibold mb-4">Suggestions</h1>
-      <div className="mb-4 flex items-center gap-3">
-        <button
-          className="px-3 py-2 bg-emerald-600 text-white rounded disabled:opacity-60"
-          disabled={loading || !uid}
-          onClick={runSuggest}
-        >
-          {loading ? 'Computing…' : 'Get suggestions'}
-        </button>
-        {error && <span className="text-sm text-red-600">{error}</span>}
-      </div>
+      {loading && <p className="text-sm text-gray-600">Computing your recommendations…</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
       {items && (
         <ul className="space-y-3">
           {items.map((it) => (
