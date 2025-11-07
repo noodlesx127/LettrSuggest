@@ -1,6 +1,6 @@
 'use client';
 import AuthGate from '@/components/AuthGate';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, suggestByOverlap } from '@/lib/enrich';
@@ -31,7 +31,7 @@ export default function SuggestPage() {
 
   const sourceFilms = useMemo(() => (films && films.length ? films : (fallbackFilms ?? [])), [films, fallbackFilms]);
 
-  const runSuggest = async () => {
+  const runSuggest = useCallback(async () => {
     try {
       setError(null);
       setLoading(true);
@@ -90,7 +90,7 @@ export default function SuggestPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax]);
 
   // Fallback: if no local films, load from Supabase once
   useEffect(() => {
@@ -131,8 +131,7 @@ export default function SuggestPage() {
     if (loading) return;
     if (items !== null) return;
     void runSuggest();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, sourceFilms.length]);
+  }, [uid, sourceFilms.length, loading, items, runSuggest]);
 
   // Recompute when mapping updates are emitted
   useEffect(() => {

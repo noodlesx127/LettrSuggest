@@ -111,33 +111,13 @@ export default function LibraryPage() {
 function MovieGrid({ films, uid, mappedIds, onMappingChange, onDeleteMapping }: { films: GridFilm[]; uid: string | null; mappedIds: number[]; onMappingChange: (uri: string, id: number) => void; onDeleteMapping: (uri: string) => void }) {
   const { posters, backdrops, loading } = usePostersSWR(mappedIds);
   if (!films.length) return <p className="text-sm text-gray-600">No films loaded yet. Import your data first.</p>;
-  // Responsive column count similar to Tailwind grid; simple heuristic
-  const cols = 6;
-  const itemWidth = 180; // px
-  const itemHeight = Math.round(itemWidth * 1.5) + 80; // poster ratio plus controls
-  const rowCount = Math.ceil(films.length / cols);
-  const Cell = ({ columnIndex, rowIndex, style }: any) => {
-    const index = rowIndex * cols + columnIndex;
-    if (index >= films.length) return null;
-    const f = films[index];
-    return (
-      <div style={style} className="p-2">
-        <MovieCard film={f} uid={uid} posters={posters} backdrops={backdrops} loading={loading} onMappingChange={onMappingChange} onDeleteMapping={onDeleteMapping} />
-      </div>
-    );
-  };
+  
+  // Use simple grid layout instead of virtualization for now to avoid sizing issues
   return (
-    <div className="w-full" style={{ height: Math.min(900, rowCount * itemHeight) }}>
-      <Grid
-        columnCount={cols}
-        columnWidth={itemWidth}
-        height={Math.min(900, rowCount * itemHeight)}
-        rowCount={rowCount}
-        rowHeight={itemHeight}
-        width={cols * itemWidth}
-      >
-        {Cell}
-      </Grid>
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      {films.map((f) => (
+        <MovieCard key={f.uri} film={f} uid={uid} posters={posters} backdrops={backdrops} loading={loading} onMappingChange={onMappingChange} onDeleteMapping={onDeleteMapping} />
+      ))}
     </div>
   );
 }
