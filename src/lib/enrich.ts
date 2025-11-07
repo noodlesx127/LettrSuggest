@@ -135,6 +135,8 @@ export async function suggestByOverlap(params: {
   excludeGenres?: Set<string>;
   maxCandidates?: number;
   concurrency?: number;
+  excludeWatchedIds?: Set<number>;
+  desiredResults?: number;
 }): Promise<Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[] }>> {
   // Build user profile from liked/highly-rated mapped films
   const liked = params.films.filter((f) => (f.liked || (f.rating ?? 0) >= 4) && params.mappings.get(f.uri));
@@ -164,11 +166,27 @@ export async function suggestByOverlap(params: {
   }
 
   const seenIds = new Set(likedIds);
+  // Also treat already-watched mapped films as seen to avoid recommending
+  for (const f of params.films) {
+    const id = params.mappings.get(f.uri);
+    if (id) seenIds.add(id);
+  }
+  if (params.excludeWatchedIds) {
+    for (const id of params.excludeWatchedIds) seenIds.add(id);
+  }
 
   const maxC = Math.min(params.maxCandidates ?? 80, params.candidates.length);
+  const desired = Math.max(10, Math.min(30, params.desiredResults ?? 20));
+
+  // Helper to fetch from cache first in bulk where possible
+  async function fetchFromCache(id: number): Promise<TMDBMovie | null> {
+    return await fetchTmdbMovieCached(id);
+  }
+
+  const resultsAcc: Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[] }> = [];
   const pool = await mapLimit(params.candidates.slice(0, maxC), params.concurrency ?? 8, async (cid) => {
     if (seenIds.has(cid)) return null; // skip already-liked
-    const m = await fetchTmdbMovieCached(cid);
+    const m = await fetchFromCache(cid);
     if (!m) return null;
     const feats = extractFeatures(m);
     // Exclude by genres early if requested
@@ -198,11 +216,14 @@ export async function suggestByOverlap(params: {
       reasons.push(`Keywords: ${kHits.slice(0, 5).join(', ')}`);
     }
     if (score <= 0) return null;
-    return { tmdbId: cid, score, reasons, title: m.title, release_date: m.release_date, genres: feats.genres };
+    const r = { tmdbId: cid, score, reasons, title: m.title, release_date: m.release_date, genres: feats.genres };
+    resultsAcc.push(r);
+    // Early return the result; caller will slice after sorting
+    return r;
   });
   const results = pool.filter(Boolean) as Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[] }>;
   results.sort((a, b) => b.score - a.score);
-  return results.slice(0, 20);
+  return results.slice(0, desired);
 }
 
 export async function deleteFilmMapping(userId: string, uri: string) {

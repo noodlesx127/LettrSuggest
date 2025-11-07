@@ -11,6 +11,10 @@ class LettrDB extends Dexie {
     this.version(1).stores({
       films: '&uri, title, year, rating, rewatch, lastDate, liked, onWatchlist'
     });
+    // Add watchCount index in version 2
+    this.version(2).stores({
+      films: '&uri, title, year, rating, rewatch, lastDate, liked, onWatchlist, watchCount'
+    });
   }
 }
 

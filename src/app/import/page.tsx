@@ -7,6 +7,7 @@ import { normalizeData } from '@/lib/normalize';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { searchTmdb, upsertFilmMapping, upsertTmdbCache, getFilmMappings, deleteFilmMapping } from '@/lib/enrich';
+import { upsertDiaryEvents } from '@/lib/diary';
 import { saveFilmsLocally } from '@/lib/db';
 import type { FilmEvent } from '@/lib/normalize';
 
@@ -31,6 +32,86 @@ export default function ImportPage() {
   const [distinct, setDistinct] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedCount, setSavedCount] = useState<number | null>(null);
+
+    const autoSaveToSupabase = useCallback(async (filmList: FilmEvent[]) => {
+    try {
+      if (!supabase) throw new Error('Supabase not initialized');
+      const { data: sessionRes, error: sessErr } = await supabase.auth.getSession();
+      if (sessErr) throw sessErr;
+      const uid = sessionRes.session?.user?.id;
+      if (!uid) throw new Error('Not signed in');
+      setSaving(true);
+      setError(null);
+      setSavedCount(0);
+      const total = filmList.length;
+      setStatus(`Saving to Supabase… 0/${total}`);
+      const batchSize = 500;
+      let saved = 0;
+      for (let i = 0; i < filmList.length; i += batchSize) {
+        const chunk = filmList.slice(i, i + batchSize).map((f) => ({
+          user_id: uid,
+          uri: f.uri,
+          title: f.title,
+          year: f.year ?? null,
+          rating: f.rating ?? null,
+          rewatch: f.rewatch ?? null,
+          last_date: f.lastDate ?? null,
+          watch_count: f.watchCount ?? null,
+          liked: f.liked ?? null,
+          on_watchlist: f.onWatchlist ?? null,
+        }));
+        const { error } = await supabase.from('film_events').upsert(chunk, { onConflict: 'user_id,uri' });
+        if (error) throw error;
+        saved += chunk.length;
+        setSavedCount(saved);
+        setStatus(`Saving to Supabase… ${saved}/${total}`);
+      }
+      setStatus(`Saved ${saved} films to Supabase`);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to save to Supabase');
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  const autoMapBatch = useCallback(async (filmList: FilmEvent[]) => {
+    try {
+      const { data: sessionRes } = supabase ? await supabase.auth.getSession() : ({ data: { session: null } } as any);
+      const uid = sessionRes?.session?.user?.id;
+      if (!uid) return;
+      const toTry = filmList;
+      let mapped = 0;
+      let next = 0;
+      const concurrency = 5;
+      const worker = async () => {
+        while (true) {
+          const i = next++;
+          if (i >= toTry.length) break;
+          const f = toTry[i];
+          if (!f.title) continue;
+          try {
+            const results = await searchTmdb(f.title, f.year ?? undefined);
+            const best = results?.[0];
+            if (best) {
+              await upsertTmdbCache(best);
+              await upsertFilmMapping(uid, f.uri, best.id);
+              mapped += 1;
+              setStatus((s) => `Auto-mapped ${mapped}/${toTry.length} to TMDB…`);
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
+              }
+            }
+          } catch {
+            // ignore per-film errors
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      if (mapped > 0) setStatus((s) => `Auto-mapped ${mapped} films to TMDB`);
+    } catch {
+      // silent fail
+    }
+  }, []);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     setError(null);
@@ -87,81 +168,32 @@ export default function ImportPage() {
   // Persist locally (IndexedDB)
   await saveFilmsLocally(norm.films);
       setStatus('Parsed and normalized. Saving to Supabase…');
-      // Auto-save to Supabase and auto-map a batch in background
       await autoSaveToSupabase(norm.films);
+      // Upsert diary events for accurate watch counts if view/table exists
+      try {
+        if (next.diary?.length) {
+          const { data: sessionRes } = supabase ? await supabase.auth.getSession() : ({ data: { session: null } } as any);
+          const uid = sessionRes?.session?.user?.id;
+          if (uid) {
+            const diaryRows = (next.diary || []).map(r => ({
+              user_id: uid,
+              uri: r['Letterboxd URI'] || '',
+              watched_date: r['Date'] || null,
+              rating: r['Rating'] ? Number(r['Rating']) : null,
+              rewatch: (r['Rewatch'] || '').toLowerCase() === 'yes'
+            })).filter(d => d.uri);
+            await upsertDiaryEvents(diaryRows);
+          }
+        }
+      } catch {
+        // ignore diary upsert errors (table may not exist yet)
+      }
+      // Auto-map in background
       void autoMapBatch(norm.films);
     } catch (e: any) {
       setStatus('Parsed');
     }
-  }, [setFilms]);
-
-  const autoSaveToSupabase = useCallback(async (filmList: FilmEvent[]) => {
-    try {
-      if (!supabase) throw new Error('Supabase not initialized');
-      const { data: sessionRes, error: sessErr } = await supabase.auth.getSession();
-      if (sessErr) throw sessErr;
-      const uid = sessionRes.session?.user?.id;
-      if (!uid) throw new Error('Not signed in');
-      setSaving(true);
-      setError(null);
-      setSavedCount(0);
-      const total = filmList.length;
-      setStatus(`Saving to Supabase… 0/${total}`);
-      const batchSize = 500;
-      let saved = 0;
-      for (let i = 0; i < filmList.length; i += batchSize) {
-        const chunk = filmList.slice(i, i + batchSize).map((f) => ({
-          user_id: uid,
-          uri: f.uri,
-          title: f.title,
-          year: f.year ?? null,
-          rating: f.rating ?? null,
-          rewatch: f.rewatch ?? null,
-          last_date: f.lastDate ?? null,
-          liked: f.liked ?? null,
-          on_watchlist: f.onWatchlist ?? null,
-        }));
-        const { error } = await supabase.from('film_events').upsert(chunk, { onConflict: 'user_id,uri' });
-        if (error) throw error;
-        saved += chunk.length;
-        setSavedCount(saved);
-        setStatus(`Saving to Supabase… ${saved}/${total}`);
-      }
-      setStatus(`Saved ${saved} films to Supabase`);
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to save to Supabase');
-    } finally {
-      setSaving(false);
-    }
-  }, []);
-
-  const autoMapBatch = useCallback(async (filmList: FilmEvent[]) => {
-    try {
-      const { data: sessionRes } = supabase ? await supabase.auth.getSession() : ({ data: { session: null } } as any);
-      const uid = sessionRes?.session?.user?.id;
-      if (!uid) return;
-      const toTry = filmList.slice(0, 50); // limit for now
-      let mapped = 0;
-      for (const f of toTry) {
-        if (!f.title) continue;
-        try {
-          const results = await searchTmdb(f.title, f.year ?? undefined);
-          const best = results?.[0];
-          if (best) {
-            await upsertTmdbCache(best);
-            await upsertFilmMapping(uid, f.uri, best.id);
-            mapped += 1;
-            setStatus((s) => `Auto-mapped ${mapped}/${toTry.length} to TMDB…`);
-          }
-        } catch {
-          // ignore per-film errors
-        }
-      }
-      if (mapped > 0) setStatus((s) => `Auto-mapped ${mapped} films to TMDB`);
-    } catch {
-      // silent fail, user can edit in panel
-    }
-  }, []);
+  }, [setFilms, autoSaveToSupabase, autoMapBatch]);
 
   const summary = useMemo(() => {
     const s: { label: string; count: number }[] = [];
@@ -236,28 +268,33 @@ export default function ImportPage() {
         </div>
       )}
 
-      <PreviewTable />
-
       {films && films.length > 0 && (
-        <div className="mt-4">
-          {saving && savedCount != null && (
-            <span className="text-sm text-gray-600" aria-live="polite">{savedCount} saved…</span>
-          )}
-          <button
-            className="ml-0 px-4 py-2 bg-gray-200 rounded"
-            onClick={() => {
-              const blob = new Blob([JSON.stringify(films, null, 2)], { type: 'application/json' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = 'lettrsuggest-films.json';
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
-          >
-            Export JSON
-          </button>
-          <MappingsPanel films={films} />
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+          <div>
+            <PreviewTable />
+            <div className="mt-3">
+              {saving && savedCount != null && (
+                <span className="text-sm text-gray-600" aria-live="polite">{savedCount} saved…</span>
+              )}
+              <button
+                className="ml-0 mt-2 px-4 py-2 bg-gray-200 rounded"
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(films, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'lettrsuggest-films.json';
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                Export JSON
+              </button>
+            </div>
+          </div>
+          <div>
+            <MappingsPanel films={films} />
+          </div>
         </div>
       )}
     </AuthGate>
@@ -344,24 +381,34 @@ function MappingsPanel({ films }: { films: FilmEvent[] }) {
     setError(null);
     let success = 0;
     try {
-      const N = Math.min(50, unmapped.length);
-      for (let i = 0; i < N; i += 1) {
-        const f = unmapped[i];
-        if (!f?.title) continue;
-        try {
-          const results = await searchTmdb(f.title, f.year ?? undefined);
-          const best = results?.[0];
-          if (best) {
-            await upsertTmdbCache(best);
-            await upsertFilmMapping(uid, f.uri, best.id);
-            setMapped((prev) => ({ ...prev, [f.uri]: best.id }));
-            success += 1;
-          }
-        } catch {
-          // ignore individual failures
+      const toMap = unmapped.slice();
+      let next = 0;
+      const concurrency = 5;
+      const worker = async () => {
+        while (true) {
+          const i = next++;
+          if (i >= toMap.length) break;
+            const f = toMap[i];
+            if (!f?.title) continue;
+            try {
+              const results = await searchTmdb(f.title, f.year ?? undefined);
+              const best = results?.[0];
+              if (best) {
+                await upsertTmdbCache(best);
+                await upsertFilmMapping(uid, f.uri, best.id);
+                setMapped((prev) => ({ ...prev, [f.uri]: best.id }));
+                success += 1;
+              }
+            } catch {
+              // ignore individual failures
+            }
         }
-      }
+      };
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
       setAutoCount(success);
+      if (success > 0 && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
+      }
     } catch (e: any) {
       setError(e?.message ?? 'Auto-map failed');
     } finally {
@@ -384,7 +431,7 @@ function MappingsPanel({ films }: { films: FilmEvent[] }) {
           disabled={loading || !uid || unmapped.length === 0}
           onClick={autoMap}
         >
-          {loading ? 'Auto-mapping…' : 'Auto-map first 50'}
+          {loading ? 'Auto-mapping…' : 'Auto-map all'}
         </button>
         {autoCount > 0 && (
           <span className="text-sm text-gray-600">Mapped {autoCount} just now</span>
@@ -411,6 +458,9 @@ function MappingsPanel({ films }: { films: FilmEvent[] }) {
                       try {
                         await deleteFilmMapping(uid, f.uri);
                         setMapped((prev) => { const n = { ...prev }; delete n[f.uri]; return n; });
+                        if (typeof window !== 'undefined') {
+                          window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
+                        }
                       } catch (e: any) {
                         setError(e?.message ?? 'Failed to unmap');
                       }
@@ -432,7 +482,7 @@ function MappingsPanel({ films }: { films: FilmEvent[] }) {
                 {f.title} {f.year ? `(${f.year})` : ''}
               </span>
               <div className="flex items-center gap-2">
-                <button
+                  <button
                   className="px-2 py-1 text-xs bg-gray-200 rounded"
                   onClick={() => {
                     setSelectedUri(f.uri);
@@ -498,6 +548,9 @@ function MappingsPanel({ films }: { films: FilmEvent[] }) {
                         setMapped((prev) => ({ ...prev, [selectedUri]: r.id }));
                         setSelectedUri(null);
                         setResults(null);
+                        if (typeof window !== 'undefined') {
+                          window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
+                        }
                       } catch (e) {
                         // ignore
                       }

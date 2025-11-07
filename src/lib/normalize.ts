@@ -7,6 +7,7 @@ export type FilmEvent = {
   lastDate?: string;
   liked?: boolean;
   onWatchlist?: boolean;
+  watchCount?: number;
 };
 
 export function toNumber(n?: string) {
@@ -27,6 +28,9 @@ export function normalizeData(raw: {
   likesFilms?: Record<string, string>[];
 }) {
   const byURI = new Map<string, FilmEvent>();
+  const watchedSet = new Set<string>();
+  const diaryCount = new Map<string, number>();
+  const latestDate = new Map<string, string>();
 
   const upd = (uri: string, patch: Partial<FilmEvent>, seed?: { title?: string; year?: string }) => {
     const prev = byURI.get(uri) ?? {
@@ -40,6 +44,7 @@ export function normalizeData(raw: {
   for (const r of raw.watched ?? []) {
     const uri = r['Letterboxd URI'];
     if (!uri) continue;
+    watchedSet.add(uri);
     upd(uri, {}, { title: r['Name'], year: r['Year'] });
   }
 
@@ -48,7 +53,23 @@ export function normalizeData(raw: {
     if (!uri) continue;
     const rewatch = (r['Rewatch'] ?? '').toLowerCase() === 'yes';
     const rating = toNumber(r['Rating']);
-    upd(uri, { rewatch: (byURI.get(uri)?.rewatch || rewatch) || undefined, rating: rating ?? byURI.get(uri)?.rating, lastDate: r['Date'] ?? byURI.get(uri)?.lastDate }, { title: r['Name'], year: r['Year'] });
+    const d = r['Date'];
+    // Count diary entries per URI
+    diaryCount.set(uri, (diaryCount.get(uri) ?? 0) + 1);
+    // Track latest date lexicographically (YYYY-MM-DD works as string compare)
+    if (d) {
+      const prev = latestDate.get(uri);
+      if (!prev || d > prev) latestDate.set(uri, d);
+    }
+    upd(
+      uri,
+      {
+        rewatch: (byURI.get(uri)?.rewatch || rewatch) || undefined,
+        rating: rating ?? byURI.get(uri)?.rating,
+        lastDate: d ?? byURI.get(uri)?.lastDate,
+      },
+      { title: r['Name'], year: r['Year'] }
+    );
   }
 
   for (const r of raw.ratings ?? []) {
@@ -63,6 +84,17 @@ export function normalizeData(raw: {
 
   for (const uri of wl) upd(uri, { onWatchlist: true });
   for (const uri of likes) upd(uri, { liked: true });
+
+  // Finalize watchCount and lastDate
+  for (const [uri, f] of byURI.entries()) {
+    let wc = diaryCount.get(uri) ?? 0;
+    if (wc === 0) {
+      // Fallback: at least 1 if present in watched export or has a rating
+      if (watchedSet.has(uri) || (f.rating != null)) wc = 1;
+    }
+    const ld = latestDate.get(uri) ?? f.lastDate;
+    byURI.set(uri, { ...f, watchCount: wc, lastDate: ld });
+  }
 
   const films = [...byURI.values()];
   return {

@@ -3,7 +3,8 @@ import AuthGate from '@/components/AuthGate';
 import { useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, suggestByOverlap, fetchTmdbMovie } from '@/lib/enrich';
+import { getFilmMappings, suggestByOverlap } from '@/lib/enrich';
+import { fetchTrendingIds } from '@/lib/trending';
 import type { FilmEvent } from '@/lib/normalize';
 
 export default function SuggestPage() {
@@ -12,6 +13,7 @@ export default function SuggestPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Array<{ id: number; title: string; year?: string; reasons: string[] }> | null>(null);
+  const [sourceLabel, setSourceLabel] = useState<string>('');
   const [fallbackFilms, setFallbackFilms] = useState<FilmEvent[] | null>(null);
   const [excludeGenres, setExcludeGenres] = useState<string>('');
   const [yearMin, setYearMin] = useState<string>('');
@@ -51,13 +53,24 @@ export default function SuggestPage() {
       });
       const uris = filteredFilms.map((f) => f.uri);
       const mappings = await getFilmMappings(uid, uris);
-      // Candidates: try watchlist mapped films not yet liked/rated high
-      const candidateIds = filteredFilms
+      // Build watched TMDB id set
+      const watchedIds = new Set<number>();
+      for (const f of filteredFilms) {
+        const mid = mappings.get(f.uri);
+        if (mid) watchedIds.add(mid);
+      }
+      const watchlistCandidateIds = filteredFilms
         .filter((f) => f.onWatchlist && mappings.get(f.uri))
         .map((f) => mappings.get(f.uri)!) as number[];
-      // Fallback: if no watchlist candidates, pick first 100 mappings
-      const allMappedIds = uris.map((u) => mappings.get(u)).filter(Boolean) as number[];
-      const candidates = candidateIds.length ? candidateIds.slice(0, 200) : allMappedIds.slice(0, 200);
+      let fallbackIds: number[] = [];
+      if (!watchlistCandidateIds.length) {
+        fallbackIds = await fetchTrendingIds('day', 120);
+      }
+      const candidatesRaw = (watchlistCandidateIds.length ? watchlistCandidateIds : fallbackIds)
+        .filter((id, idx, arr) => arr.indexOf(id) === idx)
+        .filter((id) => !watchedIds.has(id));
+      const candidates = candidatesRaw.slice(0, 250);
+      setSourceLabel(watchlistCandidateIds.length ? 'Watchlist-based' : 'Trending fallback');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       const suggestions = await suggestByOverlap({
         userId: uid,
@@ -65,8 +78,10 @@ export default function SuggestPage() {
         mappings,
         candidates,
         excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: 120,
-        concurrency: 8,
+        maxCandidates: 150,
+        concurrency: 6,
+        excludeWatchedIds: watchedIds,
+        desiredResults: 20,
       });
       const details = suggestions.map((s) => ({ id: s.tmdbId, title: s.title ?? `#${s.tmdbId}`, year: s.release_date?.slice(0, 4), reasons: s.reasons }));
       setItems(details);
@@ -168,6 +183,9 @@ export default function SuggestPage() {
       {error && <p className="text-sm text-red-600">{error}</p>}
       {items && (
         <ul className="space-y-3">
+          {sourceLabel && (
+            <li className="text-xs text-gray-500">Source: {sourceLabel}</li>
+          )}
           {items.map((it) => (
             <li key={it.id} className="border bg-white rounded p-3">
               <div className="font-medium">{it.title} {it.year ? `(${it.year})` : ''}</div>
