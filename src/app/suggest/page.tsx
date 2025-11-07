@@ -5,20 +5,26 @@ import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, suggestByOverlap } from '@/lib/enrich';
 import { fetchTrendingIds } from '@/lib/trending';
+import { usePostersSWR } from '@/lib/usePostersSWR';
 import type { FilmEvent } from '@/lib/normalize';
+import Image from 'next/image';
 
 export default function SuggestPage() {
   const { films } = useImportData();
   const [uid, setUid] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<Array<{ id: number; title: string; year?: string; reasons: string[] }> | null>(null);
+  const [items, setItems] = useState<Array<{ id: number; title: string; year?: string; reasons: string[]; poster_path?: string | null }> | null>(null);
   const [sourceLabel, setSourceLabel] = useState<string>('');
   const [fallbackFilms, setFallbackFilms] = useState<FilmEvent[] | null>(null);
   const [excludeGenres, setExcludeGenres] = useState<string>('');
   const [yearMin, setYearMin] = useState<string>('');
   const [yearMax, setYearMax] = useState<string>('');
   const [refreshTick, setRefreshTick] = useState(0);
+
+  // Get posters for all suggested movies
+  const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
+  const { posters } = usePostersSWR(tmdbIds);
 
   useEffect(() => {
     const init = async () => {
@@ -83,7 +89,13 @@ export default function SuggestPage() {
         excludeWatchedIds: watchedIds,
         desiredResults: 20,
       });
-      const details = suggestions.map((s) => ({ id: s.tmdbId, title: s.title ?? `#${s.tmdbId}`, year: s.release_date?.slice(0, 4), reasons: s.reasons }));
+      const details = suggestions.map((s) => ({ 
+        id: s.tmdbId, 
+        title: s.title ?? `#${s.tmdbId}`, 
+        year: s.release_date?.slice(0, 4), 
+        reasons: s.reasons,
+        poster_path: s.poster_path 
+      }));
       setItems(details);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to get suggestions');
@@ -181,23 +193,61 @@ export default function SuggestPage() {
       {loading && <p className="text-sm text-gray-600">Computing your recommendations…</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {items && (
-        <ul className="space-y-3">
+        <div>
           {sourceLabel && (
-            <li className="text-xs text-gray-500">Source: {sourceLabel}</li>
+            <p className="text-xs text-gray-500 mb-4">Source: {sourceLabel}</p>
           )}
-          {items.map((it) => (
-            <li key={it.id} className="border bg-white rounded p-3">
-              <div className="font-medium">{it.title} {it.year ? `(${it.year})` : ''}</div>
-              {it.reasons.length > 0 && (
-                <ul className="list-disc ml-5 text-sm text-gray-700 mt-1">
-                  {it.reasons.slice(0, 3).map((r, i) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
-        </ul>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {items.map((it) => {
+              const posterPath = posters[it.id];
+              return (
+                <div key={it.id} className="border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex gap-4 p-4">
+                    {/* Poster */}
+                    <div className="flex-shrink-0 w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
+                      {posterPath ? (
+                        <Image
+                          src={`https://image.tmdb.org/t/p/w185${posterPath}`}
+                          alt={it.title}
+                          fill
+                          sizes="96px"
+                          className="object-cover"
+                          unoptimized
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs text-center p-2">
+                          No poster
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-lg mb-1 truncate" title={it.title}>
+                        {it.title}
+                      </h3>
+                      {it.year && (
+                        <p className="text-sm text-gray-600 mb-3">{it.year}</p>
+                      )}
+                      
+                      {/* Reasons */}
+                      {it.reasons.length > 0 && (
+                        <ul className="space-y-2">
+                          {it.reasons.map((r, i) => (
+                            <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                              <span className="text-blue-500 mt-0.5">•</span>
+                              <span className="flex-1">{r}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
       {!items && (
         <p className="text-gray-700">Your personalized recommendations will appear here.</p>

@@ -183,7 +183,7 @@ export async function suggestByOverlap(params: {
     return await fetchTmdbMovieCached(id);
   }
 
-  const resultsAcc: Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[] }> = [];
+  const resultsAcc: Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null }> = [];
   const pool = await mapLimit(params.candidates.slice(0, maxC), params.concurrency ?? 8, async (cid) => {
     if (seenIds.has(cid)) return null; // skip already-liked
     const m = await fetchFromCache(cid);
@@ -198,30 +198,32 @@ export async function suggestByOverlap(params: {
     const gHits = feats.genres.filter((g) => pref.genres.has(g));
     if (gHits.length) {
       score += gHits.length * weights.genre;
-      reasons.push(`Genres: ${gHits.slice(0, 3).join(', ')}`);
+      const genreCount = pref.genres.get(gHits[0]) ?? 1;
+      reasons.push(`Matches your taste in ${gHits.slice(0, 3).join(', ')} (${genreCount} similar ${genreCount === 1 ? 'film' : 'films'} in your collection)`);
     }
     const dHits = feats.directors.filter((d) => pref.directors.has(d));
     if (dHits.length) {
       score += dHits.length * weights.director;
-      reasons.push(`Director: ${dHits.slice(0, 2).join(', ')}`);
+      const dirCount = pref.directors.get(dHits[0]) ?? 1;
+      reasons.push(`Directed by ${dHits.slice(0, 2).join(', ')} — you've enjoyed ${dirCount} ${dirCount === 1 ? 'film' : 'films'} by ${dHits.length === 1 ? 'this director' : 'these directors'}`);
     }
     const cHits = feats.cast.filter((c) => pref.cast.has(c));
     if (cHits.length) {
       score += Math.min(3, cHits.length) * weights.cast;
-      reasons.push(`Cast overlap: ${cHits.slice(0, 3).join(', ')}`);
+      reasons.push(`Stars ${cHits.slice(0, 3).join(', ')} — ${cHits.length} cast ${cHits.length === 1 ? 'member' : 'members'} you've liked before`);
     }
     const kHits = feats.keywords.filter((k) => pref.keywords.has(k));
     if (kHits.length) {
       score += Math.min(5, kHits.length) * weights.keyword;
-      reasons.push(`Keywords: ${kHits.slice(0, 5).join(', ')}`);
+      reasons.push(`Similar themes: ${kHits.slice(0, 5).join(', ')}`);
     }
     if (score <= 0) return null;
-    const r = { tmdbId: cid, score, reasons, title: m.title, release_date: m.release_date, genres: feats.genres };
+    const r = { tmdbId: cid, score, reasons, title: m.title, release_date: m.release_date, genres: feats.genres, poster_path: m.poster_path };
     resultsAcc.push(r);
     // Early return the result; caller will slice after sorting
     return r;
   });
-  const results = pool.filter(Boolean) as Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[] }>;
+  const results = pool.filter(Boolean) as Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null }>;
   results.sort((a, b) => b.score - a.score);
   return results.slice(0, desired);
 }
