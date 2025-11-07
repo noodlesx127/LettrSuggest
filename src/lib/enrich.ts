@@ -137,7 +137,7 @@ export async function suggestByOverlap(params: {
   concurrency?: number;
   excludeWatchedIds?: Set<number>;
   desiredResults?: number;
-}): Promise<Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[] }>> {
+}): Promise<Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null }>> {
   // Build user profile from liked/highly-rated mapped films
   const liked = params.films.filter((f) => (f.liked || (f.rating ?? 0) >= 4) && params.mappings.get(f.uri));
   const likedIds = liked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
