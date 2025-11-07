@@ -46,17 +46,21 @@ npm run dev
 
 ## Notes
 - Admin route `/admin` includes a simple TMDB search tool.
-- Import route `/import` supports ZIP or folder drag-and-drop, normalization, local preview, saving to Supabase, and TMDB mapping.
+- Import route `/import` supports ZIP or folder drag-and-drop, normalization, local preview, saving to Supabase, and TMDB mapping. Preview and Mapping now render side-by-side on desktop for quicker workflows.
+- Library route `/library` shows your watched films in a poster-like grid, with watch counts and quick mapping edit controls.
+	- Posters are loaded from TMDB (cached rows) using `image.tmdb.org` CDN; unmapped films show a title fallback.
+	- Watch count derives from the number of diary entries per film (fallback to 1 if only in watched list or rated).
 
 ## Usage
 1) Sign in or register via `/auth/login` or `/auth/register`.
 2) Go to `/import` and upload your Letterboxd export (ZIP or CSVs/folder).
 3) Review the preview, then click “Save to Supabase” to upsert into `film_events`.
 4) Click “Map to TMDB” to:
-	- Auto-map the first 50 titles (best-effort), and/or
+	- Auto-map all unmapped titles (best-effort, concurrency-limited), and/or
 	- Manually search and map remaining titles.
 	Mappings are stored in `film_tmdb_map` and movie metadata cached in `tmdb_movies`.
 5) Open `/stats` to see charts; use “Load from Supabase” to render from your cloud data.
+6) Visit `/library` to browse a poster grid of your watched films, inspect accurate watch counts, and adjust TMDB mappings.
 
 ## Security & Secrets
 - Never commit secrets. Use `.env.local` for local dev and Netlify env vars for deploys.
