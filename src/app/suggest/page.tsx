@@ -22,6 +22,7 @@ export default function SuggestPage() {
   const [yearMax, setYearMax] = useState<string>('');
   const [refreshTick, setRefreshTick] = useState(0);
   const [mode, setMode] = useState<'quick' | 'deep'>('quick');
+  const [noCandidatesReason, setNoCandidatesReason] = useState<string | null>(null);
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
@@ -42,6 +43,7 @@ export default function SuggestPage() {
     try {
       console.log('[Suggest] runSuggest start', { uid, hasSourceFilms: sourceFilms.length, excludeGenres, yearMin, yearMax, mode });
       setError(null);
+      setNoCandidatesReason(null);
       setLoading(true);
       if (!supabase) throw new Error('Supabase not initialized');
       if (!uid) throw new Error('Not signed in');
@@ -86,6 +88,12 @@ export default function SuggestPage() {
       const maxCandidatesLocal = mode === 'quick' ? quickLimit : deepLimit;
       const candidates = candidatesRaw.slice(0, maxCandidatesLocal);
       console.log('[Suggest] candidate pool', { mode, quickLimit, deepLimit, maxCandidatesLocal, candidatesCount: candidates.length });
+      if (candidates.length === 0) {
+        const reason = watchlistCandidateIds.length
+          ? 'No unmapped watchlist films available to recommend from.'
+          : 'Trending fallback is currently unavailable; please try again later or map more films.';
+        setNoCandidatesReason(reason);
+      }
       setSourceLabel(watchlistCandidateIds.length ? 'Watchlist-based' : 'Trending fallback');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length });
@@ -247,6 +255,11 @@ export default function SuggestPage() {
       </div>
       {loading && <p className="text-sm text-gray-600">Computing your recommendations…</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {!loading && !error && noCandidatesReason && (
+        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
+          {noCandidatesReason}
+        </p>
+      )}
       {items && (
         <div>
           {sourceLabel && (

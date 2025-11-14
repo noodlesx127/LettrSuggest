@@ -43,6 +43,7 @@ export function PostersProvider({ children, ids }: { children: ReactNode; ids: n
     if (!distinct.length) return;
     setLoading(true);
     fetchChunked(distinct).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids.join(',')]);
 
   const value: PostersState = useMemo(() => ({ posters, backdrops, loading, refresh: fetchChunked }), [posters, backdrops, loading]);

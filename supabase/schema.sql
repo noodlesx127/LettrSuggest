@@ -103,6 +103,9 @@ create table if not exists public.film_tmdb_map (
   primary key (user_id, uri)
 );
 
+-- Add index for efficient user_id queries
+create index if not exists film_tmdb_map_user_idx on public.film_tmdb_map (user_id);
+
 alter table public.film_tmdb_map enable row level security;
 
 drop policy if exists "film_tmdb_map user read" on public.film_tmdb_map;

@@ -52,33 +52,62 @@ export async function upsertFilmMapping(userId: string, uri: string, tmdbId: num
 export async function getFilmMappings(userId: string, uris: string[]) {
   if (!supabase) throw new Error('Supabase not initialized');
   if (!uris.length) return new Map<string, number>();
-  // Supabase has a limit of values in .in(); chunk if large
-  const chunkSize = 500;
-  const map = new Map<string, number>();
-  for (let i = 0; i < uris.length; i += chunkSize) {
-    const chunk = uris.slice(i, i + chunkSize);
-    console.log('[Mappings] fetching chunk', { userId, offset: i, chunkSize: chunk.length });
-    try {
-      const queryPromise = supabase
-        .from('film_tmdb_map')
-        .select('uri, tmdb_id')
-        .eq('user_id', userId)
-        .in('uri', chunk);
-      const { data, error } = await withTimeout(queryPromise as unknown as Promise<{ data: Array<{ uri: string; tmdb_id: number }>; error: any }>, 8000);
-      if (error) {
-        console.error('[Mappings] error fetching chunk', { offset: i, chunkSize: chunk.length, error });
-        break;
-      }
-      console.log('[Mappings] chunk loaded', { offset: i, rowCount: (data ?? []).length });
-      for (const row of data ?? []) {
-        if (row.uri != null && row.tmdb_id != null) map.set(row.uri, Number(row.tmdb_id));
-      }
-    } catch (e) {
-      console.error('[Mappings] timeout or exception fetching chunk', { offset: i, chunkSize: chunk.length, error: e });
-      break;
+  
+  // First verify auth is working
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData?.session) {
+      console.error('[Mappings] No active session - cannot fetch mappings');
+      return new Map<string, number>();
     }
+    console.log('[Mappings] Auth verified', { uid: sessionData.session.user.id });
+  } catch (e) {
+    console.error('[Mappings] Auth check failed', e);
+    return new Map<string, number>();
   }
-  console.log('[Mappings] finished getFilmMappings', { totalMappings: map.size });
+  
+  // Instead of chunking by URIs (which can hit query size limits),
+  // fetch ALL mappings for this user, then filter in memory
+  console.log('[Mappings] fetching all mappings for user', { userId, uriCount: uris.length });
+  const map = new Map<string, number>();
+  
+  try {
+    // Increase timeout to 15 seconds for large datasets
+    const queryPromise = supabase
+      .from('film_tmdb_map')
+      .select('uri, tmdb_id')
+      .eq('user_id', userId);
+    
+    const { data, error } = await withTimeout(
+      queryPromise as unknown as Promise<{ data: Array<{ uri: string; tmdb_id: number }>; error: any }>, 
+      15000
+    );
+    
+    if (error) {
+      console.error('[Mappings] error fetching mappings', { error, code: error.code, message: error.message, details: error.details });
+      return map;
+    }
+    
+    console.log('[Mappings] all mappings loaded', { totalRows: (data ?? []).length });
+    
+    // Filter to only the URIs we care about
+    const uriSet = new Set(uris);
+    for (const row of data ?? []) {
+      if (row.uri != null && row.tmdb_id != null && uriSet.has(row.uri)) {
+        map.set(row.uri, Number(row.tmdb_id));
+      }
+    }
+    
+  } catch (e: any) {
+    console.error('[Mappings] timeout or exception', { 
+      error: e, 
+      message: e?.message, 
+      name: e?.name,
+      stack: e?.stack?.split('\n').slice(0, 3).join('\n')
+    });
+  }
+  
+  console.log('[Mappings] finished getFilmMappings', { totalMappings: map.size, requestedUris: uris.length });
   return map;
 }
 
