@@ -3,7 +3,7 @@ import AuthGate from '@/components/AuthGate';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, suggestByOverlap } from '@/lib/enrich';
+import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap } from '@/lib/enrich';
 import { fetchTrendingIds } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import type { FilmEvent } from '@/lib/normalize';
@@ -21,10 +21,11 @@ export default function SuggestPage() {
   const [yearMin, setYearMin] = useState<string>('');
   const [yearMax, setYearMax] = useState<string>('');
   const [refreshTick, setRefreshTick] = useState(0);
+  const [mode, setMode] = useState<'quick' | 'deep'>('quick');
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
-  const { posters } = usePostersSWR(tmdbIds);
+  const { posters, mutate: refreshPosters } = usePostersSWR(tmdbIds);
 
   useEffect(() => {
     const init = async () => {
@@ -75,7 +76,12 @@ export default function SuggestPage() {
       const candidatesRaw = (watchlistCandidateIds.length ? watchlistCandidateIds : fallbackIds)
         .filter((id, idx, arr) => arr.indexOf(id) === idx)
         .filter((id) => !watchedIds.has(id));
-      const candidates = candidatesRaw.slice(0, 250);
+      // Keep candidate pool modest in quick mode to ensure fast scoring,
+      // but allow a deeper pass when the user requests it.
+      const quickLimit = 120;
+      const deepLimit = 220;
+      const maxCandidatesLocal = mode === 'quick' ? quickLimit : deepLimit;
+      const candidates = candidatesRaw.slice(0, maxCandidatesLocal);
       setSourceLabel(watchlistCandidateIds.length ? 'Watchlist-based' : 'Trending fallback');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       const suggestions = await suggestByOverlap({
@@ -84,11 +90,21 @@ export default function SuggestPage() {
         mappings,
         candidates,
         excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: 150,
+        maxCandidates: mode === 'quick' ? quickLimit : Math.min(deepLimit, maxCandidatesLocal),
         concurrency: 6,
         excludeWatchedIds: watchedIds,
         desiredResults: 20,
       });
+      // Best-effort: ensure posters/backdrops exist for suggested ids.
+      if (suggestions.length) {
+        try {
+          const idsForCache = suggestions.map((s) => s.tmdbId);
+          await refreshTmdbCacheForIds(idsForCache);
+          await refreshPosters();
+        } catch {
+          // ignore poster refresh errors; core suggestions still work
+        }
+      }
       const details = suggestions.map((s) => ({ 
         id: s.tmdbId, 
         title: s.title ?? `#${s.tmdbId}`, 
@@ -102,7 +118,7 @@ export default function SuggestPage() {
     } finally {
       setLoading(false);
     }
-  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax]);
+  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters]);
 
   // Fallback: if no local films, load from Supabase once
   useEffect(() => {
@@ -163,7 +179,34 @@ export default function SuggestPage() {
 
   return (
     <AuthGate>
-      <h1 className="text-xl font-semibold mb-4">Suggestions</h1>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">Suggestions</h1>
+          <p className="text-xs text-gray-600 mt-1">Based on your liked and highly rated films.</p>
+        </div>
+        <div className="flex flex-col items-end gap-1 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-gray-600">Mode:</span>
+          <button
+            type="button"
+            className={`px-2 py-1 rounded border text-xs ${mode === 'quick' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+            onClick={() => { setMode('quick'); setItems(null); setRefreshTick((x) => x + 1); void runSuggest(); }}
+          >
+            Quick
+          </button>
+          <button
+            type="button"
+            className={`px-2 py-1 rounded border text-xs ${mode === 'deep' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+            onClick={() => { setMode('deep'); setItems(null); setRefreshTick((x) => x + 1); void runSuggest(); }}
+          >
+            Deep dive
+          </button>
+          </div>
+          <p className="text-[10px] text-gray-500">
+            Quick is snappy; Deep dive scans more candidates and may take longer.
+          </p>
+        </div>
+      </div>
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div>
           <label className="block text-xs text-gray-600">Exclude genres (comma)</label>
@@ -182,13 +225,16 @@ export default function SuggestPage() {
           <label className="block text-xs text-gray-600">Year max</label>
           <input value={yearMax} onChange={(e) => setYearMax(e.target.value)} placeholder="e.g., 2025" className="border rounded px-2 py-1 text-sm w-24" />
         </div>
-        <button
-          className="ml-auto px-2 py-2 rounded border text-sm hover:bg-gray-50"
-          title="Recompute"
-          onClick={() => { setItems(null); setRefreshTick((x) => x + 1); void runSuggest(); }}
-        >
-          🔄 Refresh
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
+            title="Recompute with current filters"
+            onClick={() => { setItems(null); setRefreshTick((x) => x + 1); void runSuggest(); }}
+          >
+            <span>🔄</span>
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
       {loading && <p className="text-sm text-gray-600">Computing your recommendations…</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
