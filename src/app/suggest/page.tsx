@@ -40,6 +40,7 @@ export default function SuggestPage() {
 
   const runSuggest = useCallback(async () => {
     try {
+      console.log('[Suggest] runSuggest start', { uid, hasSourceFilms: sourceFilms.length, excludeGenres, yearMin, yearMax, mode });
       setError(null);
       setLoading(true);
       if (!supabase) throw new Error('Supabase not initialized');
@@ -59,7 +60,9 @@ export default function SuggestPage() {
         return true; // genre filter will apply on candidates via overlap features
       });
       const uris = filteredFilms.map((f) => f.uri);
+      console.log('[Suggest] fetching mappings for', uris.length, 'films');
       const mappings = await getFilmMappings(uid, uris);
+      console.log('[Suggest] mappings loaded', { mappingCount: mappings.size });
       // Build watched TMDB id set
       const watchedIds = new Set<number>();
       for (const f of filteredFilms) {
@@ -82,8 +85,10 @@ export default function SuggestPage() {
       const deepLimit = 220;
       const maxCandidatesLocal = mode === 'quick' ? quickLimit : deepLimit;
       const candidates = candidatesRaw.slice(0, maxCandidatesLocal);
+      console.log('[Suggest] candidate pool', { mode, quickLimit, deepLimit, maxCandidatesLocal, candidatesCount: candidates.length });
       setSourceLabel(watchlistCandidateIds.length ? 'Watchlist-based' : 'Trending fallback');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
+      console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length });
       const suggestions = await suggestByOverlap({
         userId: uid,
         films: lite,
@@ -99,6 +104,7 @@ export default function SuggestPage() {
       if (suggestions.length) {
         try {
           const idsForCache = suggestions.map((s) => s.tmdbId);
+          console.log('[Suggest] refreshing TMDB cache for suggested ids', idsForCache.length);
           await refreshTmdbCacheForIds(idsForCache);
           await refreshPosters();
         } catch {
@@ -112,10 +118,13 @@ export default function SuggestPage() {
         reasons: s.reasons,
         poster_path: s.poster_path 
       }));
+      console.log('[Suggest] suggestions ready', { count: details.length });
       setItems(details);
     } catch (e: any) {
+      console.error('[Suggest] error in runSuggest', e);
       setError(e?.message ?? 'Failed to get suggestions');
     } finally {
+      console.log('[Suggest] runSuggest end');
       setLoading(false);
     }
   }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters]);
