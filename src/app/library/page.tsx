@@ -45,35 +45,6 @@ export default function LibraryPage() {
         const m = await getFilmMappings(uid, films.map((f) => f.uri));
         console.log('[Library] mappings loaded', { mappingCount: m.size });
         setMappings(m);
-        // Try to load server-side watch counts if view exists
-        try {
-          if (!supabase) return;
-          const uris = films.map((f) => f.uri);
-          const chunkSize = 500;
-          const wcMap = new Map<string, number>();
-          for (let i = 0; i < uris.length; i += chunkSize) {
-            const chunk = uris.slice(i, i + chunkSize);
-            const { data, error } = await supabase
-              .from('film_watch_counts')
-              .select('uri, watch_count')
-              .eq('user_id', uid)
-              .in('uri', chunk);
-            if (error) throw error;
-            for (const row of data ?? []) {
-              if (row?.uri) wcMap.set(row.uri, Number(row.watch_count || 0));
-            }
-          }
-          if (wcMap.size) {
-            // Merge into films in-place
-            for (const f of films) {
-              const c = wcMap.get(f.uri);
-              if (c != null) (f as any).watchCount = c;
-            }
-            console.log('[Library] watch counts merged', { watchCountRows: wcMap.size });
-          }
-        } catch {
-          // view may not exist yet; ignore
-        }
       } catch (e: any) {
         console.error('[Library] error loading mappings', e);
         setError(e?.message ?? 'Failed to load mappings');
