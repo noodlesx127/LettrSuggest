@@ -112,6 +112,28 @@ export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null
   }
 }
 
+// Best-effort refresh of TMDB cache rows for a set of ids.
+// Used by UI "refresh posters" actions to backfill missing poster/backdrop
+// metadata without changing any mappings.
+export async function refreshTmdbCacheForIds(ids: number[]): Promise<void> {
+  const distinct = Array.from(new Set(ids.filter(Boolean)));
+  if (!distinct.length) return;
+  // We intentionally do not parallelize too aggressively here; callers can
+  // choose when to invoke this (e.g., behind a button).
+  for (const id of distinct) {
+    try {
+      const fresh = await withTimeout(fetchTmdbMovie(id));
+      try {
+        await upsertTmdbCache(fresh);
+      } catch {
+        // ignore individual upsert failures
+      }
+    } catch {
+      // ignore individual fetch failures
+    }
+  }
+}
+
 // Concurrency-limited async mapper
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const ret: R[] = new Array(items.length);
@@ -138,9 +160,16 @@ export async function suggestByOverlap(params: {
   excludeWatchedIds?: Set<number>;
   desiredResults?: number;
 }): Promise<Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null }>> {
-  // Build user profile from liked/highly-rated mapped films
+  // Build user profile from liked/highly-rated mapped films.
+  // Use as much history as possible, but cap TMDB fetches to avoid huge fan-out
+  // for extremely large libraries. We bias towards the most recent entries when
+  // trimming.
   const liked = params.films.filter((f) => (f.liked || (f.rating ?? 0) >= 4) && params.mappings.get(f.uri));
-  const likedIds = liked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
+  const likedIdsAll = liked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
+  const likedCap = 800;
+  // If the user has an enormous number of liked films, bias towards
+  // the most recent ones (assuming input films are roughly chronological).
+  const likedIds = likedIdsAll.length > likedCap ? likedIdsAll.slice(-likedCap) : likedIdsAll;
   const likedMovies = await Promise.all(likedIds.map((id) => fetchTmdbMovieCached(id)));
   const likedFeats = likedMovies.filter(Boolean).map((m) => extractFeatures(m as TMDBMovie));
 
@@ -175,7 +204,7 @@ export async function suggestByOverlap(params: {
     for (const id of params.excludeWatchedIds) seenIds.add(id);
   }
 
-  const maxC = Math.min(params.maxCandidates ?? 80, params.candidates.length);
+  const maxC = Math.min(params.maxCandidates ?? 120, params.candidates.length);
   const desired = Math.max(10, Math.min(30, params.desiredResults ?? 20));
 
   // Helper to fetch from cache first in bulk where possible
