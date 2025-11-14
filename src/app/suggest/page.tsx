@@ -10,7 +10,7 @@ import type { FilmEvent } from '@/lib/normalize';
 import Image from 'next/image';
 
 export default function SuggestPage() {
-  const { films } = useImportData();
+  const { films, loading: loadingFilms } = useImportData();
   const [uid, setUid] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -253,6 +253,7 @@ export default function SuggestPage() {
           </button>
         </div>
       </div>
+      {loadingFilms && <p className="text-sm text-gray-600">Loading your library from database…</p>}
       {loading && <p className="text-sm text-gray-600">Computing your recommendations…</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {!loading && !error && noCandidatesReason && (
