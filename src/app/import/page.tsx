@@ -32,6 +32,8 @@ export default function ImportPage() {
   const [distinct, setDistinct] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedCount, setSavedCount] = useState<number | null>(null);
+  const [autoMappingActive, setAutoMappingActive] = useState(false);
+  const [mappingProgress, setMappingProgress] = useState<{ current: number; total: number } | null>(null);
 
     const autoSaveToSupabase = useCallback(async (filmList: FilmEvent[]) => {
     try {
@@ -76,13 +78,21 @@ export default function ImportPage() {
 
   const autoMapBatch = useCallback(async (filmList: FilmEvent[]) => {
     try {
+      setAutoMappingActive(true);
       const { data: sessionRes } = supabase ? await supabase.auth.getSession() : ({ data: { session: null } } as any);
       const uid = sessionRes?.session?.user?.id;
-      if (!uid) return;
+      if (!uid) {
+        setAutoMappingActive(false);
+        return;
+      }
       const toTry = filmList;
       let mapped = 0;
       let next = 0;
       const concurrency = 5;
+      
+      setMappingProgress({ current: 0, total: toTry.length });
+      setStatus(`Mapping films to TMDB database… 0/${toTry.length}`);
+      
       const worker = async () => {
         while (true) {
           const i = next++;
@@ -96,7 +106,8 @@ export default function ImportPage() {
               await upsertTmdbCache(best);
               await upsertFilmMapping(uid, f.uri, best.id);
               mapped += 1;
-              setStatus((s) => `Auto-mapped ${mapped}/${toTry.length} to TMDB…`);
+              setMappingProgress({ current: mapped, total: toTry.length });
+              setStatus(`Mapping films to TMDB database… ${mapped}/${toTry.length}`);
               if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
               }
@@ -107,9 +118,13 @@ export default function ImportPage() {
         }
       };
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
-      if (mapped > 0) setStatus((s) => `Auto-mapped ${mapped} films to TMDB`);
-    } catch {
-      // silent fail
+      setStatus(`✓ Successfully mapped ${mapped} of ${toTry.length} films to TMDB`);
+      setMappingProgress(null);
+      setAutoMappingActive(false);
+    } catch (e) {
+      console.error('[Import] autoMapBatch error', e);
+      setAutoMappingActive(false);
+      setMappingProgress(null);
     }
   }, []);
 
@@ -208,10 +223,10 @@ export default function ImportPage() {
       } catch {
         // ignore diary upsert errors (table may not exist yet)
       }
-      // Auto-map in background
+      // Auto-map (await to show progress)
       console.log('[Import] autoMapBatch start', { filmCount: norm.films.length });
-      void autoMapBatch(norm.films);
-      console.log('[Import] autoMapBatch scheduled');
+      await autoMapBatch(norm.films);
+      console.log('[Import] autoMapBatch complete');
     } catch (e: any) {
       console.error('[Import] error in handleFiles normalization/save', e);
       setStatus('Parsed');
@@ -269,6 +284,27 @@ export default function ImportPage() {
         </div>
         {status && <p className="text-sm text-gray-600" aria-live="polite">{status}</p>}
         {error && <p className="text-sm text-red-600" aria-live="assertive">{error}</p>}
+        
+        {/* Progress bar for mapping */}
+        {mappingProgress && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between text-sm mb-1">
+              <span className="text-gray-700 font-medium">Mapping to TMDB</span>
+              <span className="text-gray-600">
+                {mappingProgress.current} / {mappingProgress.total}
+              </span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
+              <div
+                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                style={{ width: `${(mappingProgress.current / mappingProgress.total) * 100}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Finding matches for your films in The Movie Database…
+            </p>
+          </div>
+        )}
       </div>
 
       {summary.length > 0 && (
@@ -443,62 +479,38 @@ function MappingsPanel({ films }: { films: FilmEvent[] }) {
   return (
     <div className="mt-6 border rounded bg-white p-4">
       <div className="flex items-center justify-between">
-        <h2 className="font-medium">TMDB Mapping</h2>
+        <h2 className="font-medium">TMDB Mapping Status</h2>
       </div>
       <p className="text-sm text-gray-700 mt-2">
-        {mappedCount}/{total} films mapped. Unmapped: {Math.max(total - mappedCount, 0)}
+        {mappedCount}/{total} films successfully mapped
       </p>
       {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
-      <div className="mt-3 flex items-center gap-3">
-        <button
-          className="px-3 py-2 bg-blue-600 text-white rounded disabled:opacity-60"
-          disabled={loading || !uid || unmapped.length === 0}
-          onClick={autoMap}
-        >
-          {loading ? 'Auto-mapping…' : 'Auto-map all'}
-        </button>
-        {autoCount > 0 && (
-          <span className="text-sm text-gray-600">Mapped {autoCount} just now</span>
-        )}
-      </div>
-      {mappedCount > 0 && (
-        <div className="mt-4">
-          <h3 className="font-medium text-sm mb-2">Mapped</h3>
-          <ul className="space-y-1 text-sm max-h-40 overflow-auto">
-            {films.filter((f) => mapped[f.uri] != null).slice(0, 25).map((f) => (
-              <li key={f.uri} className="flex items-center justify-between gap-2">
-                <span className="truncate">{f.title} {f.year ? `(${f.year})` : ''}</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    className="px-2 py-1 text-xs bg-gray-200 rounded"
-                    onClick={() => { setSelectedUri(f.uri); setSearchQ(f.title); setResults(null); }}
-                  >
-                    Remap
-                  </button>
-                  <button
-                    className="px-2 py-1 text-xs bg-red-600 text-white rounded"
-                    onClick={async () => {
-                      if (!uid) return;
-                      try {
-                        await deleteFilmMapping(uid, f.uri);
-                        setMapped((prev) => { const n = { ...prev }; delete n[f.uri]; return n; });
-                        if (typeof window !== 'undefined') {
-                          window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
-                        }
-                      } catch (e: any) {
-                        setError(e?.message ?? 'Failed to unmap');
-                      }
-                    }}
-                  >
-                    Unmap
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+      
+      {unmapped.length > 0 && (
+        <div className="mt-3">
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            {unmapped.length} film{unmapped.length !== 1 ? 's' : ''} could not be automatically mapped. 
+            You can manually search and map them below.
+          </p>
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              className="px-3 py-2 bg-blue-600 text-white rounded disabled:opacity-60 text-sm"
+              disabled={loading || !uid}
+              onClick={autoMap}
+            >
+              {loading ? 'Retrying…' : 'Retry auto-map failed'}
+            </button>
+            {autoCount > 0 && (
+              <span className="text-sm text-gray-600">Mapped {autoCount} more</span>
+            )}
+          </div>
         </div>
       )}
-      <div className="mt-4 max-h-64 overflow-auto text-sm">
+      
+      {unmapped.length > 0 && (
+        <div className="mt-4">
+          <h3 className="font-medium text-sm mb-2 text-amber-700">Films needing manual mapping</h3>
+          <div className="max-h-64 overflow-auto text-sm">
         <ul className="space-y-1">
           {unmapped.slice(0, 25).map((f) => (
             <li key={f.uri} className="flex items-center justify-between gap-2">
@@ -524,7 +536,9 @@ function MappingsPanel({ films }: { films: FilmEvent[] }) {
         {unmapped.length > 25 && (
           <p className="text-xs text-gray-500 mt-2">…and {unmapped.length - 25} more</p>
         )}
-      </div>
+          </div>
+        </div>
+      )}
       {selectedUri && (
         <div className="mt-4 border-t pt-4">
           <h3 className="font-medium text-sm mb-2">Manual mapping</h3>
