@@ -38,10 +38,12 @@ export default function LibraryPage() {
   useEffect(() => {
     if (!uid || !films || films.length === 0) return;
     const load = async () => {
+      console.log('[Library] start loading mappings', { uid, filmCount: films.length });
       setLoadingMappings(true);
       setError(null);
       try {
         const m = await getFilmMappings(uid, films.map((f) => f.uri));
+        console.log('[Library] mappings loaded', { mappingCount: m.size });
         setMappings(m);
         // Try to load server-side watch counts if view exists
         try {
@@ -67,13 +69,16 @@ export default function LibraryPage() {
               const c = wcMap.get(f.uri);
               if (c != null) (f as any).watchCount = c;
             }
+            console.log('[Library] watch counts merged', { watchCountRows: wcMap.size });
           }
         } catch {
           // view may not exist yet; ignore
         }
       } catch (e: any) {
+        console.error('[Library] error loading mappings', e);
         setError(e?.message ?? 'Failed to load mappings');
       } finally {
+        console.log('[Library] finished loading mappings');
         setLoadingMappings(false);
       }
     };
