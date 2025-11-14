@@ -71,30 +71,30 @@ export default function SuggestPage() {
         const mid = mappings.get(f.uri);
         if (mid) watchedIds.add(mid);
       }
-      const watchlistCandidateIds = filteredFilms
-        .filter((f) => f.onWatchlist && mappings.get(f.uri))
-        .map((f) => mappings.get(f.uri)!) as number[];
-      let fallbackIds: number[] = [];
-      if (!watchlistCandidateIds.length) {
-        fallbackIds = await fetchTrendingIds('day', 120);
+      
+      // Try to get candidates from trending movies (these are movies to potentially suggest)
+      let candidatesRaw: number[] = [];
+      try {
+        candidatesRaw = await fetchTrendingIds('day', mode === 'quick' ? 120 : 220);
+        console.log('[Suggest] fetched trending candidates', { count: candidatesRaw.length });
+      } catch (e) {
+        console.error('[Suggest] failed to fetch trending', e);
       }
-      const candidatesRaw = (watchlistCandidateIds.length ? watchlistCandidateIds : fallbackIds)
-        .filter((id, idx, arr) => arr.indexOf(id) === idx)
-        .filter((id) => !watchedIds.has(id));
-      // Keep candidate pool modest in quick mode to ensure fast scoring,
-      // but allow a deeper pass when the user requests it.
-      const quickLimit = 120;
-      const deepLimit = 220;
-      const maxCandidatesLocal = mode === 'quick' ? quickLimit : deepLimit;
-      const candidates = candidatesRaw.slice(0, maxCandidatesLocal);
-      console.log('[Suggest] candidate pool', { mode, quickLimit, deepLimit, maxCandidatesLocal, candidatesCount: candidates.length });
+      
+      // Filter out already watched films
+      const candidates = candidatesRaw
+        .filter((id, idx, arr) => arr.indexOf(id) === idx) // dedupe
+        .filter((id) => !watchedIds.has(id)) // exclude watched
+        .slice(0, mode === 'quick' ? 120 : 220);
+      
+      console.log('[Suggest] candidate pool', { mode, totalTrending: candidatesRaw.length, afterFilter: candidates.length, watchedCount: watchedIds.size });
+      
       if (candidates.length === 0) {
-        const reason = watchlistCandidateIds.length
-          ? 'No unmapped watchlist films available to recommend from.'
-          : 'Trending fallback is currently unavailable; please try again later or map more films.';
+        const reason = 'No trending candidates available. Please check your TMDB API key or try again later.';
         setNoCandidatesReason(reason);
       }
-      setSourceLabel(watchlistCandidateIds.length ? 'Watchlist-based' : 'Trending fallback');
+      
+      setSourceLabel('Based on your watched & liked films');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length });
       const suggestions = await suggestByOverlap({
@@ -103,7 +103,7 @@ export default function SuggestPage() {
         mappings,
         candidates,
         excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: mode === 'quick' ? quickLimit : Math.min(deepLimit, maxCandidatesLocal),
+        maxCandidates: mode === 'quick' ? 120 : 220,
         concurrency: 6,
         excludeWatchedIds: watchedIds,
         desiredResults: 20,
