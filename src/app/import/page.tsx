@@ -114,6 +114,7 @@ export default function ImportPage() {
   }, []);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
+    console.log('[Import] handleFiles start', { fileCount: Array.from(files).length });
     setError(null);
     setStatus('Processing files…');
     const next: ParsedData = {};
@@ -123,8 +124,10 @@ export default function ImportPage() {
     const zipFile = fileArr.find((f) => f.name.toLowerCase().endsWith('.zip'));
     if (zipFile) {
       try {
+        console.log('[Import] detected ZIP', { name: zipFile.name, size: zipFile.size });
         const zip = await JSZip.loadAsync(await zipFile.arrayBuffer());
         const entries = Object.keys(zip.files);
+        console.log('[Import] ZIP entries', entries.length);
         for (const entry of entries) {
           const key = entry.replace(/^.*\//, '').toLowerCase();
           // support likes/films.csv nested path
@@ -141,10 +144,12 @@ export default function ImportPage() {
           (next as any)[logical] = parseCsv(fileText);
         }
       } catch (e: any) {
+        console.error('[Import] error reading ZIP', e);
         setError(e?.message ?? 'Failed to read ZIP');
       }
     } else {
       // Handle individual CSVs; allow folder drag-and-drop
+      console.log('[Import] processing individual CSV files', { fileCount: fileArr.length });
       for (const f of fileArr) {
         if (!f.name.toLowerCase().endsWith('.csv')) continue;
         const lower = f.webkitRelativePath?.toLowerCase() || f.name.toLowerCase();
@@ -160,18 +165,31 @@ export default function ImportPage() {
       }
     }
 
+    console.log('[Import] parsed raw data', {
+      watched: next.watched?.length ?? 0,
+      diary: next.diary?.length ?? 0,
+      ratings: next.ratings?.length ?? 0,
+      watchlist: next.watchlist?.length ?? 0,
+      likesFilms: next.likesFilms?.length ?? 0,
+    });
     setData(next);
     try {
+      console.log('[Import] normalizeData start');
       const norm = normalizeData(next);
+      console.log('[Import] normalizeData done', { filmCount: norm.films.length, distinctFilms: norm.distinctFilms });
       setDistinct(norm.distinctFilms);
       setFilms(norm.films);
   // Persist locally (IndexedDB)
   await saveFilmsLocally(norm.films);
+      console.log('[Import] films saved locally');
       setStatus('Parsed and normalized. Saving to Supabase…');
+      console.log('[Import] autoSaveToSupabase start');
       await autoSaveToSupabase(norm.films);
+      console.log('[Import] autoSaveToSupabase done');
       // Upsert diary events for accurate watch counts if view/table exists
       try {
         if (next.diary?.length) {
+          console.log('[Import] upserting diary events', { count: next.diary.length });
           const { data: sessionRes } = supabase ? await supabase.auth.getSession() : ({ data: { session: null } } as any);
           const uid = sessionRes?.session?.user?.id;
           if (uid) {
@@ -182,17 +200,23 @@ export default function ImportPage() {
               rating: r['Rating'] ? Number(r['Rating']) : null,
               rewatch: (r['Rewatch'] || '').toLowerCase() === 'yes'
             })).filter(d => d.uri);
+            console.log('[Import] diary rows prepared', { count: diaryRows.length });
             await upsertDiaryEvents(diaryRows);
+            console.log('[Import] upsertDiaryEvents done');
           }
         }
       } catch {
         // ignore diary upsert errors (table may not exist yet)
       }
       // Auto-map in background
+      console.log('[Import] autoMapBatch start', { filmCount: norm.films.length });
       void autoMapBatch(norm.films);
+      console.log('[Import] autoMapBatch scheduled');
     } catch (e: any) {
+      console.error('[Import] error in handleFiles normalization/save', e);
       setStatus('Parsed');
     }
+    console.log('[Import] handleFiles end');
   }, [setFilms, autoSaveToSupabase, autoMapBatch]);
 
   const summary = useMemo(() => {

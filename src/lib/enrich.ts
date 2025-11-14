@@ -12,25 +12,41 @@ export type TMDBMovie = {
 };
 
 export async function searchTmdb(query: string, year?: number) {
+  console.log('[TMDB] search start', { query, year });
   const u = new URL('/api/tmdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
   u.searchParams.set('query', query);
   if (year) u.searchParams.set('year', String(year));
-  const r = await fetch(u.toString());
-  const j = await r.json();
-  if (!r.ok || !j.ok) throw new Error(j.error || 'TMDB search failed');
-  return j.results as TMDBMovie[];
+  try {
+    const r = await fetch(u.toString());
+    const j = await r.json();
+    if (!r.ok || !j.ok) {
+      console.error('[TMDB] search error', { status: r.status, body: j });
+      throw new Error(j.error || 'TMDB search failed');
+    }
+    console.log('[TMDB] search ok', { count: (j.results ?? []).length });
+    return j.results as TMDBMovie[];
+  } catch (e) {
+    console.error('[TMDB] search exception', e);
+    throw e;
+  }
 }
 
 export async function upsertTmdbCache(movie: TMDBMovie) {
   if (!supabase) throw new Error('Supabase not initialized');
   const { error } = await supabase.from('tmdb_movies').upsert({ tmdb_id: movie.id, data: movie }, { onConflict: 'tmdb_id' });
-  if (error) throw error;
+  if (error) {
+    console.error('[Supabase] upsertTmdbCache error', { tmdbId: movie.id, error });
+    throw error;
+  }
 }
 
 export async function upsertFilmMapping(userId: string, uri: string, tmdbId: number) {
   if (!supabase) throw new Error('Supabase not initialized');
   const { error } = await supabase.from('film_tmdb_map').upsert({ user_id: userId, uri, tmdb_id: tmdbId }, { onConflict: 'user_id,uri' });
-  if (error) throw error;
+  if (error) {
+    console.error('[Supabase] upsertFilmMapping error', { userId, uri, tmdbId, error });
+    throw error;
+  }
 }
 
 export async function getFilmMappings(userId: string, uris: string[]) {
@@ -41,26 +57,48 @@ export async function getFilmMappings(userId: string, uris: string[]) {
   const map = new Map<string, number>();
   for (let i = 0; i < uris.length; i += chunkSize) {
     const chunk = uris.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from('film_tmdb_map')
-      .select('uri, tmdb_id')
-      .eq('user_id', userId)
-      .in('uri', chunk);
-    if (error) throw error;
-    for (const row of data ?? []) {
-      if (row.uri != null && row.tmdb_id != null) map.set(row.uri, Number(row.tmdb_id));
+    console.log('[Mappings] fetching chunk', { userId, offset: i, chunkSize: chunk.length });
+    try {
+      const queryPromise = supabase
+        .from('film_tmdb_map')
+        .select('uri, tmdb_id')
+        .eq('user_id', userId)
+        .in('uri', chunk);
+      const { data, error } = await withTimeout(queryPromise as unknown as Promise<{ data: Array<{ uri: string; tmdb_id: number }>; error: any }>, 8000);
+      if (error) {
+        console.error('[Mappings] error fetching chunk', { offset: i, chunkSize: chunk.length, error });
+        break;
+      }
+      console.log('[Mappings] chunk loaded', { offset: i, rowCount: (data ?? []).length });
+      for (const row of data ?? []) {
+        if (row.uri != null && row.tmdb_id != null) map.set(row.uri, Number(row.tmdb_id));
+      }
+    } catch (e) {
+      console.error('[Mappings] timeout or exception fetching chunk', { offset: i, chunkSize: chunk.length, error: e });
+      break;
     }
   }
+  console.log('[Mappings] finished getFilmMappings', { totalMappings: map.size });
   return map;
 }
 
 export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
+  console.log('[TMDB] fetch movie start', { id });
   const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
   u.searchParams.set('id', String(id));
-  const r = await fetch(u.toString(), { cache: 'no-store' });
-  const j = await r.json();
-  if (!r.ok || !j.ok) throw new Error(j.error || 'TMDB fetch failed');
-  return j.movie as TMDBMovie;
+  try {
+    const r = await fetch(u.toString(), { cache: 'no-store' });
+    const j = await r.json();
+    if (!r.ok || !j.ok) {
+      console.error('[TMDB] fetch movie error', { id, status: r.status, body: j });
+      throw new Error(j.error || 'TMDB fetch failed');
+    }
+    console.log('[TMDB] fetch movie ok');
+    return j.movie as TMDBMovie;
+  } catch (e) {
+    console.error('[TMDB] fetch movie exception', e);
+    throw e;
+  }
 }
 
 export type FilmEventLite = { uri: string; title: string; year: number | null; rating?: number; liked?: boolean };
