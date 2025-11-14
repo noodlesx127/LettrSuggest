@@ -29,7 +29,7 @@ function useUserId() {
 }
 
 export default function LibraryPage() {
-  const { films } = useImportData();
+  const { films, loading: loadingFilms } = useImportData();
   const uid = useUserId();
   const [mappings, setMappings] = useState<Map<string, number>>(new Map());
   const [loadingMappings, setLoadingMappings] = useState(false);
@@ -67,12 +67,17 @@ export default function LibraryPage() {
     <AuthGate>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">Library</h1>
-        {loadingMappings && <span className="text-sm text-gray-600">Loading mappings…</span>}
+        {(loadingFilms || loadingMappings) && (
+          <span className="text-sm text-gray-600">
+            {loadingFilms ? 'Loading films…' : 'Loading mappings…'}
+          </span>
+        )}
       </div>
       <p className="text-sm text-gray-700 mb-4">
         Your watched films. Use this page to review mapping accuracy and edit any mismatched titles.
       </p>
       {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
+      {loadingFilms && <p className="text-sm text-gray-600">Loading your library from database…</p>}
       <MovieGrid films={gridFilms} uid={uid} mappedIds={mappedIds} onMappingChange={(uri, id) => {
         setMappings((prev) => new Map(prev).set(uri, id));
       }} onDeleteMapping={(uri) => {
