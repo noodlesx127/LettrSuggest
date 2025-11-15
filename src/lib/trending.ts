@@ -71,6 +71,7 @@ export async function discoverMoviesByProfile(options: {
   sortBy?: 'vote_average.desc' | 'popularity.desc' | 'primary_release_date.desc';
   minVotes?: number;
   limit?: number;
+  randomizePage?: boolean; // Add random page offset for variety
 }): Promise<number[]> {
   const allIds = new Set<number>();
   
@@ -84,6 +85,12 @@ export async function discoverMoviesByProfile(options: {
     if (options.yearMax) u.searchParams.set('primary_release_date.lte', `${options.yearMax}-12-31`);
     if (options.sortBy) u.searchParams.set('sort_by', options.sortBy);
     if (options.minVotes) u.searchParams.set('vote_count.gte', String(options.minVotes));
+    
+    // Randomize starting page for variety (pages 1-5)
+    if (options.randomizePage !== false) {
+      const randomPage = Math.floor(Math.random() * 5) + 1;
+      u.searchParams.set('page', String(randomPage));
+    }
     
     const limit = options.limit ?? 20;
     u.searchParams.set('limit', String(limit));
@@ -130,33 +137,50 @@ export async function generateSmartCandidates(profile: {
     discovered: [] as number[]
   };
 
-  // 1. Trending movies (small set for discovery)
+  // 1. Trending movies (randomize between day/week for variety)
   try {
-    results.trending = await fetchTrendingIds('week', 100);
+    const period = Math.random() > 0.5 ? 'day' : 'week';
+    results.trending = await fetchTrendingIds(period, 100);
   } catch (e) {
     console.error('[SmartCandidates] Trending failed', e);
   }
 
-  // 2. Similar to highly-rated films
+  // 2. Similar to highly-rated films (randomize seed selection)
   try {
     if (profile.highlyRatedIds.length > 0) {
-      results.similar = await fetchSimilarMovieIds(profile.highlyRatedIds.slice(0, 20), 30);
+      // Shuffle and take random subset for variety on each refresh
+      const shuffled = [...profile.highlyRatedIds].sort(() => Math.random() - 0.5);
+      results.similar = await fetchSimilarMovieIds(shuffled.slice(0, 20), 30);
     }
   } catch (e) {
     console.error('[SmartCandidates] Similar failed', e);
   }
 
-  // 3. Discover by top genres + keywords (hidden gems)
+  // 3. Discover by top genres + keywords (randomize year ranges for variety)
   try {
     if (profile.topGenres.length > 0 && profile.topKeywords.length > 0) {
+      // Randomize decade focus on each refresh
+      const yearRanges = [
+        { min: 1970, max: 1990 },
+        { min: 1980, max: 2000 },
+        { min: 1990, max: 2010 },
+        { min: 2000, max: 2015 },
+        { min: 1970, max: 2015 } // Full range
+      ];
+      const randomRange = yearRanges[Math.floor(Math.random() * yearRanges.length)];
+      
+      // Shuffle genre/keyword selection
+      const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
+      const shuffledKeywords = [...profile.topKeywords].sort(() => Math.random() - 0.5);
+      
       const genreDiscovered = await discoverMoviesByProfile({
-        genres: profile.topGenres.slice(0, 3).map(g => g.id),
-        keywords: profile.topKeywords.slice(0, 5).map(k => k.id),
+        genres: shuffledGenres.slice(0, 3).map(g => g.id),
+        keywords: shuffledKeywords.slice(0, 5).map(k => k.id),
         sortBy: 'vote_average.desc',
         minVotes: 100,
-        yearMin: 1980,
-        yearMax: 2015, // Hidden gems cutoff
-        limit: 100
+        yearMin: randomRange.min,
+        yearMax: randomRange.max,
+        limit: 150 // Increased for more variety
       });
       results.discovered.push(...genreDiscovered);
     }
@@ -164,14 +188,16 @@ export async function generateSmartCandidates(profile: {
     console.error('[SmartCandidates] Genre+keyword discovery failed', e);
   }
 
-  // 4. Discover by favorite directors (recent works)
+  // 4. Discover by favorite directors (randomize which directors)
   try {
     if (profile.topDirectors.length > 0) {
+      // Shuffle director selection for variety
+      const shuffledDirectors = [...profile.topDirectors].sort(() => Math.random() - 0.5);
       const directorDiscovered = await discoverMoviesByProfile({
-        people: profile.topDirectors.slice(0, 3).map(d => d.id),
+        people: shuffledDirectors.slice(0, 3).map(d => d.id),
         sortBy: 'primary_release_date.desc',
         yearMin: 2010,
-        limit: 50
+        limit: 75 // Increased
       });
       results.discovered.push(...directorDiscovered);
     }
@@ -179,14 +205,16 @@ export async function generateSmartCandidates(profile: {
     console.error('[SmartCandidates] Director discovery failed', e);
   }
 
-  // 5. Discover niche subgenre picks
+  // 5. Discover niche subgenre picks (randomize keywords)
   try {
     if (profile.topKeywords.length > 2) {
+      // Take random keywords for variety
+      const shuffledKeywords = [...profile.topKeywords].sort(() => Math.random() - 0.5);
       const nicheDiscovered = await discoverMoviesByProfile({
-        keywords: profile.topKeywords.slice(0, 3).map(k => k.id),
-        sortBy: 'vote_average.desc',
+        keywords: shuffledKeywords.slice(0, 3).map(k => k.id),
+        sortBy: Math.random() > 0.5 ? 'vote_average.desc' : 'popularity.desc', // Randomize sort
         minVotes: 50, // Lower threshold for niche films
-        limit: 50
+        limit: 75 // Increased
       });
       results.discovered.push(...nicheDiscovered);
     }

@@ -41,12 +41,13 @@ export async function GET(req: Request) {
     }
     
     const limit = parseInt(searchParams.get('limit') || '20');
+    const startPage = parseInt(searchParams.get('page') || '1'); // Support custom start page
     const pages = Math.min(Math.ceil(limit / 20), 3); // Max 3 pages = 60 results
     
     const allResults: any[] = [];
     
-    // Fetch multiple pages if needed
-    for (let page = 1; page <= pages; page++) {
+    // Fetch multiple pages if needed, starting from startPage
+    for (let page = startPage; page < startPage + pages; page++) {
       tmdbUrl.searchParams.set('page', String(page));
       
       const r = await fetch(tmdbUrl.toString(), {
