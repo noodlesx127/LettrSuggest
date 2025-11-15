@@ -910,9 +910,9 @@ export async function suggestByOverlap(params: {
     
     if (crossGenreBoost.boost > 0) {
       score += crossGenreBoost.boost;
-      if (crossGenreBoost.boostReason) {
-        reasons.push(crossGenreBoost.boostReason);
-        console.log(`[CrossGenreBoost] Boosted "${m.title}" by ${crossGenreBoost.boost.toFixed(2)} - ${crossGenreBoost.boostReason}`);
+      if (crossGenreBoost.reason) {
+        reasons.push(crossGenreBoost.reason);
+        console.log(`[CrossGenreBoost] Boosted "${m.title}" by ${crossGenreBoost.boost.toFixed(2)} - ${crossGenreBoost.reason}`);
       }
     }
     
