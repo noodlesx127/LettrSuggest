@@ -56,49 +56,55 @@ export default function SuggestPage() {
 
     // Sort all by score first
     const sorted = [...items].sort((a, b) => b.score - a.score);
+    
+    // Track used IDs to prevent duplicates across sections
+    const usedIds = new Set<number>();
+    
+    // Helper to get next N unused items matching a filter
+    const getNextItems = (filter: (item: MovieItem) => boolean, count: number): MovieItem[] => {
+      const results: MovieItem[] = [];
+      for (const item of sorted) {
+        if (usedIds.has(item.id)) continue;
+        if (filter(item)) {
+          results.push(item);
+          usedIds.add(item.id);
+          if (results.length >= count) break;
+        }
+      }
+      return results;
+    };
 
     // 1. Perfect Matches: Top 8 highest scoring films
-    const perfectMatches = sorted.slice(0, 8);
-    const perfectMatchIds = new Set(perfectMatches.map(m => m.id));
+    const perfectMatches = getNextItems(() => true, 8);
 
-    // 2. From Directors You Love: Films with director matches (excluding perfect matches)
-    const directorMatches = sorted
-      .filter(item => hasDirectorMatch(item.reasons) && !perfectMatchIds.has(item.id))
-      .slice(0, 5);
+    // 2. From Directors You Love: Films with director matches
+    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 5);
 
-    // 3. Hidden Gems: Pre-2015 films with good scores (not in perfect matches)
-    const hiddenGems = sorted
-      .filter(item => {
-        const year = parseInt(item.year || '0');
-        return year > 0 && year < 2015 && !perfectMatchIds.has(item.id);
-      })
-      .slice(0, 6);
+    // 3. Hidden Gems: Pre-2015 films with good scores
+    const hiddenGems = getNextItems(item => {
+      const year = parseInt(item.year || '0');
+      return year > 0 && year < 2015;
+    }, 6);
 
-    // 4. New & Trending: 2023+ releases (not in perfect matches)
-    const newReleases = sorted
-      .filter(item => {
-        const year = parseInt(item.year || '0');
-        return year >= 2023 && !perfectMatchIds.has(item.id);
-      })
-      .slice(0, 5);
+    // 4. New & Trending: 2023+ releases
+    const newReleases = getNextItems(item => {
+      const year = parseInt(item.year || '0');
+      return year >= 2023;
+    }, 5);
 
-    // 5. Deep Cuts: Films with strong theme/keyword matches (not in other sections)
-    const usedIds = new Set([
-      ...perfectMatchIds,
-      ...directorMatches.map(m => m.id),
-      ...hiddenGems.map(m => m.id),
-      ...newReleases.map(m => m.id)
-    ]);
-    const deepCuts = sorted
-      .filter(item => hasDeepCutThemes(item.reasons) && !usedIds.has(item.id))
-      .slice(0, 5);
+    // 5. Deep Cuts: Films with strong theme/keyword matches
+    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 5);
+    
+    // 6. Fallback: More recommendations (any remaining films not already shown)
+    const moreRecommendations = getNextItems(() => true, 10);
 
     return {
       perfectMatches,
       directorMatches,
       hiddenGems,
       newReleases,
-      deepCuts
+      deepCuts,
+      moreRecommendations
     };
   }, [items]);
 
@@ -548,6 +554,36 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.deepCuts.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* More Recommendations Section - Fallback for remaining suggestions */}
+          {categorizedSuggestions.moreRecommendations.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-2xl">🎥</span>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">More Recommendations</h2>
+                  <p className="text-xs text-gray-600">Additional films you might enjoy</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.moreRecommendations.map((item) => (
                   <MovieCard 
                     key={item.id} 
                     id={item.id}
