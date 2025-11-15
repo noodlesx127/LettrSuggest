@@ -64,6 +64,10 @@ drop policy if exists "film_events user update" on public.film_events;
 create policy "film_events user update" on public.film_events
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+drop policy if exists "film_events user delete" on public.film_events;
+create policy "film_events user delete" on public.film_events
+  for delete using (auth.uid() = user_id);
+
 -- Trigger to populate profiles from auth.users
 create or replace function public.handle_new_user()
 returns trigger as $$
@@ -124,6 +128,10 @@ drop policy if exists "film_tmdb_map user update" on public.film_tmdb_map;
 create policy "film_tmdb_map user update" on public.film_tmdb_map
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+drop policy if exists "film_tmdb_map user delete" on public.film_tmdb_map;
+create policy "film_tmdb_map user delete" on public.film_tmdb_map
+  for delete using (auth.uid() = user_id);
+
 -- Per-diary-entry table to support accurate watch counts and timelines
 create table if not exists public.film_diary_events (
   id bigserial primary key,
@@ -151,6 +159,10 @@ create policy "film_diary user insert" on public.film_diary_events
 drop policy if exists "film_diary user update" on public.film_diary_events;
 create policy "film_diary user update" on public.film_diary_events
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "film_diary user delete" on public.film_diary_events;
+create policy "film_diary user delete" on public.film_diary_events
+  for delete using (auth.uid() = user_id);
 
 -- Aggregated watch counts view
 create or replace view public.film_watch_counts as

@@ -53,9 +53,9 @@ export default function NavBar() {
             <span className="text-sm text-gray-400">...</span>
           ) : user ? (
             <>
-              <span className="text-sm text-gray-600">
+              <a href="/profile" className="text-sm text-gray-600 hover:text-gray-900">
                 {user.email}
-              </span>
+              </a>
               <button 
                 onClick={handleSignOut}
                 className="text-sm text-gray-600 hover:text-gray-900 underline"
