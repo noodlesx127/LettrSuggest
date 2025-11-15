@@ -26,7 +26,7 @@ export default function SuggestPage() {
   const [uid, setUid] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<Array<{ id: number; title: string; year?: string; reasons: string[]; poster_path?: string | null; score: number }> | null>(null);
+  const [items, setItems] = useState<MovieItem[] | null>(null);
   const [sourceLabel, setSourceLabel] = useState<string>('');
   const [fallbackFilms, setFallbackFilms] = useState<FilmEvent[] | null>(null);
   const [watchlistTmdbIds, setWatchlistTmdbIds] = useState<Set<number>>(new Set());
