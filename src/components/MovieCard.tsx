@@ -30,15 +30,19 @@ export default function MovieCard({
   showTrailer = true
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const voteCategoryBadge = voteCategory && voteCategory !== 'standard' ? {
     'hidden-gem': { label: '💎 Hidden Gem', className: 'bg-purple-100 text-purple-800' },
     'crowd-pleaser': { label: '🎉 Crowd Pleaser', className: 'bg-green-100 text-green-800' },
     'cult-classic': { label: '🎭 Cult Classic', className: 'bg-orange-100 text-orange-800' }
   }[voteCategory] : null;
+  
+  const displayedReasons = expanded ? reasons : reasons?.slice(0, 3);
+  const hasMoreReasons = reasons && reasons.length > 3;
 
   return (
-    <div className="border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow h-full flex flex-col min-h-[280px]">
+    <div className={`border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'}`}>
       <div className="flex gap-4 p-4 flex-1">
         {/* Poster or Trailer */}
         <div className="flex-shrink-0 w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
@@ -96,7 +100,7 @@ export default function MovieCard({
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-1">
-            <h3 className="font-semibold text-lg truncate flex-1" title={title}>
+            <h3 className="font-semibold text-lg line-clamp-2 flex-1" title={title}>
               {title}
             </h3>
             <div className="flex gap-1 flex-wrap justify-end">
@@ -127,19 +131,38 @@ export default function MovieCard({
           
           {/* Reasons */}
           {reasons && reasons.length > 0 && (
-            <ul className="space-y-1.5 overflow-hidden">
-              {reasons.slice(0, 3).map((r, i) => (
-                <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
-                  <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
-                  <span className="flex-1 line-clamp-2">{r}</span>
-                </li>
-              ))}
-              {reasons.length > 3 && (
-                <li className="text-xs text-gray-500 italic">
-                  +{reasons.length - 3} more reason{reasons.length - 3 > 1 ? 's' : ''}
-                </li>
+            <div>
+              <ul className="space-y-1.5 overflow-hidden">
+                {displayedReasons?.map((r, i) => (
+                  <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
+                    <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
+                    <span className="flex-1 line-clamp-2">{r}</span>
+                  </li>
+                ))}
+              </ul>
+              {hasMoreReasons && (
+                <button
+                  onClick={() => setExpanded(!expanded)}
+                  className="mt-2 text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
+                >
+                  {expanded ? (
+                    <>
+                      <span>Show less</span>
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                      </svg>
+                    </>
+                  ) : (
+                    <>
+                      <span>+{reasons.length - 3} more reason{reasons.length - 3 > 1 ? 's' : ''}</span>
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </>
+                  )}
+                </button>
               )}
-            </ul>
+            </div>
           )}
         </div>
       </div>
