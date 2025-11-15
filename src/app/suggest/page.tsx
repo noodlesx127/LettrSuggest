@@ -47,12 +47,18 @@ export default function SuggestPage() {
 
     const currentYear = new Date().getFullYear();
     
-    // Helper to check if director/actor is mentioned in reasons
+    // Helper functions to check reason types
     const hasDirectorMatch = (reasons: string[]) => 
       reasons.some(r => r.toLowerCase().includes('directed by') || r.toLowerCase().includes('director'));
     
+    const hasActorMatch = (reasons: string[]) =>
+      reasons.some(r => r.toLowerCase().includes('starring') || r.toLowerCase().includes('cast') || r.toLowerCase().includes('actor'));
+    
+    const hasGenreMatch = (reasons: string[]) =>
+      reasons.some(r => r.toLowerCase().includes('genre:') || r.toLowerCase().includes('similar genre'));
+    
     const hasDeepCutThemes = (reasons: string[]) =>
-      reasons.some(r => r.toLowerCase().includes('themes you') || r.toLowerCase().includes('specific themes'));
+      reasons.some(r => r.toLowerCase().includes('themes you') || r.toLowerCase().includes('specific themes') || r.toLowerCase().includes('keyword:'));
 
     // Sort all by score first
     const sorted = [...items].sort((a, b) => b.score - a.score);
@@ -74,36 +80,67 @@ export default function SuggestPage() {
       return results;
     };
 
-    // 1. Perfect Matches: Top 8 highest scoring films
-    const perfectMatches = getNextItems(() => true, 8);
+    // 1. Perfect Matches: Top 6 highest scoring films
+    const perfectMatches = getNextItems(() => true, 6);
 
     // 2. From Directors You Love: Films with director matches
-    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 5);
+    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 6);
 
-    // 3. Hidden Gems: Pre-2015 films with good scores
+    // 3. From Actors You Love: Films with cast matches
+    const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 6);
+
+    // 4. Your Favorite Genres: Films matching preferred genres
+    const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 6);
+
+    // 5. Hidden Gems: Pre-2015 films with high scores but low recognition
     const hiddenGems = getNextItems(item => {
       const year = parseInt(item.year || '0');
-      return year > 0 && year < 2015;
+      return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
     }, 6);
 
-    // 4. New & Trending: 2023+ releases
+    // 6. Cult Classics: Films with cult following
+    const cultClassics = getNextItems(item => {
+      return item.voteCategory === 'cult-classic';
+    }, 6);
+
+    // 7. Crowd Pleasers: Popular high-rated films
+    const crowdPleasers = getNextItems(item => {
+      return item.voteCategory === 'crowd-pleaser';
+    }, 6);
+
+    // 8. New & Trending: Recent releases (2023+)
     const newReleases = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2023;
-    }, 5);
+    }, 6);
 
-    // 5. Deep Cuts: Films with strong theme/keyword matches
-    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 5);
+    // 9. Recent Classics: Films from 2015-2022
+    const recentClassics = getNextItems(item => {
+      const year = parseInt(item.year || '0');
+      return year >= 2015 && year < 2023;
+    }, 6);
+
+    // 10. Deep Cuts: Films with specific theme/keyword matches
+    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 6);
+
+    // 11. From Collections: Films in same collections/franchises
+    const fromCollections = getNextItems(item => !!item.collectionName, 6);
     
-    // 6. Fallback: More recommendations (any remaining films not already shown)
-    const moreRecommendations = getNextItems(() => true, 10);
+    // 12. Fallback: More recommendations (any remaining films)
+    const moreRecommendations = getNextItems(() => true, 12);
 
     return {
       perfectMatches,
       directorMatches,
+      actorMatches,
+      genreMatches,
       hiddenGems,
+      cultClassics,
+      crowdPleasers,
       newReleases,
+      recentClassics,
       deepCuts,
+      fromCollections,
       moreRecommendations
     };
   }, [items]);
@@ -482,6 +519,66 @@ export default function SuggestPage() {
             </section>
           )}
 
+          {/* From Actors You Love Section */}
+          {categorizedSuggestions.actorMatches.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-2xl">⭐</span>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">From Actors You Love</h2>
+                  <p className="text-xs text-gray-600">More from your favorite performers</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.actorMatches.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Your Favorite Genres Section */}
+          {categorizedSuggestions.genreMatches.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-2xl">🎭</span>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Your Favorite Genres</h2>
+                  <p className="text-xs text-gray-600">Based on genres you watch most</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.genreMatches.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Hidden Gems Section */}
           {categorizedSuggestions.hiddenGems.length > 0 && (
             <section>
@@ -494,6 +591,66 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.hiddenGems.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Cult Classics Section */}
+          {categorizedSuggestions.cultClassics.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-2xl">🎭</span>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Cult Classics</h2>
+                  <p className="text-xs text-gray-600">Films with dedicated followings</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.cultClassics.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Crowd Pleasers Section */}
+          {categorizedSuggestions.crowdPleasers.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-2xl">🎉</span>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Crowd Pleasers</h2>
+                  <p className="text-xs text-gray-600">Widely loved and highly rated</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.crowdPleasers.map((item) => (
                   <MovieCard 
                     key={item.id} 
                     id={item.id}
@@ -542,6 +699,36 @@ export default function SuggestPage() {
             </section>
           )}
 
+          {/* Recent Classics Section */}
+          {categorizedSuggestions.recentClassics.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-2xl">🎬</span>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Recent Classics</h2>
+                  <p className="text-xs text-gray-600">Great films from 2015-2022</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.recentClassics.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Deep Cuts Section */}
           {categorizedSuggestions.deepCuts.length > 0 && (
             <section>
@@ -554,6 +741,36 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.deepCuts.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* From Collections Section */}
+          {categorizedSuggestions.fromCollections.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-2xl">📚</span>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">From Collections</h2>
+                  <p className="text-xs text-gray-600">Complete franchises and series</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.fromCollections.map((item) => (
                   <MovieCard 
                     key={item.id} 
                     id={item.id}
