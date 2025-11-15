@@ -28,7 +28,9 @@ export function applyAdvancedFiltering(
 ): FilterResult {
   
   const genres = candidate.genres?.map(g => g.name) || [];
-  const keywords = (candidate as any).keywords?.map((k: any) => k.name) || [];
+  // Handle TMDBMovie keyword structure: keywords.keywords or keywords.results
+  const keywordsList = (candidate.keywords as any)?.keywords || (candidate.keywords as any)?.results || [];
+  const keywords = Array.isArray(keywordsList) ? keywordsList.map((k: any) => k.name || k).filter(Boolean) : [];
   const title = candidate.title || '';
   
   // Step 1: Check for subgenre avoidance
@@ -76,7 +78,9 @@ export function applyNegativeFiltering(
 ): { shouldFilter: boolean; reason?: string } {
   
   const genres = candidate.genres?.map(g => g.name) || [];
-  const keywords = (candidate as any).keywords?.map((k: any) => k.name) || [];
+  // Handle TMDBMovie keyword structure
+  const keywordsList = (candidate.keywords as any)?.keywords || (candidate.keywords as any)?.results || [];
+  const keywords = Array.isArray(keywordsList) ? keywordsList.map((k: any) => k.name || k).filter(Boolean) : [];
   const genreCombo = genres.slice(0, 2).sort().join('+');
   
   // Check avoided genre combinations
@@ -109,8 +113,10 @@ export function checkNicheCompatibility(
 ): { compatible: boolean; reason?: string } {
   
   const genres = candidate.genres?.map(g => g.name) || [];
-  const keywords = (candidate as any).keywords?.map((k: any) => k.name) || [];
-  const allText = [candidate.title?.toLowerCase() || '', ...keywords.map((k: string) => k.toLowerCase())].join(' ');
+  // Handle TMDBMovie keyword structure: keywords.keywords or keywords.results
+  const keywordsList = (candidate.keywords as any)?.keywords || (candidate.keywords as any)?.results || [];
+  const keywords = Array.isArray(keywordsList) ? keywordsList.map((k: any) => k.name || k).filter(Boolean) : [];
+  const allText = [candidate.title?.toLowerCase() || '', ...keywords.map((k: string) => String(k).toLowerCase())].join(' ');
   
   // Check Anime
   const isAnime = genres.some(g => g.toLowerCase().includes('anime')) || 
