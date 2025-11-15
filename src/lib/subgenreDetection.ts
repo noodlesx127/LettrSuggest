@@ -278,7 +278,13 @@ export function shouldFilterBySubgenre(
   subgenrePatterns: Map<string, SubgenrePattern>
 ): { shouldFilter: boolean; reason?: string } {
   
-  const allText = [candidateTitle.toLowerCase(), ...candidateKeywords.map(k => k.toLowerCase())].join(' ');
+  // Defensive checks
+  if (!Array.isArray(candidateGenres) || !Array.isArray(candidateKeywords)) {
+    console.warn('[SubgenreFilter] Invalid input: genres or keywords not arrays', { candidateGenres, candidateKeywords });
+    return { shouldFilter: false };
+  }
+  
+  const allText = [candidateTitle.toLowerCase(), ...candidateKeywords.map((k: string) => k.toLowerCase())].join(' ');
   
   for (const genre of candidateGenres) {
     const pattern = subgenrePatterns.get(genre);
@@ -311,9 +317,15 @@ export function boostForCrossGenreMatch(
   crossGenrePatterns: Map<string, CrossGenrePattern>
 ): { boost: number; reason?: string } {
   
+  // Defensive checks
+  if (!Array.isArray(candidateGenres) || !Array.isArray(candidateKeywords)) {
+    console.warn('[CrossGenreBoost] Invalid input: genres or keywords not arrays', { candidateGenres, candidateKeywords });
+    return { boost: 0 };
+  }
+  
   // Check for matching genre combinations
   const sortedGenres = candidateGenres.slice().sort();
-  const candidateKeywordSet = new Set(candidateKeywords.map(k => k.toLowerCase()));
+  const candidateKeywordSet = new Set(candidateKeywords.map((k: string) => k.toLowerCase()));
   
   let maxBoost = 0;
   let bestReason = '';
