@@ -25,20 +25,5 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }, []);
   if (email === undefined) return <p>Loading…</p>;
   if (!email) return <p>Please <a className="underline" href="/auth/login">sign in</a>.</p>;
-  return (
-    <div>
-      <div className="text-sm text-gray-600 mb-3 flex items-center gap-2">
-        <span>Signed in as {email}</span>
-        <button
-          className="underline"
-          onClick={async () => {
-            if (supabase) await supabase.auth.signOut();
-          }}
-        >
-          Sign out
-        </button>
-      </div>
-      {children}
-    </div>
-  );
+  return <>{children}</>;
 }
