@@ -108,8 +108,28 @@ export default function ImportPage() {
         setAutoMappingActive(false);
         return;
       }
-      const toTry = filmList;
+      
+      // First, get existing mappings to skip already-mapped films
+      let existingMappings = new Set<string>();
+      try {
+        const { data: existingData } = await supabase!.from('film_tmdb_map')
+          .select('uri')
+          .eq('user_id', uid);
+        if (existingData) {
+          existingMappings = new Set(existingData.map(m => m.uri));
+        }
+        console.log(`[Import] Found ${existingMappings.size} existing mappings`);
+      } catch (e) {
+        console.warn('[Import] Could not fetch existing mappings, will attempt all', e);
+      }
+      
+      // Filter to only films that need mapping
+      const toTry = filmList.filter(f => f.title && !existingMappings.has(f.uri));
+      console.log(`[Import] Need to map ${toTry.length} of ${filmList.length} films (${existingMappings.size} already mapped, ${filmList.filter(f => !f.title).length} have no title)`);
+      
       let mapped = 0;
+      let skipped = 0; // No TMDB results found
+      let failed = 0; // API errors
       let next = 0;
       const concurrency = 2; // Reduced to avoid rate limits
       let lastRequestTime = 0;
@@ -125,7 +145,6 @@ export default function ImportPage() {
           const i = next++;
           if (i >= toTry.length) break;
           const f = toTry[i];
-          if (!f.title) continue;
           
           // Rate limiting: ensure minimum delay between requests
           const now = Date.now();
@@ -138,6 +157,7 @@ export default function ImportPage() {
           // Retry logic with exponential backoff
           let retries = 3;
           let backoff = 1000; // Start with 1 second
+          let success = false;
           
           while (retries > 0) {
             try {
@@ -147,13 +167,21 @@ export default function ImportPage() {
                 await upsertTmdbCache(best);
                 await upsertFilmMapping(uid, f.uri, best.id);
                 mapped += 1;
-                setMappingProgress({ current: mapped, total: toTry.length });
-                setStatus(`Mapping films to TMDB database… ${mapped}/${toTry.length}`);
+                success = true;
+                setMappingProgress({ current: mapped + skipped + failed, total: toTry.length });
+                setStatus(`Mapping films to TMDB database… ${mapped + skipped + failed}/${toTry.length} (${mapped} mapped, ${skipped} no match)`);
                 if (typeof window !== 'undefined') {
                   window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
                 }
+              } else {
+                // No results found
+                skipped += 1;
+                success = true;
+                console.log(`[Import] No TMDB results for: ${f.title} (${f.year || 'no year'})`);
+                setMappingProgress({ current: mapped + skipped + failed, total: toTry.length });
+                setStatus(`Mapping films to TMDB database… ${mapped + skipped + failed}/${toTry.length} (${mapped} mapped, ${skipped} no match)`);
               }
-              break; // Success, exit retry loop
+              break; // Success (mapped or no results), exit retry loop
             } catch (e: any) {
               retries--;
               if (retries > 0) {
@@ -162,13 +190,18 @@ export default function ImportPage() {
                 backoff *= 2; // Exponential backoff
               } else {
                 console.error(`[Import] Failed to map ${f.title} after 3 retries`, e);
+                failed += 1;
+                setMappingProgress({ current: mapped + skipped + failed, total: toTry.length });
+                setStatus(`Mapping films to TMDB database… ${mapped + skipped + failed}/${toTry.length} (${mapped} mapped, ${failed} failed)`);
               }
             }
           }
         }
       };
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
-      setStatus(`✓ Successfully mapped ${mapped} of ${toTry.length} films to TMDB`);
+      
+      const totalMapped = mapped + existingMappings.size;
+      setStatus(`✓ Successfully mapped ${totalMapped} of ${filmList.length} films to TMDB (${mapped} new, ${existingMappings.size} existing, ${skipped} no match, ${failed} failed)`);
       setMappingProgress(null);
       setAutoMappingActive(false);
     } catch (e) {
