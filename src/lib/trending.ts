@@ -183,6 +183,19 @@ export async function generateSmartCandidates(profile: {
         limit: 150 // Increased for more variety
       });
       results.discovered.push(...genreDiscovered);
+      
+      // Fallback: If no results, try with just genres (no keywords restriction)
+      if (genreDiscovered.length === 0) {
+        const genreOnlyDiscovered = await discoverMoviesByProfile({
+          genres: shuffledGenres.slice(0, 3).map(g => g.id),
+          sortBy: 'vote_average.desc',
+          minVotes: 50, // Lower threshold
+          yearMin: randomRange.min,
+          yearMax: randomRange.max,
+          limit: 150
+        });
+        results.discovered.push(...genreOnlyDiscovered);
+      }
     }
   } catch (e) {
     console.error('[SmartCandidates] Genre+keyword discovery failed', e);
@@ -200,6 +213,17 @@ export async function generateSmartCandidates(profile: {
         limit: 75 // Increased
       });
       results.discovered.push(...directorDiscovered);
+      
+      // Fallback: If no results, try with broader year range
+      if (directorDiscovered.length === 0) {
+        const directorBroadDiscovered = await discoverMoviesByProfile({
+          people: shuffledDirectors.slice(0, 3).map(d => d.id),
+          sortBy: 'vote_average.desc',
+          yearMin: 1990, // Much broader range
+          limit: 75
+        });
+        results.discovered.push(...directorBroadDiscovered);
+      }
     }
   } catch (e) {
     console.error('[SmartCandidates] Director discovery failed', e);
@@ -220,6 +244,39 @@ export async function generateSmartCandidates(profile: {
     }
   } catch (e) {
     console.error('[SmartCandidates] Niche discovery failed', e);
+  }
+
+  // 6. Add pure genre-based discovery (no restrictions) for more variety
+  try {
+    if (profile.topGenres.length > 0 && results.discovered.length < 200) {
+      const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
+      const pureGenreDiscovered = await discoverMoviesByProfile({
+        genres: shuffledGenres.slice(0, 2).map(g => g.id),
+        sortBy: Math.random() > 0.5 ? 'vote_average.desc' : 'popularity.desc',
+        minVotes: 100,
+        limit: 100
+      });
+      results.discovered.push(...pureGenreDiscovered);
+    }
+  } catch (e) {
+    console.error('[SmartCandidates] Pure genre discovery failed', e);
+  }
+
+  // 7. Add recent popular films in user's top genres
+  try {
+    if (profile.topGenres.length > 0 && results.discovered.length < 300) {
+      const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
+      const recentDiscovered = await discoverMoviesByProfile({
+        genres: shuffledGenres.slice(0, 2).map(g => g.id),
+        sortBy: 'primary_release_date.desc',
+        yearMin: 2020, // Recent films
+        minVotes: 50,
+        limit: 100
+      });
+      results.discovered.push(...recentDiscovered);
+    }
+  } catch (e) {
+    console.error('[SmartCandidates] Recent discovery failed', e);
   }
 
   console.log('[SmartCandidates] Generated', {
