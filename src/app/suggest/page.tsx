@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap } from '@/lib/enrich';
-import { fetchTrendingIds } from '@/lib/trending';
+import { fetchTrendingIds, fetchSimilarMovieIds } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import type { FilmEvent } from '@/lib/normalize';
 import Image from 'next/image';
@@ -85,29 +85,57 @@ export default function SuggestPage() {
       setWatchlistTmdbIds(watchlistIds);
       console.log('[Suggest] watchlist IDs', { count: watchlistIds.size });
       
-      // Try to get candidates from trending movies (these are movies to potentially suggest)
+      // Build candidate pool from multiple sources for better personalization
       let candidatesRaw: number[] = [];
+      
+      // 1. Get trending movies (discovery of new releases)
       try {
-        candidatesRaw = await fetchTrendingIds('day', mode === 'quick' ? 120 : 220);
-        console.log('[Suggest] fetched trending candidates', { count: candidatesRaw.length });
+        const trendingIds = await fetchTrendingIds('week', mode === 'quick' ? 40 : 60);
+        candidatesRaw.push(...trendingIds);
+        console.log('[Suggest] fetched trending candidates', { count: trendingIds.length });
       } catch (e) {
         console.error('[Suggest] failed to fetch trending', e);
       }
       
-      // Filter out already watched films
+      // 2. Get similar/recommended movies based on user's highly-rated films
+      // This provides more personalized candidates from the user's taste profile
+      try {
+        const highlyRated = filteredFilms
+          .filter(f => (f.rating ?? 0) >= 4 || f.liked)
+          .map(f => mappings.get(f.uri))
+          .filter((id): id is number => id != null)
+          .slice(0, 15); // Use top 15 highly-rated films as seeds
+        
+        if (highlyRated.length > 0) {
+          console.log('[Suggest] Fetching similar movies based on', highlyRated.length, 'highly-rated films');
+          const similarIds = await fetchSimilarMovieIds(highlyRated, mode === 'quick' ? 8 : 15);
+          candidatesRaw.push(...similarIds);
+          console.log('[Suggest] fetched similar/recommended candidates', { count: similarIds.length });
+        }
+      } catch (e) {
+        console.error('[Suggest] failed to fetch similar movies', e);
+      }
+      
+      // Filter out already watched films and deduplicate
       const candidates = candidatesRaw
         .filter((id, idx, arr) => arr.indexOf(id) === idx) // dedupe
         .filter((id) => !watchedIds.has(id)) // exclude watched
-        .slice(0, mode === 'quick' ? 120 : 220);
+        .slice(0, mode === 'quick' ? 200 : 350); // Increased pool size for better matching
       
-      console.log('[Suggest] candidate pool', { mode, totalTrending: candidatesRaw.length, afterFilter: candidates.length, watchedCount: watchedIds.size });
+      console.log('[Suggest] candidate pool', { 
+        mode, 
+        totalCandidates: candidatesRaw.length, 
+        afterFilter: candidates.length, 
+        watchedCount: watchedIds.size,
+        trendingRatio: candidatesRaw.length > 0 ? (60 / candidatesRaw.length * 100).toFixed(0) + '%' : '0%'
+      });
       
       if (candidates.length === 0) {
-        const reason = 'No trending candidates available. Please check your TMDB API key or try again later.';
+        const reason = 'No candidates available. Please check your TMDB API key or try again later.';
         setNoCandidatesReason(reason);
       }
       
-      setSourceLabel('Based on your watched & liked films');
+      setSourceLabel('Based on your watched & liked films + trending releases');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length });
       const suggestions = await suggestByOverlap({
@@ -116,7 +144,7 @@ export default function SuggestPage() {
         mappings,
         candidates,
         excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: mode === 'quick' ? 120 : 220,
+        maxCandidates: mode === 'quick' ? 200 : 350,
         concurrency: 6,
         excludeWatchedIds: watchedIds,
         desiredResults: 20,
