@@ -454,27 +454,159 @@ export default function SuggestPage() {
     };
   }, [runSuggest, uid]);
 
+  // Fetch a single replacement suggestion
+  const fetchReplacementSuggestion = useCallback(async (): Promise<MovieItem | null> => {
+    if (!uid || !sourceFilms) return null;
+    
+    try {
+      const mappings = await getFilmMappings(uid);
+      const filteredFilms = sourceFilms;
+      
+      // Build sets of watched and blocked IDs
+      const watchedIds = new Set<number>();
+      for (const f of filteredFilms) {
+        const mid = mappings.get(f.uri);
+        if (mid) watchedIds.add(mid);
+      }
+      
+      // Get all currently shown IDs
+      const currentShownIds = new Set([...shownIds, ...(items?.map(i => i.id) ?? [])]);
+      
+      // Generate candidates
+      const highlyRated = filteredFilms
+        .filter(f => (f.rating ?? 0) >= 4 || f.liked)
+        .map(f => mappings.get(f.uri))
+        .filter((id): id is number => id != null);
+      
+      const tasteProfile = await buildTasteProfile({
+        films: filteredFilms,
+        mappings,
+        topN: 10
+      });
+      
+      const smartCandidates = await generateSmartCandidates({
+        highlyRatedIds: highlyRated,
+        topGenres: tasteProfile.topGenres,
+        topKeywords: tasteProfile.topKeywords,
+        topDirectors: tasteProfile.topDirectors
+      });
+      
+      let candidatesRaw: number[] = [];
+      candidatesRaw.push(...smartCandidates.trending);
+      candidatesRaw.push(...smartCandidates.similar);
+      candidatesRaw.push(...smartCandidates.discovered);
+      
+      // Filter candidates
+      const candidatesFiltered = candidatesRaw
+        .filter((id, idx, arr) => arr.indexOf(id) === idx)
+        .filter((id) => !watchedIds.has(id))
+        .filter((id) => !blockedIds.has(id))
+        .filter((id) => !currentShownIds.has(id));
+      
+      if (candidatesFiltered.length === 0) return null;
+      
+      // Shuffle and take one
+      const shuffled = [...candidatesFiltered].sort(() => Math.random() - 0.5);
+      const candidateId = shuffled[0];
+      
+      // Get suggestion details
+      const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
+      const suggestions = await suggestByOverlap({
+        userId: uid,
+        films: lite,
+        mappings,
+        candidates: [candidateId],
+        excludeGenres: undefined,
+        maxCandidates: 1,
+        concurrency: 1,
+        excludeWatchedIds: watchedIds,
+        desiredResults: 1,
+      });
+      
+      if (suggestions.length === 0) return null;
+      
+      const s = suggestions[0];
+      
+      // Fetch full movie details
+      const u = new URL('/api/tmdb/movie', window.location.origin);
+      u.searchParams.set('id', String(s.tmdbId));
+      const r = await fetch(u.toString(), { cache: 'no-store' });
+      const j = await r.json();
+      
+      if (j.ok && j.movie) {
+        const movie = j.movie;
+        const videos = movie.videos?.results || [];
+        const trailer = videos.find((v: any) => 
+          v.site === 'YouTube' && v.type === 'Trailer' && v.official
+        ) || videos.find((v: any) => 
+          v.site === 'YouTube' && v.type === 'Trailer'
+        );
+        
+        const voteAverage = movie.vote_average || 0;
+        const voteCount = movie.vote_count || 0;
+        let voteCategory: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard' = 'standard';
+        
+        if (voteAverage >= 7.5 && voteCount < 1000) {
+          voteCategory = 'hidden-gem';
+        } else if (voteAverage >= 7.0 && voteCount > 10000) {
+          voteCategory = 'crowd-pleaser';
+        } else if (voteAverage >= 7.0 && voteCount >= 1000 && voteCount <= 5000) {
+          voteCategory = 'cult-classic';
+        }
+        
+        const collection = movie.belongs_to_collection;
+        const collectionName = collection?.name || undefined;
+        
+        return {
+          id: s.tmdbId,
+          title: s.title ?? movie.title ?? `#${s.tmdbId}`,
+          year: s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
+          reasons: s.reasons,
+          poster_path: s.poster_path || movie.poster_path,
+          score: s.score,
+          trailerKey: trailer?.key || null,
+          voteCategory,
+          collectionName
+        };
+      }
+      
+      return null;
+    } catch (e) {
+      console.error('[Suggest] Failed to fetch replacement:', e);
+      return null;
+    }
+  }, [uid, sourceFilms, blockedIds, shownIds, items]);
+
   // Handle removing a suggestion
   const handleRemoveSuggestion = async (tmdbId: number) => {
     if (!uid) return;
     try {
-      // Immediately remove from UI
-      setItems(prev => prev ? prev.filter(item => item.id !== tmdbId) : prev);
-      
       // Block the suggestion in the background
       await blockSuggestion(uid, tmdbId);
       setBlockedIds(prev => new Set([...prev, tmdbId]));
       
-      // Remove from shown IDs so it doesn't reappear on future refreshes
-      setShownIds(prev => {
-        const updated = new Set(prev);
-        updated.delete(tmdbId);
-        return updated;
+      // Fetch a replacement suggestion
+      const replacement = await fetchReplacementSuggestion();
+      
+      // Update items: remove the old one and add replacement if available
+      setItems(prev => {
+        if (!prev) return prev;
+        const filtered = prev.filter(item => item.id !== tmdbId);
+        if (replacement) {
+          // Add replacement at the end
+          return [...filtered, replacement];
+        }
+        return filtered;
       });
+      
+      // Track the replacement as shown
+      if (replacement) {
+        setShownIds(prev => new Set([...prev, replacement.id]));
+      }
     } catch (e) {
       console.error('Failed to block suggestion:', e);
-      // On error, restore the item or show an error message
-      await runSuggest();
+      // On error, just remove the item
+      setItems(prev => prev ? prev.filter(item => item.id !== tmdbId) : prev);
     }
   };
 
