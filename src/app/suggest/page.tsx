@@ -452,10 +452,9 @@ export default function SuggestPage() {
       await blockSuggestion(uid, tmdbId);
       setBlockedIds(prev => new Set([...prev, tmdbId]));
       
-      // Remove from current items
-      setItems(prev => prev ? prev.filter(item => item.id !== tmdbId) : prev);
-      
-      // TODO: Optionally fetch one new suggestion to replace the removed one
+      // Clear items and trigger full refresh to repopulate with new suggestions
+      setItems(null);
+      await runSuggest();
     } catch (e) {
       console.error('Failed to block suggestion:', e);
     }
