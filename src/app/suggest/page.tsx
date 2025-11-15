@@ -38,6 +38,7 @@ export default function SuggestPage() {
   const [noCandidatesReason, setNoCandidatesReason] = useState<string | null>(null);
   const [blockedIds, setBlockedIds] = useState<Set<number>>(new Set());
   const [refreshingSections, setRefreshingSections] = useState<Set<string>>(new Set());
+  const [shownIds, setShownIds] = useState<Set<number>>(new Set());
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
@@ -254,7 +255,8 @@ export default function SuggestPage() {
       const candidatesFiltered = candidatesRaw
         .filter((id, idx, arr) => arr.indexOf(id) === idx) // dedupe
         .filter((id) => !watchedIds.has(id)) // exclude watched
-        .filter((id) => !blockedIds.has(id)); // exclude blocked
+        .filter((id) => !blockedIds.has(id)) // exclude blocked
+        .filter((id) => !shownIds.has(id)); // exclude previously shown on refresh
       
       // Shuffle candidates to get different results on refresh and take a larger pool
       const shuffled = [...candidatesFiltered].sort(() => Math.random() - 0.5);
@@ -367,6 +369,14 @@ export default function SuggestPage() {
       
       const details = await Promise.all(detailsPromises);
       console.log('[Suggest] suggestions ready with full details', { count: details.length });
+      
+      // Track shown IDs for future refreshes
+      setShownIds(prev => {
+        const updated = new Set(prev);
+        details.forEach(d => updated.add(d.id));
+        return updated;
+      });
+      
       setItems(details);
     } catch (e: any) {
       console.error('[Suggest] error in runSuggest', e);
@@ -452,6 +462,13 @@ export default function SuggestPage() {
       await blockSuggestion(uid, tmdbId);
       setBlockedIds(prev => new Set([...prev, tmdbId]));
       
+      // Remove from shown IDs so it doesn't affect future refreshes
+      setShownIds(prev => {
+        const updated = new Set(prev);
+        updated.delete(tmdbId);
+        return updated;
+      });
+      
       // Clear items and trigger full refresh to repopulate with new suggestions
       setItems(null);
       await runSuggest();
@@ -495,14 +512,14 @@ export default function SuggestPage() {
           <button
             type="button"
             className={`px-2 py-1 rounded border text-xs ${mode === 'quick' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
-            onClick={() => { setMode('quick'); setItems(null); setRefreshTick((x) => x + 1); void runSuggest(); }}
+            onClick={() => { setMode('quick'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
           >
             Quick
           </button>
           <button
             type="button"
             className={`px-2 py-1 rounded border text-xs ${mode === 'deep' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
-            onClick={() => { setMode('deep'); setItems(null); setRefreshTick((x) => x + 1); void runSuggest(); }}
+            onClick={() => { setMode('deep'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
           >
             Deep dive
           </button>
@@ -534,7 +551,7 @@ export default function SuggestPage() {
           <button
             className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
             title="Recompute with current filters"
-            onClick={() => { setItems(null); setRefreshTick((x) => x + 1); void runSuggest(); }}
+            onClick={() => { setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
           >
             <span>🔄</span>
             <span>Refresh</span>
