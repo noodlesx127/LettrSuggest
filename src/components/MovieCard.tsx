@@ -38,7 +38,7 @@ export default function MovieCard({
   }[voteCategory] : null;
 
   return (
-    <div className="border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow h-full flex flex-col">
+    <div className="border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow h-full flex flex-col min-h-[280px]">
       <div className="flex gap-4 p-4 flex-1">
         {/* Poster or Trailer */}
         <div className="flex-shrink-0 w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
@@ -127,13 +127,18 @@ export default function MovieCard({
           
           {/* Reasons */}
           {reasons && reasons.length > 0 && (
-            <ul className="space-y-2">
-              {reasons.map((r, i) => (
-                <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                  <span className="text-blue-500 mt-0.5">•</span>
-                  <span className="flex-1">{r}</span>
+            <ul className="space-y-1.5 overflow-hidden">
+              {reasons.slice(0, 3).map((r, i) => (
+                <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
+                  <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
+                  <span className="flex-1 line-clamp-2">{r}</span>
                 </li>
               ))}
+              {reasons.length > 3 && (
+                <li className="text-xs text-gray-500 italic">
+                  +{reasons.length - 3} more reason{reasons.length - 3 > 1 ? 's' : ''}
+                </li>
+              )}
             </ul>
           )}
         </div>
