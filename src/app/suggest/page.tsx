@@ -17,6 +17,7 @@ export default function SuggestPage() {
   const [items, setItems] = useState<Array<{ id: number; title: string; year?: string; reasons: string[]; poster_path?: string | null }> | null>(null);
   const [sourceLabel, setSourceLabel] = useState<string>('');
   const [fallbackFilms, setFallbackFilms] = useState<FilmEvent[] | null>(null);
+  const [watchlistTmdbIds, setWatchlistTmdbIds] = useState<Set<number>>(new Set());
   const [excludeGenres, setExcludeGenres] = useState<string>('');
   const [yearMin, setYearMin] = useState<string>('');
   const [yearMax, setYearMax] = useState<string>('');
@@ -65,12 +66,24 @@ export default function SuggestPage() {
       console.log('[Suggest] fetching mappings for', uris.length, 'films');
       const mappings = await getFilmMappings(uid, uris);
       console.log('[Suggest] mappings loaded', { mappingCount: mappings.size });
+      
       // Build watched TMDB id set
       const watchedIds = new Set<number>();
+      // Build watchlist TMDB id set
+      const watchlistIds = new Set<number>();
+      
       for (const f of filteredFilms) {
         const mid = mappings.get(f.uri);
-        if (mid) watchedIds.add(mid);
+        if (mid) {
+          watchedIds.add(mid);
+          if (f.onWatchlist) {
+            watchlistIds.add(mid);
+          }
+        }
       }
+      
+      setWatchlistTmdbIds(watchlistIds);
+      console.log('[Suggest] watchlist IDs', { count: watchlistIds.size });
       
       // Try to get candidates from trending movies (these are movies to potentially suggest)
       let candidatesRaw: number[] = [];
@@ -269,6 +282,7 @@ export default function SuggestPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {items.map((it) => {
               const posterPath = posters[it.id];
+              const isInWatchlist = watchlistTmdbIds.has(it.id);
               return (
                 <div key={it.id} className="border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                   <div className="flex gap-4 p-4">
@@ -292,9 +306,16 @@ export default function SuggestPage() {
                     
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-lg mb-1 truncate" title={it.title}>
-                        {it.title}
-                      </h3>
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <h3 className="font-semibold text-lg truncate flex-1" title={it.title}>
+                          {it.title}
+                        </h3>
+                        {isInWatchlist && (
+                          <span className="flex-shrink-0 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded" title="This movie is already in your watchlist">
+                            📋 Watchlist
+                          </span>
+                        )}
+                      </div>
                       {it.year && (
                         <p className="text-sm text-gray-600 mb-3">{it.year}</p>
                       )}

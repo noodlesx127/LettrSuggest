@@ -25,7 +25,9 @@ export default function StatsPage() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
   const [tmdbDetails, setTmdbDetails] = useState<Map<number, TMDBDetails>>(new Map());
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
   const [uid, setUid] = useState<string | null>(null);
+  const [filmMappings, setFilmMappings] = useState<Map<string, number>>(new Map());
 
   useEffect(() => {
     async function getUid() {
@@ -57,64 +59,151 @@ export default function StatsPage() {
 
   // Load TMDB details for mapped films
   useEffect(() => {
-    if (!uid || !filteredFilms.length) return;
+    if (!uid || !filteredFilms.length) {
+      console.log('[Stats] Skipping TMDB load:', { uid, filmCount: filteredFilms.length });
+      return;
+    }
     
     async function loadTmdbDetails() {
+      console.log('[Stats] Starting TMDB details load', { uid, filmCount: filteredFilms.length });
       setLoadingDetails(true);
+      setDetailsError(null);
+      
+      // Add timeout protection
+      const timeoutId = setTimeout(() => {
+        console.error('[Stats] Load timeout after 30 seconds');
+        setDetailsError('Loading took too long. Try refreshing the page.');
+        setLoadingDetails(false);
+      }, 30000);
+      
       try {
-        // Get mappings for filtered films
-        const { data: mappings } = await supabase!
+        // Get ALL mappings for this user instead of using .in() which can hit query limits
+        console.log('[Stats] Fetching mappings for user');
+        const { data: allMappings, error: mappingError } = await supabase!
           .from('film_tmdb_map')
           .select('uri, tmdb_id')
-          .eq('user_id', uid)
-          .in('uri', filteredFilms.map(f => f.uri));
+          .eq('user_id', uid);
         
-        if (!mappings) return;
+        if (mappingError) {
+          console.error('[Stats] Error fetching mappings:', mappingError);
+          setDetailsError(`Error loading mappings: ${mappingError.message}`);
+          clearTimeout(timeoutId);
+          setLoadingDetails(false);
+          return;
+        }
         
-        const tmdbIds = mappings.map(m => m.tmdb_id);
+        if (!allMappings || allMappings.length === 0) {
+          console.log('[Stats] No mappings found for user');
+          clearTimeout(timeoutId);
+          setLoadingDetails(false);
+          return;
+        }
         
-        // Fetch from cache first
-        const { data: cached } = await supabase!
-          .from('tmdb_movies')
-          .select('tmdb_id, data')
-          .in('tmdb_id', tmdbIds);
+        console.log('[Stats] Mappings loaded:', allMappings.length);
         
+        // Store mappings for preference calculation
+        const mappingsMap = new Map<string, number>();
+        const filteredUris = new Set(filteredFilms.map(f => f.uri));
+        
+        // Filter to only mappings for currently filtered films
+        const relevantMappings = allMappings.filter(m => filteredUris.has(m.uri));
+        console.log('[Stats] Relevant mappings:', relevantMappings.length);
+        
+        relevantMappings.forEach(m => mappingsMap.set(m.uri, m.tmdb_id));
+        setFilmMappings(mappingsMap);
+        
+        const tmdbIds = relevantMappings.map(m => m.tmdb_id);
+        
+        if (tmdbIds.length === 0) {
+          console.log('[Stats] No TMDB IDs to fetch');
+          clearTimeout(timeoutId);
+          setLoadingDetails(false);
+          return;
+        }
+        
+        console.log('[Stats] Fetching cached TMDB details for', tmdbIds.length, 'IDs');
+        
+        // Fetch from cache in batches to avoid query size limits
+        const batchSize = 500;
         const detailsMap = new Map<number, TMDBDetails>();
         
-        for (const row of cached ?? []) {
-          const data = row.data as any;
-          // Check if we have full details (genres and credits)
-          if (data.genres && data.credits) {
-            detailsMap.set(row.tmdb_id, data);
-          } else {
-            // Fetch full details from API
-            try {
-              const res = await fetch(`/api/tmdb/movie/${row.tmdb_id}`);
-              const json = await res.json();
-              if (json.ok && json.movie) {
-                detailsMap.set(row.tmdb_id, json.movie);
-                // Update cache
-                await supabase!.from('tmdb_movies').upsert({
-                  tmdb_id: row.tmdb_id,
-                  data: json.movie
-                }, { onConflict: 'tmdb_id' });
+        for (let i = 0; i < tmdbIds.length; i += batchSize) {
+          const batch = tmdbIds.slice(i, i + batchSize);
+          console.log(`[Stats] Fetching batch ${i / batchSize + 1}:`, batch.length, 'IDs');
+          
+          const { data: cached, error: cacheError } = await supabase!
+            .from('tmdb_movies')
+            .select('tmdb_id, data')
+            .in('tmdb_id', batch);
+          
+          if (cacheError) {
+            console.error('[Stats] Error fetching cached movies:', cacheError);
+            continue;
+          }
+          
+          console.log('[Stats] Cached results for batch:', cached?.length ?? 0);
+          
+          for (const row of cached ?? []) {
+            const data = row.data as any;
+            // Check if we have full details (genres and credits)
+            if (data && data.genres && data.credits) {
+              detailsMap.set(row.tmdb_id, data);
+            } else if (data) {
+              // Fetch full details from API only if we're missing key data
+              try {
+                console.log(`[Stats] Fetching full details for ${row.tmdb_id} (missing genres or credits)`);
+                const res = await fetch(`/api/tmdb/movie/${row.tmdb_id}`);
+                const json = await res.json();
+                if (json.ok && json.movie) {
+                  detailsMap.set(row.tmdb_id, json.movie);
+                  // Update cache
+                  await supabase!.from('tmdb_movies').upsert({
+                    tmdb_id: row.tmdb_id,
+                    data: json.movie
+                  }, { onConflict: 'tmdb_id' });
+                }
+              } catch (e) {
+                console.error(`[Stats] Failed to fetch details for ${row.tmdb_id}`, e);
               }
-            } catch (e) {
-              console.error(`Failed to fetch details for ${row.tmdb_id}`, e);
             }
           }
         }
         
+        console.log('[Stats] Total details loaded:', detailsMap.size);
         setTmdbDetails(detailsMap);
+        clearTimeout(timeoutId);
       } catch (e) {
-        console.error('Error loading TMDB details', e);
+        console.error('[Stats] Error loading TMDB details', e);
+        setDetailsError(e instanceof Error ? e.message : 'Unknown error occurred');
+        clearTimeout(timeoutId);
       } finally {
+        console.log('[Stats] Finished loading TMDB details');
         setLoadingDetails(false);
       }
     }
     
     loadTmdbDetails();
   }, [uid, filteredFilms]);
+
+  // Helper function to calculate preference weight (same as in enrich.ts)
+  const getPreferenceWeight = (rating?: number, isLiked?: boolean): number => {
+    const r = rating ?? 3;
+    let weight = 0.0;
+    
+    if (r >= 4.5) {
+      weight = isLiked ? 2.0 : 1.5;
+    } else if (r >= 3.5) {
+      weight = isLiked ? 1.5 : 1.2;
+    } else if (r >= 2.5) {
+      weight = isLiked ? 1.0 : 0.3;
+    } else if (r >= 1.5) {
+      weight = isLiked ? 0.7 : 0.1;
+    } else {
+      weight = isLiked ? 0.5 : 0.0;
+    }
+    
+    return weight;
+  };
 
   const stats = useMemo(() => {
     if (!filteredFilms || filteredFilms.length === 0) return null;
@@ -161,41 +250,59 @@ export default function StatsPage() {
       (f.watchCount ?? 0) > (max.watchCount ?? 0) ? f : max
     , filteredFilms[0]);
 
-    // Genre analysis
+    // Genre analysis with weighted preferences
     const genreCounts = new Map<string, number>();
+    const genreWeights = new Map<string, number>(); // Weighted by rating + liked
     const actorCounts = new Map<string, { count: number; profile?: string }>();
+    const actorWeights = new Map<string, number>();
     const directorCounts = new Map<string, { count: number; profile?: string }>();
+    const directorWeights = new Map<string, number>();
+    const keywordWeights = new Map<string, number>();
+    
+    // Track films by preference strength for the "Taste Profile" section
+    const absoluteFavorites = filteredFilms.filter(f => (f.rating ?? 0) >= 4.5 && f.liked);
+    const highlyRated = filteredFilms.filter(f => (f.rating ?? 0) >= 4);
+    const liked = filteredFilms.filter(f => f.liked);
+    const lowRatedButLiked = filteredFilms.filter(f => (f.rating ?? 0) < 3 && (f.rating ?? 0) > 0 && f.liked);
     
     for (const film of filteredFilms) {
-      // Find TMDB ID for this film
-      const mapping = Array.from(tmdbDetails.entries()).find(([id, details]) => 
-        film.title === details.title
-      );
+      const weight = getPreferenceWeight(film.rating, film.liked);
       
-      if (mapping) {
-        const [tmdbId, details] = mapping;
-        
-        // Count genres
+      // Find TMDB ID for this film
+      const tmdbId = filmMappings.get(film.uri);
+      const details = tmdbId ? tmdbDetails.get(tmdbId) : undefined;
+      
+      if (details) {
+        // Count genres (both raw count and weighted)
         details.genres?.forEach(genre => {
           genreCounts.set(genre.name, (genreCounts.get(genre.name) ?? 0) + 1);
+          genreWeights.set(genre.name, (genreWeights.get(genre.name) ?? 0) + weight);
         });
         
-        // Count top 5 actors
+        // Count top 5 actors (both raw and weighted)
         details.credits?.cast?.slice(0, 5).forEach(actor => {
           const current = actorCounts.get(actor.name) ?? { count: 0 };
           actorCounts.set(actor.name, {
             count: current.count + 1,
             profile: actor.profile_path ?? current.profile
           });
+          actorWeights.set(actor.name, (actorWeights.get(actor.name) ?? 0) + weight);
         });
         
-        // Count directors
+        // Count directors (both raw and weighted)
         details.credits?.crew?.filter(c => c.job === 'Director').forEach(director => {
           const current = directorCounts.get(director.name) ?? { count: 0 };
           directorCounts.set(director.name, {
             count: current.count + 1,
             profile: director.profile_path ?? current.profile
           });
+          directorWeights.set(director.name, (directorWeights.get(director.name) ?? 0) + weight);
+        });
+        
+        // Extract keywords if available
+        const keywords = (details as any).keywords?.keywords || (details as any).keywords?.results || [];
+        keywords.forEach((k: { name: string }) => {
+          keywordWeights.set(k.name, (keywordWeights.get(k.name) ?? 0) + weight);
         });
       }
     }
@@ -204,13 +311,31 @@ export default function StatsPage() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
     
+    const topGenresByWeight = Array.from(genreWeights.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10);
+    
     const topActors = Array.from(actorCounts.entries())
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 5);
     
+    const topActorsByWeight = Array.from(actorWeights.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, weight]) => ({ name, weight, ...actorCounts.get(name)! }));
+    
     const topDirectors = Array.from(directorCounts.entries())
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 5);
+    
+    const topDirectorsByWeight = Array.from(directorWeights.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, weight]) => ({ name, weight, ...directorCounts.get(name)! }));
+    
+    const topKeywords = Array.from(keywordWeights.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15);
 
     return {
       totalFilms: films?.length ?? 0,
@@ -228,10 +353,17 @@ export default function StatsPage() {
       decades,
       decadeCounts,
       topGenres,
+      topGenresByWeight,
       topActors,
+      topActorsByWeight,
       topDirectors,
+      topDirectorsByWeight,
+      topKeywords,
+      absoluteFavorites: absoluteFavorites.length,
+      highlyRatedCount: highlyRated.length,
+      lowRatedButLikedCount: lowRatedButLiked.length,
     };
-  }, [filteredFilms, tmdbDetails, films]);
+  }, [filteredFilms, tmdbDetails, films, filmMappings]);
 
   if (loading) {
     return (
@@ -357,6 +489,89 @@ export default function StatsPage() {
         </div>
       </div>
 
+      {/* Taste Profile - Weighted Preferences (Powers Suggestions) */}
+      {!loadingDetails && stats.topKeywords.length > 0 && (
+        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-gray-900 text-lg">🎯 Your Taste Profile</h2>
+            <span className="text-xs text-green-700 bg-green-100 px-2 py-1 rounded">Powers Suggestions</span>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            These weighted preferences drive your movie suggestions. Higher weights mean stronger influence.
+          </p>
+          
+          {/* Preference Strength Breakdown */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <div className="bg-white rounded-lg p-3 border border-green-200">
+              <p className="text-xs text-gray-600 mb-1">Absolute Favorites</p>
+              <p className="text-xl font-bold text-gray-900">{stats.absoluteFavorites}</p>
+              <p className="text-xs text-gray-500">5★ + Liked (2.0x)</p>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-green-200">
+              <p className="text-xs text-gray-600 mb-1">Highly Rated</p>
+              <p className="text-xl font-bold text-gray-900">{stats.highlyRatedCount}</p>
+              <p className="text-xs text-gray-500">4★+ films</p>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-green-200">
+              <p className="text-xs text-gray-600 mb-1">Liked Films</p>
+              <p className="text-xl font-bold text-gray-900">{stats.likedCount}</p>
+              <p className="text-xs text-gray-500">All liked</p>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-green-200">
+              <p className="text-xs text-gray-600 mb-1">Guilty Pleasures</p>
+              <p className="text-xl font-bold text-gray-900">{stats.lowRatedButLikedCount}</p>
+              <p className="text-xs text-gray-500">&lt;3★ but liked</p>
+            </div>
+          </div>
+
+          {/* Top Genres by Weight */}
+          <div className="mb-4">
+            <h3 className="font-medium text-gray-900 mb-2 text-sm">Top Genre Preferences (Weighted)</h3>
+            <div className="flex flex-wrap gap-2">
+              {stats.topGenresByWeight.slice(0, 8).map(([genre, weight]) => {
+                const strength = weight >= 3.0 ? 'strong' : weight >= 1.5 ? 'moderate' : 'light';
+                const colorClass = strength === 'strong' ? 'bg-green-600 text-white' : strength === 'moderate' ? 'bg-green-400 text-white' : 'bg-green-200 text-green-900';
+                return (
+                  <span key={genre} className={`px-3 py-1 rounded-full text-xs font-medium ${colorClass}`}>
+                    {genre} ({weight.toFixed(1)})
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Top Keywords/Themes */}
+          <div className="mb-4">
+            <h3 className="font-medium text-gray-900 mb-2 text-sm">Top Themes & Keywords (Weighted)</h3>
+            <div className="flex flex-wrap gap-2">
+              {stats.topKeywords.slice(0, 12).map(([keyword, weight]) => {
+                const strength = weight >= 3.0 ? 'strong' : weight >= 1.5 ? 'moderate' : 'light';
+                const colorClass = strength === 'strong' ? 'bg-emerald-600 text-white' : strength === 'moderate' ? 'bg-emerald-400 text-white' : 'bg-emerald-200 text-emerald-900';
+                return (
+                  <span key={keyword} className={`px-3 py-1 rounded-full text-xs font-medium ${colorClass}`}>
+                    {keyword} ({weight.toFixed(1)})
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Top Directors by Weight */}
+          {stats.topDirectorsByWeight.length > 0 && (
+            <div>
+              <h3 className="font-medium text-gray-900 mb-2 text-sm">Favorite Directors (Weighted by Ratings)</h3>
+              <div className="flex flex-wrap gap-2">
+                {stats.topDirectorsByWeight.map(({ name, weight, count }) => (
+                  <span key={name} className="px-3 py-1 rounded-full text-xs font-medium bg-blue-500 text-white">
+                    {name} ({weight.toFixed(1)} across {count} films)
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Most Watched Film */}
       {stats.mostWatched && (stats.mostWatched.watchCount ?? 0) > 1 && (
         <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4 mb-6">
@@ -372,6 +587,18 @@ export default function StatsPage() {
       {loadingDetails ? (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-blue-800">Loading detailed stats (actors, directors, genres)...</p>
+          <p className="text-xs text-blue-600 mt-1">This may take a moment for large libraries.</p>
+        </div>
+      ) : detailsError ? (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-red-800 font-medium">Error loading detailed stats</p>
+          <p className="text-xs text-red-600 mt-1">{detailsError}</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="mt-2 px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
+          >
+            Refresh Page
+          </button>
         </div>
       ) : (
         <>

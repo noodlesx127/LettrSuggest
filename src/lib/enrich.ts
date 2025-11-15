@@ -134,11 +134,39 @@ export type FilmEventLite = { uri: string; title: string; year: number | null; r
 
 function extractFeatures(movie: TMDBMovie) {
   const genres: string[] = Array.isArray((movie as any).genres) ? (movie as any).genres.map((g: any) => g.name).filter(Boolean) : [];
+  const genreIds: number[] = Array.isArray((movie as any).genres) ? (movie as any).genres.map((g: any) => g.id).filter(Boolean) : [];
   const directors = (movie.credits?.crew || []).filter((c) => c.job === 'Director').map((c) => c.name);
   const cast = (movie.credits?.cast || []).slice(0, 5).map((c) => c.name);
   const keywordsList = movie.keywords?.keywords || movie.keywords?.results || [];
   const keywords = (keywordsList as Array<{ id: number; name: string }>).map((k) => k.name);
-  return { genres, directors, cast, keywords };
+  const original_language = (movie as any).original_language as string | undefined;
+  const runtime = (movie as any).runtime as number | undefined;
+  
+  // Detect animation/children's/family content markers
+  const isAnimation = genres.includes('Animation') || genreIds.includes(16);
+  const isFamily = genres.includes('Family') || genreIds.includes(10751);
+  const isChildrens = keywords.some(k => 
+    k.toLowerCase().includes('children') || 
+    k.toLowerCase().includes('kids') || 
+    k.toLowerCase().includes('cartoon')
+  );
+  
+  // Create genre combination signature for more precise matching
+  const genreCombo = genres.slice().sort().join('+');
+  
+  return { 
+    genres, 
+    genreIds, 
+    genreCombo,
+    directors, 
+    cast, 
+    keywords,
+    original_language,
+    runtime,
+    isAnimation,
+    isFamily,
+    isChildrens
+  };
 }
 
 // Basic timeout helper for fetches
@@ -233,33 +261,157 @@ export async function suggestByOverlap(params: {
   // trimming.
   const liked = params.films.filter((f) => (f.liked || (f.rating ?? 0) >= 4) && params.mappings.get(f.uri));
   const likedIdsAll = liked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
+  
+  // Also identify watched but NOT liked films for negative signals
+  const watchedNotLiked = params.films.filter((f) => 
+    !f.liked && 
+    (f.rating ?? 0) < 3 && 
+    params.mappings.get(f.uri)
+  );
+  const dislikedIdsAll = watchedNotLiked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
+  
   const likedCap = 800;
+  const dislikedCap = 400;
   // If the user has an enormous number of liked films, bias towards
   // the most recent ones (assuming input films are roughly chronological).
   const likedIds = likedIdsAll.length > likedCap ? likedIdsAll.slice(-likedCap) : likedIdsAll;
+  const dislikedIds = dislikedIdsAll.length > dislikedCap ? dislikedIdsAll.slice(-dislikedCap) : dislikedIdsAll;
+  
+  // Create a map of film URI to its rating and liked status for weighted profile building
+  const filmPreferenceMap = new Map<string, { rating?: number; liked?: boolean }>();
+  for (const f of params.films) {
+    filmPreferenceMap.set(f.uri, { rating: f.rating, liked: f.liked });
+  }
+  
   const likedMovies = await Promise.all(likedIds.map((id) => fetchTmdbMovieCached(id)));
+  const dislikedMovies = await Promise.all(dislikedIds.map((id) => fetchTmdbMovieCached(id)));
+  
   const likedFeats = likedMovies.filter(Boolean).map((m) => extractFeatures(m as TMDBMovie));
+  const dislikedFeats = dislikedMovies.filter(Boolean).map((m) => extractFeatures(m as TMDBMovie));
+  
+  // Map TMDB IDs back to original film data for weighting
+  const likedFilmData = liked.filter(f => params.mappings.has(f.uri));
 
+  // Adjusted weights: keywords are now more important for subgenre detection
   const weights = {
-    genre: 1.0,
+    genre: 0.8,
+    genreCombo: 1.2, // Reward exact genre combinations
     director: 1.5,
     cast: 0.5,
-    keyword: 0.4,
+    keyword: 1.0, // Increased from 0.4 to better capture subgenres
   };
 
-  // Build simple feature bags
+  // Build positive feature bags (things the user likes)
+  // Now with weighted scoring based on rating and liked status
   const pref = {
     genres: new Map<string, number>(),
+    genreCombos: new Map<string, number>(),
     directors: new Map<string, number>(),
     cast: new Map<string, number>(),
     keywords: new Map<string, number>(),
+    // Track directors/actors within specific subgenres for better matching
+    directorKeywords: new Map<string, Set<string>>(), // director -> keywords they work in
+    castKeywords: new Map<string, Set<string>>(), // cast -> keywords they work in
   };
-  for (const f of likedFeats) {
-    for (const g of f.genres) pref.genres.set(g, (pref.genres.get(g) ?? 0) + 1);
-    for (const d of f.directors) pref.directors.set(d, (pref.directors.get(d) ?? 0) + 1);
-    for (const c of f.cast) pref.cast.set(c, (pref.cast.get(c) ?? 0) + 1);
-    for (const k of f.keywords) pref.keywords.set(k, (pref.keywords.get(k) ?? 0) + 1);
+  
+  // Build negative feature bags (things the user avoids)
+  const avoid = {
+    keywords: new Map<string, number>(),
+    genreCombos: new Map<string, number>(),
+  };
+  
+  // Helper function to calculate preference weight for a film
+  // Takes into account both rating and liked status
+  const getPreferenceWeight = (rating?: number, isLiked?: boolean): number => {
+    // Base cases:
+    // - 5 stars + liked = 2.0 (strongest signal)
+    // - 5 stars, not liked = 1.5 (strong rating but no explicit like)
+    // - 4 stars + liked = 1.5
+    // - 4 stars, not liked = 1.2
+    // - 3 stars + liked = 1.0 (liked but mediocre rating - respect the like)
+    // - 2 stars + liked = 0.7 (edge case: low rating but liked - nuanced preference)
+    // - 1 star + liked = 0.5 (very rare edge case)
+    
+    const r = rating ?? 3; // Default to 3 if no rating
+    let weight = 0.0;
+    
+    if (r >= 4.5) {
+      weight = isLiked ? 2.0 : 1.5;
+    } else if (r >= 3.5) {
+      weight = isLiked ? 1.5 : 1.2;
+    } else if (r >= 2.5) {
+      weight = isLiked ? 1.0 : 0.3; // Mediocre rating: liked matters more
+    } else if (r >= 1.5) {
+      weight = isLiked ? 0.7 : 0.1; // Low rating but liked: nuanced taste
+    } else {
+      weight = isLiked ? 0.5 : 0.0; // Very low: only count if explicitly liked
+    }
+    
+    return weight;
+  };
+  
+  // Track patterns
+  let totalLiked = likedFeats.length;
+  let likedAnimationCount = 0;
+  let likedFamilyCount = 0;
+  let likedChildrensCount = 0;
+  
+  for (let i = 0; i < likedFeats.length; i++) {
+    const f = likedFeats[i];
+    const filmData = likedFilmData[i];
+    const weight = getPreferenceWeight(filmData?.rating, filmData?.liked);
+    
+    // Weight all features by the preference strength
+    for (const g of f.genres) pref.genres.set(g, (pref.genres.get(g) ?? 0) + weight);
+    if (f.genreCombo) pref.genreCombos.set(f.genreCombo, (pref.genreCombos.get(f.genreCombo) ?? 0) + weight);
+    
+    for (const d of f.directors) {
+      pref.directors.set(d, (pref.directors.get(d) ?? 0) + weight);
+      // Track which keywords/subgenres this director works in
+      if (!pref.directorKeywords.has(d)) pref.directorKeywords.set(d, new Set());
+      f.keywords.forEach(k => pref.directorKeywords.get(d)!.add(k));
+    }
+    
+    for (const c of f.cast) {
+      pref.cast.set(c, (pref.cast.get(c) ?? 0) + weight);
+      // Track which keywords/subgenres this cast member works in
+      if (!pref.castKeywords.has(c)) pref.castKeywords.set(c, new Set());
+      f.keywords.forEach(k => pref.castKeywords.get(c)!.add(k));
+    }
+    
+    for (const k of f.keywords) pref.keywords.set(k, (pref.keywords.get(k) ?? 0) + weight);
+    
+    if (f.isAnimation) likedAnimationCount++;
+    if (f.isFamily) likedFamilyCount++;
+    if (f.isChildrens) likedChildrensCount++;
   }
+  
+  // Build avoidance patterns from disliked films
+  for (const f of dislikedFeats) {
+    if (f.genreCombo) avoid.genreCombos.set(f.genreCombo, (avoid.genreCombos.get(f.genreCombo) ?? 0) + 1);
+    for (const k of f.keywords) avoid.keywords.set(k, (avoid.keywords.get(k) ?? 0) + 1);
+  }
+  
+  // Detect if user avoids animation/family/children's content
+  // If less than 10% of liked films are in these categories, consider them avoided
+  const animationThreshold = 0.1;
+  const avoidsAnimation = totalLiked > 10 && (likedAnimationCount / totalLiked) < animationThreshold;
+  const avoidsFamily = totalLiked > 10 && (likedFamilyCount / totalLiked) < animationThreshold;
+  const avoidsChildrens = totalLiked > 10 && (likedChildrensCount / totalLiked) < animationThreshold;
+  
+  console.log('[Suggest] User profile analysis', {
+    totalLiked,
+    likedAnimationCount,
+    likedFamilyCount,
+    likedChildrensCount,
+    avoidsAnimation,
+    avoidsFamily,
+    avoidsChildrens,
+    topKeywords: Array.from(pref.keywords.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => `${k}(${v.toFixed(1)})`),
+    topGenreCombos: Array.from(pref.genreCombos.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => `${k}(${v.toFixed(1)})`),
+    topDirectors: Array.from(pref.directors.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([d, v]) => `${d}(${v.toFixed(1)})`),
+    topCast: Array.from(pref.cast.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([c, v]) => `${c}(${v.toFixed(1)})`),
+  });
 
   const seenIds = new Set(likedIds);
   // Also treat already-watched mapped films as seen to avoid recommending
@@ -285,34 +437,126 @@ export async function suggestByOverlap(params: {
     const m = await fetchFromCache(cid);
     if (!m) return null;
     const feats = extractFeatures(m);
+    
     // Exclude by genres early if requested
     if (params.excludeGenres && feats.genres.some((g) => params.excludeGenres!.has(g.toLowerCase()))) {
       return null;
     }
+    
+    // Apply negative filters: exclude animation/family/children's if user avoids them
+    if (avoidsAnimation && feats.isAnimation) return null;
+    if (avoidsFamily && feats.isFamily) return null;
+    if (avoidsChildrens && feats.isChildrens) return null;
+    
+    // Check if genre combo is in avoided patterns (appears more in disliked than liked)
+    if (feats.genreCombo && avoid.genreCombos.has(feats.genreCombo)) {
+      const avoidCount = avoid.genreCombos.get(feats.genreCombo) ?? 0;
+      const likeCount = pref.genreCombos.get(feats.genreCombo) ?? 0;
+      if (avoidCount > likeCount * 2) return null; // Skip if strongly avoided
+    }
+    
+    // Check for avoided keywords (appear more in disliked than liked)
+    const strongAvoidedKeywords = feats.keywords.filter(k => {
+      const avoidCount = avoid.keywords.get(k) ?? 0;
+      const likeCount = pref.keywords.get(k) ?? 0;
+      return avoidCount > 2 && avoidCount > likeCount * 2;
+    });
+    if (strongAvoidedKeywords.length > 2) return null; // Skip if multiple strong avoid signals
+    
     let score = 0;
     const reasons: string[] = [];
-    const gHits = feats.genres.filter((g) => pref.genres.has(g));
-    if (gHits.length) {
-      score += gHits.length * weights.genre;
-      const genreCount = pref.genres.get(gHits[0]) ?? 1;
-      reasons.push(`Matches your taste in ${gHits.slice(0, 3).join(', ')} (${genreCount} similar ${genreCount === 1 ? 'film' : 'films'} in your collection)`);
+    
+    // Genre combo matching (more specific than individual genres)
+    if (feats.genreCombo && pref.genreCombos.has(feats.genreCombo)) {
+      const comboWeight = pref.genreCombos.get(feats.genreCombo) ?? 1;
+      score += comboWeight * weights.genreCombo;
+      const comboCountRounded = Math.round(comboWeight);
+      reasons.push(`Matches your specific taste in ${feats.genres.join(' + ')} films (${comboCountRounded} highly-rated similar ${comboCountRounded === 1 ? 'film' : 'films'})`);
+    } else {
+      // Fallback to individual genre matching if combo doesn't match
+      const gHits = feats.genres.filter((g) => pref.genres.has(g));
+      if (gHits.length) {
+        const totalGenreWeight = gHits.reduce((sum, g) => sum + (pref.genres.get(g) ?? 0), 0);
+        score += totalGenreWeight * weights.genre;
+        const genreWeight = pref.genres.get(gHits[0]) ?? 1;
+        const genreCountRounded = Math.round(genreWeight);
+        reasons.push(`Matches your taste in ${gHits.slice(0, 3).join(', ')} (${genreCountRounded} similar ${genreCountRounded === 1 ? 'film' : 'films'})`);
+      }
     }
+    
     const dHits = feats.directors.filter((d) => pref.directors.has(d));
     if (dHits.length) {
-      score += dHits.length * weights.director;
-      const dirCount = pref.directors.get(dHits[0]) ?? 1;
-      reasons.push(`Directed by ${dHits.slice(0, 2).join(', ')} — you've enjoyed ${dirCount} ${dirCount === 1 ? 'film' : 'films'} by ${dHits.length === 1 ? 'this director' : 'these directors'}`);
+      const totalDirWeight = dHits.reduce((sum, d) => sum + (pref.directors.get(d) ?? 0), 0);
+      score += totalDirWeight * weights.director;
+      const dirWeight = pref.directors.get(dHits[0]) ?? 1;
+      const dirCountRounded = Math.round(dirWeight);
+      const dirQuality = dirWeight >= 3.0 ? 'highly rated' : 'enjoyed';
+      reasons.push(`Directed by ${dHits.slice(0, 2).join(', ')} — you've ${dirQuality} ${dirCountRounded} ${dirCountRounded === 1 ? 'film' : 'films'} by ${dHits.length === 1 ? 'this director' : 'these directors'}`);
+    } else {
+      // Check for similar directors (directors who work in the same subgenres/keywords)
+      const similarDirectors = feats.directors.filter(d => {
+        // Find directors who share many keywords with this candidate
+        const candidateKeywords = new Set(feats.keywords);
+        for (const [likedDir, dirKeywords] of pref.directorKeywords.entries()) {
+          const sharedKeywords = Array.from(dirKeywords).filter(k => candidateKeywords.has(k));
+          if (sharedKeywords.length >= 2 && feats.directors.includes(d)) {
+            return true;
+          }
+        }
+        return false;
+      });
+      if (similarDirectors.length) {
+        score += 0.8 * weights.director; // Lower boost than exact director match
+        reasons.push(`Director works in similar subgenres you enjoy`);
+      }
     }
+    
     const cHits = feats.cast.filter((c) => pref.cast.has(c));
     if (cHits.length) {
-      score += Math.min(3, cHits.length) * weights.cast;
+      const totalCastWeight = cHits.slice(0, 3).reduce((sum, c) => sum + (pref.cast.get(c) ?? 0), 0);
+      score += totalCastWeight * weights.cast;
+      const topCastWeight = Math.max(...cHits.map(c => pref.cast.get(c) ?? 0));
+      const castCountRounded = Math.round(topCastWeight);
       reasons.push(`Stars ${cHits.slice(0, 3).join(', ')} — ${cHits.length} cast ${cHits.length === 1 ? 'member' : 'members'} you've liked before`);
+    } else {
+      // Check for similar actors (actors who work in the same subgenres)
+      const similarCast = feats.cast.filter(c => {
+        const candidateKeywords = new Set(feats.keywords);
+        for (const [likedCast, castKeywords] of pref.castKeywords.entries()) {
+          const sharedKeywords = Array.from(castKeywords).filter(k => candidateKeywords.has(k));
+          if (sharedKeywords.length >= 2 && feats.cast.includes(c)) {
+            return true;
+          }
+        }
+        return false;
+      });
+      if (similarCast.length) {
+        score += 0.3 * weights.cast; // Small boost for similar actors
+        reasons.push(`Features actors who work in similar themes you enjoy`);
+      }
     }
+    
+    // Keyword matching - now more important for subgenre detection
     const kHits = feats.keywords.filter((k) => pref.keywords.has(k));
     if (kHits.length) {
-      score += Math.min(5, kHits.length) * weights.keyword;
-      reasons.push(`Similar themes: ${kHits.slice(0, 5).join(', ')}`);
+      // Sort keywords by weighted frequency in user's liked films
+      const sortedKHits = kHits
+        .map(k => ({ keyword: k, weight: pref.keywords.get(k) ?? 0 }))
+        .sort((a, b) => b.weight - a.weight);
+      
+      const topKeywords = sortedKHits.slice(0, 5);
+      const totalKeywordWeight = topKeywords.reduce((sum, k) => sum + k.weight, 0);
+      const keywordScore = topKeywords.reduce((sum, k) => sum + Math.log(k.weight + 1), 0);
+      score += keywordScore * weights.keyword;
+      
+      const topKeywordNames = topKeywords.slice(0, 3).map(k => k.keyword);
+      const topKeywordWeight = topKeywords[0]?.weight ?? 1;
+      const isStrongPattern = topKeywordWeight >= 3.0;
+      const strengthText = isStrongPattern ? 'especially love' : 'enjoy';
+      const countRounded = Math.round(topKeywordWeight);
+      reasons.push(`Matches specific themes you ${strengthText}: ${topKeywordNames.join(', ')} (${countRounded}+ highly-rated films)`);
     }
+    
     if (score <= 0) return null;
     const r = { tmdbId: cid, score, reasons, title: m.title, release_date: m.release_date, genres: feats.genres, poster_path: m.poster_path };
     resultsAcc.push(r);
