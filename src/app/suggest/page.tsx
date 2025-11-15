@@ -371,7 +371,7 @@ export default function SuggestPage() {
       console.log('[Suggest] runSuggest end');
       setLoading(false);
     }
-  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters]);
+  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters, blockedIds]);
 
   // Fallback: if no local films, load from Supabase once
   useEffect(() => {

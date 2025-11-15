@@ -128,7 +128,7 @@ export default function AdminPage() {
       <div className="mb-6">
         <h2 className="text-lg font-semibold mb-2">Blocked Suggestions</h2>
         <p className="text-sm text-gray-600 mb-4">
-          Movies you've removed from suggestions. Click "Unblock" to allow them to appear again.
+          Movies you&apos;ve removed from suggestions. Click &quot;Unblock&quot; to allow them to appear again.
         </p>
         
         {loadingBlocked ? (
