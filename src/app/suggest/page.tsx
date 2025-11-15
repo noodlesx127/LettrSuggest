@@ -82,54 +82,54 @@ export default function SuggestPage() {
       return results;
     };
 
-    // 1. Perfect Matches: Top 6 highest scoring films
-    const perfectMatches = getNextItems(() => true, 6);
+    // 1. Perfect Matches: Top highest scoring films
+    const perfectMatches = getNextItems(() => true, 8);
 
     // 2. From Directors You Love: Films with director matches
-    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 6);
+    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 8);
 
     // 3. From Actors You Love: Films with cast matches
-    const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 6);
+    const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 8);
 
     // 4. Your Favorite Genres: Films matching preferred genres
-    const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 6);
+    const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 8);
 
     // 5. Hidden Gems: Pre-2015 films with high scores but low recognition
     const hiddenGems = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
-    }, 6);
+    }, 8);
 
     // 6. Cult Classics: Films with cult following
     const cultClassics = getNextItems(item => {
       return item.voteCategory === 'cult-classic';
-    }, 6);
+    }, 8);
 
     // 7. Crowd Pleasers: Popular high-rated films
     const crowdPleasers = getNextItems(item => {
       return item.voteCategory === 'crowd-pleaser';
-    }, 6);
+    }, 8);
 
     // 8. New & Trending: Recent releases (2023+)
     const newReleases = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2023;
-    }, 6);
+    }, 8);
 
     // 9. Recent Classics: Films from 2015-2022
     const recentClassics = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2015 && year < 2023;
-    }, 6);
+    }, 8);
 
     // 10. Deep Cuts: Films with specific theme/keyword matches
-    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 6);
+    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 8);
 
     // 11. From Collections: Films in same collections/franchises
-    const fromCollections = getNextItems(item => !!item.collectionName, 6);
+    const fromCollections = getNextItems(item => !!item.collectionName, 8);
     
     // 12. Fallback: More recommendations (any remaining films)
-    const moreRecommendations = getNextItems(() => true, 12);
+    const moreRecommendations = getNextItems(() => true, 15);
 
     return {
       perfectMatches,
@@ -285,7 +285,7 @@ export default function SuggestPage() {
         maxCandidates: mode === 'quick' ? 500 : 800,
         concurrency: 6,
         excludeWatchedIds: watchedIds,
-        desiredResults: 50, // Request more suggestions for better variety across sections
+        desiredResults: 80, // Request more suggestions to fill all sections with variety
       });
       // Best-effort: ensure posters/backdrops exist for suggested ids.
       if (suggestions.length) {
@@ -556,7 +556,7 @@ export default function SuggestPage() {
           )}
 
           {/* Perfect Matches Section */}
-          {categorizedSuggestions.perfectMatches.length > 0 && (
+          {categorizedSuggestions.perfectMatches.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -600,7 +600,7 @@ export default function SuggestPage() {
           )}
 
           {/* From Directors You Love Section */}
-          {categorizedSuggestions.directorMatches.length > 0 && (
+          {categorizedSuggestions.directorMatches.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -644,7 +644,7 @@ export default function SuggestPage() {
           )}
 
           {/* From Actors You Love Section */}
-          {categorizedSuggestions.actorMatches.length > 0 && (
+          {categorizedSuggestions.actorMatches.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -688,7 +688,7 @@ export default function SuggestPage() {
           )}
 
           {/* Your Favorite Genres Section */}
-          {categorizedSuggestions.genreMatches.length > 0 && (
+          {categorizedSuggestions.genreMatches.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -732,7 +732,7 @@ export default function SuggestPage() {
           )}
 
           {/* Hidden Gems Section */}
-          {categorizedSuggestions.hiddenGems.length > 0 && (
+          {categorizedSuggestions.hiddenGems.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -776,7 +776,7 @@ export default function SuggestPage() {
           )}
 
           {/* Cult Classics Section */}
-          {categorizedSuggestions.cultClassics.length > 0 && (
+          {categorizedSuggestions.cultClassics.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -820,7 +820,7 @@ export default function SuggestPage() {
           )}
 
           {/* Crowd Pleasers Section */}
-          {categorizedSuggestions.crowdPleasers.length > 0 && (
+          {categorizedSuggestions.crowdPleasers.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -864,7 +864,7 @@ export default function SuggestPage() {
           )}
 
           {/* New & Trending Section */}
-          {categorizedSuggestions.newReleases.length > 0 && (
+          {categorizedSuggestions.newReleases.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -908,7 +908,7 @@ export default function SuggestPage() {
           )}
 
           {/* Recent Classics Section */}
-          {categorizedSuggestions.recentClassics.length > 0 && (
+          {categorizedSuggestions.recentClassics.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -952,7 +952,7 @@ export default function SuggestPage() {
           )}
 
           {/* Deep Cuts Section */}
-          {categorizedSuggestions.deepCuts.length > 0 && (
+          {categorizedSuggestions.deepCuts.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -996,7 +996,7 @@ export default function SuggestPage() {
           )}
 
           {/* From Collections Section */}
-          {categorizedSuggestions.fromCollections.length > 0 && (
+          {categorizedSuggestions.fromCollections.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1040,7 +1040,7 @@ export default function SuggestPage() {
           )}
 
           {/* More Recommendations Section - Fallback for remaining suggestions */}
-          {categorizedSuggestions.moreRecommendations.length > 0 && (
+          {categorizedSuggestions.moreRecommendations.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
