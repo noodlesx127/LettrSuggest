@@ -20,6 +20,7 @@ type MovieItem = {
   trailerKey?: string | null;
   voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
   collectionName?: string;
+  genres?: string[];
 };
 
 export default function SuggestPage() {
