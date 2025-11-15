@@ -35,6 +35,10 @@ begin
   end if;
 end $$;
 
+-- Force PostgREST to reload schema cache after structural changes
+-- This ensures the API layer recognizes new columns immediately
+notify pgrst, 'reload schema';
+
 -- RLS
 alter table public.profiles enable row level security;
 alter table public.film_events enable row level security;
