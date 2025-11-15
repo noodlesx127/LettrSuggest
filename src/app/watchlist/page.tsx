@@ -62,6 +62,8 @@ export default function WatchlistPage() {
     return watchlistFilms.map((f) => ({ ...f, tmdbId: mappings.get(f.uri) }));
   }, [watchlistFilms, mappings]);
 
+  const unmappedCount = gridFilms.filter(f => !f.tmdbId).length;
+
   return (
     <AuthGate>
       <div className="flex items-center justify-between mb-4">
@@ -75,6 +77,14 @@ export default function WatchlistPage() {
       <p className="text-sm text-gray-700 mb-4">
         Films you want to watch. These are not used for suggestions but you can browse them here.
       </p>
+      {unmappedCount > 0 && (
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+          <p className="text-sm text-yellow-800">
+            <strong>{unmappedCount} of {gridFilms.length} watchlist films</strong> don&apos;t have poster images yet. 
+            Re-import your data to map them to TMDB and see their posters.
+          </p>
+        </div>
+      )}
       {loadingFilms && <p className="text-sm text-gray-600">Loading your watchlist from database…</p>}
       {!loadingFilms && gridFilms.length === 0 && (
         <p className="text-sm text-gray-600">No films in your watchlist yet.</p>
