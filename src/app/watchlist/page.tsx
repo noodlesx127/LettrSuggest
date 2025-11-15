@@ -32,6 +32,7 @@ export default function WatchlistPage() {
   const uid = useUserId();
   const [mappings, setMappings] = useState<Map<string, number>>(new Map());
   const [loadingMappings, setLoadingMappings] = useState(false);
+  const [trailerKeys, setTrailerKeys] = useState<Map<number, string>>(new Map());
 
   // Filter to only watchlist films
   const watchlistFilms = useMemo(() => {
@@ -56,6 +57,42 @@ export default function WatchlistPage() {
   }, [uid, watchlistFilms]);
 
   const mappedIds = useMemo(() => Array.from(new Set(Array.from(mappings.values()))), [mappings]);
+
+  // Fetch trailer data for mapped films
+  useEffect(() => {
+    if (mappedIds.length === 0) return;
+    const fetchTrailers = async () => {
+      try {
+        const trailerMap = new Map<number, string>();
+        await Promise.all(
+          mappedIds.slice(0, 50).map(async (tmdbId) => {
+            try {
+              const response = await fetch(`/api/tmdb/movie/${tmdbId}`);
+              if (response.ok) {
+                const data = await response.json();
+                if (data.videos?.results) {
+                  const trailer = data.videos.results.find(
+                    (v: any) => v.site === 'YouTube' && v.type === 'Trailer' && v.official
+                  ) || data.videos.results.find(
+                    (v: any) => v.site === 'YouTube' && v.type === 'Trailer'
+                  );
+                  if (trailer) {
+                    trailerMap.set(tmdbId, trailer.key);
+                  }
+                }
+              }
+            } catch (e) {
+              // Ignore individual fetch errors
+            }
+          })
+        );
+        setTrailerKeys(trailerMap);
+      } catch (e) {
+        console.error('Error fetching trailers:', e);
+      }
+    };
+    void fetchTrailers();
+  }, [mappedIds]);
 
   const gridFilms: GridFilm[] = useMemo(() => {
     if (!watchlistFilms) return [];
@@ -89,35 +126,46 @@ export default function WatchlistPage() {
       {!loadingFilms && gridFilms.length === 0 && (
         <p className="text-sm text-gray-600">No films in your watchlist yet.</p>
       )}
-      <MovieGrid films={gridFilms} mappedIds={mappedIds} />
+      <MovieGrid films={gridFilms} mappedIds={mappedIds} trailerKeys={trailerKeys} />
     </AuthGate>
   );
 }
 
-function MovieGrid({ films, mappedIds }: { films: GridFilm[]; mappedIds: number[] }) {
+function MovieGrid({ films, mappedIds, trailerKeys }: { films: GridFilm[]; mappedIds: number[]; trailerKeys: Map<number, string> }) {
   const { posters, backdrops, loading } = usePostersSWR(mappedIds);
   if (!films.length) return null;
   
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
       {films.map((f) => (
-        <MovieCard key={f.uri} film={f} posters={posters} backdrops={backdrops} loading={loading} />
+        <MovieCard key={f.uri} film={f} posters={posters} backdrops={backdrops} trailerKey={f.tmdbId ? trailerKeys.get(f.tmdbId) : undefined} loading={loading} />
       ))}
     </div>
   );
 }
 
-function MovieCard({ film, posters, backdrops, loading }: { film: GridFilm; posters: Record<number, string | null>; backdrops: Record<number, string | null>; loading: boolean }) {
+function MovieCard({ film, posters, backdrops, trailerKey, loading }: { film: GridFilm; posters: Record<number, string | null>; backdrops: Record<number, string | null>; trailerKey?: string; loading: boolean }) {
   const mapped = film.tmdbId != null;
   const posterPath = mapped && film.tmdbId ? (posters[film.tmdbId] ?? null) : null;
   const backdropPath = mapped && film.tmdbId ? (backdrops[film.tmdbId] ?? null) : null;
   const [imgError, setImgError] = useState(false);
+  const [showVideo, setShowVideo] = useState(false);
 
   return (
     <div className="group relative bg-white rounded shadow-sm border overflow-hidden">
       <div className="aspect-[2/3] bg-gray-200 relative overflow-hidden">
         {loading && !posterPath ? (
           <div className="w-full h-full animate-pulse bg-gray-300" />
+        ) : showVideo && trailerKey ? (
+          <iframe
+            width="100%"
+            height="100%"
+            src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1&mute=1`}
+            title={`${film.title} trailer`}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            className="absolute inset-0 w-full h-full"
+          />
         ) : posterPath && !imgError ? (
           <Image
             src={`https://image.tmdb.org/t/p/w342${posterPath}`}
@@ -132,6 +180,32 @@ function MovieCard({ film, posters, backdrops, loading }: { film: GridFilm; post
           <div className="w-full h-full flex items-center justify-center text-xs text-gray-500 p-2 text-center">
             {film.title || film.uri}
           </div>
+        )}
+        
+        {/* Trailer play button */}
+        {!showVideo && trailerKey && posterPath && !imgError && (
+          <button
+            onClick={() => setShowVideo(true)}
+            className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-40 transition-all flex items-center justify-center group"
+            aria-label="Play trailer"
+          >
+            <div className="w-10 h-10 bg-black bg-opacity-70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+              </svg>
+            </div>
+          </button>
+        )}
+        
+        {/* Close trailer button */}
+        {showVideo && (
+          <button
+            onClick={() => setShowVideo(false)}
+            className="absolute top-1 right-1 w-6 h-6 bg-black bg-opacity-70 rounded-full flex items-center justify-center text-white text-xs hover:bg-opacity-90 z-10"
+            aria-label="Close trailer"
+          >
+            ✕
+          </button>
         )}
         {/* Hover overlay with backdrop */}
         <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
