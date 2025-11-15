@@ -146,7 +146,7 @@ export default function ProfilePage() {
         <div className="bg-white rounded-lg border p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">Blocked Suggestions</h2>
           <p className="text-sm text-gray-600 mb-4">
-            Movies you've removed from your suggestions. Click to add them back.
+            Movies you&apos;ve removed from your suggestions. Click to add them back.
           </p>
           
           {loadingBlocked ? (
