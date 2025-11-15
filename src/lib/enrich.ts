@@ -785,9 +785,16 @@ export async function suggestByOverlap(params: {
   
   // Build advanced subgenre patterns for nuanced filtering
   // E.g., "likes Action but avoids Superhero Action"
-  const filmsForSubgenreAnalysis = params.films.map(f => {
-    const tmdbId = params.mappings.get(f.uri);
-    const cached = tmdbId ? tmdbCache.get(tmdbId) : null;
+  // Fetch TMDB data for all mapped films (with reasonable cap to avoid huge fan-out)
+  const mappedFilmsForAnalysis = params.films
+    .filter(f => params.mappings.get(f.uri))
+    .slice(-400); // Cap at 400 most recent to avoid excessive fetches
+  
+  const mappedIds = mappedFilmsForAnalysis.map(f => params.mappings.get(f.uri)!);
+  const moviesForAnalysis = await Promise.all(mappedIds.map(id => fetchTmdbMovieCached(id)));
+  
+  const filmsForSubgenreAnalysis = mappedFilmsForAnalysis.map((f, idx) => {
+    const cached = moviesForAnalysis[idx];
     return {
       title: f.title,
       genres: cached?.genres?.map(g => g.name) || [],
