@@ -44,21 +44,40 @@ export default function MovieCard({
   const hasMoreReasons = reasons && reasons.length > 3;
 
   return (
-    <div className={`border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'}`}>
-      <div className="flex gap-4 p-4 flex-1">
-        {/* Poster or Trailer */}
-        <div className="flex-shrink-0 w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
-          {showVideo && trailerKey ? (
+    <>
+      {/* Fullscreen Trailer Modal */}
+      {showVideo && trailerKey && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowVideo(false)}
+        >
+          <div 
+            className="relative w-full max-w-4xl aspect-video"
+            onClick={(e) => e.stopPropagation()}
+          >
             <iframe
-              width="96"
-              height="144"
-              src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1&mute=1`}
+              src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}
               title={`${title} trailer`}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
-              className="absolute inset-0 w-full h-full"
+              className="absolute inset-0 w-full h-full rounded-lg"
             />
-          ) : posterPath ? (
+            <button
+              onClick={() => setShowVideo(false)}
+              className="absolute -top-10 right-0 w-8 h-8 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full flex items-center justify-center text-white text-lg transition-all"
+              aria-label="Close trailer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+      
+      <div className={`border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'}`}>
+      <div className="flex gap-4 p-4 flex-1">
+        {/* Poster */}
+        <div className="flex-shrink-0 w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
+          {posterPath ? (
             <Image
               src={`https://image.tmdb.org/t/p/w185${posterPath}`}
               alt={title}
@@ -74,27 +93,17 @@ export default function MovieCard({
           )}
           
           {/* Trailer toggle button */}
-          {!showVideo && trailerKey && showTrailer && (
+          {trailerKey && showTrailer && (
             <button
               onClick={() => setShowVideo(true)}
-              className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-40 transition-all flex items-center justify-center group"
+              className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-60 transition-all flex items-center justify-center group"
               aria-label="Play trailer"
             >
-              <div className="w-10 h-10 bg-black bg-opacity-70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 20 20">
+              <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+                <svg className="w-6 h-6 text-white ml-0.5" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
                 </svg>
               </div>
-            </button>
-          )}
-          
-          {showVideo && (
-            <button
-              onClick={() => setShowVideo(false)}
-              className="absolute top-1 right-1 w-6 h-6 bg-black bg-opacity-70 rounded-full flex items-center justify-center text-white text-xs hover:bg-opacity-90"
-              aria-label="Close trailer"
-            >
-              ✕
             </button>
           )}
         </div>
@@ -183,5 +192,6 @@ export default function MovieCard({
         </div>
       </div>
     </div>
+    </>
   );
 }
