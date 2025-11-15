@@ -60,7 +60,10 @@ export default function LibraryPage() {
 
   const gridFilms: GridFilm[] = useMemo(() => {
     if (!films) return [];
-    return films.map((f) => ({ ...f, tmdbId: mappings.get(f.uri) }));
+    // Only show watched films (not watchlist-only)
+    return films
+      .filter(f => (f.watchCount ?? 0) > 0)
+      .map((f) => ({ ...f, tmdbId: mappings.get(f.uri) }));
   }, [films, mappings]);
 
   return (
@@ -196,7 +199,7 @@ function MovieCard({ film, uid, posters, backdrops, loading, onMappingChange, on
       <div className="p-2">
         <p className="text-xs font-medium leading-tight truncate" title={film.title}>{film.title || film.uri}</p>
         <p className="text-[10px] text-gray-500">{film.year || '—'} · Watches: {film.watchCount ?? 0}</p>
-        <p className="text-[10px] mt-1 {mapped ? 'text-green-700' : 'text-red-700'}">
+        <p className={`text-[10px] mt-1 ${mapped ? 'text-green-700' : 'text-red-700'}`}>
           {mapped ? `Mapped (${film.tmdbId})` : 'Unmapped'}
         </p>
         <div className="mt-2 flex gap-1">
