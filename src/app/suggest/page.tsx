@@ -280,32 +280,60 @@ export default function SuggestPage() {
           // ignore poster refresh errors; core suggestions still work
         }
       }
-      const details = suggestions.map((s) => {
-        // Extract trailer key (first official trailer or first trailer)
-        const videos = (s as any).videos?.results || [];
-        const trailer = videos.find((v: any) => 
-          v.site === 'YouTube' && v.type === 'Trailer' && v.official
-        ) || videos.find((v: any) => 
-          v.site === 'YouTube' && v.type === 'Trailer'
-        );
-        
-        // Extract vote category
-        const voteAverage = (s as any).vote_average || 0;
-        const voteCount = (s as any).vote_count || 0;
-        let voteCategory: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard' = 'standard';
-        
-        if (voteAverage >= 7.5 && voteCount < 1000) {
-          voteCategory = 'hidden-gem';
-        } else if (voteAverage >= 7.0 && voteCount > 10000) {
-          voteCategory = 'crowd-pleaser';
-        } else if (voteAverage >= 7.0 && voteCount >= 1000 && voteCount <= 5000) {
-          voteCategory = 'cult-classic';
+      
+      // Fetch full TMDB data for each suggestion to get videos, collections, etc.
+      const detailsPromises = suggestions.map(async (s) => {
+        try {
+          const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+          u.searchParams.set('id', String(s.tmdbId));
+          const r = await fetch(u.toString(), { cache: 'no-store' });
+          const j = await r.json();
+          
+          if (j.ok && j.movie) {
+            const movie = j.movie;
+            
+            // Extract trailer key (first official trailer or first trailer)
+            const videos = movie.videos?.results || [];
+            const trailer = videos.find((v: any) => 
+              v.site === 'YouTube' && v.type === 'Trailer' && v.official
+            ) || videos.find((v: any) => 
+              v.site === 'YouTube' && v.type === 'Trailer'
+            );
+            
+            // Extract vote category
+            const voteAverage = movie.vote_average || 0;
+            const voteCount = movie.vote_count || 0;
+            let voteCategory: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard' = 'standard';
+            
+            if (voteAverage >= 7.5 && voteCount < 1000) {
+              voteCategory = 'hidden-gem';
+            } else if (voteAverage >= 7.0 && voteCount > 10000) {
+              voteCategory = 'crowd-pleaser';
+            } else if (voteAverage >= 7.0 && voteCount >= 1000 && voteCount <= 5000) {
+              voteCategory = 'cult-classic';
+            }
+            
+            // Extract collection name
+            const collection = movie.belongs_to_collection;
+            const collectionName = collection?.name || undefined;
+            
+            return {
+              id: s.tmdbId,
+              title: s.title ?? movie.title ?? `#${s.tmdbId}`,
+              year: s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
+              reasons: s.reasons,
+              poster_path: s.poster_path || movie.poster_path,
+              score: s.score,
+              trailerKey: trailer?.key || null,
+              voteCategory,
+              collectionName
+            };
+          }
+        } catch (e) {
+          console.error(`[Suggest] Failed to fetch details for ${s.tmdbId}`, e);
         }
         
-        // Extract collection name
-        const collection = (s as any).belongs_to_collection;
-        const collectionName = collection?.name || undefined;
-        
+        // Fallback if fetch fails
         return {
           id: s.tmdbId,
           title: s.title ?? `#${s.tmdbId}`,
@@ -313,12 +341,14 @@ export default function SuggestPage() {
           reasons: s.reasons,
           poster_path: s.poster_path,
           score: s.score,
-          trailerKey: trailer?.key || null,
-          voteCategory,
-          collectionName
+          trailerKey: null,
+          voteCategory: 'standard' as const,
+          collectionName: undefined
         };
       });
-      console.log('[Suggest] suggestions ready', { count: details.length });
+      
+      const details = await Promise.all(detailsPromises);
+      console.log('[Suggest] suggestions ready with full details', { count: details.length });
       setItems(details);
     } catch (e: any) {
       console.error('[Suggest] error in runSuggest', e);
