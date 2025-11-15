@@ -136,9 +136,11 @@ function extractFeatures(movie: TMDBMovie) {
   const genres: string[] = Array.isArray((movie as any).genres) ? (movie as any).genres.map((g: any) => g.name).filter(Boolean) : [];
   const genreIds: number[] = Array.isArray((movie as any).genres) ? (movie as any).genres.map((g: any) => g.id).filter(Boolean) : [];
   const directors = (movie.credits?.crew || []).filter((c) => c.job === 'Director').map((c) => c.name);
+  const directorIds = (movie.credits?.crew || []).filter((c) => c.job === 'Director').map((c) => c.id);
   const cast = (movie.credits?.cast || []).slice(0, 5).map((c) => c.name);
   const keywordsList = movie.keywords?.keywords || movie.keywords?.results || [];
   const keywords = (keywordsList as Array<{ id: number; name: string }>).map((k) => k.name);
+  const keywordIds = (keywordsList as Array<{ id: number; name: string }>).map((k) => k.id);
   const original_language = (movie as any).original_language as string | undefined;
   const runtime = (movie as any).runtime as number | undefined;
   
@@ -158,9 +160,11 @@ function extractFeatures(movie: TMDBMovie) {
     genres, 
     genreIds, 
     genreCombo,
-    directors, 
+    directors,
+    directorIds,
     cast, 
     keywords,
+    keywordIds,
     original_language,
     runtime,
     isAnimation,
@@ -242,6 +246,106 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: nu
   });
   await Promise.all(workers);
   return ret;
+}
+
+/**
+ * Build a taste profile with IDs for TMDB discovery
+ * Extracts top genres, keywords, and directors with their IDs and weights
+ */
+export async function buildTasteProfile(params: {
+  films: Array<{ uri: string; rating?: number; liked?: boolean }>;
+  mappings: Map<string, number>;
+  topN?: number;
+}): Promise<{
+  topGenres: Array<{ id: number; name: string; weight: number }>;
+  topKeywords: Array<{ id: number; name: string; weight: number }>;
+  topDirectors: Array<{ id: number; name: string; weight: number }>;
+}> {
+  const topN = params.topN ?? 10;
+  
+  // Helper to calculate preference weight
+  const getWeight = (rating?: number, isLiked?: boolean): number => {
+    const r = rating ?? 3;
+    if (r >= 4.5) return isLiked ? 2.0 : 1.5;
+    if (r >= 3.5) return isLiked ? 1.5 : 1.2;
+    if (r >= 2.5) return isLiked ? 1.0 : 0.3;
+    if (r >= 1.5) return isLiked ? 0.7 : 0.1;
+    return isLiked ? 0.5 : 0.0;
+  };
+  
+  // Get highly-rated/liked films
+  const likedFilms = params.films.filter(f => 
+    (f.liked || (f.rating ?? 0) >= 4) && params.mappings.has(f.uri)
+  );
+  
+  const likedIds = likedFilms
+    .map(f => params.mappings.get(f.uri)!)
+    .filter(Boolean)
+    .slice(0, 100); // Cap to avoid too many API calls
+  
+  // Fetch movie details
+  const movies = await Promise.all(
+    likedIds.map(id => fetchTmdbMovieCached(id))
+  );
+  
+  const genreWeights = new Map<number, { name: string; weight: number }>();
+  const keywordWeights = new Map<number, { name: string; weight: number }>();
+  const directorWeights = new Map<number, { name: string; weight: number }>();
+  
+  // Accumulate weighted preferences
+  for (let i = 0; i < movies.length; i++) {
+    const movie = movies[i];
+    if (!movie) continue;
+    
+    const film = likedFilms[i];
+    const weight = getWeight(film.rating, film.liked);
+    const feats = extractFeatures(movie);
+    
+    // Genres with IDs
+    feats.genreIds.forEach((id, idx) => {
+      const name = feats.genres[idx];
+      const current = genreWeights.get(id) || { name, weight: 0 };
+      genreWeights.set(id, { name, weight: current.weight + weight });
+    });
+    
+    // Keywords with IDs
+    feats.keywordIds.forEach((id, idx) => {
+      const name = feats.keywords[idx];
+      const current = keywordWeights.get(id) || { name, weight: 0 };
+      keywordWeights.set(id, { name, weight: current.weight + weight });
+    });
+    
+    // Directors with IDs
+    feats.directorIds.forEach((id, idx) => {
+      const name = feats.directors[idx];
+      const current = directorWeights.get(id) || { name, weight: 0 };
+      directorWeights.set(id, { name, weight: current.weight + weight });
+    });
+  }
+  
+  // Sort and return top N
+  const topGenres = Array.from(genreWeights.entries())
+    .sort((a, b) => b[1].weight - a[1].weight)
+    .slice(0, topN)
+    .map(([id, { name, weight }]) => ({ id, name, weight }));
+  
+  const topKeywords = Array.from(keywordWeights.entries())
+    .sort((a, b) => b[1].weight - a[1].weight)
+    .slice(0, topN)
+    .map(([id, { name, weight }]) => ({ id, name, weight }));
+  
+  const topDirectors = Array.from(directorWeights.entries())
+    .sort((a, b) => b[1].weight - a[1].weight)
+    .slice(0, topN)
+    .map(([id, { name, weight }]) => ({ id, name, weight }));
+  
+  console.log('[TasteProfile] Built', {
+    topGenres: topGenres.slice(0, 3).map(g => `${g.name}(${g.weight.toFixed(1)})`),
+    topKeywords: topKeywords.slice(0, 3).map(k => `${k.name}(${k.weight.toFixed(1)})`),
+    topDirectors: topDirectors.slice(0, 3).map(d => `${d.name}(${d.weight.toFixed(1)})`)
+  });
+  
+  return { topGenres, topKeywords, topDirectors };
 }
 
 export async function suggestByOverlap(params: {
