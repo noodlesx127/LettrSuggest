@@ -69,12 +69,12 @@ export default function StatsPage() {
       setLoadingDetails(true);
       setDetailsError(null);
       
-      // Add timeout protection
+      // Add timeout protection (60 seconds for large libraries)
       const timeoutId = setTimeout(() => {
-        console.error('[Stats] Load timeout after 30 seconds');
-        setDetailsError('Loading took too long. Try refreshing the page.');
+        console.error('[Stats] Load timeout after 60 seconds');
+        setDetailsError('Loading took too long. Please try again or reduce your time filter.');
         setLoadingDetails(false);
-      }, 30000);
+      }, 60000);
       
       try {
         // Get ALL mappings for this user instead of using .in() which can hit query limits
@@ -145,26 +145,10 @@ export default function StatsPage() {
           
           for (const row of cached ?? []) {
             const data = row.data as any;
-            // Check if we have full details (genres and credits)
-            if (data && data.genres && data.credits) {
+            // Accept cached data even if incomplete - we'll use what's available
+            // This prevents hundreds of individual API calls
+            if (data) {
               detailsMap.set(row.tmdb_id, data);
-            } else if (data) {
-              // Fetch full details from API only if we're missing key data
-              try {
-                console.log(`[Stats] Fetching full details for ${row.tmdb_id} (missing genres or credits)`);
-                const res = await fetch(`/api/tmdb/movie/${row.tmdb_id}`);
-                const json = await res.json();
-                if (json.ok && json.movie) {
-                  detailsMap.set(row.tmdb_id, json.movie);
-                  // Update cache
-                  await supabase!.from('tmdb_movies').upsert({
-                    tmdb_id: row.tmdb_id,
-                    data: json.movie
-                  }, { onConflict: 'tmdb_id' });
-                }
-              } catch (e) {
-                console.error(`[Stats] Failed to fetch details for ${row.tmdb_id}`, e);
-              }
             }
           }
         }
