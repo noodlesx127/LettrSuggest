@@ -66,13 +66,14 @@ export default function SuggestPage() {
     const hasDeepCutThemes = (reasons: string[]) =>
       reasons.some(r => r.toLowerCase().includes('themes you') || r.toLowerCase().includes('specific themes') || r.toLowerCase().includes('keyword:'));
     
-    const isSeasonalMatch = (item: MovieItem) => {
+    const isSeasonalMatch = (item: MovieItem): boolean => {
       // Check if movie title or genres match current seasonal themes
       const titleLower = item.title.toLowerCase();
-      return seasonalConfig.keywords.some(kw => titleLower.includes(kw)) ||
-             (item.genres && seasonalConfig.keywords.some(kw => 
-               item.genres!.some(g => g.toLowerCase().includes(kw))
-             ));
+      const titleMatch = seasonalConfig.keywords.some(kw => titleLower.includes(kw));
+      const genreMatch = item.genres ? seasonalConfig.keywords.some(kw => 
+        item.genres!.some(g => g.toLowerCase().includes(kw))
+      ) : false;
+      return titleMatch || genreMatch;
     };
 
     // Sort all by score first
