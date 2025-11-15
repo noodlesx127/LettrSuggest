@@ -1,13 +1,13 @@
 'use client';
 import AuthGate from '@/components/AuthGate';
+import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile } from '@/lib/enrich';
+import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import type { FilmEvent } from '@/lib/normalize';
-import Image from 'next/image';
 
 type MovieItem = {
   id: number;
@@ -16,66 +16,10 @@ type MovieItem = {
   reasons: string[];
   poster_path?: string | null;
   score: number;
+  trailerKey?: string | null;
+  voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
+  collectionName?: string;
 };
-
-function MovieCard({ item, posterPath, isInWatchlist }: { 
-  item: MovieItem; 
-  posterPath?: string | null; 
-  isInWatchlist: boolean;
-}) {
-  return (
-    <div className="border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-      <div className="flex gap-4 p-4">
-        {/* Poster */}
-        <div className="flex-shrink-0 w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
-          {posterPath ? (
-            <Image
-              src={`https://image.tmdb.org/t/p/w185${posterPath}`}
-              alt={item.title}
-              fill
-              sizes="96px"
-              className="object-cover"
-              unoptimized
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs text-center p-2">
-              No poster
-            </div>
-          )}
-        </div>
-        
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <h3 className="font-semibold text-lg truncate flex-1" title={item.title}>
-              {item.title}
-            </h3>
-            {isInWatchlist && (
-              <span className="flex-shrink-0 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded" title="This movie is already in your watchlist">
-                📋 Watchlist
-              </span>
-            )}
-          </div>
-          {item.year && (
-            <p className="text-sm text-gray-600 mb-3">{item.year}</p>
-          )}
-          
-          {/* Reasons */}
-          {item.reasons.length > 0 && (
-            <ul className="space-y-2">
-              {item.reasons.map((r, i) => (
-                <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                  <span className="text-blue-500 mt-0.5">•</span>
-                  <span className="flex-1">{r}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function SuggestPage() {
   const { films, loading: loadingFilms } = useImportData();
@@ -293,14 +237,44 @@ export default function SuggestPage() {
           // ignore poster refresh errors; core suggestions still work
         }
       }
-      const details = suggestions.map((s) => ({ 
-        id: s.tmdbId, 
-        title: s.title ?? `#${s.tmdbId}`, 
-        year: s.release_date?.slice(0, 4), 
-        reasons: s.reasons,
-        poster_path: s.poster_path,
-        score: s.score
-      }));
+      const details = suggestions.map((s) => {
+        // Extract trailer key (first official trailer or first trailer)
+        const videos = (s as any).videos?.results || [];
+        const trailer = videos.find((v: any) => 
+          v.site === 'YouTube' && v.type === 'Trailer' && v.official
+        ) || videos.find((v: any) => 
+          v.site === 'YouTube' && v.type === 'Trailer'
+        );
+        
+        // Extract vote category
+        const voteAverage = (s as any).vote_average || 0;
+        const voteCount = (s as any).vote_count || 0;
+        let voteCategory: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard' = 'standard';
+        
+        if (voteAverage >= 7.5 && voteCount < 1000) {
+          voteCategory = 'hidden-gem';
+        } else if (voteAverage >= 7.0 && voteCount > 10000) {
+          voteCategory = 'crowd-pleaser';
+        } else if (voteAverage >= 7.0 && voteCount >= 1000 && voteCount <= 5000) {
+          voteCategory = 'cult-classic';
+        }
+        
+        // Extract collection name
+        const collection = (s as any).belongs_to_collection;
+        const collectionName = collection?.name || undefined;
+        
+        return {
+          id: s.tmdbId,
+          title: s.title ?? `#${s.tmdbId}`,
+          year: s.release_date?.slice(0, 4),
+          reasons: s.reasons,
+          poster_path: s.poster_path,
+          score: s.score,
+          trailerKey: trailer?.key || null,
+          voteCategory,
+          collectionName
+        };
+      });
       console.log('[Suggest] suggestions ready', { count: details.length });
       setItems(details);
     } catch (e: any) {
@@ -454,7 +428,19 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {categorizedSuggestions.perfectMatches.map((item) => (
-                  <MovieCard key={item.id} item={item} posterPath={posters[item.id]} isInWatchlist={watchlistTmdbIds.has(item.id)} />
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
                 ))}
               </div>
             </section>
@@ -472,7 +458,19 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.directorMatches.map((item) => (
-                  <MovieCard key={item.id} item={item} posterPath={posters[item.id]} isInWatchlist={watchlistTmdbIds.has(item.id)} />
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
                 ))}
               </div>
             </section>
@@ -490,7 +488,19 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.hiddenGems.map((item) => (
-                  <MovieCard key={item.id} item={item} posterPath={posters[item.id]} isInWatchlist={watchlistTmdbIds.has(item.id)} />
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
                 ))}
               </div>
             </section>
@@ -508,7 +518,19 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.newReleases.map((item) => (
-                  <MovieCard key={item.id} item={item} posterPath={posters[item.id]} isInWatchlist={watchlistTmdbIds.has(item.id)} />
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
                 ))}
               </div>
             </section>
@@ -526,7 +548,19 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.deepCuts.map((item) => (
-                  <MovieCard key={item.id} item={item} posterPath={posters[item.id]} isInWatchlist={watchlistTmdbIds.has(item.id)} />
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                  />
                 ))}
               </div>
             </section>

@@ -7,8 +7,14 @@ export type TMDBMovie = {
   poster_path?: string;
   backdrop_path?: string;
   overview?: string;
+  vote_average?: number;
+  vote_count?: number;
   credits?: { cast?: Array<{ id: number; name: string; known_for_department?: string; order?: number }>; crew?: Array<{ id: number; name: string; job?: string; department?: string }> };
   keywords?: { keywords?: Array<{ id: number; name: string }>; results?: Array<{ id: number; name: string }> };
+  belongs_to_collection?: { id: number; name: string; poster_path?: string; backdrop_path?: string } | null;
+  videos?: { results?: Array<{ id: string; key: string; site: string; type: string; name: string; official?: boolean }> };
+  images?: { backdrops?: Array<{ file_path: string; vote_average?: number }>; posters?: Array<{ file_path: string; vote_average?: number }> };
+  lists?: { results?: Array<{ id: number; name: string; description?: string; item_count?: number }> };
 };
 
 export async function searchTmdb(query: string, year?: number) {
@@ -144,6 +150,55 @@ function extractFeatures(movie: TMDBMovie) {
   const original_language = (movie as any).original_language as string | undefined;
   const runtime = (movie as any).runtime as number | undefined;
   
+  // Extract collection info
+  const collection = movie.belongs_to_collection ? {
+    id: movie.belongs_to_collection.id,
+    name: movie.belongs_to_collection.name,
+    poster_path: movie.belongs_to_collection.poster_path
+  } : null;
+  
+  // Extract video data (trailers, teasers, etc.)
+  const videos = (movie.videos?.results || [])
+    .filter(v => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser'))
+    .sort((a, b) => {
+      // Prioritize official trailers
+      if (a.official && !b.official) return -1;
+      if (!a.official && b.official) return 1;
+      if (a.type === 'Trailer' && b.type !== 'Trailer') return -1;
+      if (a.type !== 'Trailer' && b.type === 'Trailer') return 1;
+      return 0;
+    });
+  
+  // Extract lists this movie appears in
+  const lists = (movie.lists?.results || [])
+    .slice(0, 10) // Limit to top 10 lists
+    .map(l => ({ id: l.id, name: l.name, description: l.description, item_count: l.item_count }));
+  
+  // Extract high-quality images
+  const images = {
+    backdrops: (movie.images?.backdrops || [])
+      .sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0))
+      .slice(0, 5)
+      .map(i => i.file_path),
+    posters: (movie.images?.posters || [])
+      .sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0))
+      .slice(0, 5)
+      .map(i => i.file_path)
+  };
+  
+  // Categorize by vote distribution
+  const voteAverage = movie.vote_average || 0;
+  const voteCount = movie.vote_count || 0;
+  let voteCategory: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard' = 'standard';
+  
+  if (voteAverage >= 7.5 && voteCount < 1000) {
+    voteCategory = 'hidden-gem';
+  } else if (voteAverage >= 7.0 && voteCount > 10000) {
+    voteCategory = 'crowd-pleaser';
+  } else if (voteAverage >= 7.0 && voteCount >= 1000 && voteCount <= 5000) {
+    voteCategory = 'cult-classic';
+  }
+  
   // Detect animation/children's/family content markers
   const isAnimation = genres.includes('Animation') || genreIds.includes(16);
   const isFamily = genres.includes('Family') || genreIds.includes(10751);
@@ -169,7 +224,14 @@ function extractFeatures(movie: TMDBMovie) {
     runtime,
     isAnimation,
     isFamily,
-    isChildrens
+    isChildrens,
+    collection,
+    videos,
+    lists,
+    images,
+    voteCategory,
+    voteAverage,
+    voteCount
   };
 }
 
@@ -242,6 +304,191 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: nu
       const i = next++;
       if (i >= items.length) break;
       ret[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return ret;
+}
+
+/**
+ * Analyze user's library to find incomplete collections/franchises
+ * Returns collections where user has watched some but not all films
+ */
+export async function findIncompleteCollections(
+  watchedFilms: Array<{ tmdbId: number; title: string; rating?: number; liked?: boolean }>
+): Promise<Array<{ 
+  collectionId: number; 
+  collectionName: string; 
+  watchedCount: number; 
+  totalCount: number;
+  watchedFilms: Array<{ id: number; title: string; rating?: number }>;
+  missingFilms: number[];
+  avgRating: number;
+}>> {
+  console.log('[Collections] Analyzing collections', { filmCount: watchedFilms.length });
+  
+  // Group films by collection
+  const collectionMap = new Map<number, {
+    name: string;
+    watched: Array<{ id: number; title: string; rating?: number }>;
+    ratings: number[];
+  }>();
+  
+  // Fetch TMDB data for watched films to get collection info
+  for (const film of watchedFilms) {
+    try {
+      const movie = await fetchTmdbMovieCached(film.tmdbId);
+      if (!movie?.belongs_to_collection) continue;
+      
+      const collId = movie.belongs_to_collection.id;
+      if (!collectionMap.has(collId)) {
+        collectionMap.set(collId, {
+          name: movie.belongs_to_collection.name,
+          watched: [],
+          ratings: []
+        });
+      }
+      
+      const coll = collectionMap.get(collId)!;
+      coll.watched.push({ id: film.tmdbId, title: film.title, rating: film.rating });
+      if (film.rating && film.rating >= 4) {
+        coll.ratings.push(film.rating);
+      }
+    } catch (e) {
+      console.error(`[Collections] Failed to fetch ${film.tmdbId}`, e);
+    }
+  }
+  
+  console.log('[Collections] Found collections', { count: collectionMap.size });
+  
+  // For each collection with watched films, fetch full collection to find missing films
+  const incomplete: Array<{
+    collectionId: number;
+    collectionName: string;
+    watchedCount: number;
+    totalCount: number;
+    watchedFilms: Array<{ id: number; title: string; rating?: number }>;
+    missingFilms: number[];
+    avgRating: number;
+  }> = [];
+  
+  for (const [collId, data] of collectionMap.entries()) {
+    try {
+      // Fetch collection details
+      const apiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY || process.env.TMDB_API_KEY;
+      if (!apiKey) continue;
+      
+      const collUrl = `https://api.themoviedb.org/3/collection/${collId}?api_key=${apiKey}`;
+      const r = await fetch(collUrl, { cache: 'no-store' });
+      if (!r.ok) continue;
+      
+      const collData = await r.json();
+      const allParts = (collData.parts || []) as Array<{ id: number }>;
+      const watchedIds = new Set(data.watched.map(f => f.id));
+      const missingFilms = allParts.filter(p => !watchedIds.has(p.id)).map(p => p.id);
+      
+      // Only include if there are missing films and user liked what they've seen
+      if (missingFilms.length > 0 && data.ratings.length > 0) {
+        const avgRating = data.ratings.reduce((sum, r) => sum + r, 0) / data.ratings.length;
+        
+        incomplete.push({
+          collectionId: collId,
+          collectionName: data.name,
+          watchedCount: data.watched.length,
+          totalCount: allParts.length,
+          watchedFilms: data.watched,
+          missingFilms,
+          avgRating
+        });
+      }
+    } catch (e) {
+      console.error(`[Collections] Failed to fetch collection ${collId}`, e);
+    }
+  }
+  
+  // Sort by avg rating (highest first)
+  incomplete.sort((a, b) => b.avgRating - a.avgRating);
+  
+  console.log('[Collections] Incomplete collections found', { count: incomplete.length });
+  return incomplete;
+}
+
+/**
+ * Get films from curated lists that contain movies the user loved
+ * This discovers hidden connections between films
+ */
+export async function discoverFromLists(
+  seedFilms: Array<{ tmdbId: number; title: string; rating?: number }>
+): Promise<number[]> {
+  console.log('[Lists] Discovering from curated lists', { seedCount: seedFilms.length });
+  
+  // Use top 5 highest-rated films as seeds
+  const seeds = seedFilms
+    .filter(f => f.rating && f.rating >= 4.5)
+    .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+    .slice(0, 5);
+  
+  const discoveredIds = new Set<number>();
+  const listIds = new Set<number>();
+  
+  // For each seed, get lists it appears in
+  for (const seed of seeds) {
+    try {
+      const movie = await fetchTmdbMovieCached(seed.tmdbId);
+      const lists = movie?.lists?.results || [];
+      
+      // Add films from lists with substantial content (20+ items)
+      for (const list of lists) {
+        if (list.item_count && list.item_count >= 20 && list.item_count <= 200) {
+          listIds.add(list.id);
+        }
+      }
+    } catch (e) {
+      console.error(`[Lists] Failed to fetch lists for ${seed.tmdbId}`, e);
+    }
+  }
+  
+  console.log('[Lists] Found relevant lists', { count: listIds.size });
+  
+  // Fetch films from each list (up to 10 lists)
+  const limitedLists = Array.from(listIds).slice(0, 10);
+  for (const listId of limitedLists) {
+    try {
+      const apiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY || process.env.TMDB_API_KEY;
+      if (!apiKey) continue;
+      
+      const listUrl = `https://api.themoviedb.org/3/list/${listId}?api_key=${apiKey}`;
+      const r = await fetch(listUrl, { cache: 'no-store' });
+      if (!r.ok) continue;
+      
+      const listData = await r.json();
+      const items = (listData.items || []) as Array<{ id: number }>;
+      
+      // Add up to 10 films from each list
+      items.slice(0, 10).forEach(item => discoveredIds.add(item.id));
+    } catch (e) {
+      console.error(`[Lists] Failed to fetch list ${listId}`, e);
+    }
+  }
+  
+  console.log('[Lists] Discovered films from lists', { count: discoveredIds.size });
+  return Array.from(discoveredIds);
+}
+
+// Concurrency-limited async mapper
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const ret: R[] = new Array(items.length);
+  let next = 0;
+  const workers = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) break;
+      ret[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return ret;
+}
     }
   });
   await Promise.all(workers);
