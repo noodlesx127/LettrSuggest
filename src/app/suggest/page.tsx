@@ -251,13 +251,17 @@ export default function SuggestPage() {
       });
       
       // Filter out already watched films, blocked suggestions, and deduplicate
-      const candidates = candidatesRaw
+      const candidatesFiltered = candidatesRaw
         .filter((id, idx, arr) => arr.indexOf(id) === idx) // dedupe
         .filter((id) => !watchedIds.has(id)) // exclude watched
-        .filter((id) => !blockedIds.has(id)) // exclude blocked
-        .slice(0, mode === 'quick' ? 250 : 400); // Increased pool size for better matching
+        .filter((id) => !blockedIds.has(id)); // exclude blocked
+      
+      // Shuffle candidates to get different results on refresh
+      const shuffled = [...candidatesFiltered].sort(() => Math.random() - 0.5);
+      const candidates = shuffled.slice(0, mode === 'quick' ? 300 : 500); // Increased pool size
       
       console.log('[Suggest] candidate pool', { 
+        blockedCount: blockedIds.size, 
         mode, 
         totalCandidates: candidatesRaw.length, 
         afterFilter: candidates.length, 
@@ -441,7 +445,7 @@ export default function SuggestPage() {
   }, [runSuggest, uid]);
 
   // Handle removing a suggestion
-  const handleRemoveSuggestion = useCallback(async (tmdbId: number) => {
+  const handleRemoveSuggestion = async (tmdbId: number) => {
     if (!uid) return;
     try {
       // Block the suggestion
@@ -455,16 +459,18 @@ export default function SuggestPage() {
     } catch (e) {
       console.error('Failed to block suggestion:', e);
     }
-  }, [uid]);
+  };
 
   // Handle refreshing a specific section
-  const handleRefreshSection = useCallback(async (sectionName: string) => {
-    if (!uid || !items) return;
+  const handleRefreshSection = async (sectionName: string) => {
+    if (!uid) return;
     
     setRefreshingSections(prev => new Set([...prev, sectionName]));
     
     try {
-      // Just trigger a full refresh for now - could be optimized to refresh only specific section
+      // Clear items to force recomputation with updated blocked list
+      setItems(null);
+      // Trigger a full refresh - could be optimized to refresh only specific section
       await runSuggest();
     } catch (e) {
       console.error('Failed to refresh section:', e);
@@ -475,7 +481,7 @@ export default function SuggestPage() {
         return next;
       });
     }
-  }, [uid, items, runSuggest]);
+  };
 
   return (
     <AuthGate>
