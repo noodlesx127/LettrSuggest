@@ -489,11 +489,6 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: nu
   await Promise.all(workers);
   return ret;
 }
-    }
-  });
-  await Promise.all(workers);
-  return ret;
-}
 
 /**
  * Build a taste profile with IDs for TMDB discovery
