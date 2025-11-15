@@ -129,7 +129,7 @@ export async function generateSmartCandidates(profile: {
 
   // 1. Trending movies (small set for discovery)
   try {
-    results.trending = await fetchTrendingIds('week', 40);
+    results.trending = await fetchTrendingIds('week', 100);
   } catch (e) {
     console.error('[SmartCandidates] Trending failed', e);
   }
@@ -137,7 +137,7 @@ export async function generateSmartCandidates(profile: {
   // 2. Similar to highly-rated films
   try {
     if (profile.highlyRatedIds.length > 0) {
-      results.similar = await fetchSimilarMovieIds(profile.highlyRatedIds.slice(0, 10), 10);
+      results.similar = await fetchSimilarMovieIds(profile.highlyRatedIds.slice(0, 20), 30);
     }
   } catch (e) {
     console.error('[SmartCandidates] Similar failed', e);
@@ -153,7 +153,7 @@ export async function generateSmartCandidates(profile: {
         minVotes: 100,
         yearMin: 1980,
         yearMax: 2015, // Hidden gems cutoff
-        limit: 30
+        limit: 100
       });
       results.discovered.push(...genreDiscovered);
     }
@@ -168,7 +168,7 @@ export async function generateSmartCandidates(profile: {
         people: profile.topDirectors.slice(0, 3).map(d => d.id),
         sortBy: 'primary_release_date.desc',
         yearMin: 2010,
-        limit: 20
+        limit: 50
       });
       results.discovered.push(...directorDiscovered);
     }
@@ -183,7 +183,7 @@ export async function generateSmartCandidates(profile: {
         keywords: profile.topKeywords.slice(0, 3).map(k => k.id),
         sortBy: 'vote_average.desc',
         minVotes: 50, // Lower threshold for niche films
-        limit: 25
+        limit: 50
       });
       results.discovered.push(...nicheDiscovered);
     }

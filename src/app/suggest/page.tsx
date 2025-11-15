@@ -256,9 +256,9 @@ export default function SuggestPage() {
         .filter((id) => !watchedIds.has(id)) // exclude watched
         .filter((id) => !blockedIds.has(id)); // exclude blocked
       
-      // Shuffle candidates to get different results on refresh
+      // Shuffle candidates to get different results on refresh and take a larger pool
       const shuffled = [...candidatesFiltered].sort(() => Math.random() - 0.5);
-      const candidates = shuffled.slice(0, mode === 'quick' ? 300 : 500); // Increased pool size
+      const candidates = shuffled.slice(0, mode === 'quick' ? 500 : 800); // Much larger pool for variety
       
       console.log('[Suggest] candidate pool', { 
         blockedCount: blockedIds.size, 
@@ -275,17 +275,17 @@ export default function SuggestPage() {
       
       setSourceLabel('Based on your watched & liked films + trending releases');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
-      console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length });
+      console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length, candidatesCount: candidates.length });
       const suggestions = await suggestByOverlap({
         userId: uid,
         films: lite,
         mappings,
         candidates,
         excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: mode === 'quick' ? 250 : 400,
+        maxCandidates: mode === 'quick' ? 500 : 800,
         concurrency: 6,
         excludeWatchedIds: watchedIds,
-        desiredResults: 30, // Increased to have enough for all sections
+        desiredResults: 50, // Request more suggestions for better variety across sections
       });
       // Best-effort: ensure posters/backdrops exist for suggested ids.
       if (suggestions.length) {
