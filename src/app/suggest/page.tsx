@@ -59,14 +59,14 @@ export default function SuggestPage() {
 
     // 1. Perfect Matches: Top 8 highest scoring films
     const perfectMatches = sorted.slice(0, 8);
+    const perfectMatchIds = new Set(perfectMatches.map(m => m.id));
 
-    // 2. From Directors You Love: Films with director matches
+    // 2. From Directors You Love: Films with director matches (excluding perfect matches)
     const directorMatches = sorted
-      .filter(item => hasDirectorMatch(item.reasons))
+      .filter(item => hasDirectorMatch(item.reasons) && !perfectMatchIds.has(item.id))
       .slice(0, 5);
 
     // 3. Hidden Gems: Pre-2015 films with good scores (not in perfect matches)
-    const perfectMatchIds = new Set(perfectMatches.map(m => m.id));
     const hiddenGems = sorted
       .filter(item => {
         const year = parseInt(item.year || '0');
@@ -426,7 +426,7 @@ export default function SuggestPage() {
                   <p className="text-xs text-gray-600">These match everything you love</p>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 {categorizedSuggestions.perfectMatches.map((item) => (
                   <MovieCard 
                     key={item.id} 

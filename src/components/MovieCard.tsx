@@ -38,8 +38,8 @@ export default function MovieCard({
   }[voteCategory] : null;
 
   return (
-    <div className="border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-      <div className="flex gap-4 p-4">
+    <div className="border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow h-full flex flex-col">
+      <div className="flex gap-4 p-4 flex-1">
         {/* Poster or Trailer */}
         <div className="flex-shrink-0 w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
           {showVideo && trailerKey ? (
