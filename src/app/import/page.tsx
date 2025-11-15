@@ -62,8 +62,31 @@ export default function ImportPage() {
           liked: f.liked ?? null,
           on_watchlist: f.onWatchlist ?? null,
         }));
-        const { error } = await supabase.from('film_events').upsert(chunk, { onConflict: 'user_id,uri' });
-        if (error) throw error;
+        
+        // Retry logic for schema cache errors
+        let retries = 2;
+        let lastError = null;
+        while (retries >= 0) {
+          const { error } = await supabase.from('film_events').upsert(chunk, { onConflict: 'user_id,uri' });
+          if (!error) {
+            break; // Success
+          }
+          
+          lastError = error;
+          // If schema cache error, wait and retry
+          if (error.message?.includes('schema cache') || error.message?.includes('column')) {
+            console.warn(`[Import] Schema cache error, retrying... (${retries} retries left)`, error.message);
+            retries--;
+            if (retries >= 0) {
+              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+              continue;
+            }
+          }
+          throw error; // Non-retryable error
+        }
+        
+        if (lastError) throw lastError;
+        
         saved += chunk.length;
         setSavedCount(saved);
         setStatus(`Saving to Supabase… ${saved}/${total}`);
@@ -88,10 +111,14 @@ export default function ImportPage() {
       const toTry = filmList;
       let mapped = 0;
       let next = 0;
-      const concurrency = 5;
+      const concurrency = 2; // Reduced to avoid rate limits
+      let lastRequestTime = 0;
+      const minDelay = 300; // 300ms between requests (max ~3 requests/sec)
       
       setMappingProgress({ current: 0, total: toTry.length });
       setStatus(`Mapping films to TMDB database… 0/${toTry.length}`);
+      
+      const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
       
       const worker = async () => {
         while (true) {
@@ -99,21 +126,44 @@ export default function ImportPage() {
           if (i >= toTry.length) break;
           const f = toTry[i];
           if (!f.title) continue;
-          try {
-            const results = await searchTmdb(f.title, f.year ?? undefined);
-            const best = results?.[0];
-            if (best) {
-              await upsertTmdbCache(best);
-              await upsertFilmMapping(uid, f.uri, best.id);
-              mapped += 1;
-              setMappingProgress({ current: mapped, total: toTry.length });
-              setStatus(`Mapping films to TMDB database… ${mapped}/${toTry.length}`);
-              if (typeof window !== 'undefined') {
-                window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
+          
+          // Rate limiting: ensure minimum delay between requests
+          const now = Date.now();
+          const timeSinceLastRequest = now - lastRequestTime;
+          if (timeSinceLastRequest < minDelay) {
+            await sleep(minDelay - timeSinceLastRequest);
+          }
+          lastRequestTime = Date.now();
+          
+          // Retry logic with exponential backoff
+          let retries = 3;
+          let backoff = 1000; // Start with 1 second
+          
+          while (retries > 0) {
+            try {
+              const results = await searchTmdb(f.title, f.year ?? undefined);
+              const best = results?.[0];
+              if (best) {
+                await upsertTmdbCache(best);
+                await upsertFilmMapping(uid, f.uri, best.id);
+                mapped += 1;
+                setMappingProgress({ current: mapped, total: toTry.length });
+                setStatus(`Mapping films to TMDB database… ${mapped}/${toTry.length}`);
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
+                }
+              }
+              break; // Success, exit retry loop
+            } catch (e: any) {
+              retries--;
+              if (retries > 0) {
+                console.warn(`[Import] Retry ${3 - retries}/3 for ${f.title}`, e?.message);
+                await sleep(backoff);
+                backoff *= 2; // Exponential backoff
+              } else {
+                console.error(`[Import] Failed to map ${f.title} after 3 retries`, e);
               }
             }
-          } catch {
-            // ignore per-film errors
           }
         }
       };
