@@ -70,6 +70,7 @@ export async function searchTuiMDB(
   if (year) {
     url.searchParams.set('year', String(year));
   }
+  url.searchParams.set('_t', String(Date.now())); // Cache buster
 
   const response = await fetch(url.toString(), {
     headers: {
@@ -102,6 +103,7 @@ export async function getTuiMDBMovie(
   const url = new URL(`${TUIMDB_BASE_URL}/movies/details/`);
   url.searchParams.set('api_key', key);
   url.searchParams.set('id', String(id));
+  url.searchParams.set('_t', String(Date.now())); // Cache buster
 
   const response = await fetch(url.toString(), {
     headers: {
@@ -133,12 +135,13 @@ export async function getTuiMDBGenres(apiKey?: string): Promise<TuiMDBGenre[]> {
 
   const url = new URL(`${TUIMDB_BASE_URL}/movies/genres/`);
   url.searchParams.set('api_key', key);
+  url.searchParams.set('_t', String(Date.now())); // Cache buster
 
   const response = await fetch(url.toString(), {
     headers: {
       Accept: 'application/json',
     },
-    cache: 'force-cache',
+    cache: 'no-store',
   });
 
   if (!response.ok) {

@@ -364,6 +364,7 @@ export default function SuggestPage() {
         try {
           const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
           u.searchParams.set('id', String(s.tmdbId));
+          u.searchParams.set('_t', String(freshCacheKey)); // Cache buster
           const r = await fetch(u.toString(), { cache: 'no-store' });
           const j = await r.json();
           
@@ -589,6 +590,7 @@ export default function SuggestPage() {
       // Fetch full movie details
       const u = new URL('/api/tmdb/movie', window.location.origin);
       u.searchParams.set('id', String(s.tmdbId));
+      u.searchParams.set('_t', String(Date.now())); // Cache buster
       const r = await fetch(u.toString(), { cache: 'no-store' });
       const j = await r.json();
       

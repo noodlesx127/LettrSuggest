@@ -33,6 +33,7 @@ export async function searchMovies(options: MovieSearchOptions): Promise<Unified
       const u = new URL('/api/tuimdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
       u.searchParams.set('query', query);
       if (year) u.searchParams.set('year', String(year));
+      u.searchParams.set('_t', String(Date.now())); // Cache buster
       
       const r = await fetch(u.toString());
       const j = await r.json();
@@ -53,6 +54,7 @@ export async function searchMovies(options: MovieSearchOptions): Promise<Unified
   const u = new URL('/api/tmdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
   u.searchParams.set('query', query);
   if (year) u.searchParams.set('year', String(year));
+  u.searchParams.set('_t', String(Date.now())); // Cache buster
   
   const r = await fetch(u.toString());
   const j = await r.json();
@@ -78,6 +80,7 @@ export async function getMovieDetails(options: MovieDetailsOptions): Promise<Uni
       console.log('[UnifiedAPI] Fetching movie from TuiMDB', { id });
       const u = new URL('/api/tuimdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
       u.searchParams.set('id', String(id));
+      u.searchParams.set('_t', String(Date.now())); // Cache buster
       
       const r = await fetch(u.toString());
       const j = await r.json();
@@ -97,6 +100,7 @@ export async function getMovieDetails(options: MovieDetailsOptions): Promise<Uni
   console.log('[UnifiedAPI] Fetching movie from TMDB', { id });
   const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
   u.searchParams.set('id', String(id));
+  u.searchParams.set('_t', String(Date.now())); // Cache buster
   
   try {
     const r = await fetch(u.toString());
