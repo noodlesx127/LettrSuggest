@@ -459,8 +459,9 @@ export default function SuggestPage() {
     if (!uid || !sourceFilms) return null;
     
     try {
-      const mappings = await getFilmMappings(uid);
       const filteredFilms = sourceFilms;
+      const uris = filteredFilms.map((f) => f.uri);
+      const mappings = await getFilmMappings(uid, uris);
       
       // Build sets of watched and blocked IDs
       const watchedIds = new Set<number>();
