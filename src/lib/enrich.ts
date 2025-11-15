@@ -160,6 +160,7 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
   console.log('[TMDB] fetch movie start', { id });
   const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
   u.searchParams.set('id', String(id));
+  u.searchParams.set('_t', String(Date.now())); // Cache buster
   try {
     const r = await fetch(u.toString(), { cache: 'no-store' });
     const j = await r.json();

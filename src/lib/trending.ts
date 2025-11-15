@@ -2,6 +2,7 @@ export async function fetchTrendingIds(period: 'day' | 'week' = 'day', limit = 1
   const u = new URL('/api/tmdb/trending', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
   u.searchParams.set('period', period);
   u.searchParams.set('limit', String(limit));
+  u.searchParams.set('_t', String(Date.now())); // Cache buster
   try {
     console.log('[TMDB] trending start', { period, limit });
     const r = await fetch(u.toString(), { cache: 'no-store' });
@@ -33,6 +34,7 @@ export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10)
       // Fetch similar movies for this seed
       const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
       u.searchParams.set('id', String(seedId));
+      u.searchParams.set('_t', String(Date.now())); // Cache buster
       
       const r = await fetch(u.toString(), { cache: 'no-store' });
       const j = await r.json();
@@ -85,6 +87,7 @@ export async function discoverMoviesByProfile(options: {
     
     const limit = options.limit ?? 20;
     u.searchParams.set('limit', String(limit));
+    u.searchParams.set('_t', String(Date.now())); // Cache buster
     
     console.log('[TMDB] discover start', options);
     const r = await fetch(u.toString(), { cache: 'no-store' });

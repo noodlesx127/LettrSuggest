@@ -41,6 +41,7 @@ export default function SuggestPage() {
   const [blockedIds, setBlockedIds] = useState<Set<number>>(new Set());
   const [refreshingSections, setRefreshingSections] = useState<Set<string>>(new Set());
   const [shownIds, setShownIds] = useState<Set<number>>(new Set());
+  const [cacheKey, setCacheKey] = useState<number>(Date.now());
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
@@ -215,7 +216,13 @@ export default function SuggestPage() {
 
   const runSuggest = useCallback(async () => {
     try {
-      console.log('[Suggest] runSuggest start', { uid, hasSourceFilms: sourceFilms.length, excludeGenres, yearMin, yearMax, mode });
+      // Generate new cache key to bust browser and API caches
+      const freshCacheKey = Date.now();
+      setCacheKey(freshCacheKey);
+      console.log('[Suggest] runSuggest start', { uid, hasSourceFilms: sourceFilms.length, excludeGenres, yearMin, yearMax, mode, cacheKey: freshCacheKey });
+      
+      // Clear previous state completely
+      setItems(null);
       setError(null);
       setNoCandidatesReason(null);
       setLoading(true);
@@ -301,8 +308,11 @@ export default function SuggestPage() {
         .filter((id) => !blockedIds.has(id)) // exclude blocked
         .filter((id) => !shownIds.has(id)); // exclude previously shown on refresh
       
-      // Shuffle candidates to get different results on refresh and take a larger pool
-      const shuffled = [...candidatesFiltered].sort(() => Math.random() - 0.5);
+      // Shuffle candidates aggressively using cache key as seed for true randomness
+      const shuffled = [...candidatesFiltered].sort(() => {
+        const hash = (freshCacheKey + Math.random() * 1000000) % 1;
+        return hash - 0.5;
+      });
       const candidates = shuffled.slice(0, mode === 'quick' ? 500 : 800); // Much larger pool for variety
       
       console.log('[Suggest] candidate pool', { 
@@ -343,6 +353,11 @@ export default function SuggestPage() {
           // ignore poster refresh errors; core suggestions still work
         }
       }
+      
+      // Track these IDs as shown for next refresh
+      const newShownIds = new Set([...shownIds, ...suggestions.map(s => s.tmdbId)]);
+      setShownIds(newShownIds);
+      console.log('[Suggest] Tracking shown IDs', { total: newShownIds.size, newThisRound: suggestions.length });
       
       // Fetch full TMDB data for each suggestion to get videos, collections, etc.
       const detailsPromises = suggestions.map(async (s) => {
@@ -727,7 +742,15 @@ export default function SuggestPage() {
         <div className="ml-auto flex items-center gap-2">
           <button
             className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
-            title="Recompute with current filters"
+            title="Clear cache and show completely new suggestions"
+            onClick={() => { setItems(null); setShownIds(new Set()); setBlockedIds(new Set()); setCacheKey(Date.now()); setRefreshTick((x) => x + 1); void runSuggest(); }}
+          >
+            <span>🗑️</span>
+            <span>Clear Cache</span>
+          </button>
+          <button
+            className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
+            title="Get fresh suggestions with current filters"
             onClick={() => { setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
           >
             <span>🔄</span>
