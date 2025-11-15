@@ -475,21 +475,6 @@ export async function discoverFromLists(
   return Array.from(discoveredIds);
 }
 
-// Concurrency-limited async mapper
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
-  const ret: R[] = new Array(items.length);
-  let next = 0;
-  const workers = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
-    while (true) {
-      const i = next++;
-      if (i >= items.length) break;
-      ret[i] = await fn(items[i], i);
-    }
-  });
-  await Promise.all(workers);
-  return ret;
-}
-
 /**
  * Build a taste profile with IDs for TMDB discovery
  * Extracts top genres, keywords, and directors with their IDs and weights
