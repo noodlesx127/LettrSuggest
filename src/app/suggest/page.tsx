@@ -458,22 +458,23 @@ export default function SuggestPage() {
   const handleRemoveSuggestion = async (tmdbId: number) => {
     if (!uid) return;
     try {
-      // Block the suggestion
+      // Immediately remove from UI
+      setItems(prev => prev ? prev.filter(item => item.id !== tmdbId) : prev);
+      
+      // Block the suggestion in the background
       await blockSuggestion(uid, tmdbId);
       setBlockedIds(prev => new Set([...prev, tmdbId]));
       
-      // Remove from shown IDs so it doesn't affect future refreshes
+      // Remove from shown IDs so it doesn't reappear on future refreshes
       setShownIds(prev => {
         const updated = new Set(prev);
         updated.delete(tmdbId);
         return updated;
       });
-      
-      // Clear items and trigger full refresh to repopulate with new suggestions
-      setItems(null);
-      await runSuggest();
     } catch (e) {
       console.error('Failed to block suggestion:', e);
+      // On error, restore the item or show an error message
+      await runSuggest();
     }
   };
 
