@@ -1,4 +1,14 @@
 import { supabase } from './supabaseClient';
+import { searchMovies } from './movieAPI';
+import { 
+  analyzeSubgenrePatterns, 
+  analyzeCrossGenrePatterns,
+  shouldFilterBySubgenre,
+  boostForCrossGenreMatch,
+  type SubgenrePattern,
+  type CrossGenrePattern
+} from './subgenreDetection';
+import { checkNicheCompatibility } from './advancedFiltering';
 
 export type TMDBMovie = {
   id: number;
@@ -9,6 +19,7 @@ export type TMDBMovie = {
   overview?: string;
   vote_average?: number;
   vote_count?: number;
+  genres?: Array<{ id: number; name: string }>;
   credits?: { cast?: Array<{ id: number; name: string; known_for_department?: string; order?: number }>; crew?: Array<{ id: number; name: string; job?: string; department?: string }> };
   keywords?: { keywords?: Array<{ id: number; name: string }>; results?: Array<{ id: number; name: string }> };
   belongs_to_collection?: { id: number; name: string; poster_path?: string; backdrop_path?: string } | null;
@@ -17,22 +28,17 @@ export type TMDBMovie = {
   lists?: { results?: Array<{ id: number; name: string; description?: string; item_count?: number }> };
 };
 
+/**
+ * Search for movies using unified API (TuiMDB first, then TMDB)
+ */
 export async function searchTmdb(query: string, year?: number) {
-  console.log('[TMDB] search start', { query, year });
-  const u = new URL('/api/tmdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
-  u.searchParams.set('query', query);
-  if (year) u.searchParams.set('year', String(year));
+  console.log('[MovieAPI] search start', { query, year });
   try {
-    const r = await fetch(u.toString());
-    const j = await r.json();
-    if (!r.ok || !j.ok) {
-      console.error('[TMDB] search error', { status: r.status, body: j });
-      throw new Error(j.error || 'TMDB search failed');
-    }
-    console.log('[TMDB] search ok', { count: (j.results ?? []).length });
-    return j.results as TMDBMovie[];
+    const results = await searchMovies({ query, year, preferTuiMDB: true });
+    console.log('[MovieAPI] search ok', { count: results.length });
+    return results;
   } catch (e) {
-    console.error('[TMDB] search exception', e);
+    console.error('[MovieAPI] search exception', e);
     throw e;
   }
 }
@@ -776,6 +782,33 @@ export async function suggestByOverlap(params: {
     topDirectors: Array.from(pref.directors.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([d, v]) => `${d}(${v.toFixed(1)})`),
     topCast: Array.from(pref.cast.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([c, v]) => `${c}(${v.toFixed(1)})`),
   });
+  
+  // Build advanced subgenre patterns for nuanced filtering
+  // E.g., "likes Action but avoids Superhero Action"
+  const filmsForSubgenreAnalysis = params.films.map(f => {
+    const tmdbId = params.mappings.get(f.uri);
+    const cached = tmdbId ? tmdbCache.get(tmdbId) : null;
+    return {
+      title: f.title,
+      genres: cached?.genres?.map(g => g.name) || [],
+      keywords: (cached as any)?.keywords?.keywords?.map((k: any) => k.name) || 
+                (cached as any)?.keywords?.results?.map((k: any) => k.name) || [],
+      rating: f.rating,
+      liked: f.liked
+    };
+  });
+  
+  const subgenrePatterns = analyzeSubgenrePatterns(filmsForSubgenreAnalysis);
+  const crossGenrePatterns = analyzeCrossGenrePatterns(filmsForSubgenreAnalysis);
+  
+  console.log('[Suggest] Subgenre analysis complete', {
+    patternsDetected: subgenrePatterns.size,
+    crossPatternsDetected: crossGenrePatterns.size,
+    exampleAvoidances: Array.from(subgenrePatterns.entries())
+      .filter(([_, p]) => p.avoidedSubgenres.size > 0)
+      .slice(0, 3)
+      .map(([genre, p]) => `${genre}: avoids ${Array.from(p.avoidedSubgenres).slice(0, 2).join(', ')}`)
+  });
 
   const seenIds = new Set(likedIds);
   // Also treat already-watched mapped films as seen to avoid recommending
@@ -827,8 +860,54 @@ export async function suggestByOverlap(params: {
     });
     if (strongAvoidedKeywords.length > 2) return null; // Skip if multiple strong avoid signals
     
+    // ADVANCED FILTERING: Apply subgenre-level filtering
+    // E.g., filter "Superhero Action" if user avoids that subgenre within Action
+    const subgenreCheck = shouldFilterBySubgenre(
+      feats.genres,
+      feats.keywords,
+      m.title || '',
+      subgenrePatterns
+    );
+    
+    if (subgenreCheck.shouldFilter) {
+      console.log(`[SubgenreFilter] Filtered "${m.title}" - ${subgenreCheck.reason}`);
+      return null;
+    }
+    
+    // Check niche compatibility (anime, stand-up, food/travel docs)
+    const nicheProfile = {
+      nichePreferences: {
+        likesAnime: (likedAnimationCount / totalLiked) >= 0.1,
+        likesStandUp: Array.from(pref.keywords.keys()).some(k => k.toLowerCase().includes('stand-up') || k.toLowerCase().includes('stand up')),
+        likesFoodDocs: Array.from(pref.keywords.keys()).some(k => k.toLowerCase().includes('food') || k.toLowerCase().includes('cooking')),
+        likesTravelDocs: Array.from(pref.keywords.keys()).some(k => k.toLowerCase().includes('travel') || k.toLowerCase().includes('journey'))
+      }
+    };
+    
+    const nicheCheck = checkNicheCompatibility(m, nicheProfile as any);
+    if (!nicheCheck.compatible) {
+      console.log(`[NicheFilter] Filtered "${m.title}" - ${nicheCheck.reason}`);
+      return null;
+    }
+    
     let score = 0;
     const reasons: string[] = [];
+    
+    // CROSS-GENRE BOOST: Check if candidate matches user's preferred genre combinations
+    // E.g., boost "Action+Thriller with spy themes" if user loves that pattern
+    const crossGenreBoost = boostForCrossGenreMatch(
+      feats.genres,
+      feats.keywords,
+      crossGenrePatterns
+    );
+    
+    if (crossGenreBoost.boost > 0) {
+      score += crossGenreBoost.boost;
+      if (crossGenreBoost.boostReason) {
+        reasons.push(crossGenreBoost.boostReason);
+        console.log(`[CrossGenreBoost] Boosted "${m.title}" by ${crossGenreBoost.boost.toFixed(2)} - ${crossGenreBoost.boostReason}`);
+      }
+    }
     
     // Genre combo matching (more specific than individual genres)
     if (feats.genreCombo && pref.genreCombos.has(feats.genreCombo)) {

@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
+import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
 import type { FilmEvent } from '@/lib/normalize';
 
 type MovieItem = {
@@ -49,6 +50,7 @@ export default function SuggestPage() {
     if (!items || items.length === 0) return null;
 
     const currentYear = new Date().getFullYear();
+    const seasonalConfig = getSeasonalRecommendationConfig();
     
     // Helper functions to check reason types
     const hasDirectorMatch = (reasons: string[]) => 
@@ -62,6 +64,15 @@ export default function SuggestPage() {
     
     const hasDeepCutThemes = (reasons: string[]) =>
       reasons.some(r => r.toLowerCase().includes('themes you') || r.toLowerCase().includes('specific themes') || r.toLowerCase().includes('keyword:'));
+    
+    const isSeasonalMatch = (item: MovieItem) => {
+      // Check if movie title or genres match current seasonal themes
+      const titleLower = item.title.toLowerCase();
+      return seasonalConfig.keywords.some(kw => titleLower.includes(kw)) ||
+             (item.genres && seasonalConfig.keywords.some(kw => 
+               item.genres!.some(g => g.toLowerCase().includes(kw))
+             ));
+    };
 
     // Sort all by score first
     const sorted = [...items].sort((a, b) => b.score - a.score);
@@ -82,6 +93,10 @@ export default function SuggestPage() {
       }
       return results;
     };
+
+    // 0. Seasonal Recommendations (if applicable)
+    const seasonalPicks = seasonalConfig.genres.length > 0 ? 
+      getNextItems(isSeasonalMatch, 8) : [];
 
     // 1. Perfect Matches: Top highest scoring films
     const perfectMatches = getNextItems(() => true, 8);
@@ -133,6 +148,8 @@ export default function SuggestPage() {
     const moreRecommendations = getNextItems(() => true, 15);
 
     return {
+      seasonalPicks,
+      seasonalConfig,
       perfectMatches,
       directorMatches,
       actorMatches,
@@ -704,6 +721,57 @@ export default function SuggestPage() {
         <div className="space-y-8">
           {sourceLabel && (
             <p className="text-xs text-gray-500 mb-4">Source: {sourceLabel}</p>
+          )}
+
+          {/* Seasonal/Holiday Recommendations Section */}
+          {categorizedSuggestions.seasonalPicks.length >= 3 && (
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">
+                    {categorizedSuggestions.seasonalConfig.title.includes('Christmas') ? '🎄' :
+                     categorizedSuggestions.seasonalConfig.title.includes('Halloween') ? '🎃' :
+                     categorizedSuggestions.seasonalConfig.title.includes('Thanksgiving') ? '🦃' :
+                     categorizedSuggestions.seasonalConfig.title.includes('Valentine') ? '💝' :
+                     categorizedSuggestions.seasonalConfig.title.includes('Fourth') || categorizedSuggestions.seasonalConfig.title.includes('Independence') ? '🎆' :
+                     categorizedSuggestions.seasonalConfig.title.includes('Easter') ? '🐰' : '📅'}
+                  </span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">{categorizedSuggestions.seasonalConfig.title}</h2>
+                    <p className="text-xs text-gray-600">{categorizedSuggestions.seasonalConfig.description}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRefreshSection('seasonalPicks')}
+                  disabled={refreshingSections.has('seasonalPicks')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('seasonalPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.seasonalPicks.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
+                  />
+                ))}
+              </div>
+            </section>
           )}
 
           {/* Perfect Matches Section */}
