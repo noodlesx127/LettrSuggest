@@ -99,6 +99,12 @@ export default function SuggestPage() {
     // 0. Seasonal Recommendations (if applicable)
     const seasonalPicks = seasonalConfig.genres.length > 0 ? 
       getNextItems(isSeasonalMatch, 8) : [];
+    
+    console.log('[Suggest] Seasonal picks result', {
+      configGenres: seasonalConfig.genres,
+      configKeywords: seasonalConfig.keywords,
+      seasonalPicksCount: seasonalPicks.length
+    });
 
     // 1. Perfect Matches: Top highest scoring films
     const perfectMatches = getNextItems(() => true, 8);
@@ -148,6 +154,24 @@ export default function SuggestPage() {
     
     // 12. Fallback: More recommendations (any remaining films)
     const moreRecommendations = getNextItems(() => true, 15);
+
+    console.log('[Suggest] Categorization complete', {
+      seasonalPicks: seasonalPicks.length,
+      perfectMatches: perfectMatches.length,
+      directorMatches: directorMatches.length,
+      actorMatches: actorMatches.length,
+      genreMatches: genreMatches.length,
+      hiddenGems: hiddenGems.length,
+      cultClassics: cultClassics.length,
+      crowdPleasers: crowdPleasers.length,
+      newReleases: newReleases.length,
+      recentClassics: recentClassics.length,
+      deepCuts: deepCuts.length,
+      fromCollections: fromCollections.length,
+      moreRecommendations: moreRecommendations.length,
+      totalUsed: usedIds.size,
+      totalAvailable: items.length
+    });
 
     return {
       seasonalPicks,
@@ -726,7 +750,7 @@ export default function SuggestPage() {
           )}
 
           {/* Seasonal/Holiday Recommendations Section */}
-          {categorizedSuggestions.seasonalPicks.length >= 3 && (
+          {categorizedSuggestions.seasonalPicks.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
