@@ -262,7 +262,7 @@ export default function StatsPage() {
     // Track films by preference strength for the "Taste Profile" section
     const absoluteFavorites = filteredFilms.filter(f => (f.rating ?? 0) >= 4.5 && f.liked);
     const highlyRated = filteredFilms.filter(f => (f.rating ?? 0) >= 4);
-    const liked = filteredFilms.filter(f => f.liked);
+    const likedFilms = filteredFilms.filter(f => f.liked);
     const lowRatedButLiked = filteredFilms.filter(f => (f.rating ?? 0) < 3 && (f.rating ?? 0) > 0 && f.liked);
     
     for (const film of filteredFilms) {
