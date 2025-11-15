@@ -43,6 +43,7 @@ export default function NavBar() {
           <>
             <a href="/import" className="text-sm text-gray-600 hover:text-gray-900">Import</a>
             <a href="/library" className="text-sm text-gray-600 hover:text-gray-900">Library</a>
+            <a href="/watchlist" className="text-sm text-gray-600 hover:text-gray-900">Watchlist</a>
             <a href="/suggest" className="text-sm text-gray-600 hover:text-gray-900">Suggestions</a>
             <a href="/stats" className="text-sm text-gray-600 hover:text-gray-900">Stats</a>
           </>

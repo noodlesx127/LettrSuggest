@@ -42,6 +42,9 @@ export default function HomePage() {
           <a className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300" href="/library">
             View Library
           </a>
+          <a className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300" href="/watchlist">
+            Watchlist
+          </a>
           <a className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300" href="/suggest">
             Get Suggestions
           </a>

@@ -79,11 +79,19 @@ export function normalizeData(raw: {
     if (rating != null) upd(uri, { rating }, { title: r['Name'], year: r['Year'] });
   }
 
-  const wl = new Set((raw.watchlist ?? []).map((r) => r['Letterboxd URI']).filter(Boolean));
-  const likes = new Set((raw.likesFilms ?? []).map((r) => r['Letterboxd URI']).filter(Boolean));
+  // Process watchlist with title/year
+  for (const r of raw.watchlist ?? []) {
+    const uri = r['Letterboxd URI'];
+    if (!uri) continue;
+    upd(uri, { onWatchlist: true }, { title: r['Name'], year: r['Year'] });
+  }
 
-  for (const uri of wl) upd(uri, { onWatchlist: true });
-  for (const uri of likes) upd(uri, { liked: true });
+  // Process likes
+  for (const r of raw.likesFilms ?? []) {
+    const uri = r['Letterboxd URI'];
+    if (!uri) continue;
+    upd(uri, { liked: true }, { title: r['Name'], year: r['Year'] });
+  }
 
   // Finalize watchCount and lastDate
   for (const [uri, f] of byURI.entries()) {
