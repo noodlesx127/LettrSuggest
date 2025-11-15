@@ -157,3 +157,27 @@ create or replace view public.film_watch_counts as
   select user_id, uri, count(*)::bigint as watch_count
   from public.film_diary_events
   group by user_id, uri;
+
+-- Blocked suggestions: movies the user doesn't want to see in recommendations
+create table if not exists public.blocked_suggestions (
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  tmdb_id bigint not null,
+  blocked_at timestamp with time zone default now(),
+  primary key (user_id, tmdb_id)
+);
+
+create index if not exists blocked_suggestions_user_idx on public.blocked_suggestions (user_id);
+
+alter table public.blocked_suggestions enable row level security;
+
+drop policy if exists "blocked_suggestions user read" on public.blocked_suggestions;
+create policy "blocked_suggestions user read" on public.blocked_suggestions
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "blocked_suggestions user insert" on public.blocked_suggestions;
+create policy "blocked_suggestions user insert" on public.blocked_suggestions
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "blocked_suggestions user delete" on public.blocked_suggestions;
+create policy "blocked_suggestions user delete" on public.blocked_suggestions
+  for delete using (auth.uid() = user_id);

@@ -14,6 +14,7 @@ type MovieCardProps = {
   voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
   collectionName?: string;
   showTrailer?: boolean;
+  onRemove?: (id: number) => void;
 };
 
 export default function MovieCard({
@@ -27,7 +28,8 @@ export default function MovieCard({
   score,
   voteCategory,
   collectionName,
-  showTrailer = true
+  showTrailer = true,
+  onRemove
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -163,6 +165,20 @@ export default function MovieCard({
                 </button>
               )}
             </div>
+          )}
+          
+          {/* Remove button (only shown if onRemove is provided) */}
+          {onRemove && (
+            <button
+              onClick={() => onRemove(id)}
+              className="mt-2 text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1 transition-colors"
+              title="Remove this suggestion"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              <span>Remove suggestion</span>
+            </button>
           )}
         </div>
       </div>

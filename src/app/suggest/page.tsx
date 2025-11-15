@@ -4,7 +4,7 @@ import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists } from '@/lib/enrich';
+import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import type { FilmEvent } from '@/lib/normalize';
@@ -36,6 +36,8 @@ export default function SuggestPage() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [mode, setMode] = useState<'quick' | 'deep'>('quick');
   const [noCandidatesReason, setNoCandidatesReason] = useState<string | null>(null);
+  const [blockedIds, setBlockedIds] = useState<Set<number>>(new Set());
+  const [refreshingSections, setRefreshingSections] = useState<Set<string>>(new Set());
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
@@ -149,7 +151,18 @@ export default function SuggestPage() {
     const init = async () => {
       if (!supabase) return;
       const { data } = await supabase.auth.getSession();
-      setUid(data.session?.user?.id ?? null);
+      const userId = data.session?.user?.id ?? null;
+      setUid(userId);
+      
+      // Fetch blocked suggestions
+      if (userId) {
+        try {
+          const blocked = await getBlockedSuggestions(userId);
+          setBlockedIds(blocked);
+        } catch (e) {
+          console.error('Failed to fetch blocked suggestions:', e);
+        }
+      }
     };
     void init();
   }, []);
@@ -237,10 +250,11 @@ export default function SuggestPage() {
         totalRaw: candidatesRaw.length
       });
       
-      // Filter out already watched films and deduplicate
+      // Filter out already watched films, blocked suggestions, and deduplicate
       const candidates = candidatesRaw
         .filter((id, idx, arr) => arr.indexOf(id) === idx) // dedupe
         .filter((id) => !watchedIds.has(id)) // exclude watched
+        .filter((id) => !blockedIds.has(id)) // exclude blocked
         .slice(0, mode === 'quick' ? 250 : 400); // Increased pool size for better matching
       
       console.log('[Suggest] candidate pool', { 
@@ -406,15 +420,62 @@ export default function SuggestPage() {
       setItems(null);
       void runSuggest();
     };
+    const blockedHandler = async () => {
+      if (uid) {
+        const blocked = await getBlockedSuggestions(uid);
+        setBlockedIds(blocked);
+        setItems(null);
+        void runSuggest();
+      }
+    };
     if (typeof window !== 'undefined') {
       window.addEventListener('lettr:mappings-updated', handler);
+      window.addEventListener('lettr:blocked-updated', blockedHandler);
     }
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('lettr:mappings-updated', handler);
+        window.removeEventListener('lettr:blocked-updated', blockedHandler);
       }
     };
-  }, [runSuggest]);
+  }, [runSuggest, uid]);
+
+  // Handle removing a suggestion
+  const handleRemoveSuggestion = useCallback(async (tmdbId: number) => {
+    if (!uid) return;
+    try {
+      // Block the suggestion
+      await blockSuggestion(uid, tmdbId);
+      setBlockedIds(prev => new Set([...prev, tmdbId]));
+      
+      // Remove from current items
+      setItems(prev => prev ? prev.filter(item => item.id !== tmdbId) : prev);
+      
+      // TODO: Optionally fetch one new suggestion to replace the removed one
+    } catch (e) {
+      console.error('Failed to block suggestion:', e);
+    }
+  }, [uid]);
+
+  // Handle refreshing a specific section
+  const handleRefreshSection = useCallback(async (sectionName: string) => {
+    if (!uid || !items) return;
+    
+    setRefreshingSections(prev => new Set([...prev, sectionName]));
+    
+    try {
+      // Just trigger a full refresh for now - could be optimized to refresh only specific section
+      await runSuggest();
+    } catch (e) {
+      console.error('Failed to refresh section:', e);
+    } finally {
+      setRefreshingSections(prev => {
+        const next = new Set(prev);
+        next.delete(sectionName);
+        return next;
+      });
+    }
+  }, [uid, items, runSuggest]);
 
   return (
     <AuthGate>
@@ -492,12 +553,25 @@ export default function SuggestPage() {
           {/* Perfect Matches Section */}
           {categorizedSuggestions.perfectMatches.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🎯</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Perfect Matches</h2>
-                  <p className="text-xs text-gray-600">These match everything you love</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🎯</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Perfect Matches</h2>
+                    <p className="text-xs text-gray-600">These match everything you love</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('perfectMatches')}
+                  disabled={refreshingSections.has('perfectMatches')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('perfectMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.perfectMatches.map((item) => (
@@ -513,6 +587,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -522,12 +597,25 @@ export default function SuggestPage() {
           {/* From Directors You Love Section */}
           {categorizedSuggestions.directorMatches.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🎬</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">From Directors You Love</h2>
-                  <p className="text-xs text-gray-600">More from filmmakers you enjoy</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🎬</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">From Directors You Love</h2>
+                    <p className="text-xs text-gray-600">More from filmmakers you enjoy</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('directorMatches')}
+                  disabled={refreshingSections.has('directorMatches')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('directorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.directorMatches.map((item) => (
@@ -543,6 +631,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -552,12 +641,25 @@ export default function SuggestPage() {
           {/* From Actors You Love Section */}
           {categorizedSuggestions.actorMatches.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">⭐</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">From Actors You Love</h2>
-                  <p className="text-xs text-gray-600">More from your favorite performers</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">⭐</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">From Actors You Love</h2>
+                    <p className="text-xs text-gray-600">More from your favorite performers</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('actorMatches')}
+                  disabled={refreshingSections.has('actorMatches')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('actorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.actorMatches.map((item) => (
@@ -573,6 +675,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -582,12 +685,25 @@ export default function SuggestPage() {
           {/* Your Favorite Genres Section */}
           {categorizedSuggestions.genreMatches.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🎭</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Your Favorite Genres</h2>
-                  <p className="text-xs text-gray-600">Based on genres you watch most</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🎭</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Your Favorite Genres</h2>
+                    <p className="text-xs text-gray-600">Based on genres you watch most</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('genreMatches')}
+                  disabled={refreshingSections.has('genreMatches')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('genreMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.genreMatches.map((item) => (
@@ -603,6 +719,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -612,12 +729,25 @@ export default function SuggestPage() {
           {/* Hidden Gems Section */}
           {categorizedSuggestions.hiddenGems.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🔍</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Hidden Gems</h2>
-                  <p className="text-xs text-gray-600">Older films that match your taste</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🔍</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Hidden Gems</h2>
+                    <p className="text-xs text-gray-600">Older films that match your taste</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('hiddenGems')}
+                  disabled={refreshingSections.has('hiddenGems')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('hiddenGems') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.hiddenGems.map((item) => (
@@ -633,6 +763,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -642,12 +773,25 @@ export default function SuggestPage() {
           {/* Cult Classics Section */}
           {categorizedSuggestions.cultClassics.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🎭</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Cult Classics</h2>
-                  <p className="text-xs text-gray-600">Films with dedicated followings</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🎭</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Cult Classics</h2>
+                    <p className="text-xs text-gray-600">Films with dedicated followings</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('cultClassics')}
+                  disabled={refreshingSections.has('cultClassics')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('cultClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.cultClassics.map((item) => (
@@ -663,6 +807,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -672,12 +817,25 @@ export default function SuggestPage() {
           {/* Crowd Pleasers Section */}
           {categorizedSuggestions.crowdPleasers.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🎉</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Crowd Pleasers</h2>
-                  <p className="text-xs text-gray-600">Widely loved and highly rated</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🎉</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Crowd Pleasers</h2>
+                    <p className="text-xs text-gray-600">Widely loved and highly rated</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('crowdPleasers')}
+                  disabled={refreshingSections.has('crowdPleasers')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('crowdPleasers') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.crowdPleasers.map((item) => (
@@ -693,6 +851,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -702,12 +861,25 @@ export default function SuggestPage() {
           {/* New & Trending Section */}
           {categorizedSuggestions.newReleases.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">✨</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">New & Trending</h2>
-                  <p className="text-xs text-gray-600">Fresh picks based on your taste</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">✨</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">New & Trending</h2>
+                    <p className="text-xs text-gray-600">Fresh picks based on your taste</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('newReleases')}
+                  disabled={refreshingSections.has('newReleases')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('newReleases') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.newReleases.map((item) => (
@@ -723,6 +895,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -732,12 +905,25 @@ export default function SuggestPage() {
           {/* Recent Classics Section */}
           {categorizedSuggestions.recentClassics.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🎬</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Recent Classics</h2>
-                  <p className="text-xs text-gray-600">Great films from 2015-2022</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🎬</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Recent Classics</h2>
+                    <p className="text-xs text-gray-600">Great films from 2015-2022</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('recentClassics')}
+                  disabled={refreshingSections.has('recentClassics')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('recentClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.recentClassics.map((item) => (
@@ -753,6 +939,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -762,12 +949,25 @@ export default function SuggestPage() {
           {/* Deep Cuts Section */}
           {categorizedSuggestions.deepCuts.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🌟</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">Deep Cuts</h2>
-                  <p className="text-xs text-gray-600">Niche matches for your specific taste</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🌟</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Deep Cuts</h2>
+                    <p className="text-xs text-gray-600">Niche matches for your specific taste</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('deepCuts')}
+                  disabled={refreshingSections.has('deepCuts')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('deepCuts') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.deepCuts.map((item) => (
@@ -783,6 +983,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -792,12 +993,25 @@ export default function SuggestPage() {
           {/* From Collections Section */}
           {categorizedSuggestions.fromCollections.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">📚</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">From Collections</h2>
-                  <p className="text-xs text-gray-600">Complete franchises and series</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">📚</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">From Collections</h2>
+                    <p className="text-xs text-gray-600">Complete franchises and series</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('fromCollections')}
+                  disabled={refreshingSections.has('fromCollections')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('fromCollections') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.fromCollections.map((item) => (
@@ -813,6 +1027,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>
@@ -822,12 +1037,25 @@ export default function SuggestPage() {
           {/* More Recommendations Section - Fallback for remaining suggestions */}
           {categorizedSuggestions.moreRecommendations.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🎥</span>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">More Recommendations</h2>
-                  <p className="text-xs text-gray-600">Additional films you might enjoy</p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🎥</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">More Recommendations</h2>
+                    <p className="text-xs text-gray-600">Additional films you might enjoy</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRefreshSection('moreRecommendations')}
+                  disabled={refreshingSections.has('moreRecommendations')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('moreRecommendations') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.moreRecommendations.map((item) => (
@@ -843,6 +1071,7 @@ export default function SuggestPage() {
                     score={item.score}
                     voteCategory={item.voteCategory}
                     collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
                   />
                 ))}
               </div>

@@ -117,6 +117,39 @@ export async function getFilmMappings(userId: string, uris: string[]) {
   return map;
 }
 
+export async function blockSuggestion(userId: string, tmdbId: number) {
+  if (!supabase) throw new Error('Supabase not initialized');
+  const { error } = await supabase.from('blocked_suggestions').insert({ user_id: userId, tmdb_id: tmdbId });
+  if (error && error.code !== '23505') { // Ignore duplicate key errors
+    console.error('[Supabase] blockSuggestion error', { userId, tmdbId, error });
+    throw error;
+  }
+}
+
+export async function unblockSuggestion(userId: string, tmdbId: number) {
+  if (!supabase) throw new Error('Supabase not initialized');
+  const { error } = await supabase.from('blocked_suggestions').delete().eq('user_id', userId).eq('tmdb_id', tmdbId);
+  if (error) {
+    console.error('[Supabase] unblockSuggestion error', { userId, tmdbId, error });
+    throw error;
+  }
+}
+
+export async function getBlockedSuggestions(userId: string): Promise<Set<number>> {
+  if (!supabase) throw new Error('Supabase not initialized');
+  const { data, error } = await supabase
+    .from('blocked_suggestions')
+    .select('tmdb_id')
+    .eq('user_id', userId);
+  
+  if (error) {
+    console.error('[Supabase] getBlockedSuggestions error', { userId, error });
+    return new Set();
+  }
+  
+  return new Set((data ?? []).map(row => Number(row.tmdb_id)));
+}
+
 export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
   console.log('[TMDB] fetch movie start', { id });
   const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
