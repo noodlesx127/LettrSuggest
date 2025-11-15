@@ -13,8 +13,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: 'TMDB_API_KEY not configured' }, { status: 500 });
     }
 
-    // Fetch movie details with credits and genres
-    const tmdbUrl = `https://api.themoviedb.org/3/movie/${movieId}?append_to_response=credits`;
+    // Fetch movie details with credits, genres, and keywords for better subgenre detection
+    const tmdbUrl = `https://api.themoviedb.org/3/movie/${movieId}?append_to_response=credits,keywords`;
     
     const r = await fetch(tmdbUrl, {
       headers: {
