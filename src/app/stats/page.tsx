@@ -14,6 +14,7 @@ type TMDBDetails = {
   poster_path?: string;
   backdrop_path?: string;
   genres?: Array<{ id: number; name: string }>;
+  production_companies?: Array<{ id: number; name: string; logo_path?: string }>;
   credits?: {
     cast?: Array<{ id: number; name: string; profile_path?: string; order?: number }>;
     crew?: Array<{ id: number; name: string; job?: string; profile_path?: string }>;
