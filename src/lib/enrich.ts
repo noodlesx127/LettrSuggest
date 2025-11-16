@@ -1217,12 +1217,10 @@ export async function suggestByOverlap(params: {
       } else if (feats.voteCategory === 'cult-classic') {
         score = 0.25; // Cult classics get small boost
         reasons.push('Cult classic with dedicated following');
-      } else {
-        return null; // Standard films with no matches are filtered out
       }
+      // If still no score, filter out standard films with no taste matches
+      if (score <= 0) return null;
     }
-    
-    if (score <= 0) return null;
     const r = { 
       tmdbId: cid, 
       score, 
