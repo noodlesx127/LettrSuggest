@@ -122,48 +122,48 @@ export default function ProfilePage() {
       
       // 1. Delete blocked suggestions
       console.log('[Profile] Deleting blocked_suggestions...');
-      const { error: blockedError, count: blockedCount } = await supabase
+      const blockedResult = await supabase
         .from('blocked_suggestions')
-        .delete({ count: 'exact' })
+        .delete()
         .eq('user_id', uid);
-      console.log('[Profile] Deleted blocked_suggestions:', { count: blockedCount, error: blockedError });
-      if (blockedError && blockedError.code !== 'PGRST205') throw blockedError;
+      console.log('[Profile] Deleted blocked_suggestions:', { error: blockedResult.error, status: blockedResult.status });
+      if (blockedResult.error && blockedResult.error.code !== 'PGRST205') throw blockedResult.error;
 
       // 2. Delete diary events (individual watch entries) - may not exist in all deployments
       console.log('[Profile] Deleting film_diary_events...');
-      const { error: diaryError, count: diaryCount } = await supabase
+      const diaryResult = await supabase
         .from('film_diary_events')
-        .delete({ count: 'exact' })
+        .delete()
         .eq('user_id', uid);
-      console.log('[Profile] Deleted film_diary_events:', { count: diaryCount, error: diaryError });
-      if (diaryError && diaryError.code !== 'PGRST205') {
+      console.log('[Profile] Deleted film_diary_events:', { error: diaryResult.error, status: diaryResult.status });
+      if (diaryResult.error && diaryResult.error.code !== 'PGRST205') {
         console.warn('[Profile] film_diary_events table not found, skipping');
       }
 
       // 3. Delete film mappings
       console.log('[Profile] Deleting film_tmdb_map...');
-      const { error: mappingError, count: mappingCount } = await supabase
+      const mappingResult = await supabase
         .from('film_tmdb_map')
-        .delete({ count: 'exact' })
+        .delete()
         .eq('user_id', uid);
-      console.log('[Profile] Deleted film_tmdb_map:', { count: mappingCount, error: mappingError });
-      if (mappingError && mappingError.code !== 'PGRST205') throw mappingError;
+      console.log('[Profile] Deleted film_tmdb_map:', { error: mappingResult.error, status: mappingResult.status });
+      if (mappingResult.error && mappingResult.error.code !== 'PGRST205') throw mappingResult.error;
 
-      // 4. Delete film events (aggregated film data)
+      // 4. Delete film events (aggregated film data) - THIS IS THE CRITICAL ONE
       console.log('[Profile] Deleting film_events...');
-      const { error: eventsError, count: eventsCount } = await supabase
+      const eventsResult = await supabase
         .from('film_events')
-        .delete({ count: 'exact' })
+        .delete()
         .eq('user_id', uid);
-      console.log('[Profile] Deleted film_events:', { count: eventsCount, error: eventsError });
-      if (eventsError && eventsError.code !== 'PGRST205') throw eventsError;
+      console.log('[Profile] Deleted film_events:', { error: eventsResult.error, status: eventsResult.status });
+      if (eventsResult.error && eventsResult.error.code !== 'PGRST205') throw eventsResult.error;
 
       // Verify deletion
-      const { count: remainingCount } = await supabase
+      const { count: remainingCount, error: countError } = await supabase
         .from('film_events')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', uid);
-      console.log('[Profile] Remaining film_events after delete:', remainingCount);
+      console.log('[Profile] Verification query:', { remainingCount, countError });
 
       // 5. Clear local cache
       clearImportStore();
