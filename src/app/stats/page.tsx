@@ -241,7 +241,8 @@ export default function StatsPage() {
     const actorWeights = new Map<string, number>();
     const directorCounts = new Map<string, { count: number; profile?: string }>();
     const directorWeights = new Map<string, number>();
-    const keywordWeights = new Map<string, number>();
+    const keywordWeights = new Map<string, number>(); // Sub-genres/themes
+    const studioWeights = new Map<string, number>(); // Production companies
     
     // Track films by preference strength for the "Taste Profile" section
     const absoluteFavorites = filteredFilms.filter(f => (f.rating ?? 0) >= 4.5 && f.liked);
@@ -283,10 +284,16 @@ export default function StatsPage() {
           directorWeights.set(director.name, (directorWeights.get(director.name) ?? 0) + weight);
         });
         
-        // Extract keywords if available
+        // Extract keywords if available (these are sub-genres/themes)
         const keywords = (details as any).keywords?.keywords || (details as any).keywords?.results || [];
         keywords.forEach((k: { name: string }) => {
           keywordWeights.set(k.name, (keywordWeights.get(k.name) ?? 0) + weight);
+        });
+        
+        // Extract production companies/studios
+        const companies = details.production_companies || [];
+        companies.forEach((c: { name: string }) => {
+          studioWeights.set(c.name, (studioWeights.get(c.name) ?? 0) + weight);
         });
       }
     }
@@ -320,6 +327,41 @@ export default function StatsPage() {
     const topKeywords = Array.from(keywordWeights.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 15);
+    
+    // Top sub-genres (keywords are essentially sub-genres/themes)
+    const topSubgenres = Array.from(keywordWeights.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10);
+    
+    // Top studios
+    const topStudios = Array.from(studioWeights.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10);
+    
+    // Categorize studios (indie vs major)
+    const indieStudios = ['A24', 'Neon', 'Annapurna Pictures', 'Focus Features', 'Blumhouse Productions', 
+                          'Studio Ghibli', 'Searchlight Pictures', 'Fox Searchlight Pictures', 'IFC Films', 
+                          'Magnolia Pictures', 'Miramax', '24 Frames', 'Plan B Entertainment', 'Participant'];
+    const majorStudios = ['Warner Bros.', 'Universal Pictures', 'Paramount Pictures', '20th Century Fox', 
+                          'Columbia Pictures', 'Walt Disney Pictures', 'Sony Pictures', 'Metro-Goldwyn-Mayer',
+                          'Lionsgate', 'New Line Cinema', 'DreamWorks', 'Legendary Pictures'];
+    
+    let indieWeight = 0;
+    let majorWeight = 0;
+    
+    for (const [studio, weight] of studioWeights.entries()) {
+      if (indieStudios.some(indie => studio.includes(indie))) {
+        indieWeight += weight;
+      } else if (majorStudios.some(major => studio.includes(major))) {
+        majorWeight += weight;
+      }
+    }
+    
+    const studioPreference = {
+      indie: indieWeight,
+      major: majorWeight,
+      total: indieWeight + majorWeight
+    };
 
     // Decade preferences (weighted)
     const decadeWeights = new Map<string, number>();
@@ -411,6 +453,9 @@ export default function StatsPage() {
       topDirectors,
       topDirectorsByWeight,
       topKeywords,
+      topSubgenres,
+      topStudios,
+      studioPreference,
       absoluteFavorites: absoluteFavorites.length,
       highlyRatedCount: highlyRated.length,
       lowRatedButLikedCount: lowRatedButLiked.length,
@@ -614,6 +659,26 @@ export default function StatsPage() {
               </div>
             </div>
 
+            {/* Sub-Genres Section */}
+            <div className="mb-4">
+              <h3 className="font-medium text-gray-900 mb-2 text-sm flex items-center gap-2">
+                <span>🎯</span>
+                <span>Top Sub-Genres</span>
+              </h3>
+              <p className="text-xs text-gray-600 mb-2">Specific themes and sub-genres you love most</p>
+              <div className="flex flex-wrap gap-2">
+                {stats.topSubgenres.slice(0, 10).map(([subgenre, weight]) => {
+                  const strength = weight >= 3.0 ? 'strong' : weight >= 1.5 ? 'moderate' : 'light';
+                  const colorClass = strength === 'strong' ? 'bg-purple-600 text-white' : strength === 'moderate' ? 'bg-purple-400 text-white' : 'bg-purple-200 text-purple-900';
+                  return (
+                    <span key={subgenre} className={`px-3 py-1 rounded-full text-xs font-medium ${colorClass}`}>
+                      {subgenre} ({weight.toFixed(1)})
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Top Directors by Weight */}
             {stats.topDirectorsByWeight.length > 0 && (
               <div className="mb-4">
@@ -630,7 +695,7 @@ export default function StatsPage() {
 
             {/* Top Actors by Weight */}
             {stats.topActorsByWeight.length > 0 && (
-              <div>
+              <div className="mb-4">
                 <h3 className="font-medium text-gray-900 mb-2 text-sm">Favorite Actors (Weighted by Ratings)</h3>
                 <div className="flex flex-wrap gap-2">
                   {stats.topActorsByWeight.map(({ name, weight, count }) => (
@@ -641,9 +706,53 @@ export default function StatsPage() {
                 </div>
               </div>
             )}
+
+            {/* Studio Preferences */}
+            {stats.topStudios.length > 0 && (
+              <div>
+                <h3 className="font-medium text-gray-900 mb-2 text-sm flex items-center gap-2">
+                  <span>🎬</span>
+                  <span>Favorite Studios</span>
+                </h3>
+                <p className="text-xs text-gray-600 mb-2">Production companies whose films resonate with you</p>
+                
+                {/* Indie vs Major breakdown */}
+                {stats.studioPreference.total > 0 && (
+                  <div className="mb-3 bg-gray-50 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-medium text-gray-700">Studio Type Preference:</span>
+                    </div>
+                    <div className="flex gap-2 h-8">
+                      <div 
+                        className="bg-orange-500 flex items-center justify-center text-white text-xs font-medium rounded transition-all"
+                        style={{ width: `${(stats.studioPreference.indie / stats.studioPreference.total) * 100}%` }}
+                      >
+                        {stats.studioPreference.indie > 0 && `Indie ${stats.studioPreference.indie.toFixed(1)}`}
+                      </div>
+                      <div 
+                        className="bg-blue-500 flex items-center justify-center text-white text-xs font-medium rounded transition-all"
+                        style={{ width: `${(stats.studioPreference.major / stats.studioPreference.total) * 100}%` }}
+                      >
+                        {stats.studioPreference.major > 0 && `Major ${stats.studioPreference.major.toFixed(1)}`}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex flex-wrap gap-2">
+                  {stats.topStudios.slice(0, 10).map(([studio, weight]) => {
+                    return (
+                      <span key={studio} className="px-3 py-1 rounded-full text-xs font-medium bg-amber-500 text-white">
+                        {studio} ({weight.toFixed(1)})
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Additional Taste Insights */}
+          {/* Additional Taste Insights - Informational Only */}
           <div className="grid md:grid-cols-2 gap-6 mb-6">
             {/* Era Preferences */}
             {stats.topDecades && stats.topDecades.length > 0 && (
@@ -651,8 +760,9 @@ export default function StatsPage() {
                 <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                   <span>📅</span>
                   <span>Preferred Film Eras</span>
+                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Info Only</span>
                 </h3>
-                <p className="text-xs text-gray-600 mb-3">Decades you gravitate towards (used for era-specific suggestions)</p>
+                <p className="text-xs text-gray-600 mb-3">Decades you&apos;ve watched most. Not used to limit suggestions—we&apos;ll recommend great films from any era!</p>
                 <div className="space-y-2">
                   {stats.topDecades.map(([decade, weight]) => {
                     const percentage = (weight / stats.topDecades[0][1]) * 100;
@@ -681,8 +791,9 @@ export default function StatsPage() {
                 <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                   <span>🌍</span>
                   <span>Language Preferences</span>
+                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Info Only</span>
                 </h3>
-                <p className="text-xs text-gray-600 mb-3">Films in these languages match your taste</p>
+                <p className="text-xs text-gray-600 mb-3">Languages you&apos;ve watched most. Not used to limit suggestions—we&apos;ll recommend films in any language!</p>
                 <div className="space-y-2">
                   {stats.topLanguages.map(([lang, weight]) => {
                     const langNames: Record<string, string> = {
@@ -717,8 +828,9 @@ export default function StatsPage() {
                 <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                   <span>⏱️</span>
                   <span>Runtime Sweet Spot</span>
+                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Info Only</span>
                 </h3>
-                <p className="text-xs text-gray-600 mb-3">Your typical preferred film length</p>
+                <p className="text-xs text-gray-600 mb-3">Your typical film length. Not used to limit suggestions—we&apos;ll recommend films of any runtime!</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="text-center">
                     <p className="text-2xl font-bold text-gray-900">{Math.round(stats.runtimeStats.min)}</p>
@@ -741,12 +853,13 @@ export default function StatsPage() {
               <div className="bg-white border rounded-lg p-4">
                 <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                   <span>🍂</span>
-                  <span>Seasonal Boost Active</span>
+                  <span>Seasonal Context</span>
+                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Info Only</span>
                 </h3>
-                <p className="text-xs text-gray-600 mb-3">Current season influences your suggestions</p>
+                <p className="text-xs text-gray-600 mb-3">Current season for context. Not used to limit suggestions—we recommend all types year-round!</p>
                 <div className="bg-gradient-to-r from-orange-100 to-amber-100 rounded-lg p-3">
                   <p className="text-lg font-bold text-gray-900 mb-1">{stats.currentSeason}</p>
-                  <p className="text-xs text-gray-700 mb-2">Active genre boosts for this time of year</p>
+                  <p className="text-xs text-gray-700 mb-2">Typical seasonal genres (for reference only)</p>
                   {stats.seasonalGenres && stats.seasonalGenres.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {stats.seasonalGenres.map((genre) => (
