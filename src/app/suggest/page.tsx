@@ -160,57 +160,57 @@ export default function SuggestPage() {
       seasonalPicksCount: seasonalPicks.length
     });
 
-    // 1. Perfect Matches: Top highest scoring films
-    const perfectMatches = getNextItems(() => true, 12);
-
-    // 2. Based on Recent Watches: Films similar to recent favorites
+    // 1. Based on Recent Watches: Films similar to recent favorites
     const recentWatchMatches = getNextItems(item => hasRecentWatchMatch(item.reasons), 12);
 
-    // 3. From Studios You Love: Films from studios whose style you enjoy
+    // 2. From Studios You Love: Films from studios whose style you enjoy
     const studioMatches = getNextItems(item => hasStudioMatch(item.reasons), 12);
 
-    // 4. Inspired by Directors You Love: Films from or similar to directors you enjoy
+    // 3. Inspired by Directors You Love: Films from or similar to directors you enjoy
     const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 12);
 
-    // 5. From Actors You Love: Films with cast matches or similar actors
+    // 4. From Actors You Love: Films with cast matches or similar actors
     const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 12);
 
-    // 6. Your Favorite Genres: Films matching preferred genres
+    // 5. Your Favorite Genres: Films matching preferred genres
     const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 12);
 
-    // 7. Hidden Gems: Pre-2015 films with high scores but low recognition
+    // 6. Hidden Gems: Pre-2015 films with high scores but low recognition
     const hiddenGems = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
     }, 12);
 
-    // 8. Cult Classics: Films with cult following
+    // 7. Cult Classics: Films with cult following
     const cultClassics = getNextItems(item => {
       return item.voteCategory === 'cult-classic';
     }, 12);
 
-    // 9. Crowd Pleasers: Popular high-rated films
+    // 8. Crowd Pleasers: Popular high-rated films
     const crowdPleasers = getNextItems(item => {
       return item.voteCategory === 'crowd-pleaser';
     }, 12);
 
-    // 10. New & Trending: Recent releases (2023+)
+    // 9. New & Trending: Recent releases (2023+)
     const newReleases = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2023;
     }, 12);
 
-    // 11. Recent Classics: Films from 2015-2022
+    // 10. Recent Classics: Films from 2015-2022
     const recentClassics = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2015 && year < 2023;
     }, 12);
 
-    // 12. Deep Cuts: Films with specific theme/keyword matches
+    // 11. Deep Cuts: Films with specific theme/keyword matches
     const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 12);
 
-    // 13. From Collections: Films in same collections/franchises
+    // 12. From Collections: Films in same collections/franchises
     const fromCollections = getNextItems(item => !!item.collectionName, 12);
+    
+    // 13. Perfect Matches: Top highest scoring films that don't fit other categories
+    const perfectMatches = getNextItems(() => true, 12);
     
     // 14. Fallback: More recommendations (any remaining films)
     const moreRecommendations = getNextItems(() => true, 20);
