@@ -68,18 +68,32 @@ export default function LibraryPage() {
         await Promise.all(
           mappedIds.slice(0, 50).map(async (tmdbId) => { // Limit to first 50 to avoid rate limits
             try {
-              const response = await fetch(`/api/tmdb/movie/${tmdbId}`);
-              if (response.ok) {
-                const data = await response.json();
-                if (data.videos?.results) {
-                  const trailer = data.videos.results.find(
-                    (v: any) => v.site === 'YouTube' && v.type === 'Trailer' && v.official
-                  ) || data.videos.results.find(
-                    (v: any) => v.site === 'YouTube' && v.type === 'Trailer'
-                  );
-                  if (trailer) {
-                    trailerMap.set(tmdbId, trailer.key);
-                  }
+              // Try TuiMDB first, fallback to TMDB
+              let data = null;
+              try {
+                const tuiResponse = await fetch(`/api/tuimdb/movie?id=${tmdbId}&_t=${Date.now()}`);
+                if (tuiResponse.ok) {
+                  const tuiData = await tuiResponse.json();
+                  if (tuiData.ok && tuiData.movie) data = tuiData.movie;
+                }
+              } catch (e) { /* fallback to TMDB */ }
+              
+              if (!data) {
+                const response = await fetch(`/api/tmdb/movie/${tmdbId}`);
+                if (response.ok) {
+                  const tmdbData = await response.json();
+                  if (tmdbData.ok && tmdbData.movie) data = tmdbData.movie;
+                }
+              }
+              
+              if (data && data.videos?.results) {
+                const trailer = data.videos.results.find(
+                  (v: any) => v.site === 'YouTube' && v.type === 'Trailer' && v.official
+                ) || data.videos.results.find(
+                  (v: any) => v.site === 'YouTube' && v.type === 'Trailer'
+                );
+                if (trailer) {
+                  trailerMap.set(tmdbId, trailer.key);
                 }
               }
             } catch (e) {

@@ -36,17 +36,31 @@ export default function AdminPage() {
       // Fetch movie details for each blocked ID
       const detailsPromises = Array.from(blockedIds).map(async (tmdbId) => {
         try {
-          const response = await fetch(`/api/tmdb/movie/${tmdbId}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.ok && data.movie) {
-              return {
-                tmdb_id: tmdbId,
-                title: data.movie.title,
-                poster_path: data.movie.poster_path,
-                year: data.movie.release_date?.slice(0, 4)
-              };
+          // Try TuiMDB first, fallback to TMDB
+          let data = null;
+          try {
+            const tuiResponse = await fetch(`/api/tuimdb/movie?id=${tmdbId}&_t=${Date.now()}`);
+            if (tuiResponse.ok) {
+              const tuiData = await tuiResponse.json();
+              if (tuiData.ok && tuiData.movie) data = tuiData.movie;
             }
+          } catch (e) { /* fallback to TMDB */ }
+          
+          if (!data) {
+            const response = await fetch(`/api/tmdb/movie/${tmdbId}`);
+            if (response.ok) {
+              const tmdbData = await response.json();
+              if (tmdbData.ok && tmdbData.movie) data = tmdbData.movie;
+            }
+          }
+          
+          if (data) {
+            return {
+              tmdb_id: tmdbId,
+              title: data.title,
+              poster_path: data.poster_path,
+              year: data.release_date?.slice(0, 4)
+            };
           }
         } catch (e) {
           console.error(`Failed to fetch details for ${tmdbId}:`, e);
