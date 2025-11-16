@@ -5,14 +5,13 @@ Updated: 2025-11-15
 ## Current Focus
 - Enhanced genre granularity, seasonal recommendations, and **advanced subgenre-level filtering**.
 
-### ⚠️ TuiMDB Status (Nov 15, 2025)
-**TuiMDB API is functional but architecturally incompatible:**
-- ✅ API works with header-based auth (`apiKey` header)
-- ✅ Genres endpoint returns 60+ genres including seasonal ones
-- ❌ Uses internal UIDs, not TMDB IDs
-- ❌ No direct TMDB ID → TuiMDB UID mapping
-- ❌ Requires 2-step process: search by title → fetch by UID
-- **Result**: System uses TMDB exclusively. Fallback code works correctly.
+### ✅ TuiMDB Dual-ID Integration (Nov 15, 2025)
+**TuiMDB UIDs now collected during import:**
+- ✅ Movies enriched with both TMDB ID and TuiMDB UID
+- ✅ Search-based mapping: title → TuiMDB UID during import
+- ✅ UIDs cached in Supabase alongside TMDB data
+- ✅ Future-proof for TuiMDB's 60+ enhanced genres
+- 📊 Impact: Enables seasonal filtering (Christmas, Halloween, etc.) when needed
 
 ## Latest Features (Nov 15, 2025)
 

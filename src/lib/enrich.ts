@@ -27,6 +27,7 @@ export type TMDBMovie = {
   videos?: { results?: Array<{ id: string; key: string; site: string; type: string; name: string; official?: boolean }> };
   images?: { backdrops?: Array<{ file_path: string; vote_average?: number }>; posters?: Array<{ file_path: string; vote_average?: number }> };
   lists?: { results?: Array<{ id: number; name: string; description?: string; item_count?: number }> };
+  tuimdb_uid?: number; // TuiMDB's internal UID for cross-referencing
 };
 
 /**
@@ -158,31 +159,13 @@ export async function getBlockedSuggestions(userId: string): Promise<Set<number>
 }
 
 export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
-  // Try TuiMDB first for better genre data and rate limits
-  try {
-    console.log('[UnifiedAPI] fetch movie from TuiMDB start', { id });
-    const tuiUrl = new URL('/api/tuimdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
-    tuiUrl.searchParams.set('id', String(id));
-    tuiUrl.searchParams.set('_t', String(Date.now())); // Cache buster
-    
-    const tuiR = await fetch(tuiUrl.toString(), { cache: 'no-store' });
-    const tuiJ = await tuiR.json();
-    
-    if (tuiR.ok && tuiJ.ok && tuiJ.movie) {
-      console.log('[UnifiedAPI] TuiMDB fetch successful', { id });
-      return tuiJ.movie as TMDBMovie;
-    }
-    
-    console.log('[UnifiedAPI] TuiMDB fetch failed, falling back to TMDB', { id, status: tuiR.status });
-  } catch (e) {
-    console.log('[UnifiedAPI] TuiMDB exception, falling back to TMDB', { id, error: e });
-  }
-  
-  // Fallback to TMDB
+  // Fetch from TMDB (primary source)
   console.log('[UnifiedAPI] fetch movie from TMDB', { id });
   const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
   u.searchParams.set('id', String(id));
   u.searchParams.set('_t', String(Date.now())); // Cache buster
+  
+  let movie: TMDBMovie;
   try {
     const r = await fetch(u.toString(), { cache: 'no-store' });
     const j = await r.json();
@@ -191,11 +174,37 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
       throw new Error(j.error || 'Movie fetch failed');
     }
     console.log('[UnifiedAPI] TMDB fetch movie ok', { id });
-    return j.movie as TMDBMovie;
+    movie = j.movie as TMDBMovie;
   } catch (e) {
     console.error('[UnifiedAPI] TMDB fetch movie exception', { id, error: e });
     throw e;
   }
+
+  // Try to get TuiMDB UID by searching for the movie
+  try {
+    console.log('[UnifiedAPI] searching TuiMDB for UID', { tmdbId: id, title: movie.title });
+    const tuiUrl = new URL('/api/tuimdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+    const year = movie.release_date ? new Date(movie.release_date).getFullYear() : undefined;
+    tuiUrl.searchParams.set('query', movie.title);
+    if (year) tuiUrl.searchParams.set('year', String(year));
+    tuiUrl.searchParams.set('_t', String(Date.now()));
+    
+    const tuiR = await fetch(tuiUrl.toString(), { cache: 'no-store' });
+    const tuiJ = await tuiR.json();
+    
+    if (tuiR.ok && tuiJ.ok && tuiJ.results?.length > 0) {
+      // Use first result (best match)
+      const tuimdbUid = tuiJ.results[0].UID;
+      console.log('[UnifiedAPI] TuiMDB UID found', { tmdbId: id, tuimdbUid });
+      movie.tuimdb_uid = tuimdbUid;
+    } else {
+      console.log('[UnifiedAPI] TuiMDB UID not found', { tmdbId: id });
+    }
+  } catch (e) {
+    console.log('[UnifiedAPI] TuiMDB UID search failed', { tmdbId: id, error: e });
+  }
+  
+  return movie;
 }
 
 export type FilmEventLite = { uri: string; title: string; year: number | null; rating?: number; liked?: boolean };

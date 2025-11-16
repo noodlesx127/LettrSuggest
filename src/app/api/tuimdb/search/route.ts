@@ -18,10 +18,8 @@ export async function GET(req: Request) {
 
     const results = await searchTuiMDB(query, year ? parseInt(year) : undefined, apiKey);
     
-    // Convert to TMDB-compatible format for consistency
-    const tmdbFormat = results.map(tuiMDBSearchToTMDB);
-    
-    return NextResponse.json({ ok: true, results: tmdbFormat });
+    // Return raw TuiMDB results to preserve UID
+    return NextResponse.json({ ok: true, results });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'Unexpected error' }, { status: 500 });
   }
