@@ -429,39 +429,21 @@ export default function SuggestPage() {
       console.log('[Suggest] Tracking shown IDs', { total: newShownIds.size, newThisRound: suggestions.length });
       
       // Fetch full movie data for each suggestion to get videos, collections, etc.
-      // Try TuiMDB first for better genre data and rate limits, fallback to TMDB
       setProgress({ current: 5, total: 5, stage: 'Fetching movie details...' });
       const detailsPromises = suggestions.map(async (s) => {
         try {
           let movie = null;
           
-          // Try TuiMDB first
-          try {
-            const tuiUrl = new URL('/api/tuimdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
-            tuiUrl.searchParams.set('id', String(s.tmdbId));
-            tuiUrl.searchParams.set('_t', String(freshCacheKey)); // Cache buster
-            const tuiR = await fetch(tuiUrl.toString(), { cache: 'no-store' });
-            const tuiJ = await tuiR.json();
-            
-            if (tuiR.ok && tuiJ.ok && tuiJ.movie) {
-              movie = tuiJ.movie;
-              console.log('[Suggest] TuiMDB fetch successful for', s.tmdbId);
-            }
-          } catch (tuiError) {
-            console.log('[Suggest] TuiMDB failed, trying TMDB for', s.tmdbId);
-          }
+          // Fetch from TMDB API
+          // Note: TuiMDB integration requires UID mapping which we skip for now
+          const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+          u.searchParams.set('id', String(s.tmdbId));
+          u.searchParams.set('_t', String(freshCacheKey)); // Cache buster
+          const r = await fetch(u.toString(), { cache: 'no-store' });
+          const j = await r.json();
           
-          // Fallback to TMDB if TuiMDB didn't work
-          if (!movie) {
-            const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
-            u.searchParams.set('id', String(s.tmdbId));
-            u.searchParams.set('_t', String(freshCacheKey)); // Cache buster
-            const r = await fetch(u.toString(), { cache: 'no-store' });
-            const j = await r.json();
-            
-            if (j.ok && j.movie) {
-              movie = j.movie;
-            }
+          if (j.ok && j.movie) {
+            movie = j.movie;
           }
           
           if (movie) {
@@ -677,24 +659,10 @@ export default function SuggestPage() {
       
       const s = suggestions[0];
       
-      // Fetch full movie details - try TuiMDB first, fallback to TMDB
+      // Fetch full movie details from TMDB
       let movie = null;
       
       try {
-        const tuiUrl = new URL('/api/tuimdb/movie', window.location.origin);
-        tuiUrl.searchParams.set('id', String(s.tmdbId));
-        tuiUrl.searchParams.set('_t', String(Date.now())); // Cache buster
-        const tuiR = await fetch(tuiUrl.toString(), { cache: 'no-store' });
-        const tuiJ = await tuiR.json();
-        
-        if (tuiR.ok && tuiJ.ok && tuiJ.movie) {
-          movie = tuiJ.movie;
-        }
-      } catch (tuiError) {
-        console.log('[RefreshSection] TuiMDB failed, trying TMDB');
-      }
-      
-      if (!movie) {
         const u = new URL('/api/tmdb/movie', window.location.origin);
         u.searchParams.set('id', String(s.tmdbId));
         u.searchParams.set('_t', String(Date.now())); // Cache buster
@@ -704,6 +672,8 @@ export default function SuggestPage() {
         if (j.ok && j.movie) {
           movie = j.movie;
         }
+      } catch (e) {
+        console.error('[Suggest] Failed to fetch movie details', e);
       }
       
       if (movie) {

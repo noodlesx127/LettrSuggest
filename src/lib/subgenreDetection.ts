@@ -152,7 +152,7 @@ export function analyzeSubgenrePatterns(films: Array<{
     }
   }
   
-  // Determine preferred and avoided subgenres
+  // Determine preferred and avoided subgenres (more conservative thresholds)
   for (const [genre, pattern] of patterns.entries()) {
     const totalWatched = Array.from(pattern.subgenres.values()).reduce((sum, s) => sum + s.watched, 0);
     
@@ -167,8 +167,10 @@ export function analyzeSubgenrePatterns(films: Array<{
         pattern.preferredSubgenres.add(subgenre);
       }
       
-      // Avoided: watched some but low like ratio OR barely watched at all
-      if ((stats.watched >= 3 && likeRatio < 0.3) || (watchRatio < 0.05 && totalWatched >= 20)) {
+      // Avoided: ONLY if we have strong evidence (more conservative)
+      // Require at least 10 watches AND low like ratio < 0.2
+      // OR very rarely watched (< 3% of total) with at least 30 total watched
+      if ((stats.watched >= 10 && likeRatio < 0.2) || (watchRatio < 0.03 && totalWatched >= 30)) {
         pattern.avoidedSubgenres.add(subgenre);
       }
     }
