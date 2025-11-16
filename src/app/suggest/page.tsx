@@ -400,7 +400,7 @@ export default function SuggestPage() {
         mappings,
         candidates,
         excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: mode === 'quick' ? 500 : 800,
+        maxCandidates: mode === 'quick' ? 1000 : 1500,
         concurrency: 6,
         excludeWatchedIds: watchedIds,
         desiredResults: 80, // Request more suggestions to fill all sections with variety
