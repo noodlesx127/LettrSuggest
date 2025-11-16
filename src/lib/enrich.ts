@@ -683,6 +683,11 @@ export async function suggestByOverlap(params: {
     // Track directors/actors within specific subgenres for better matching
     directorKeywords: new Map<string, Set<string>>(), // director -> keywords they work in
     castKeywords: new Map<string, Set<string>>(), // cast -> keywords they work in
+    // Track recent watches for recency boost
+    recentGenres: new Set<string>(),
+    recentDirectors: new Set<string>(),
+    recentCast: new Set<string>(),
+    recentKeywords: new Set<string>(),
   };
   
   // Build negative feature bags (things the user avoids)
@@ -755,6 +760,15 @@ export async function suggestByOverlap(params: {
     if (f.isAnimation) likedAnimationCount++;
     if (f.isFamily) likedFamilyCount++;
     if (f.isChildrens) likedChildrensCount++;
+  }
+  
+  // Track recent watches (last 20 liked films) for recency boost
+  const recentLiked = likedFeats.slice(-20);
+  for (const f of recentLiked) {
+    f.genres.forEach(g => pref.recentGenres.add(g));
+    f.directors.forEach(d => pref.recentDirectors.add(d));
+    f.cast.forEach(c => pref.recentCast.add(c));
+    f.keywords.forEach(k => pref.recentKeywords.add(k));
   }
   
   // Build avoidance patterns from disliked films
@@ -980,19 +994,29 @@ export async function suggestByOverlap(params: {
       reasons.push(`Stars ${cHits.slice(0, 3).join(', ')} — ${cHits.length} cast ${cHits.length === 1 ? 'member' : 'members'} you've liked before`);
     } else {
       // Check for similar actors (actors who work in the same subgenres)
-      const similarCast = feats.cast.filter(c => {
+      const similarCast: Array<{ actor: string; likedActor: string; sharedThemes: string[] }> = [];
+      
+      for (const candidateActor of feats.cast) {
         const candidateKeywords = new Set(feats.keywords);
-        for (const [likedCast, castKeywords] of pref.castKeywords.entries()) {
-          const sharedKeywords = Array.from(castKeywords).filter(k => candidateKeywords.has(k));
-          if (sharedKeywords.length >= 2 && feats.cast.includes(c)) {
-            return true;
+        
+        // Check each actor the user likes
+        for (const [likedActor, actorKeywords] of pref.castKeywords.entries()) {
+          const sharedKeywords = Array.from(actorKeywords).filter(k => candidateKeywords.has(k));
+          if (sharedKeywords.length >= 2) {
+            similarCast.push({
+              actor: candidateActor,
+              likedActor: likedActor,
+              sharedThemes: sharedKeywords.slice(0, 3)
+            });
+            break; // Only match once per candidate actor
           }
         }
-        return false;
-      });
+      }
+      
       if (similarCast.length) {
         score += 0.3 * weights.cast; // Small boost for similar actors
-        reasons.push(`Features actors who work in similar themes you enjoy`);
+        const firstMatch = similarCast[0];
+        reasons.push(`Similar to ${firstMatch.likedActor} you enjoy — works in ${firstMatch.sharedThemes.slice(0, 2).join(', ')} themes`);
       }
     }
     
@@ -1015,6 +1039,39 @@ export async function suggestByOverlap(params: {
       const strengthText = isStrongPattern ? 'especially love' : 'enjoy';
       const countRounded = Math.round(topKeywordWeight);
       reasons.push(`Matches specific themes you ${strengthText}: ${topKeywordNames.join(', ')} (${countRounded}+ highly-rated films)`);
+    }
+    
+    // Recent watches boost - if matches genres/directors/cast/keywords from last 20 films
+    let recentBoost = 0;
+    const recentMatches: string[] = [];
+    
+    const recentGenreMatches = feats.genres.filter(g => pref.recentGenres.has(g));
+    if (recentGenreMatches.length) {
+      recentBoost += 0.5 * recentGenreMatches.length;
+      recentMatches.push(`similar to recent ${recentGenreMatches.slice(0, 2).join('/')} films`);
+    }
+    
+    const recentDirectorMatches = feats.directors.filter(d => pref.recentDirectors.has(d));
+    if (recentDirectorMatches.length) {
+      recentBoost += 1.0 * recentDirectorMatches.length;
+      recentMatches.push(`from ${recentDirectorMatches[0]} you recently enjoyed`);
+    }
+    
+    const recentCastMatches = feats.cast.filter(c => pref.recentCast.has(c)).slice(0, 2);
+    if (recentCastMatches.length) {
+      recentBoost += 0.3 * recentCastMatches.length;
+      recentMatches.push(`stars ${recentCastMatches[0]} from recent watches`);
+    }
+    
+    const recentKeywordMatches = feats.keywords.filter(k => pref.recentKeywords.has(k)).slice(0, 3);
+    if (recentKeywordMatches.length >= 2) {
+      recentBoost += 0.4 * recentKeywordMatches.length;
+      recentMatches.push(`explores ${recentKeywordMatches.slice(0, 2).join('/')} themes from recent favorites`);
+    }
+    
+    if (recentBoost > 0) {
+      score += recentBoost;
+      reasons.push(`Based on recent watches: ${recentMatches.slice(0, 2).join('; ')}`);
     }
     
     if (score <= 0) return null;
