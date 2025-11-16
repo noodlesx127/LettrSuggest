@@ -116,33 +116,37 @@ export default function ProfilePage() {
       if (!uid) throw new Error('Not signed in');
 
       // Delete all user data in order (child tables first)
+      // Note: Some tables may not exist in older deployments, ignore PGRST205 errors
+      
       // 1. Delete blocked suggestions
       const { error: blockedError } = await supabase
         .from('blocked_suggestions')
         .delete()
         .eq('user_id', uid);
-      if (blockedError) throw blockedError;
+      if (blockedError && blockedError.code !== 'PGRST205') throw blockedError;
 
-      // 2. Delete diary events (individual watch entries)
+      // 2. Delete diary events (individual watch entries) - may not exist in all deployments
       const { error: diaryError } = await supabase
         .from('film_diary_events')
         .delete()
         .eq('user_id', uid);
-      if (diaryError) throw diaryError;
+      if (diaryError && diaryError.code !== 'PGRST205') {
+        console.warn('[Profile] film_diary_events table not found, skipping');
+      }
 
       // 3. Delete film mappings
       const { error: mappingError } = await supabase
         .from('film_tmdb_map')
         .delete()
         .eq('user_id', uid);
-      if (mappingError) throw mappingError;
+      if (mappingError && mappingError.code !== 'PGRST205') throw mappingError;
 
       // 4. Delete film events (aggregated film data)
       const { error: eventsError } = await supabase
         .from('film_events')
         .delete()
         .eq('user_id', uid);
-      if (eventsError) throw eventsError;
+      if (eventsError && eventsError.code !== 'PGRST205') throw eventsError;
 
       // 5. Clear local cache
       clearImportStore();
