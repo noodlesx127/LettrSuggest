@@ -122,15 +122,15 @@ export default function ProfilePage() {
         .from('film_events')
         .select('user_id')
         .limit(5);
-      console.log('[Profile] Sample user_ids in film_events:', sampleEvents, sampleError);
+      console.log('[Profile] Sample user_ids in film_events:', sampleEvents?.map(e => e.user_id), sampleError);
 
       // Check current user's data specifically
-      const { data: userEvents, error: userError } = await supabase
+      const { data: userEvents, error: userError, count: userCount } = await supabase
         .from('film_events')
-        .select('user_id, film_id')
+        .select('user_id, uri', { count: 'exact' })
         .eq('user_id', uid)
         .limit(3);
-      console.log('[Profile] Current user events found:', userEvents, userError);
+      console.log('[Profile] Current user events found:', { count: userCount, sample: userEvents, error: userError });
 
       // Delete all user data in order (child tables first)
       // Note: Some tables may not exist in older deployments, ignore PGRST205 errors
@@ -173,12 +173,15 @@ export default function ProfilePage() {
       console.log('[Profile] Deleted film_events:', { error: eventsResult.error, status: eventsResult.status });
       if (eventsResult.error && eventsResult.error.code !== 'PGRST205') throw eventsResult.error;
 
+      // Wait a moment for the delete to fully commit
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // Verify deletion
       const { count: remainingCount, error: countError } = await supabase
         .from('film_events')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', uid);
-      console.log('[Profile] Verification query:', { remainingCount, countError });
+      console.log('[Profile] Verification query after 500ms:', { remainingCount, countError });
 
       // 5. Clear local cache
       clearImportStore();
