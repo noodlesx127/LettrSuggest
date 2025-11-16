@@ -694,7 +694,18 @@ export async function suggestByOverlap(params: {
   concurrency?: number;
   excludeWatchedIds?: Set<number>;
   desiredResults?: number;
-}): Promise<Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null }>> {
+}): Promise<Array<{ 
+  tmdbId: number; 
+  score: number; 
+  reasons: string[]; 
+  title?: string; 
+  release_date?: string; 
+  genres?: string[]; 
+  poster_path?: string | null;
+  voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
+  voteAverage?: number;
+  voteCount?: number;
+}>> {
   // Build user profile from liked/highly-rated mapped films.
   // Use as much history as possible, but cap TMDB fetches to avoid huge fan-out
   // for extremely large libraries. We bias towards the most recent entries when
