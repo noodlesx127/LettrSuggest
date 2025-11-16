@@ -1,16 +1,46 @@
-# TuiMDB Integration
+# TuiMDB Integration - DEPRECATED
 
-## Overview
+## ⚠️ Status: TuiMDB API Incompatible with Current Architecture
 
-LettrSuggest now supports the TuiMDB API alongside TMDB. TuiMDB offers:
+**As of November 2025, TuiMDB API is functional but incompatible** with LettrSuggest's architecture:
 
-- **More relaxed rate limits** - Better for high-volume usage
-- **Enhanced genre data** - More detailed genre information for better movie suggestions
-- **Flexible API** - Additional metadata and filtering options
+### Why TuiMDB Cannot Be Used
 
-The system uses a **fallback strategy**: it tries TuiMDB first, and falls back to TMDB if TuiMDB is unavailable or returns no results.
+1. **Different ID System**: TuiMDB uses internal UIDs, not TMDB IDs
+2. **No Direct ID Lookup**: Cannot fetch movie by TMDB ID directly
+3. **Search Required**: Must search by title to find UID, then fetch details
+4. **2-Step Process**: This doubles API calls and latency
+5. **Unreliable Mapping**: Title search may not return correct movie
 
-## Setup
+### What Works
+- ✅ Genres endpoint (`/api/movies/genres/`)
+- ✅ Search by title (`/api/movies/search/?queryString=...`)
+- ✅ Details by UID (`/api/movies/get/?uid=...`)
+
+### What Doesn't Work
+- ❌ Direct TMDB ID to TuiMDB UID mapping
+- ❌ Efficient bulk movie enrichment
+- ❌ Integration with existing TMDB-based caching
+
+## Current Implementation
+
+The codebase has TuiMDB integration code that **automatically falls back to TMDB** when TuiMDB fails. Since TuiMDB uses incompatible UIDs, the system effectively uses only TMDB for all movie data.
+
+## Recommendation
+
+**Remove TuiMDB integration** to eliminate unnecessary API calls that always fail. The fallback to TMDB is working correctly, but removing TuiMDB attempts will:
+
+1. Reduce network overhead (eliminates ~161 failed requests per suggestion run)
+2. Improve performance (no waiting for TuiMDB timeouts)
+3. Simplify codebase maintenance
+
+All movie data should be fetched directly from TMDB, which provides excellent data quality and has sufficient rate limits for this application's usage patterns.
+
+---
+
+## Original Documentation (For Reference)
+
+### Setup
 
 ### 1. Get Your API Key
 
