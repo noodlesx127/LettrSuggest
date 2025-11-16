@@ -912,7 +912,7 @@ export default function SuggestPage() {
           )}
 
           {/* Perfect Matches Section */}
-          {categorizedSuggestions.perfectMatches.length >= 3 && (
+          {categorizedSuggestions.perfectMatches.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -956,7 +956,7 @@ export default function SuggestPage() {
           )}
 
           {/* Based on Recent Watches Section */}
-          {categorizedSuggestions.recentWatchMatches.length >= 3 && (
+          {categorizedSuggestions.recentWatchMatches.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1000,7 +1000,7 @@ export default function SuggestPage() {
           )}
 
           {/* Inspired by Directors You Love Section */}
-          {categorizedSuggestions.directorMatches.length >= 3 && (
+          {categorizedSuggestions.directorMatches.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1044,7 +1044,7 @@ export default function SuggestPage() {
           )}
 
           {/* From Studios You Love Section */}
-          {categorizedSuggestions.studioMatches.length >= 3 && (
+          {categorizedSuggestions.studioMatches.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1088,7 +1088,7 @@ export default function SuggestPage() {
           )}
 
           {/* From Actors You Love Section */}
-          {categorizedSuggestions.actorMatches.length >= 3 && (
+          {categorizedSuggestions.actorMatches.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1132,7 +1132,7 @@ export default function SuggestPage() {
           )}
 
           {/* Your Favorite Genres Section */}
-          {categorizedSuggestions.genreMatches.length >= 3 && (
+          {categorizedSuggestions.genreMatches.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1176,7 +1176,7 @@ export default function SuggestPage() {
           )}
 
           {/* Hidden Gems Section */}
-          {categorizedSuggestions.hiddenGems.length >= 3 && (
+          {categorizedSuggestions.hiddenGems.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1220,7 +1220,7 @@ export default function SuggestPage() {
           )}
 
           {/* Cult Classics Section */}
-          {categorizedSuggestions.cultClassics.length >= 3 && (
+          {categorizedSuggestions.cultClassics.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1264,7 +1264,7 @@ export default function SuggestPage() {
           )}
 
           {/* Crowd Pleasers Section */}
-          {categorizedSuggestions.crowdPleasers.length >= 3 && (
+          {categorizedSuggestions.crowdPleasers.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1308,7 +1308,7 @@ export default function SuggestPage() {
           )}
 
           {/* New & Trending Section */}
-          {categorizedSuggestions.newReleases.length >= 3 && (
+          {categorizedSuggestions.newReleases.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1352,7 +1352,7 @@ export default function SuggestPage() {
           )}
 
           {/* Recent Classics Section */}
-          {categorizedSuggestions.recentClassics.length >= 3 && (
+          {categorizedSuggestions.recentClassics.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1396,7 +1396,7 @@ export default function SuggestPage() {
           )}
 
           {/* Deep Cuts Section */}
-          {categorizedSuggestions.deepCuts.length >= 3 && (
+          {categorizedSuggestions.deepCuts.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1440,7 +1440,7 @@ export default function SuggestPage() {
           )}
 
           {/* From Collections Section */}
-          {categorizedSuggestions.fromCollections.length >= 3 && (
+          {categorizedSuggestions.fromCollections.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1484,7 +1484,7 @@ export default function SuggestPage() {
           )}
 
           {/* More Recommendations Section - Fallback for remaining suggestions */}
-          {categorizedSuggestions.moreRecommendations.length >= 3 && (
+          {categorizedSuggestions.moreRecommendations.length >= 1 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
