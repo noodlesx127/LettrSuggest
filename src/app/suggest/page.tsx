@@ -68,10 +68,12 @@ export default function SuggestPage() {
     const hasActorMatch = (reasons: string[]) =>
       reasons.some(r => {
         const lower = r.toLowerCase();
-        return lower.includes('starring') || 
-               lower.includes('cast') || 
+        return lower.includes('stars ') || 
+               lower.includes('starring') || 
+               lower.includes('cast member') ||
+               lower.includes('cast members') || 
                lower.includes('actor') ||
-               lower.includes('similar to') && lower.includes('enjoy') ||
+               (lower.includes('similar to') && lower.includes('enjoy')) ||
                lower.includes('works in');
       });
     
@@ -90,14 +92,14 @@ export default function SuggestPage() {
     const hasStudioMatch = (reasons: string[]) =>
       reasons.some(r => {
         const lower = r.toLowerCase();
-        return (lower.includes('from') && lower.includes('studio')) ||
+        return (lower.includes('from ') && (lower.includes('studio') || lower.includes('—'))) ||
+               lower.includes('studios you enjoy') ||
                lower.includes('a24') ||
                lower.includes('neon') ||
                lower.includes('annapurna') ||
                lower.includes('blumhouse') ||
                lower.includes('ghibli') ||
-               lower.includes('searchlight') ||
-               lower.includes('studios you enjoy');
+               lower.includes('searchlight');
       });
     
     const hasDeepCutThemes = (reasons: string[]) =>
