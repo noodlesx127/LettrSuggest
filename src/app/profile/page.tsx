@@ -117,6 +117,21 @@ export default function ProfilePage() {
 
       console.log('[Profile] Starting delete for user:', uid);
 
+      // First, let's see what user_ids actually exist in the table
+      const { data: sampleEvents, error: sampleError } = await supabase
+        .from('film_events')
+        .select('user_id')
+        .limit(5);
+      console.log('[Profile] Sample user_ids in film_events:', sampleEvents, sampleError);
+
+      // Check current user's data specifically
+      const { data: userEvents, error: userError } = await supabase
+        .from('film_events')
+        .select('user_id, film_id')
+        .eq('user_id', uid)
+        .limit(3);
+      console.log('[Profile] Current user events found:', userEvents, userError);
+
       // Delete all user data in order (child tables first)
       // Note: Some tables may not exist in older deployments, ignore PGRST205 errors
       
