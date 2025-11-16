@@ -76,7 +76,13 @@ export default function SuggestPage() {
       });
     
     const hasGenreMatch = (reasons: string[]) =>
-      reasons.some(r => r.toLowerCase().includes('genre:') || r.toLowerCase().includes('similar genre'));
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return lower.includes('matches your taste in') || 
+               lower.includes('matches your specific taste in') ||
+               lower.includes('genre:') || 
+               lower.includes('similar genre');
+      });
     
     const hasRecentWatchMatch = (reasons: string[]) =>
       reasons.some(r => r.toLowerCase().includes('recent') && (r.toLowerCase().includes('watch') || r.toLowerCase().includes('favorite')));
@@ -95,16 +101,31 @@ export default function SuggestPage() {
       });
     
     const hasDeepCutThemes = (reasons: string[]) =>
-      reasons.some(r => r.toLowerCase().includes('themes you') || r.toLowerCase().includes('specific themes') || r.toLowerCase().includes('keyword:'));
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return lower.includes('themes you') || 
+               lower.includes('specific themes') || 
+               lower.includes('keyword:') ||
+               lower.includes('matches specific themes');
+      });
     
     const isSeasonalMatch = (item: MovieItem): boolean => {
-      // Check if movie title or genres match current seasonal themes
+      // Check if movie title, genres, or reasons match current seasonal themes
       const titleLower = item.title.toLowerCase();
-      const titleMatch = seasonalConfig.keywords.some(kw => titleLower.includes(kw));
+      const titleMatch = seasonalConfig.keywords.some(kw => titleLower.includes(kw.toLowerCase()));
+      
+      // Check genres if available
       const genreMatch = item.genres ? seasonalConfig.keywords.some(kw => 
-        item.genres!.some(g => g.toLowerCase().includes(kw))
+        item.genres!.some(g => g.toLowerCase().includes(kw.toLowerCase()))
       ) : false;
-      return titleMatch || genreMatch;
+      
+      // Also check reasons for genre mentions that match seasonal config
+      const reasonsMatch = item.reasons.some(r => {
+        const lower = r.toLowerCase();
+        return seasonalConfig.keywords.some(kw => lower.includes(kw.toLowerCase()));
+      });
+      
+      return titleMatch || genreMatch || reasonsMatch;
     };
 
     // Sort all by score first
@@ -129,7 +150,7 @@ export default function SuggestPage() {
 
     // 0. Seasonal Recommendations (if applicable)
     const seasonalPicks = seasonalConfig.genres.length > 0 ? 
-      getNextItems(isSeasonalMatch, 8) : [];
+      getNextItems(isSeasonalMatch, 12) : [];
     
     console.log('[Suggest] Seasonal picks result', {
       configGenres: seasonalConfig.genres,
@@ -138,59 +159,59 @@ export default function SuggestPage() {
     });
 
     // 1. Perfect Matches: Top highest scoring films
-    const perfectMatches = getNextItems(() => true, 8);
+    const perfectMatches = getNextItems(() => true, 12);
 
     // 2. Based on Recent Watches: Films similar to recent favorites
-    const recentWatchMatches = getNextItems(item => hasRecentWatchMatch(item.reasons), 8);
+    const recentWatchMatches = getNextItems(item => hasRecentWatchMatch(item.reasons), 12);
 
     // 3. From Studios You Love: Films from studios whose style you enjoy
-    const studioMatches = getNextItems(item => hasStudioMatch(item.reasons), 8);
+    const studioMatches = getNextItems(item => hasStudioMatch(item.reasons), 12);
 
     // 4. Inspired by Directors You Love: Films from or similar to directors you enjoy
-    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 8);
+    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 12);
 
     // 5. From Actors You Love: Films with cast matches or similar actors
-    const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 8);
+    const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 12);
 
     // 6. Your Favorite Genres: Films matching preferred genres
-    const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 8);
+    const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 12);
 
     // 7. Hidden Gems: Pre-2015 films with high scores but low recognition
     const hiddenGems = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
-    }, 8);
+    }, 12);
 
     // 8. Cult Classics: Films with cult following
     const cultClassics = getNextItems(item => {
       return item.voteCategory === 'cult-classic';
-    }, 8);
+    }, 12);
 
     // 9. Crowd Pleasers: Popular high-rated films
     const crowdPleasers = getNextItems(item => {
       return item.voteCategory === 'crowd-pleaser';
-    }, 8);
+    }, 12);
 
     // 10. New & Trending: Recent releases (2023+)
     const newReleases = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2023;
-    }, 8);
+    }, 12);
 
     // 11. Recent Classics: Films from 2015-2022
     const recentClassics = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2015 && year < 2023;
-    }, 8);
+    }, 12);
 
     // 12. Deep Cuts: Films with specific theme/keyword matches
-    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 8);
+    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 12);
 
     // 13. From Collections: Films in same collections/franchises
-    const fromCollections = getNextItems(item => !!item.collectionName, 8);
+    const fromCollections = getNextItems(item => !!item.collectionName, 12);
     
     // 14. Fallback: More recommendations (any remaining films)
-    const moreRecommendations = getNextItems(() => true, 15);
+    const moreRecommendations = getNextItems(() => true, 20);
 
     console.log('[Suggest] Categorization complete', {
       seasonalPicks: seasonalPicks.length,
@@ -461,6 +482,9 @@ export default function SuggestPage() {
             const collection = movie.belongs_to_collection;
             const collectionName = collection?.name || undefined;
             
+            // Extract genres
+            const genres = (movie.genres || []).map((g: any) => g.name);
+            
             return {
               id: s.tmdbId,
               title: s.title ?? movie.title ?? `#${s.tmdbId}`,
@@ -470,7 +494,8 @@ export default function SuggestPage() {
               score: s.score,
               trailerKey: trailer?.key || null,
               voteCategory,
-              collectionName
+              collectionName,
+              genres
             };
           }
         } catch (e) {
@@ -487,7 +512,8 @@ export default function SuggestPage() {
           score: s.score,
           trailerKey: null,
           voteCategory: 'standard' as const,
-          collectionName: undefined
+          collectionName: undefined,
+          genres: []
         };
       });
       
