@@ -42,6 +42,7 @@ export default function SuggestPage() {
   const [refreshingSections, setRefreshingSections] = useState<Set<string>>(new Set());
   const [shownIds, setShownIds] = useState<Set<number>>(new Set());
   const [cacheKey, setCacheKey] = useState<number>(Date.now());
+  const [progress, setProgress] = useState({ current: 0, total: 5, stage: '' });
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
@@ -289,6 +290,7 @@ export default function SuggestPage() {
       setError(null);
       setNoCandidatesReason(null);
       setLoading(true);
+      setProgress({ current: 0, total: 5, stage: 'Initializing...' });
       if (!supabase) throw new Error('Supabase not initialized');
       if (!uid) throw new Error('Not signed in');
       // Apply quick filters to source films
@@ -307,6 +309,7 @@ export default function SuggestPage() {
       });
       const uris = filteredFilms.map((f) => f.uri);
       console.log('[Suggest] fetching mappings for', uris.length, 'films');
+      setProgress({ current: 1, total: 5, stage: 'Loading your library...' });
       const mappings = await getFilmMappings(uid, uris);
       console.log('[Suggest] mappings loaded', { mappingCount: mappings.size });
       
@@ -330,6 +333,7 @@ export default function SuggestPage() {
       
       // Build taste profile with IDs for smarter discovery
       console.log('[Suggest] Building taste profile for smart discovery');
+      setProgress({ current: 2, total: 5, stage: 'Analyzing your taste profile...' });
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
@@ -344,6 +348,7 @@ export default function SuggestPage() {
       
       // Generate smart candidates using multiple TMDB discovery strategies
       console.log('[Suggest] Generating smart candidates');
+      setProgress({ current: 3, total: 5, stage: 'Discovering movies...' });
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
         topGenres: tasteProfile.topGenres,
@@ -394,6 +399,7 @@ export default function SuggestPage() {
       setSourceLabel('Based on your watched & liked films + trending releases');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length, candidatesCount: candidates.length });
+      setProgress({ current: 4, total: 5, stage: 'Scoring suggestions...' });
       const suggestions = await suggestByOverlap({
         userId: uid,
         films: lite,
@@ -424,6 +430,7 @@ export default function SuggestPage() {
       
       // Fetch full movie data for each suggestion to get videos, collections, etc.
       // Try TuiMDB first for better genre data and rate limits, fallback to TMDB
+      setProgress({ current: 5, total: 5, stage: 'Fetching movie details...' });
       const detailsPromises = suggestions.map(async (s) => {
         try {
           let movie = null;
@@ -859,7 +866,21 @@ export default function SuggestPage() {
         </div>
       </div>
       {loadingFilms && <p className="text-sm text-gray-600">Loading your library from database…</p>}
-      {loading && <p className="text-sm text-gray-600">Computing your recommendations…</p>}
+      {loading && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm text-gray-600">
+            <span>Computing your recommendations…</span>
+            <span className="text-xs">{Math.round((progress.current / progress.total) * 100)}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div 
+              className="h-full bg-blue-600 transition-all duration-500 ease-out"
+              style={{ width: `${(progress.current / progress.total) * 100}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-500">{progress.stage}</p>
+        </div>
+      )}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {!loading && !error && noCandidatesReason && (
         <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
