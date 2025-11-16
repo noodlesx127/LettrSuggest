@@ -66,10 +66,20 @@ export default function SuggestPage() {
       });
     
     const hasActorMatch = (reasons: string[]) =>
-      reasons.some(r => r.toLowerCase().includes('starring') || r.toLowerCase().includes('cast') || r.toLowerCase().includes('actor'));
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return lower.includes('starring') || 
+               lower.includes('cast') || 
+               lower.includes('actor') ||
+               lower.includes('similar to') && lower.includes('enjoy') ||
+               lower.includes('works in');
+      });
     
     const hasGenreMatch = (reasons: string[]) =>
       reasons.some(r => r.toLowerCase().includes('genre:') || r.toLowerCase().includes('similar genre'));
+    
+    const hasRecentWatchMatch = (reasons: string[]) =>
+      reasons.some(r => r.toLowerCase().includes('recent') && (r.toLowerCase().includes('watch') || r.toLowerCase().includes('favorite')));
     
     const hasDeepCutThemes = (reasons: string[]) =>
       reasons.some(r => r.toLowerCase().includes('themes you') || r.toLowerCase().includes('specific themes') || r.toLowerCase().includes('keyword:'));
@@ -117,16 +127,19 @@ export default function SuggestPage() {
     // 1. Perfect Matches: Top highest scoring films
     const perfectMatches = getNextItems(() => true, 8);
 
-    // 2. Inspired by Directors You Love: Films from or similar to directors you enjoy
+    // 2. Based on Recent Watches: Films similar to recent favorites
+    const recentWatchMatches = getNextItems(item => hasRecentWatchMatch(item.reasons), 8);
+
+    // 3. Inspired by Directors You Love: Films from or similar to directors you enjoy
     const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 8);
 
-    // 3. From Actors You Love: Films with cast matches
+    // 4. From Actors You Love: Films with cast matches or similar actors
     const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 8);
 
-    // 4. Your Favorite Genres: Films matching preferred genres
+    // 5. Your Favorite Genres: Films matching preferred genres
     const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 8);
 
-    // 5. Hidden Gems: Pre-2015 films with high scores but low recognition
+    // 6. Hidden Gems: Pre-2015 films with high scores but low recognition
     const hiddenGems = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
@@ -166,6 +179,7 @@ export default function SuggestPage() {
     console.log('[Suggest] Categorization complete', {
       seasonalPicks: seasonalPicks.length,
       perfectMatches: perfectMatches.length,
+      recentWatchMatches: recentWatchMatches.length,
       directorMatches: directorMatches.length,
       actorMatches: actorMatches.length,
       genreMatches: genreMatches.length,
@@ -185,6 +199,7 @@ export default function SuggestPage() {
       seasonalPicks,
       seasonalConfig,
       perfectMatches,
+      recentWatchMatches,
       directorMatches,
       actorMatches,
       genreMatches,
@@ -857,6 +872,50 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.perfectMatches.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Based on Recent Watches Section */}
+          {categorizedSuggestions.recentWatchMatches.length >= 3 && (
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">⏱️</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Based on Recent Watches</h2>
+                    <p className="text-xs text-gray-600">Similar to films you've enjoyed recently</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRefreshSection('recentWatchMatches')}
+                  disabled={refreshingSections.has('recentWatchMatches')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('recentWatchMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.recentWatchMatches.map((item) => (
                   <MovieCard 
                     key={item.id} 
                     id={item.id}
