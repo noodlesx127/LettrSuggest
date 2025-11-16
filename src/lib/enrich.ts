@@ -31,13 +31,12 @@ export type TMDBMovie = {
 };
 
 /**
- * Search for movies using TMDB (TuiMDB not used for search as it has different IDs)
+ * Search for movies using unified API (tries TuiMDB first to get UIDs, then TMDB)
  */
 export async function searchTmdb(query: string, year?: number) {
   console.log('[MovieAPI] search start', { query, year });
   try {
-    // Use TMDB directly for search since we need TMDB IDs for mapping
-    const results = await searchMovies({ query, year, preferTuiMDB: false });
+    const results = await searchMovies({ query, year, preferTuiMDB: true });
     console.log('[MovieAPI] search ok', { count: results.length });
     return results;
   } catch (e) {

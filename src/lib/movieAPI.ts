@@ -21,7 +21,7 @@ export type MovieDetailsOptions = {
 
 /**
  * Search for movies, trying TuiMDB first then TMDB
- * This is a client-side function that calls the API routes
+ * When TuiMDB returns results, we also search TMDB to get TMDB IDs and merge results
  */
 export async function searchMovies(options: MovieSearchOptions): Promise<UnifiedMovie[]> {
   const { query, year, preferTuiMDB = true } = options;
@@ -30,20 +30,66 @@ export async function searchMovies(options: MovieSearchOptions): Promise<Unified
   if (preferTuiMDB) {
     try {
       console.log('[UnifiedAPI] Searching TuiMDB', { query, year });
-      const u = new URL('/api/tuimdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
-      u.searchParams.set('query', query);
-      if (year) u.searchParams.set('year', String(year));
-      u.searchParams.set('_t', String(Date.now())); // Cache buster
+      const tuiUrl = new URL('/api/tuimdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+      tuiUrl.searchParams.set('query', query);
+      if (year) tuiUrl.searchParams.set('year', String(year));
+      tuiUrl.searchParams.set('_t', String(Date.now()));
       
-      const r = await fetch(u.toString());
-      const j = await r.json();
+      const tuiR = await fetch(tuiUrl.toString());
+      const tuiJ = await tuiR.json();
       
-      if (r.ok && j.ok && j.results && j.results.length > 0) {
-        console.log('[UnifiedAPI] TuiMDB search successful', { count: j.results.length });
-        return j.results;
+      if (tuiR.ok && tuiJ.ok && tuiJ.results && tuiJ.results.length > 0) {
+        console.log('[UnifiedAPI] TuiMDB search successful', { count: tuiJ.results.length });
+        
+        // Also search TMDB to get TMDB IDs and merge
+        console.log('[UnifiedAPI] Also searching TMDB to get TMDB IDs');
+        const tmdbUrl = new URL('/api/tmdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+        tmdbUrl.searchParams.set('query', query);
+        if (year) tmdbUrl.searchParams.set('year', String(year));
+        tmdbUrl.searchParams.set('_t', String(Date.now()));
+        
+        try {
+          const tmdbR = await fetch(tmdbUrl.toString());
+          const tmdbJ = await tmdbR.json();
+          
+          if (tmdbR.ok && tmdbJ.ok && tmdbJ.results && tmdbJ.results.length > 0) {
+            // Merge TuiMDB UIDs into TMDB results by matching titles
+            const tuiResults = tuiJ.results as Array<{ UID: number; Title: string; ReleaseDate?: string }>;
+            const tmdbResults = tmdbJ.results as TMDBMovie[];
+            
+            // Match by title (case-insensitive) and optionally year
+            for (const tmdbMovie of tmdbResults) {
+              const tmdbTitle = tmdbMovie.title?.toLowerCase();
+              const tmdbYear = tmdbMovie.release_date ? new Date(tmdbMovie.release_date).getFullYear() : null;
+              
+              for (const tuiMovie of tuiResults) {
+                const tuiTitle = tuiMovie.Title?.toLowerCase();
+                const tuiYear = tuiMovie.ReleaseDate ? new Date(tuiMovie.ReleaseDate).getFullYear() : null;
+                
+                // Match if titles are the same and years match (if both exist)
+                if (tmdbTitle === tuiTitle && (!tmdbYear || !tuiYear || tmdbYear === tuiYear)) {
+                  tmdbMovie.tuimdb_uid = tuiMovie.UID;
+                  console.log('[UnifiedAPI] Linked TuiMDB UID', { 
+                    title: tmdbMovie.title, 
+                    tmdbId: tmdbMovie.id, 
+                    tuiUid: tuiMovie.UID 
+                  });
+                  break;
+                }
+              }
+            }
+            
+            return tmdbResults;
+          }
+        } catch (tmdbError) {
+          console.error('[UnifiedAPI] TMDB search failed during TuiMDB merge', tmdbError);
+        }
+        
+        // If TMDB search failed, we can't use TuiMDB results (need TMDB IDs)
+        console.log('[UnifiedAPI] Could not get TMDB IDs, falling through to TMDB-only search');
+      } else {
+        console.log('[UnifiedAPI] TuiMDB returned no results, trying TMDB');
       }
-      
-      console.log('[UnifiedAPI] TuiMDB returned no results, trying TMDB');
     } catch (error) {
       console.error('[UnifiedAPI] TuiMDB search failed, falling back to TMDB', error);
     }
