@@ -56,7 +56,14 @@ export default function SuggestPage() {
     
     // Helper functions to check reason types
     const hasDirectorMatch = (reasons: string[]) => 
-      reasons.some(r => r.toLowerCase().includes('directed by') || r.toLowerCase().includes('director'));
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return lower.includes('directed by') || 
+               lower.includes('director') || 
+               lower.includes('similar to') || 
+               lower.includes('inspired by') ||
+               lower.includes('in the style of');
+      });
     
     const hasActorMatch = (reasons: string[]) =>
       reasons.some(r => r.toLowerCase().includes('starring') || r.toLowerCase().includes('cast') || r.toLowerCase().includes('actor'));
@@ -110,7 +117,7 @@ export default function SuggestPage() {
     // 1. Perfect Matches: Top highest scoring films
     const perfectMatches = getNextItems(() => true, 8);
 
-    // 2. From Directors You Love: Films with director matches
+    // 2. Inspired by Directors You Love: Films from or similar to directors you enjoy
     const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 8);
 
     // 3. From Actors You Love: Films with cast matches
@@ -869,15 +876,15 @@ export default function SuggestPage() {
             </section>
           )}
 
-          {/* From Directors You Love Section */}
+          {/* Inspired by Directors You Love Section */}
           {categorizedSuggestions.directorMatches.length >= 3 && (
             <section>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">🎬</span>
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-900">From Directors You Love</h2>
-                    <p className="text-xs text-gray-600">More from filmmakers you enjoy</p>
+                    <h2 className="text-lg font-semibold text-gray-900">Inspired by Directors You Love</h2>
+                    <p className="text-xs text-gray-600">From filmmakers you enjoy and directors with similar styles</p>
                   </div>
                 </div>
                 <button
