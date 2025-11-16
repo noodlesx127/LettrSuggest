@@ -81,6 +81,19 @@ export default function SuggestPage() {
     const hasRecentWatchMatch = (reasons: string[]) =>
       reasons.some(r => r.toLowerCase().includes('recent') && (r.toLowerCase().includes('watch') || r.toLowerCase().includes('favorite')));
     
+    const hasStudioMatch = (reasons: string[]) =>
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return (lower.includes('from') && lower.includes('studio')) ||
+               lower.includes('a24') ||
+               lower.includes('neon') ||
+               lower.includes('annapurna') ||
+               lower.includes('blumhouse') ||
+               lower.includes('ghibli') ||
+               lower.includes('searchlight') ||
+               lower.includes('studios you enjoy');
+      });
+    
     const hasDeepCutThemes = (reasons: string[]) =>
       reasons.some(r => r.toLowerCase().includes('themes you') || r.toLowerCase().includes('specific themes') || r.toLowerCase().includes('keyword:'));
     
@@ -130,56 +143,60 @@ export default function SuggestPage() {
     // 2. Based on Recent Watches: Films similar to recent favorites
     const recentWatchMatches = getNextItems(item => hasRecentWatchMatch(item.reasons), 8);
 
-    // 3. Inspired by Directors You Love: Films from or similar to directors you enjoy
+    // 3. From Studios You Love: Films from studios whose style you enjoy
+    const studioMatches = getNextItems(item => hasStudioMatch(item.reasons), 8);
+
+    // 4. Inspired by Directors You Love: Films from or similar to directors you enjoy
     const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 8);
 
-    // 4. From Actors You Love: Films with cast matches or similar actors
+    // 5. From Actors You Love: Films with cast matches or similar actors
     const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 8);
 
-    // 5. Your Favorite Genres: Films matching preferred genres
+    // 6. Your Favorite Genres: Films matching preferred genres
     const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 8);
 
-    // 6. Hidden Gems: Pre-2015 films with high scores but low recognition
+    // 7. Hidden Gems: Pre-2015 films with high scores but low recognition
     const hiddenGems = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
     }, 8);
 
-    // 6. Cult Classics: Films with cult following
+    // 8. Cult Classics: Films with cult following
     const cultClassics = getNextItems(item => {
       return item.voteCategory === 'cult-classic';
     }, 8);
 
-    // 7. Crowd Pleasers: Popular high-rated films
+    // 9. Crowd Pleasers: Popular high-rated films
     const crowdPleasers = getNextItems(item => {
       return item.voteCategory === 'crowd-pleaser';
     }, 8);
 
-    // 8. New & Trending: Recent releases (2023+)
+    // 10. New & Trending: Recent releases (2023+)
     const newReleases = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2023;
     }, 8);
 
-    // 9. Recent Classics: Films from 2015-2022
+    // 11. Recent Classics: Films from 2015-2022
     const recentClassics = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2015 && year < 2023;
     }, 8);
 
-    // 10. Deep Cuts: Films with specific theme/keyword matches
+    // 12. Deep Cuts: Films with specific theme/keyword matches
     const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 8);
 
-    // 11. From Collections: Films in same collections/franchises
+    // 13. From Collections: Films in same collections/franchises
     const fromCollections = getNextItems(item => !!item.collectionName, 8);
     
-    // 12. Fallback: More recommendations (any remaining films)
+    // 14. Fallback: More recommendations (any remaining films)
     const moreRecommendations = getNextItems(() => true, 15);
 
     console.log('[Suggest] Categorization complete', {
       seasonalPicks: seasonalPicks.length,
       perfectMatches: perfectMatches.length,
       recentWatchMatches: recentWatchMatches.length,
+      studioMatches: studioMatches.length,
       directorMatches: directorMatches.length,
       actorMatches: actorMatches.length,
       genreMatches: genreMatches.length,
@@ -200,6 +217,7 @@ export default function SuggestPage() {
       seasonalConfig,
       perfectMatches,
       recentWatchMatches,
+      studioMatches,
       directorMatches,
       actorMatches,
       genreMatches,
@@ -381,17 +399,42 @@ export default function SuggestPage() {
       setShownIds(newShownIds);
       console.log('[Suggest] Tracking shown IDs', { total: newShownIds.size, newThisRound: suggestions.length });
       
-      // Fetch full TMDB data for each suggestion to get videos, collections, etc.
+      // Fetch full movie data for each suggestion to get videos, collections, etc.
+      // Try TuiMDB first for better genre data and rate limits, fallback to TMDB
       const detailsPromises = suggestions.map(async (s) => {
         try {
-          const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
-          u.searchParams.set('id', String(s.tmdbId));
-          u.searchParams.set('_t', String(freshCacheKey)); // Cache buster
-          const r = await fetch(u.toString(), { cache: 'no-store' });
-          const j = await r.json();
+          let movie = null;
           
-          if (j.ok && j.movie) {
-            const movie = j.movie;
+          // Try TuiMDB first
+          try {
+            const tuiUrl = new URL('/api/tuimdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+            tuiUrl.searchParams.set('id', String(s.tmdbId));
+            tuiUrl.searchParams.set('_t', String(freshCacheKey)); // Cache buster
+            const tuiR = await fetch(tuiUrl.toString(), { cache: 'no-store' });
+            const tuiJ = await tuiR.json();
+            
+            if (tuiR.ok && tuiJ.ok && tuiJ.movie) {
+              movie = tuiJ.movie;
+              console.log('[Suggest] TuiMDB fetch successful for', s.tmdbId);
+            }
+          } catch (tuiError) {
+            console.log('[Suggest] TuiMDB failed, trying TMDB for', s.tmdbId);
+          }
+          
+          // Fallback to TMDB if TuiMDB didn't work
+          if (!movie) {
+            const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+            u.searchParams.set('id', String(s.tmdbId));
+            u.searchParams.set('_t', String(freshCacheKey)); // Cache buster
+            const r = await fetch(u.toString(), { cache: 'no-store' });
+            const j = await r.json();
+            
+            if (j.ok && j.movie) {
+              movie = j.movie;
+            }
+          }
+          
+          if (movie) {
             
             // Extract trailer key (first official trailer or first trailer)
             const videos = movie.videos?.results || [];
@@ -466,7 +509,7 @@ export default function SuggestPage() {
       console.log('[Suggest] runSuggest end');
       setLoading(false);
     }
-  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters, blockedIds]);
+  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters, blockedIds, shownIds]);
 
   // Fallback: if no local films, load from Supabase once
   useEffect(() => {
@@ -609,15 +652,36 @@ export default function SuggestPage() {
       
       const s = suggestions[0];
       
-      // Fetch full movie details
-      const u = new URL('/api/tmdb/movie', window.location.origin);
-      u.searchParams.set('id', String(s.tmdbId));
-      u.searchParams.set('_t', String(Date.now())); // Cache buster
-      const r = await fetch(u.toString(), { cache: 'no-store' });
-      const j = await r.json();
+      // Fetch full movie details - try TuiMDB first, fallback to TMDB
+      let movie = null;
       
-      if (j.ok && j.movie) {
-        const movie = j.movie;
+      try {
+        const tuiUrl = new URL('/api/tuimdb/movie', window.location.origin);
+        tuiUrl.searchParams.set('id', String(s.tmdbId));
+        tuiUrl.searchParams.set('_t', String(Date.now())); // Cache buster
+        const tuiR = await fetch(tuiUrl.toString(), { cache: 'no-store' });
+        const tuiJ = await tuiR.json();
+        
+        if (tuiR.ok && tuiJ.ok && tuiJ.movie) {
+          movie = tuiJ.movie;
+        }
+      } catch (tuiError) {
+        console.log('[RefreshSection] TuiMDB failed, trying TMDB');
+      }
+      
+      if (!movie) {
+        const u = new URL('/api/tmdb/movie', window.location.origin);
+        u.searchParams.set('id', String(s.tmdbId));
+        u.searchParams.set('_t', String(Date.now())); // Cache buster
+        const r = await fetch(u.toString(), { cache: 'no-store' });
+        const j = await r.json();
+        
+        if (j.ok && j.movie) {
+          movie = j.movie;
+        }
+      }
+      
+      if (movie) {
         const videos = movie.videos?.results || [];
         const trailer = videos.find((v: any) => 
           v.site === 'YouTube' && v.type === 'Trailer' && v.official
@@ -899,7 +963,7 @@ export default function SuggestPage() {
                   <span className="text-2xl">⏱️</span>
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900">Based on Recent Watches</h2>
-                    <p className="text-xs text-gray-600">Similar to films you've enjoyed recently</p>
+                    <p className="text-xs text-gray-600">Similar to films you&apos;ve enjoyed recently</p>
                   </div>
                 </div>
                 <button
@@ -960,6 +1024,50 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.directorMatches.map((item) => (
+                  <MovieCard 
+                    key={item.id} 
+                    id={item.id}
+                    title={item.title}
+                    year={item.year}
+                    posterPath={posters[item.id]}
+                    trailerKey={item.trailerKey}
+                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                    reasons={item.reasons}
+                    score={item.score}
+                    voteCategory={item.voteCategory}
+                    collectionName={item.collectionName}
+                    onRemove={handleRemoveSuggestion}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* From Studios You Love Section */}
+          {categorizedSuggestions.studioMatches.length >= 3 && (
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🎞️</span>
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">From Studios You Love</h2>
+                    <p className="text-xs text-gray-600">More from production companies whose style you enjoy</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRefreshSection('studioMatches')}
+                  disabled={refreshingSections.has('studioMatches')}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                  title="Refresh this section"
+                >
+                  <svg className={`w-3 h-3 ${refreshingSections.has('studioMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Refresh</span>
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {categorizedSuggestions.studioMatches.map((item) => (
                   <MovieCard 
                     key={item.id} 
                     id={item.id}

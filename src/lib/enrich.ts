@@ -20,6 +20,7 @@ export type TMDBMovie = {
   vote_average?: number;
   vote_count?: number;
   genres?: Array<{ id: number; name: string }>;
+  production_companies?: Array<{ id: number; name: string; logo_path?: string }>;
   credits?: { cast?: Array<{ id: number; name: string; known_for_department?: string; order?: number }>; crew?: Array<{ id: number; name: string; job?: string; department?: string }> };
   keywords?: { keywords?: Array<{ id: number; name: string }>; results?: Array<{ id: number; name: string }> };
   belongs_to_collection?: { id: number; name: string; poster_path?: string; backdrop_path?: string } | null;
@@ -157,7 +158,28 @@ export async function getBlockedSuggestions(userId: string): Promise<Set<number>
 }
 
 export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
-  console.log('[TMDB] fetch movie start', { id });
+  // Try TuiMDB first for better genre data and rate limits
+  try {
+    console.log('[UnifiedAPI] fetch movie from TuiMDB start', { id });
+    const tuiUrl = new URL('/api/tuimdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+    tuiUrl.searchParams.set('id', String(id));
+    tuiUrl.searchParams.set('_t', String(Date.now())); // Cache buster
+    
+    const tuiR = await fetch(tuiUrl.toString(), { cache: 'no-store' });
+    const tuiJ = await tuiR.json();
+    
+    if (tuiR.ok && tuiJ.ok && tuiJ.movie) {
+      console.log('[UnifiedAPI] TuiMDB fetch successful', { id });
+      return tuiJ.movie as TMDBMovie;
+    }
+    
+    console.log('[UnifiedAPI] TuiMDB fetch failed, falling back to TMDB', { id, status: tuiR.status });
+  } catch (e) {
+    console.log('[UnifiedAPI] TuiMDB exception, falling back to TMDB', { id, error: e });
+  }
+  
+  // Fallback to TMDB
+  console.log('[UnifiedAPI] fetch movie from TMDB', { id });
   const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
   u.searchParams.set('id', String(id));
   u.searchParams.set('_t', String(Date.now())); // Cache buster
@@ -165,13 +187,13 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
     const r = await fetch(u.toString(), { cache: 'no-store' });
     const j = await r.json();
     if (!r.ok || !j.ok) {
-      console.error('[TMDB] fetch movie error', { id, status: r.status, body: j });
-      throw new Error(j.error || 'TMDB fetch failed');
+      console.error('[UnifiedAPI] TMDB fetch movie error', { id, status: r.status, body: j });
+      throw new Error(j.error || 'Movie fetch failed');
     }
-    console.log('[TMDB] fetch movie ok');
+    console.log('[UnifiedAPI] TMDB fetch movie ok', { id });
     return j.movie as TMDBMovie;
   } catch (e) {
-    console.error('[TMDB] fetch movie exception', e);
+    console.error('[UnifiedAPI] TMDB fetch movie exception', { id, error: e });
     throw e;
   }
 }
@@ -189,6 +211,10 @@ function extractFeatures(movie: TMDBMovie) {
   const keywordIds = (keywordsList as Array<{ id: number; name: string }>).map((k) => k.id);
   const original_language = (movie as any).original_language as string | undefined;
   const runtime = (movie as any).runtime as number | undefined;
+  
+  // Extract production companies/studios
+  const productionCompanies = (movie.production_companies || []).map(c => c.name);
+  const productionCompanyIds = (movie.production_companies || []).map(c => c.id);
   
   // Extract collection info
   const collection = movie.belongs_to_collection ? {
@@ -257,7 +283,9 @@ function extractFeatures(movie: TMDBMovie) {
     genreCombo,
     directors,
     directorIds,
-    cast, 
+    cast,
+    productionCompanies,
+    productionCompanyIds,
     keywords,
     keywordIds,
     original_language,
@@ -679,6 +707,7 @@ export async function suggestByOverlap(params: {
     genreCombos: new Map<string, number>(),
     directors: new Map<string, number>(),
     cast: new Map<string, number>(),
+    productionCompanies: new Map<string, number>(), // Track studio preferences
     keywords: new Map<string, number>(),
     // Track directors/actors within specific subgenres for better matching
     directorKeywords: new Map<string, Set<string>>(), // director -> keywords they work in
@@ -688,6 +717,7 @@ export async function suggestByOverlap(params: {
     recentDirectors: new Set<string>(),
     recentCast: new Set<string>(),
     recentKeywords: new Set<string>(),
+    recentStudios: new Set<string>(),
   };
   
   // Build negative feature bags (things the user avoids)
@@ -755,6 +785,11 @@ export async function suggestByOverlap(params: {
       f.keywords.forEach(k => pref.castKeywords.get(c)!.add(k));
     }
     
+    // Track production companies/studios
+    for (const studio of f.productionCompanies) {
+      pref.productionCompanies.set(studio, (pref.productionCompanies.get(studio) ?? 0) + weight);
+    }
+    
     for (const k of f.keywords) pref.keywords.set(k, (pref.keywords.get(k) ?? 0) + weight);
     
     if (f.isAnimation) likedAnimationCount++;
@@ -769,6 +804,7 @@ export async function suggestByOverlap(params: {
     f.directors.forEach(d => pref.recentDirectors.add(d));
     f.cast.forEach(c => pref.recentCast.add(c));
     f.keywords.forEach(k => pref.recentKeywords.add(k));
+    f.productionCompanies.forEach(s => pref.recentStudios.add(s));
   }
   
   // Build avoidance patterns from disliked films
@@ -1041,6 +1077,28 @@ export async function suggestByOverlap(params: {
       reasons.push(`Matches specific themes you ${strengthText}: ${topKeywordNames.join(', ')} (${countRounded}+ highly-rated films)`);
     }
     
+    // Studio/Production company matching
+    const studioHits = feats.productionCompanies.filter(s => pref.productionCompanies.has(s));
+    if (studioHits.length) {
+      const totalStudioWeight = studioHits.reduce((sum, s) => sum + (pref.productionCompanies.get(s) ?? 0), 0);
+      score += totalStudioWeight * 0.7; // Meaningful boost for favorite studios
+      const topStudio = studioHits[0];
+      const studioWeight = pref.productionCompanies.get(topStudio) ?? 1;
+      const studioCountRounded = Math.round(studioWeight);
+      
+      // Special callouts for notable indie/boutique studios
+      const notableStudios = ['A24', 'Neon', 'Annapurna Pictures', 'Focus Features', 'Blumhouse Productions', 
+                              'Studio Ghibli', 'Searchlight Pictures', 'IFC Films', 'Magnolia Pictures', 
+                              'Miramax', '24 Frames', 'Plan B Entertainment', 'Legendary Pictures'];
+      const isNotableStudio = notableStudios.some(n => topStudio.includes(n));
+      
+      if (isNotableStudio) {
+        reasons.push(`From ${topStudio} — you've loved ${studioCountRounded} ${studioCountRounded === 1 ? 'film' : 'films'} from this studio`);
+      } else {
+        reasons.push(`From ${studioHits.slice(0, 2).join(', ')} — studios you enjoy`);
+      }
+    }
+    
     // Recent watches boost - if matches genres/directors/cast/keywords from last 20 films
     let recentBoost = 0;
     const recentMatches: string[] = [];
@@ -1067,6 +1125,12 @@ export async function suggestByOverlap(params: {
     if (recentKeywordMatches.length >= 2) {
       recentBoost += 0.4 * recentKeywordMatches.length;
       recentMatches.push(`explores ${recentKeywordMatches.slice(0, 2).join('/')} themes from recent favorites`);
+    }
+    
+    const recentStudioMatches = feats.productionCompanies.filter(s => pref.recentStudios.has(s));
+    if (recentStudioMatches.length) {
+      recentBoost += 0.6 * recentStudioMatches.length;
+      recentMatches.push(`from ${recentStudioMatches[0]} you recently enjoyed`);
     }
     
     if (recentBoost > 0) {
