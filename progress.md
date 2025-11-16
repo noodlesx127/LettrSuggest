@@ -3,7 +3,16 @@
 Updated: 2025-11-15
 
 ## Current Focus
-- Enhanced genre granularity, multi-source validation, seasonal recommendations, and **advanced subgenre-level filtering** using TuiMDB integration.
+- Enhanced genre granularity, seasonal recommendations, and **advanced subgenre-level filtering**.
+
+### ⚠️ TuiMDB Status (Nov 15, 2025)
+**TuiMDB API is functional but architecturally incompatible:**
+- ✅ API works with header-based auth (`apiKey` header)
+- ✅ Genres endpoint returns 60+ genres including seasonal ones
+- ❌ Uses internal UIDs, not TMDB IDs
+- ❌ No direct TMDB ID → TuiMDB UID mapping
+- ❌ Requires 2-step process: search by title → fetch by UID
+- **Result**: System uses TMDB exclusively. Fallback code works correctly.
 
 ## Latest Features (Nov 15, 2025)
 
