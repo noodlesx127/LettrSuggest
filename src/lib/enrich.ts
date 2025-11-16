@@ -1179,18 +1179,19 @@ export async function suggestByOverlap(params: {
       reasons.push(`Based on recent watches: ${recentMatches.slice(0, 2).join('; ')}`);
     }
     
-    // Apply seasonal genre boosting for TuiMDB-enhanced movies
-    // If movie has seasonal genres matching current season (e.g., Halloween in October), boost the score
-    if (feats.hasSeasonalGenre) {
-      const seasonalBoost = boostSeasonalGenres(score, feats.genreIds);
-      if (seasonalBoost > score) {
-        const boostAmount = seasonalBoost - score;
-        score = seasonalBoost;
-        const seasonalInfo = getCurrentSeasonalGenres();
-        reasons.push(`Perfect for ${seasonalInfo.labels.join(' & ')} season`);
-        console.log(`[SeasonalBoost] Boosted "${m.title}" by ${boostAmount.toFixed(2)} for seasonal relevance`);
-      }
-    }
+    // REMOVED: Seasonal boost no longer affects scoring to avoid limiting suggestions by time of year
+    // Users should see movies from all seasons regardless of current date
+    // Seasonal data remains visible on Stats page for informational purposes only
+    // if (feats.hasSeasonalGenre) {
+    //   const seasonalBoost = boostSeasonalGenres(score, feats.genreIds);
+    //   if (seasonalBoost > score) {
+    //     const boostAmount = seasonalBoost - score;
+    //     score = seasonalBoost;
+    //     const seasonalInfo = getCurrentSeasonalGenres();
+    //     reasons.push(`Perfect for ${seasonalInfo.labels.join(' & ')} season`);
+    //     console.log(`[SeasonalBoost] Boosted "${m.title}" by ${boostAmount.toFixed(2)} for seasonal relevance`);
+    //   }
+    // }
     
     if (score <= 0) return null;
     const r = { tmdbId: cid, score, reasons, title: m.title, release_date: m.release_date, genres: feats.genres, poster_path: m.poster_path };
