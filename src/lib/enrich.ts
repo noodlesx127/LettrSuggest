@@ -1204,6 +1204,24 @@ export async function suggestByOverlap(params: {
     //   }
     // }
     
+    // Give base score to quality films even without direct taste matches
+    // This allows hidden gems, crowd pleasers, and trending films to appear
+    if (score <= 0) {
+      // Award small base score for high-quality films (hidden gems, crowd pleasers, cult classics)
+      if (feats.voteCategory === 'hidden-gem') {
+        score = 0.3; // Hidden gems get small boost to ensure they appear
+        reasons.push('Highly-rated hidden gem worth discovering');
+      } else if (feats.voteCategory === 'crowd-pleaser') {
+        score = 0.2; // Crowd pleasers get small boost
+        reasons.push('Widely loved crowd-pleaser');
+      } else if (feats.voteCategory === 'cult-classic') {
+        score = 0.25; // Cult classics get small boost
+        reasons.push('Cult classic with dedicated following');
+      } else {
+        return null; // Standard films with no matches are filtered out
+      }
+    }
+    
     if (score <= 0) return null;
     const r = { 
       tmdbId: cid, 
