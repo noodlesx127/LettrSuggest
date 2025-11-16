@@ -9,6 +9,8 @@ import {
   type CrossGenrePattern
 } from './subgenreDetection';
 import { checkNicheCompatibility } from './advancedFiltering';
+import { getTuiMDBMovie, type TuiMDBMovie } from './tuimdb';
+import { mergeEnhancedGenres, getCurrentSeasonalGenres, boostSeasonalGenres } from './genreEnhancement';
 
 export type TMDBMovie = {
   id: number;
@@ -28,6 +30,7 @@ export type TMDBMovie = {
   images?: { backdrops?: Array<{ file_path: string; vote_average?: number }>; posters?: Array<{ file_path: string; vote_average?: number }> };
   lists?: { results?: Array<{ id: number; name: string; description?: string; item_count?: number }> };
   tuimdb_uid?: number; // TuiMDB's internal UID for cross-referencing
+  enhanced_genres?: Array<{ id: number; name: string; source: 'tmdb' | 'tuimdb' }>; // Merged TMDB + TuiMDB genres
 };
 
 /**
@@ -197,6 +200,26 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
       const tuimdbUid = tuiJ.results[0].UID;
       console.log('[UnifiedAPI] TuiMDB UID found', { tmdbId: id, tuimdbUid });
       movie.tuimdb_uid = tuimdbUid;
+      
+      // Fetch full TuiMDB movie details to get enhanced genres
+      try {
+        const tuiMovie = await getTuiMDBMovie(tuimdbUid);
+        if (tuiMovie && tuiMovie.genres) {
+          // Merge TuiMDB genres with TMDB genres
+          movie.enhanced_genres = mergeEnhancedGenres(
+            movie.genres || [],
+            tuiMovie.genres
+          );
+          console.log('[UnifiedAPI] Enhanced genres merged', {
+            tmdbId: id,
+            tmdbGenres: movie.genres?.length || 0,
+            tuimdbGenres: tuiMovie.genres.length,
+            enhancedTotal: movie.enhanced_genres?.length || 0
+          });
+        }
+      } catch (tuiErr) {
+        console.warn('[UnifiedAPI] Failed to fetch TuiMDB details', { tuimdbUid, error: tuiErr });
+      }
     } else {
       console.log('[UnifiedAPI] TuiMDB UID not found', { tmdbId: id });
     }
@@ -210,8 +233,15 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
 export type FilmEventLite = { uri: string; title: string; year: number | null; rating?: number; liked?: boolean };
 
 function extractFeatures(movie: TMDBMovie) {
-  const genres: string[] = Array.isArray((movie as any).genres) ? (movie as any).genres.map((g: any) => g.name).filter(Boolean) : [];
-  const genreIds: number[] = Array.isArray((movie as any).genres) ? (movie as any).genres.map((g: any) => g.id).filter(Boolean) : [];
+  // Use enhanced genres if available (includes TuiMDB data), otherwise fall back to TMDB genres
+  const genreSource = (movie as any).enhanced_genres || (movie as any).genres || [];
+  const genres: string[] = Array.isArray(genreSource) ? genreSource.map((g: any) => g.name).filter(Boolean) : [];
+  const genreIds: number[] = Array.isArray(genreSource) ? genreSource.map((g: any) => g.id).filter(Boolean) : [];
+  const genreSources: string[] = Array.isArray(genreSource) ? genreSource.map((g: any) => g.source || 'tmdb') : [];
+  
+  // Check for seasonal genres from TuiMDB (e.g., Christmas, Halloween)
+  const seasonalInfo = getCurrentSeasonalGenres();
+  const hasSeasonalGenre = genreIds.some(id => seasonalInfo.genres.includes(id));
   const directors = (movie.credits?.crew || []).filter((c) => c.job === 'Director').map((c) => c.name);
   const directorIds = (movie.credits?.crew || []).filter((c) => c.job === 'Director').map((c) => c.id);
   const cast = (movie.credits?.cast || []).slice(0, 5).map((c) => c.name);
@@ -288,7 +318,9 @@ function extractFeatures(movie: TMDBMovie) {
   
   return { 
     genres, 
-    genreIds, 
+    genreIds,
+    genreSources,
+    hasSeasonalGenre,
     genreCombo,
     directors,
     directorIds,
@@ -1145,6 +1177,19 @@ export async function suggestByOverlap(params: {
     if (recentBoost > 0) {
       score += recentBoost;
       reasons.push(`Based on recent watches: ${recentMatches.slice(0, 2).join('; ')}`);
+    }
+    
+    // Apply seasonal genre boosting for TuiMDB-enhanced movies
+    // If movie has seasonal genres matching current season (e.g., Halloween in October), boost the score
+    if (feats.hasSeasonalGenre) {
+      const seasonalBoost = boostSeasonalGenres(score, feats.genreIds);
+      if (seasonalBoost > score) {
+        const boostAmount = seasonalBoost - score;
+        score = seasonalBoost;
+        const seasonalInfo = getCurrentSeasonalGenres();
+        reasons.push(`Perfect for ${seasonalInfo.labels.join(' & ')} season`);
+        console.log(`[SeasonalBoost] Boosted "${m.title}" by ${boostAmount.toFixed(2)} for seasonal relevance`);
+      }
     }
     
     if (score <= 0) return null;

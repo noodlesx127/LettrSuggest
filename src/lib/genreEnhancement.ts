@@ -348,3 +348,63 @@ export function getSeasonalRecommendationConfig(): {
     boost: 1.5, // Boost seasonal relevance
   };
 }
+
+/**
+ * Merge TMDB and TuiMDB genre data to create enhanced genre list
+ * Preserves TMDB genres and adds unique TuiMDB genres (like seasonal, anime, etc.)
+ */
+export function mergeEnhancedGenres(
+  tmdbGenres: Array<{ id: number; name: string }>,
+  tuimdbGenres: Array<{ id: number; name: string }>
+): Array<{ id: number; name: string; source: 'tmdb' | 'tuimdb' }> {
+  const enhanced: Array<{ id: number; name: string; source: 'tmdb' | 'tuimdb' }> = [];
+  const seenIds = new Set<number>();
+  
+  // Add all TMDB genres first
+  for (const genre of tmdbGenres) {
+    enhanced.push({ ...genre, source: 'tmdb' });
+    seenIds.add(genre.id);
+  }
+  
+  // Add unique TuiMDB genres (those not overlapping with TMDB)
+  for (const genre of tuimdbGenres) {
+    // Check if this TuiMDB genre maps to an existing TMDB genre
+    const tmdbEquivalent = TUIMDB_TO_TMDB_MAP[genre.id];
+    
+    if (tmdbEquivalent && seenIds.has(tmdbEquivalent)) {
+      // This TuiMDB genre overlaps with existing TMDB genre, skip it
+      continue;
+    }
+    
+    if (!seenIds.has(genre.id)) {
+      // This is a unique TuiMDB genre (like seasonal, anime, food, etc.)
+      enhanced.push({ ...genre, source: 'tuimdb' });
+      seenIds.add(genre.id);
+    }
+  }
+  
+  return enhanced;
+}
+
+/**
+ * Boost score for movies with seasonal genres matching current season
+ */
+export function boostSeasonalGenres(
+  score: number,
+  movieGenreIds: number[],
+  boost: number = 1.3
+): number {
+  const { genres: seasonalGenres } = getCurrentSeasonalGenres();
+  
+  if (seasonalGenres.length === 0) {
+    return score; // No active seasonal boost
+  }
+  
+  const hasSeasonalGenre = movieGenreIds.some(id => seasonalGenres.includes(id));
+  
+  if (hasSeasonalGenre) {
+    return score * boost;
+  }
+  
+  return score;
+}
