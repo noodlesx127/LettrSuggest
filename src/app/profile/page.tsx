@@ -3,9 +3,11 @@ import AuthGate from '@/components/AuthGate';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { getBlockedSuggestions, unblockSuggestion } from '@/lib/enrich';
+import { useImportData } from '@/lib/importStore';
 import Image from 'next/image';
 
 export default function ProfilePage() {
+  const { clear: clearImportStore } = useImportData();
   const [deleting, setDeleting] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -113,23 +115,43 @@ export default function ProfilePage() {
       const uid = sessionRes.session?.user?.id;
       if (!uid) throw new Error('Not signed in');
 
-      // Delete all user data (cascading deletes will handle related tables)
-      // Delete film events
+      // Delete all user data in order (child tables first)
+      // 1. Delete blocked suggestions
+      const { error: blockedError } = await supabase
+        .from('blocked_suggestions')
+        .delete()
+        .eq('user_id', uid);
+      if (blockedError) throw blockedError;
+
+      // 2. Delete diary events (individual watch entries)
+      const { error: diaryError } = await supabase
+        .from('film_diary_events')
+        .delete()
+        .eq('user_id', uid);
+      if (diaryError) throw diaryError;
+
+      // 3. Delete film mappings
+      const { error: mappingError } = await supabase
+        .from('film_tmdb_map')
+        .delete()
+        .eq('user_id', uid);
+      if (mappingError) throw mappingError;
+
+      // 4. Delete film events (aggregated film data)
       const { error: eventsError } = await supabase
         .from('film_events')
         .delete()
         .eq('user_id', uid);
       if (eventsError) throw eventsError;
 
-      // Note: film_events table handles both diary and regular events
-      // No separate diary table needed
+      // 5. Clear local cache
+      clearImportStore();
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('lettr-import-v1');
+      }
 
-      // Delete film mappings
-      const { error: mappingError } = await supabase
-        .from('film_tmdb_map')
-        .delete()
-        .eq('user_id', uid);
-      if (mappingError) throw mappingError;
+      // 6. Reset blocked movies state
+      setBlockedMovies([]);
 
       setSuccess('All your data has been deleted successfully. You can now import fresh data.');
       setConfirmText('');
