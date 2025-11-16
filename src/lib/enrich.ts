@@ -1194,12 +1194,34 @@ export async function suggestByOverlap(params: {
     // }
     
     if (score <= 0) return null;
-    const r = { tmdbId: cid, score, reasons, title: m.title, release_date: m.release_date, genres: feats.genres, poster_path: m.poster_path };
+    const r = { 
+      tmdbId: cid, 
+      score, 
+      reasons, 
+      title: m.title, 
+      release_date: m.release_date, 
+      genres: feats.genres, 
+      poster_path: m.poster_path,
+      voteCategory: feats.voteCategory,
+      voteAverage: feats.voteAverage,
+      voteCount: feats.voteCount
+    };
     resultsAcc.push(r);
     // Early return the result; caller will slice after sorting
     return r;
   });
-  const results = pool.filter(Boolean) as Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null }>;
+  const results = pool.filter(Boolean) as Array<{ 
+    tmdbId: number; 
+    score: number; 
+    reasons: string[]; 
+    title?: string; 
+    release_date?: string; 
+    genres?: string[]; 
+    poster_path?: string | null;
+    voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
+    voteAverage?: number;
+    voteCount?: number;
+  }>;
   results.sort((a, b) => b.score - a.score);
   return results.slice(0, desired);
 }
