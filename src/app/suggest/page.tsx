@@ -707,20 +707,13 @@ export default function SuggestPage() {
           v.site === 'YouTube' && v.type === 'Trailer'
         );
         
-        const voteAverage = movie.vote_average || 0;
-        const voteCount = movie.vote_count || 0;
-        let voteCategory: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard' = 'standard';
-        
-        if (voteAverage >= 7.5 && voteCount < 1000) {
-          voteCategory = 'hidden-gem';
-        } else if (voteAverage >= 7.0 && voteCount > 10000) {
-          voteCategory = 'crowd-pleaser';
-        } else if (voteAverage >= 7.0 && voteCount >= 1000 && voteCount <= 5000) {
-          voteCategory = 'cult-classic';
-        }
+        // Use voteCategory from suggestByOverlap result (already calculated there)
+        const voteCategory = s.voteCategory || 'standard';
         
         const collection = movie.belongs_to_collection;
         const collectionName = collection?.name || undefined;
+        
+        const genres = (movie.genres || []).map((g: any) => g.name);
         
         return {
           id: s.tmdbId,
@@ -731,7 +724,8 @@ export default function SuggestPage() {
           score: s.score,
           trailerKey: trailer?.key || null,
           voteCategory,
-          collectionName
+          collectionName,
+          genres
         };
       }
       
