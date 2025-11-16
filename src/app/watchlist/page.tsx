@@ -68,9 +68,9 @@ export default function WatchlistPage() {
           mappedIds.slice(0, 50).map(async (tmdbId) => {
             try {
               // Try TuiMDB first, fallback to TMDB
-              let data = null;
-              try {
-                const tuiResponse = await fetch(`/api/tuimdb/movie?id=${tmdbId}&_t=${Date.now()}`);
+            let data = null;
+            try {
+                const tuiResponse = await fetch(`/api/tuimdb/movie?uid=${tmdbId}&_t=${Date.now()}`);
                 if (tuiResponse.ok) {
                   const tuiData = await tuiResponse.json();
                   if (tuiData.ok && tuiData.movie) data = tuiData.movie;
