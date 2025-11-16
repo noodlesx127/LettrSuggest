@@ -117,71 +117,19 @@ export default function ProfilePage() {
 
       console.log('[Profile] Starting delete for user:', uid);
 
-      // First, let's see what user_ids actually exist in the table
-      const { data: sampleEvents, error: sampleError } = await supabase
-        .from('film_events')
-        .select('user_id')
-        .limit(5);
-      console.log('[Profile] Sample user_ids in film_events:', sampleEvents?.map(e => e.user_id), sampleError);
-
-      // Check current user's data specifically
-      const { data: userEvents, error: userError, count: userCount } = await supabase
-        .from('film_events')
-        .select('user_id, uri', { count: 'exact' })
-        .eq('user_id', uid)
-        .limit(3);
-      console.log('[Profile] Current user events found:', { count: userCount, sample: userEvents, error: userError });
-
-      // Delete all user data in order (child tables first)
-      // Note: Some tables may not exist in older deployments, ignore PGRST205 errors
+      // Use database function to delete all data (bypasses RLS issues)
+      const { data: deleteResult, error: deleteError } = await supabase
+        .rpc('delete_user_data', { target_user_id: uid });
       
-      // 1. Delete blocked suggestions
-      console.log('[Profile] Deleting blocked_suggestions...');
-      const blockedResult = await supabase
-        .from('blocked_suggestions')
-        .delete()
-        .eq('user_id', uid);
-      console.log('[Profile] Deleted blocked_suggestions:', { error: blockedResult.error, status: blockedResult.status });
-      if (blockedResult.error && blockedResult.error.code !== 'PGRST205') throw blockedResult.error;
-
-      // 2. Delete diary events (individual watch entries) - may not exist in all deployments
-      console.log('[Profile] Deleting film_diary_events...');
-      const diaryResult = await supabase
-        .from('film_diary_events')
-        .delete()
-        .eq('user_id', uid);
-      console.log('[Profile] Deleted film_diary_events:', { error: diaryResult.error, status: diaryResult.status });
-      if (diaryResult.error && diaryResult.error.code !== 'PGRST205') {
-        console.warn('[Profile] film_diary_events table not found, skipping');
-      }
-
-      // 3. Delete film mappings
-      console.log('[Profile] Deleting film_tmdb_map...');
-      const mappingResult = await supabase
-        .from('film_tmdb_map')
-        .delete()
-        .eq('user_id', uid);
-      console.log('[Profile] Deleted film_tmdb_map:', { error: mappingResult.error, status: mappingResult.status });
-      if (mappingResult.error && mappingResult.error.code !== 'PGRST205') throw mappingResult.error;
-
-      // 4. Delete film events (aggregated film data) - THIS IS THE CRITICAL ONE
-      console.log('[Profile] Deleting film_events...');
-      const eventsResult = await supabase
-        .from('film_events')
-        .delete()
-        .eq('user_id', uid);
-      console.log('[Profile] Deleted film_events:', { error: eventsResult.error, status: eventsResult.status });
-      if (eventsResult.error && eventsResult.error.code !== 'PGRST205') throw eventsResult.error;
-
-      // Wait a moment for the delete to fully commit
-      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log('[Profile] Delete result:', deleteResult, deleteError);
+      if (deleteError) throw deleteError;
 
       // Verify deletion
       const { count: remainingCount, error: countError } = await supabase
         .from('film_events')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', uid);
-      console.log('[Profile] Verification query after 500ms:', { remainingCount, countError });
+      console.log('[Profile] Verification query:', { remainingCount, countError });
 
       // 5. Clear local cache
       clearImportStore();
