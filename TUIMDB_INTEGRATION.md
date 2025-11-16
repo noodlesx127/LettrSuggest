@@ -1,40 +1,30 @@
 # TuiMDB Integration - DEPRECATED
 
-## ⚠️ Status: TuiMDB API Incompatible with Current Architecture
+## ⚠️ Status: TuiMDB API Now Integrated via Search-Based Mapping
 
-**As of November 2025, TuiMDB API is functional but incompatible** with LettrSuggest's architecture:
+**As of November 2025, TuiMDB API is functional and now integrated** with LettrSuggest:
 
-### Why TuiMDB Cannot Be Used
+### How It Works Now
 
-1. **Different ID System**: TuiMDB uses internal UIDs, not TMDB IDs
-2. **No Direct ID Lookup**: Cannot fetch movie by TMDB ID directly
-3. **Search Required**: Must search by title to find UID, then fetch details
-4. **2-Step Process**: This doubles API calls and latency
-5. **Unreliable Mapping**: Title search may not return correct movie
+1. **Dual ID System**: Movies are enriched with both TMDB ID and TuiMDB UID
+2. **Search-Based Mapping**: During import, each movie is searched by title in TuiMDB to get its UID
+3. **Cached UIDs**: TuiMDB UIDs are stored alongside TMDB data in Supabase
+4. **Opportunistic Enhancement**: TuiMDB UIDs enable future access to enhanced genre data
 
 ### What Works
-- ✅ Genres endpoint (`/api/movies/genres/`)
+- ✅ TMDB as primary data source (reliable, direct ID lookup)
+- ✅ TuiMDB UID fetched via title search during enrichment
+- ✅ Both IDs cached for each movie
+- ✅ Genres endpoint (`/api/movies/genres/`) - 60+ genres including seasonal
 - ✅ Search by title (`/api/movies/search/?queryString=...`)
 - ✅ Details by UID (`/api/movies/get/?uid=...`)
 
-### What Doesn't Work
-- ❌ Direct TMDB ID to TuiMDB UID mapping
-- ❌ Efficient bulk movie enrichment
-- ❌ Integration with existing TMDB-based caching
+### Benefits of Dual ID Tracking
 
-## Current Implementation
-
-The codebase has TuiMDB integration code that **automatically falls back to TMDB** when TuiMDB fails. Since TuiMDB uses incompatible UIDs, the system effectively uses only TMDB for all movie data.
-
-## Recommendation
-
-**Remove TuiMDB integration** to eliminate unnecessary API calls that always fail. The fallback to TMDB is working correctly, but removing TuiMDB attempts will:
-
-1. Reduce network overhead (eliminates ~161 failed requests per suggestion run)
-2. Improve performance (no waiting for TuiMDB timeouts)
-3. Simplify codebase maintenance
-
-All movie data should be fetched directly from TMDB, which provides excellent data quality and has sufficient rate limits for this application's usage patterns.
+1. **Future-Proof**: Can switch to TuiMDB data when needed
+2. **Enhanced Genres**: TuiMDB has seasonal genres (Christmas, Halloween, etc.)
+3. **No Breaking Changes**: System continues using TMDB as primary source
+4. **Opportunistic**: UIDs collected during normal import flow
 
 ---
 

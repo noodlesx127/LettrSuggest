@@ -35,13 +35,12 @@ export type TuiMDBMovie = {
 };
 
 export type TuiMDBSearchResult = {
-  id: number;
-  title: string;
-  original_title?: string;
-  release_date?: string;
-  poster?: string;
-  overview?: string;
-  rating?: number;
+  UID: number; // TuiMDB's internal ID
+  Title: string;
+  ReleaseDate?: string;
+  Poster?: string;
+  Overview?: string;
+  Rating?: number;
 };
 
 export type TuiMDBGenre = {
@@ -198,12 +197,11 @@ export function tuiMDBToTMDB(tuiMovie: TuiMDBMovie): any {
  */
 export function tuiMDBSearchToTMDB(tuiResult: TuiMDBSearchResult): any {
   return {
-    id: tuiResult.id,
-    title: tuiResult.title,
-    original_title: tuiResult.original_title,
-    release_date: tuiResult.release_date,
-    poster_path: tuiResult.poster?.replace('https://image.tmdb.org/t/p/w500', ''),
-    overview: tuiResult.overview,
-    vote_average: tuiResult.rating,
+    id: tuiResult.UID,
+    title: tuiResult.Title,
+    release_date: tuiResult.ReleaseDate,
+    poster_path: tuiResult.Poster?.replace('https://image.tmdb.org/t/p/w500', ''),
+    overview: tuiResult.Overview,
+    vote_average: tuiResult.Rating,
   };
 }
