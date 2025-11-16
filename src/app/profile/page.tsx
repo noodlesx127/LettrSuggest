@@ -41,7 +41,7 @@ export default function ProfilePage() {
           // Try TuiMDB first, fallback to TMDB
           let data = null;
           try {
-            const tuiResponse = await fetch(`/api/tuimdb/movie?id=${tmdbId}&_t=${Date.now()}`);
+            const tuiResponse = await fetch(`/api/tuimdb/movie?uid=${tmdbId}&_t=${Date.now()}`);
             if (tuiResponse.ok) {
               const tuiData = await tuiResponse.json();
               if (tuiData.ok && tuiData.movie) data = tuiData.movie;
@@ -157,8 +157,13 @@ export default function ProfilePage() {
       // 6. Reset blocked movies state
       setBlockedMovies([]);
 
-      setSuccess('All your data has been deleted successfully. You can now import fresh data.');
+      setSuccess('All your data has been deleted successfully. Reloading page...');
       setConfirmText('');
+      
+      // Reload page to clear all cached data and state
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
     } catch (e: any) {
       console.error('[Profile] Delete all error:', e);
       setError(e?.message ?? 'Failed to delete data');
