@@ -121,12 +121,8 @@ export default function ProfilePage() {
         .eq('user_id', uid);
       if (eventsError) throw eventsError;
 
-      // Delete diary events
-      const { error: diaryError } = await supabase
-        .from('film_diary_events')
-        .delete()
-        .eq('user_id', uid);
-      if (diaryError) throw diaryError;
+      // Note: film_events table handles both diary and regular events
+      // No separate diary table needed
 
       // Delete film mappings
       const { error: mappingError } = await supabase

@@ -4,10 +4,10 @@ import { getTuiMDBMovie, tuiMDBToTMDB } from '@/lib/tuimdb';
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const id = url.searchParams.get('id');
+    const uid = url.searchParams.get('uid');
     
-    if (!id) {
-      return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    if (!uid) {
+      return NextResponse.json({ error: 'Missing uid parameter' }, { status: 400 });
     }
 
     const apiKey = process.env.TUIMDB_API_KEY;
@@ -15,7 +15,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'TUIMDB_API_KEY not configured' }, { status: 500 });
     }
 
-    const movie = await getTuiMDBMovie(parseInt(id), apiKey);
+    const movie = await getTuiMDBMovie(parseInt(uid), apiKey);
     
     if (!movie) {
       return NextResponse.json({ error: 'Movie not found' }, { status: 404 });
