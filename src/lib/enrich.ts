@@ -945,20 +945,29 @@ export async function suggestByOverlap(params: {
       reasons.push(`Directed by ${dHits.slice(0, 2).join(', ')} — you've ${dirQuality} ${dirCountRounded} ${dirCountRounded === 1 ? 'film' : 'films'} by ${dHits.length === 1 ? 'this director' : 'these directors'}`);
     } else {
       // Check for similar directors (directors who work in the same subgenres/keywords)
-      const similarDirectors = feats.directors.filter(d => {
-        // Find directors who share many keywords with this candidate
+      const similarDirectors: Array<{ director: string; likedDirector: string; sharedThemes: string[] }> = [];
+      
+      for (const candidateDir of feats.directors) {
         const candidateKeywords = new Set(feats.keywords);
+        
+        // Check each director the user likes
         for (const [likedDir, dirKeywords] of pref.directorKeywords.entries()) {
           const sharedKeywords = Array.from(dirKeywords).filter(k => candidateKeywords.has(k));
-          if (sharedKeywords.length >= 2 && feats.directors.includes(d)) {
-            return true;
+          if (sharedKeywords.length >= 2) {
+            similarDirectors.push({
+              director: candidateDir,
+              likedDirector: likedDir,
+              sharedThemes: sharedKeywords.slice(0, 3)
+            });
+            break; // Only match once per candidate director
           }
         }
-        return false;
-      });
+      }
+      
       if (similarDirectors.length) {
         score += 0.8 * weights.director; // Lower boost than exact director match
-        reasons.push(`Director works in similar subgenres you enjoy`);
+        const firstMatch = similarDirectors[0];
+        reasons.push(`Similar to ${firstMatch.likedDirector} you love — shares themes like ${firstMatch.sharedThemes.slice(0, 2).join(', ')}`);
       }
     }
     
