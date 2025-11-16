@@ -360,7 +360,7 @@ export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null
       .from('tmdb_movies')
       .select('data')
       .eq('tmdb_id', id)
-      .single();
+      .maybeSingle();
     if (!error && data && data.data) {
       const cached = data.data as TMDBMovie;
       // If cached has credits/keywords, use it directly
