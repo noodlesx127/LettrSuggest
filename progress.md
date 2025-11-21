@@ -1,6 +1,22 @@
-# Project Progress
+3. **Temporal Diversity:** Added random year range filtering across 5 temporal buckets:
+   - Recent (2020+)
+   - Modern classics (2010-2019)
+   - 2000s (2000-2009)
+   - 90s (1990-1999)
+   - No filter (all eras)
+4. **Variable Genre/Keyword Counts:** Randomly varies how many genres (1-3) and keywords (1-4) are used instead of fixed counts
+5. **Aggressive Shuffling:** All genre, keyword, and director selections are randomly shuffled before each query
 
-Updated: 2025-11-15
+**Changes to `src/app/suggest/page.tsx`:**
+1. **Limited History Tracking:** `shownIds` now limited to last 200 movies instead of indefinite accumulation
+2. **Automatic History Clear:** Refresh button automatically clears shown IDs for completely fresh suggestions
+3. **Improved Shuffle:** Simplified randomization algorithm for better distribution
+
+**Impact:**
+- Each refresh provides significantly different movies
+- Better temporal distribution (mix of old and new)
+- More variety in discovery strategies
+- System won't run out of candidates after multiple refreshes
 
 ## Current Focus
 - Enhanced genre granularity, seasonal recommendations, and **advanced subgenre-level filtering**.
