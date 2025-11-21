@@ -21,6 +21,8 @@ type MovieItem = {
   voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
   collectionName?: string;
   genres?: string[];
+  vote_average?: number;
+  vote_count?: number;
 };
 
 export default function SuggestPage() {
@@ -514,7 +516,7 @@ export default function SuggestPage() {
         maxCandidates: mode === 'quick' ? 1000 : 1500,
         concurrency: 6,
         excludeWatchedIds: watchedIds,
-        desiredResults: 80, // Request more suggestions to fill all sections with variety
+        desiredResults: 150, // Request more suggestions to fill all 15 sections with variety
       });
       // Best-effort: ensure posters/backdrops exist for suggested ids.
       if (suggestions.length) {
@@ -583,7 +585,9 @@ export default function SuggestPage() {
               trailerKey: trailer?.key || null,
               voteCategory,
               collectionName,
-              genres
+              genres,
+              vote_average: movie.vote_average,
+              vote_count: movie.vote_count
             };
           }
         } catch (e) {
@@ -809,7 +813,9 @@ export default function SuggestPage() {
           trailerKey: trailer?.key || null,
           voteCategory,
           collectionName,
-          genres
+          genres,
+          vote_average: movie.vote_average,
+          vote_count: movie.vote_count
         };
       }
 
@@ -930,7 +936,9 @@ export default function SuggestPage() {
               trailerKey: trailer?.key || null,
               voteCategory,
               collectionName,
-              genres
+              genres,
+              vote_average: movie.vote_average,
+              vote_count: movie.vote_count
             };
             return movieItem;
           }
