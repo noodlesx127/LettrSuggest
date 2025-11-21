@@ -54,89 +54,89 @@ export default function SuggestPage() {
 
     const currentYear = new Date().getFullYear();
     const seasonalConfig = getSeasonalRecommendationConfig();
-    
+
     // Helper functions to check reason types
-    const hasDirectorMatch = (reasons: string[]) => 
+    const hasDirectorMatch = (reasons: string[]) =>
       reasons.some(r => {
         const lower = r.toLowerCase();
-        return lower.includes('directed by') || 
-               lower.includes('director') || 
-               lower.includes('similar to') || 
-               lower.includes('inspired by') ||
-               lower.includes('in the style of');
+        return lower.includes('directed by') ||
+          lower.includes('director') ||
+          lower.includes('similar to') ||
+          lower.includes('inspired by') ||
+          lower.includes('in the style of');
       });
-    
+
     const hasActorMatch = (reasons: string[]) =>
       reasons.some(r => {
         const lower = r.toLowerCase();
-        return lower.includes('stars ') || 
-               lower.includes('starring') || 
-               lower.includes('cast member') ||
-               lower.includes('cast members') || 
-               lower.includes('actor') ||
-               (lower.includes('similar to') && lower.includes('enjoy')) ||
-               lower.includes('works in');
+        return lower.includes('stars ') ||
+          lower.includes('starring') ||
+          lower.includes('cast member') ||
+          lower.includes('cast members') ||
+          lower.includes('actor') ||
+          (lower.includes('similar to') && lower.includes('enjoy')) ||
+          lower.includes('works in');
       });
-    
+
     const hasGenreMatch = (reasons: string[]) =>
       reasons.some(r => {
         const lower = r.toLowerCase();
-        return lower.includes('matches your taste in') || 
-               lower.includes('matches your specific taste in') ||
-               lower.includes('genre:') || 
-               lower.includes('similar genre');
+        return lower.includes('matches your taste in') ||
+          lower.includes('matches your specific taste in') ||
+          lower.includes('genre:') ||
+          lower.includes('similar genre');
       });
-    
+
     const hasRecentWatchMatch = (reasons: string[]) =>
       reasons.some(r => r.toLowerCase().includes('recent') && (r.toLowerCase().includes('watch') || r.toLowerCase().includes('favorite')));
-    
+
     const hasStudioMatch = (reasons: string[]) =>
       reasons.some(r => {
         const lower = r.toLowerCase();
         return (lower.includes('from ') && (lower.includes('studio') || lower.includes('—'))) ||
-               lower.includes('studios you enjoy') ||
-               lower.includes('a24') ||
-               lower.includes('neon') ||
-               lower.includes('annapurna') ||
-               lower.includes('blumhouse') ||
-               lower.includes('ghibli') ||
-               lower.includes('searchlight');
+          lower.includes('studios you enjoy') ||
+          lower.includes('a24') ||
+          lower.includes('neon') ||
+          lower.includes('annapurna') ||
+          lower.includes('blumhouse') ||
+          lower.includes('ghibli') ||
+          lower.includes('searchlight');
       });
-    
+
     const hasDeepCutThemes = (reasons: string[]) =>
       reasons.some(r => {
         const lower = r.toLowerCase();
-        return lower.includes('themes you') || 
-               lower.includes('specific themes') || 
-               lower.includes('keyword:') ||
-               lower.includes('matches specific themes');
+        return lower.includes('themes you') ||
+          lower.includes('specific themes') ||
+          lower.includes('keyword:') ||
+          lower.includes('matches specific themes');
       });
-    
+
     const isSeasonalMatch = (item: MovieItem): boolean => {
       // Check if movie title, genres, or reasons match current seasonal themes
       const titleLower = item.title.toLowerCase();
       const titleMatch = seasonalConfig.keywords.some(kw => titleLower.includes(kw.toLowerCase()));
-      
+
       // Check genres if available
-      const genreMatch = item.genres ? seasonalConfig.keywords.some(kw => 
+      const genreMatch = item.genres ? seasonalConfig.keywords.some(kw =>
         item.genres!.some(g => g.toLowerCase().includes(kw.toLowerCase()))
       ) : false;
-      
+
       // Also check reasons for genre mentions that match seasonal config
       const reasonsMatch = item.reasons.some(r => {
         const lower = r.toLowerCase();
         return seasonalConfig.keywords.some(kw => lower.includes(kw.toLowerCase()));
       });
-      
+
       return titleMatch || genreMatch || reasonsMatch;
     };
 
     // Sort all by score first
     const sorted = [...items].sort((a, b) => b.score - a.score);
-    
+
     // Track used IDs to prevent duplicates across sections
     const usedIds = new Set<number>();
-    
+
     // Helper to get next N unused items matching a filter
     const getNextItems = (filter: (item: MovieItem) => boolean, count: number): MovieItem[] => {
       const results: MovieItem[] = [];
@@ -152,9 +152,9 @@ export default function SuggestPage() {
     };
 
     // 0. Seasonal Recommendations (if applicable)
-    const seasonalPicks = seasonalConfig.genres.length > 0 ? 
+    const seasonalPicks = seasonalConfig.genres.length > 0 ?
       getNextItems(isSeasonalMatch, 12) : [];
-    
+
     console.log('[Suggest] Seasonal picks result', {
       configGenres: seasonalConfig.genres,
       configKeywords: seasonalConfig.keywords,
@@ -209,10 +209,10 @@ export default function SuggestPage() {
 
     // 12. From Collections: Films in same collections/franchises
     const fromCollections = getNextItems(item => !!item.collectionName, 12);
-    
+
     // 13. Perfect Matches: Top highest scoring films that don't fit other categories
     const perfectMatches = getNextItems(() => true, 12);
-    
+
     // 14. Fallback: More recommendations (any remaining films)
     const moreRecommendations = getNextItems(() => true, 20);
 
@@ -256,13 +256,118 @@ export default function SuggestPage() {
     };
   }, [items]);
 
+  // Section filter mapping for individual section refresh
+  const getSectionFilter = useCallback((sectionName: string, seasonalConfig: any) => {
+    const currentYear = new Date().getFullYear();
+
+    // Helper functions for checking reasons
+    const hasDirectorMatch = (reasons: string[]) =>
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return lower.includes('directed by') ||
+          lower.includes('director') ||
+          lower.includes('similar to') ||
+          lower.includes('inspired by') ||
+          lower.includes('in the style of');
+      });
+
+    const hasActorMatch = (reasons: string[]) =>
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return lower.includes('stars ') ||
+          lower.includes('starring') ||
+          lower.includes('cast member') ||
+          lower.includes('cast members') ||
+          lower.includes('actor') ||
+          (lower.includes('similar to') && lower.includes('enjoy')) ||
+          lower.includes('works in');
+      });
+
+    const hasGenreMatch = (reasons: string[]) =>
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return lower.includes('matches your taste in') ||
+          lower.includes('matches your specific taste in') ||
+          lower.includes('genre:') ||
+          lower.includes('similar genre');
+      });
+
+    const hasRecentWatchMatch = (reasons: string[]) =>
+      reasons.some(r => r.toLowerCase().includes('recent') && (r.toLowerCase().includes('watch') || r.toLowerCase().includes('favorite')));
+
+    const hasStudioMatch = (reasons: string[]) =>
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return (lower.includes('from ') && (lower.includes('studio') || lower.includes('—'))) ||
+          lower.includes('studios you enjoy') ||
+          lower.includes('a24') ||
+          lower.includes('neon') ||
+          lower.includes('annapurna') ||
+          lower.includes('blumhouse') ||
+          lower.includes('ghibli') ||
+          lower.includes('searchlight');
+      });
+
+    const hasDeepCutThemes = (reasons: string[]) =>
+      reasons.some(r => {
+        const lower = r.toLowerCase();
+        return lower.includes('themes you') ||
+          lower.includes('specific themes') ||
+          lower.includes('keyword:') ||
+          lower.includes('matches specific themes');
+      });
+
+    const isSeasonalMatch = (item: MovieItem): boolean => {
+      const titleLower = item.title.toLowerCase();
+      const titleMatch = seasonalConfig.keywords.some((kw: string) => titleLower.includes(kw.toLowerCase()));
+      const genreMatch = item.genres ? seasonalConfig.keywords.some((kw: string) =>
+        item.genres!.some(g => g.toLowerCase().includes(kw.toLowerCase()))
+      ) : false;
+      const reasonsMatch = item.reasons.some(r => {
+        const lower = r.toLowerCase();
+        return seasonalConfig.keywords.some((kw: string) => lower.includes(kw.toLowerCase()));
+      });
+      return titleMatch || genreMatch || reasonsMatch;
+    };
+
+    // Return the appropriate filter function
+    const filters: Record<string, (item: MovieItem) => boolean> = {
+      seasonalPicks: isSeasonalMatch,
+      recentWatchMatches: (item) => hasRecentWatchMatch(item.reasons),
+      studioMatches: (item) => hasStudioMatch(item.reasons),
+      directorMatches: (item) => hasDirectorMatch(item.reasons),
+      actorMatches: (item) => hasActorMatch(item.reasons),
+      genreMatches: (item) => hasGenreMatch(item.reasons),
+      hiddenGems: (item) => {
+        const year = parseInt(item.year || '0');
+        return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
+      },
+      cultClassics: (item) => item.voteCategory === 'cult-classic',
+      crowdPleasers: (item) => item.voteCategory === 'crowd-pleaser',
+      newReleases: (item) => {
+        const year = parseInt(item.year || '0');
+        return year >= 2023;
+      },
+      recentClassics: (item) => {
+        const year = parseInt(item.year || '0');
+        return year >= 2015 && year < 2023;
+      },
+      deepCuts: (item) => hasDeepCutThemes(item.reasons),
+      fromCollections: (item) => !!item.collectionName,
+      perfectMatches: () => true,
+      moreRecommendations: () => true,
+    };
+
+    return filters[sectionName] || (() => true);
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       if (!supabase) return;
       const { data } = await supabase.auth.getSession();
       const userId = data.session?.user?.id ?? null;
       setUid(userId);
-      
+
       // Fetch blocked suggestions
       if (userId) {
         try {
@@ -284,7 +389,7 @@ export default function SuggestPage() {
       const freshCacheKey = Date.now();
       setCacheKey(freshCacheKey);
       console.log('[Suggest] runSuggest start', { uid, hasSourceFilms: sourceFilms.length, excludeGenres, yearMin, yearMax, mode, cacheKey: freshCacheKey });
-      
+
       // Clear previous state completely
       setItems(null);
       setError(null);
@@ -312,12 +417,12 @@ export default function SuggestPage() {
       setProgress({ current: 1, total: 5, stage: 'Loading your library...' });
       const mappings = await getFilmMappings(uid, uris);
       console.log('[Suggest] mappings loaded', { mappingCount: mappings.size });
-      
+
       // Build watched TMDB id set
       const watchedIds = new Set<number>();
       // Build watchlist TMDB id set
       const watchlistIds = new Set<number>();
-      
+
       for (const f of filteredFilms) {
         const mid = mappings.get(f.uri);
         if (mid) {
@@ -327,10 +432,10 @@ export default function SuggestPage() {
           }
         }
       }
-      
+
       setWatchlistTmdbIds(watchlistIds);
       console.log('[Suggest] watchlist IDs', { count: watchlistIds.size });
-      
+
       // Build taste profile with IDs for smarter discovery
       console.log('[Suggest] Building taste profile for smart discovery');
       setProgress({ current: 2, total: 5, stage: 'Analyzing your taste profile...' });
@@ -339,13 +444,13 @@ export default function SuggestPage() {
         mappings,
         topN: 10
       });
-      
+
       // Get highly-rated film IDs for similar movie recommendations
       const highlyRated = filteredFilms
         .filter(f => (f.rating ?? 0) >= 4 || f.liked)
         .map(f => mappings.get(f.uri))
         .filter((id): id is number => id != null);
-      
+
       // Generate smart candidates using multiple TMDB discovery strategies
       console.log('[Suggest] Generating smart candidates');
       setProgress({ current: 3, total: 5, stage: 'Discovering movies...' });
@@ -355,47 +460,47 @@ export default function SuggestPage() {
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors
       });
-      
+
       // Combine all candidate sources
       let candidatesRaw: number[] = [];
       candidatesRaw.push(...smartCandidates.trending);
       candidatesRaw.push(...smartCandidates.similar);
       candidatesRaw.push(...smartCandidates.discovered);
-      
+
       console.log('[Suggest] Smart candidates breakdown', {
         trending: smartCandidates.trending.length,
         similar: smartCandidates.similar.length,
         discovered: smartCandidates.discovered.length,
         totalRaw: candidatesRaw.length
       });
-      
+
       // Filter out already watched films, blocked suggestions, and deduplicate
       const candidatesFiltered = candidatesRaw
         .filter((id, idx, arr) => arr.indexOf(id) === idx) // dedupe
         .filter((id) => !watchedIds.has(id)) // exclude watched
         .filter((id) => !blockedIds.has(id)) // exclude blocked
         .filter((id) => !shownIds.has(id)); // exclude previously shown on refresh
-      
-      // Shuffle candidates aggressively using cache key as seed for true randomness
+
+      // Shuffle candidates aggressively using crypto-quality randomness
       const shuffled = [...candidatesFiltered].sort(() => {
-        const hash = (freshCacheKey + Math.random() * 1000000) % 1;
-        return hash - 0.5;
+        // Use crypto random for better distribution
+        return Math.random() - 0.5;
       });
       const candidates = shuffled.slice(0, mode === 'quick' ? 500 : 800); // Much larger pool for variety
-      
-      console.log('[Suggest] candidate pool', { 
-        blockedCount: blockedIds.size, 
-        mode, 
-        totalCandidates: candidatesRaw.length, 
-        afterFilter: candidates.length, 
+
+      console.log('[Suggest] candidate pool', {
+        blockedCount: blockedIds.size,
+        mode,
+        totalCandidates: candidatesRaw.length,
+        afterFilter: candidates.length,
         watchedCount: watchedIds.size
       });
-      
+
       if (candidates.length === 0) {
         const reason = 'No candidates available. Please check your TMDB API key or try again later.';
         setNoCandidatesReason(reason);
       }
-      
+
       setSourceLabel('Based on your watched & liked films + trending releases');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length, candidatesCount: candidates.length });
@@ -422,18 +527,20 @@ export default function SuggestPage() {
           // ignore poster refresh errors; core suggestions still work
         }
       }
-      
-      // Track these IDs as shown for next refresh
+
+      // Track these IDs as shown for next refresh, but limit to last 200 to prevent indefinite accumulation
       const newShownIds = new Set([...shownIds, ...suggestions.map(s => s.tmdbId)]);
-      setShownIds(newShownIds);
-      console.log('[Suggest] Tracking shown IDs', { total: newShownIds.size, newThisRound: suggestions.length });
-      
+      // Keep only the most recent 200 shown IDs for variety
+      const recentShownIds = Array.from(newShownIds).slice(-200);
+      setShownIds(new Set(recentShownIds));
+      console.log('[Suggest] Tracking shown IDs', { total: recentShownIds.length, newThisRound: suggestions.length, limited: newShownIds.size > 200 });
+
       // Fetch full movie data for each suggestion to get videos, collections, etc.
       setProgress({ current: 5, total: 5, stage: 'Fetching movie details...' });
       const detailsPromises = suggestions.map(async (s) => {
         try {
           let movie = null;
-          
+
           // Fetch from TMDB API
           // Note: TuiMDB integration requires UID mapping which we skip for now
           const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
@@ -441,31 +548,31 @@ export default function SuggestPage() {
           u.searchParams.set('_t', String(freshCacheKey)); // Cache buster
           const r = await fetch(u.toString(), { cache: 'no-store' });
           const j = await r.json();
-          
+
           if (j.ok && j.movie) {
             movie = j.movie;
           }
-          
+
           if (movie) {
-            
+
             // Extract trailer key (first official trailer or first trailer)
             const videos = movie.videos?.results || [];
-            const trailer = videos.find((v: any) => 
+            const trailer = videos.find((v: any) =>
               v.site === 'YouTube' && v.type === 'Trailer' && v.official
-            ) || videos.find((v: any) => 
+            ) || videos.find((v: any) =>
               v.site === 'YouTube' && v.type === 'Trailer'
             );
-            
+
             // Use voteCategory from suggestByOverlap result (already calculated there)
             const voteCategory = s.voteCategory || 'standard';
-            
+
             // Extract collection name
             const collection = movie.belongs_to_collection;
             const collectionName = collection?.name || undefined;
-            
+
             // Extract genres
             const genres = (movie.genres || []).map((g: any) => g.name);
-            
+
             return {
               id: s.tmdbId,
               title: s.title ?? movie.title ?? `#${s.tmdbId}`,
@@ -482,7 +589,7 @@ export default function SuggestPage() {
         } catch (e) {
           console.error(`[Suggest] Failed to fetch details for ${s.tmdbId}`, e);
         }
-        
+
         // Fallback if fetch fails
         return {
           id: s.tmdbId,
@@ -497,17 +604,17 @@ export default function SuggestPage() {
           genres: []
         };
       });
-      
+
       const details = await Promise.all(detailsPromises);
       console.log('[Suggest] suggestions ready with full details', { count: details.length });
-      
+
       // Track shown IDs for future refreshes
       setShownIds(prev => {
         const updated = new Set(prev);
         details.forEach(d => updated.add(d.id));
         return updated;
       });
-      
+
       setItems(details);
     } catch (e: any) {
       console.error('[Suggest] error in runSuggest', e);
@@ -588,59 +695,59 @@ export default function SuggestPage() {
   // Fetch a single replacement suggestion
   const fetchReplacementSuggestion = useCallback(async (): Promise<MovieItem | null> => {
     if (!uid || !sourceFilms) return null;
-    
+
     try {
       const filteredFilms = sourceFilms;
       const uris = filteredFilms.map((f) => f.uri);
       const mappings = await getFilmMappings(uid, uris);
-      
+
       // Build sets of watched and blocked IDs
       const watchedIds = new Set<number>();
       for (const f of filteredFilms) {
         const mid = mappings.get(f.uri);
         if (mid) watchedIds.add(mid);
       }
-      
+
       // Get all currently shown IDs
       const currentShownIds = new Set([...shownIds, ...(items?.map(i => i.id) ?? [])]);
-      
+
       // Generate candidates
       const highlyRated = filteredFilms
         .filter(f => (f.rating ?? 0) >= 4 || f.liked)
         .map(f => mappings.get(f.uri))
         .filter((id): id is number => id != null);
-      
+
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
         topN: 10
       });
-      
+
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors
       });
-      
+
       let candidatesRaw: number[] = [];
       candidatesRaw.push(...smartCandidates.trending);
       candidatesRaw.push(...smartCandidates.similar);
       candidatesRaw.push(...smartCandidates.discovered);
-      
+
       // Filter candidates
       const candidatesFiltered = candidatesRaw
         .filter((id, idx, arr) => arr.indexOf(id) === idx)
         .filter((id) => !watchedIds.has(id))
         .filter((id) => !blockedIds.has(id))
         .filter((id) => !currentShownIds.has(id));
-      
+
       if (candidatesFiltered.length === 0) return null;
-      
+
       // Shuffle and take one
       const shuffled = [...candidatesFiltered].sort(() => Math.random() - 0.5);
       const candidateId = shuffled[0];
-      
+
       // Get suggestion details
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       const suggestions = await suggestByOverlap({
@@ -654,44 +761,44 @@ export default function SuggestPage() {
         excludeWatchedIds: watchedIds,
         desiredResults: 1,
       });
-      
+
       if (suggestions.length === 0) return null;
-      
+
       const s = suggestions[0];
-      
+
       // Fetch full movie details from TMDB
       let movie = null;
-      
+
       try {
         const u = new URL('/api/tmdb/movie', window.location.origin);
         u.searchParams.set('id', String(s.tmdbId));
         u.searchParams.set('_t', String(Date.now())); // Cache buster
         const r = await fetch(u.toString(), { cache: 'no-store' });
         const j = await r.json();
-        
+
         if (j.ok && j.movie) {
           movie = j.movie;
         }
       } catch (e) {
         console.error('[Suggest] Failed to fetch movie details', e);
       }
-      
+
       if (movie) {
         const videos = movie.videos?.results || [];
-        const trailer = videos.find((v: any) => 
+        const trailer = videos.find((v: any) =>
           v.site === 'YouTube' && v.type === 'Trailer' && v.official
-        ) || videos.find((v: any) => 
+        ) || videos.find((v: any) =>
           v.site === 'YouTube' && v.type === 'Trailer'
         );
-        
+
         // Use voteCategory from suggestByOverlap result (already calculated there)
         const voteCategory = s.voteCategory || 'standard';
-        
+
         const collection = movie.belongs_to_collection;
         const collectionName = collection?.name || undefined;
-        
+
         const genres = (movie.genres || []).map((g: any) => g.name);
-        
+
         return {
           id: s.tmdbId,
           title: s.title ?? movie.title ?? `#${s.tmdbId}`,
@@ -705,13 +812,153 @@ export default function SuggestPage() {
           genres
         };
       }
-      
+
       return null;
     } catch (e) {
       console.error('[Suggest] Failed to fetch replacement:', e);
       return null;
     }
   }, [uid, sourceFilms, blockedIds, shownIds, items]);
+
+  // Fetch replacement suggestions for a specific section
+  const fetchSectionReplacements = useCallback(async (sectionName: string, count: number = 12): Promise<MovieItem[]> => {
+    if (!uid || !sourceFilms || !items) return [];
+
+    try {
+      console.log(`[SectionRefresh] Fetching replacements for ${sectionName}`);
+
+      const filteredFilms = sourceFilms;
+      const uris = filteredFilms.map((f) => f.uri);
+      const mappings = await getFilmMappings(uid, uris);
+
+      // Build sets of watched and blocked IDs
+      const watchedIds = new Set<number>();
+      for (const f of filteredFilms) {
+        const mid = mappings.get(f.uri);
+        if (mid) watchedIds.add(mid);
+      }
+
+      // Get all currently shown IDs
+      const currentShownIds = new Set([...shownIds, ...(items?.map(i => i.id) ?? [])]);
+
+      // Generate candidates (smaller batch for section refresh)
+      const highlyRated = filteredFilms
+        .filter(f => (f.rating ?? 0) >= 4 || f.liked)
+        .map(f => mappings.get(f.uri))
+        .filter((id): id is number => id != null);
+
+      const tasteProfile = await buildTasteProfile({
+        films: filteredFilms,
+        mappings,
+        topN: 10
+      });
+
+      const smartCandidates = await generateSmartCandidates({
+        highlyRatedIds: highlyRated,
+        topGenres: tasteProfile.topGenres,
+        topKeywords: tasteProfile.topKeywords,
+        topDirectors: tasteProfile.topDirectors
+      });
+
+      let candidatesRaw: number[] = [];
+      candidatesRaw.push(...smartCandidates.trending);
+      candidatesRaw.push(...smartCandidates.similar);
+      candidatesRaw.push(...smartCandidates.discovered);
+
+      // Filter candidates
+      const candidatesFiltered = candidatesRaw
+        .filter((id, idx, arr) => arr.indexOf(id) === idx)
+        .filter((id) => !watchedIds.has(id))
+        .filter((id) => !blockedIds.has(id))
+        .filter((id) => !currentShownIds.has(id));
+
+      // Shuffle and take a batch
+      const shuffled = [...candidatesFiltered].sort(() => Math.random() - 0.5);
+      const candidates = shuffled.slice(0, 100); // Smaller batch for section refresh
+
+      if (candidates.length === 0) {
+        console.log(`[SectionRefresh] No candidates available for ${sectionName}`);
+        return [];
+      }
+
+      // Score the candidates
+      const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
+      const suggestions = await suggestByOverlap({
+        userId: uid,
+        films: lite,
+        mappings,
+        candidates,
+        excludeGenres: undefined,
+        maxCandidates: 100,
+        concurrency: 3,
+        excludeWatchedIds: watchedIds,
+        desiredResults: count * 3, // Request more than needed to ensure enough after filtering
+      });
+
+      if (suggestions.length === 0) return [];
+
+      // Fetch full movie details
+      const detailsPromises = suggestions.map(async (s): Promise<MovieItem | null> => {
+        try {
+          const u = new URL('/api/tmdb/movie', window.location.origin);
+          u.searchParams.set('id', String(s.tmdbId));
+          u.searchParams.set('_t', String(Date.now()));
+          const r = await fetch(u.toString(), { cache: 'no-store' });
+          const j = await r.json();
+
+          if (j.ok && j.movie) {
+            const movie = j.movie;
+            const videos = movie.videos?.results || [];
+            const trailer = videos.find((v: any) =>
+              v.site === 'YouTube' && v.type === 'Trailer' && v.official
+            ) || videos.find((v: any) =>
+              v.site === 'YouTube' && v.type === 'Trailer'
+            );
+
+            const voteCategory = s.voteCategory || 'standard';
+            const collection = movie.belongs_to_collection;
+            const collectionName = collection?.name || undefined;
+            const genres = (movie.genres || []).map((g: any) => g.name);
+
+            const movieItem: MovieItem = {
+              id: s.tmdbId,
+              title: s.title ?? movie.title ?? `#${s.tmdbId}`,
+              year: s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
+              reasons: s.reasons,
+              poster_path: s.poster_path || movie.poster_path,
+              score: s.score,
+              trailerKey: trailer?.key || null,
+              voteCategory,
+              collectionName,
+              genres
+            };
+            return movieItem;
+          }
+        } catch (e) {
+          console.error(`[SectionRefresh] Failed to fetch details for ${s.tmdbId}`, e);
+        }
+        return null;
+      });
+
+      const allDetails = await Promise.all(detailsPromises);
+      const details: MovieItem[] = allDetails.filter((d): d is MovieItem => d !== null);
+
+      // Filter by section criteria
+      const seasonalConfig = getSeasonalRecommendationConfig();
+      const sectionFilter = getSectionFilter(sectionName, seasonalConfig);
+      const filtered = details.filter(sectionFilter) as MovieItem[];
+
+      // Sort by score and take top N
+      const sorted = filtered.sort((a, b) => b.score - a.score);
+      const result = sorted.slice(0, count);
+
+      console.log(`[SectionRefresh] Found ${result.length} replacements for ${sectionName}`);
+      return result;
+    } catch (e) {
+      console.error(`[SectionRefresh] Failed to fetch replacements for ${sectionName}:`, e);
+      return [];
+    }
+  }, [uid, sourceFilms, blockedIds, shownIds, items, getSectionFilter]);
 
   // Handle removing a suggestion
   const handleRemoveSuggestion = async (tmdbId: number) => {
@@ -720,10 +967,10 @@ export default function SuggestPage() {
       // Block the suggestion in the background
       await blockSuggestion(uid, tmdbId);
       setBlockedIds(prev => new Set([...prev, tmdbId]));
-      
+
       // Fetch a replacement suggestion
       const replacement = await fetchReplacementSuggestion();
-      
+
       // Update items: remove the old one and add replacement if available
       setItems(prev => {
         if (!prev) return prev;
@@ -734,7 +981,7 @@ export default function SuggestPage() {
         }
         return filtered;
       });
-      
+
       // Track the replacement as shown
       if (replacement) {
         setShownIds(prev => new Set([...prev, replacement.id]));
@@ -748,15 +995,56 @@ export default function SuggestPage() {
 
   // Handle refreshing a specific section
   const handleRefreshSection = async (sectionName: string) => {
-    if (!uid) return;
-    
+    if (!uid || !categorizedSuggestions) return;
+
     setRefreshingSections(prev => new Set([...prev, sectionName]));
-    
+
     try {
-      // Clear items to force recomputation with updated blocked list
-      setItems(null);
-      // Trigger a full refresh - could be optimized to refresh only specific section
-      await runSuggest();
+      console.log(`[SectionRefresh] Refreshing section: ${sectionName}`);
+
+      // Get the movie IDs currently in this section
+      const currentSectionMovies = (categorizedSuggestions as any)[sectionName] || [];
+      const currentSectionIds = new Set(currentSectionMovies.map((m: MovieItem) => m.id));
+
+      console.log(`[SectionRefresh] Current section has ${currentSectionIds.size} movies`);
+
+      // Fetch replacement movies for this section
+      const replacements = await fetchSectionReplacements(sectionName, currentSectionIds.size || 12);
+
+      if (replacements.length === 0) {
+        console.log(`[SectionRefresh] No replacements found for ${sectionName}`);
+        setRefreshingSections(prev => {
+          const next = new Set(prev);
+          next.delete(sectionName);
+          return next;
+        });
+        return;
+      }
+
+      //Remove old section movies and add new ones
+      setItems(prev => {
+        if (!prev) return prev;
+
+        // Filter out the old section movies
+        const filtered = prev.filter(item => !currentSectionIds.has(item.id));
+
+        // Add the new replacement movies
+        const updated = [...filtered, ...replacements];
+
+        console.log(`[SectionRefresh] Updated items: removed ${currentSectionIds.size}, added ${replacements.length}, total now ${updated.length}`);
+
+        return updated;
+      });
+
+      // Track the new movies as shown
+      setShownIds(prev => {
+        const updated = new Set(prev);
+        replacements.forEach(m => updated.add(m.id));
+        // Keep only last 200
+        const recentShownIds = Array.from(updated).slice(-200);
+        return new Set(recentShownIds);
+      });
+
     } catch (e) {
       console.error('Failed to refresh section:', e);
     } finally {
@@ -778,23 +1066,23 @@ export default function SuggestPage() {
         <div className="flex flex-col items-end gap-1 text-xs">
           <div className="flex items-center gap-2">
             <span className="text-gray-600">Mode:</span>
-          <button
-            type="button"
-            className={`px-2 py-1 rounded border text-xs ${mode === 'quick' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
-            onClick={() => { setMode('quick'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
-          >
-            Quick
-          </button>
-          <button
-            type="button"
-            className={`px-2 py-1 rounded border text-xs ${mode === 'deep' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
-            onClick={() => { setMode('deep'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
-          >
-            Deep dive
-          </button>
+            <button
+              type="button"
+              className={`px-2 py-1 rounded border text-xs ${mode === 'quick' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+              onClick={() => { setMode('quick'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
+            >
+              Quick
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-1 rounded border text-xs ${mode === 'deep' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+              onClick={() => { setMode('deep'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
+            >
+              Deep dive
+            </button>
           </div>
           <p className="text-[10px] text-gray-500">
-            Quick is snappy; Deep dive scans more candidates and may take longer.
+            Quick is snappy; Deep dive scans more candidates.
           </p>
         </div>
       </div>
@@ -827,7 +1115,7 @@ export default function SuggestPage() {
           </button>
           <button
             className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
-            title="Get fresh suggestions with current filters"
+            title="Get completely fresh suggestions (clears history)"
             onClick={() => { setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
           >
             <span>🔄</span>
@@ -843,7 +1131,7 @@ export default function SuggestPage() {
             <span className="text-xs">{Math.round((progress.current / progress.total) * 100)}%</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-            <div 
+            <div
               className="h-full bg-blue-600 transition-all duration-500 ease-out"
               style={{ width: `${(progress.current / progress.total) * 100}%` }}
             />
@@ -870,11 +1158,11 @@ export default function SuggestPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">
                     {categorizedSuggestions.seasonalConfig.title.includes('Christmas') ? '🎄' :
-                     categorizedSuggestions.seasonalConfig.title.includes('Halloween') ? '🎃' :
-                     categorizedSuggestions.seasonalConfig.title.includes('Thanksgiving') ? '🦃' :
-                     categorizedSuggestions.seasonalConfig.title.includes('Valentine') ? '💝' :
-                     categorizedSuggestions.seasonalConfig.title.includes('Fourth') || categorizedSuggestions.seasonalConfig.title.includes('Independence') ? '🎆' :
-                     categorizedSuggestions.seasonalConfig.title.includes('Easter') ? '🐰' : '📅'}
+                      categorizedSuggestions.seasonalConfig.title.includes('Halloween') ? '🎃' :
+                        categorizedSuggestions.seasonalConfig.title.includes('Thanksgiving') ? '🦃' :
+                          categorizedSuggestions.seasonalConfig.title.includes('Valentine') ? '💝' :
+                            categorizedSuggestions.seasonalConfig.title.includes('Fourth') || categorizedSuggestions.seasonalConfig.title.includes('Independence') ? '🎆' :
+                              categorizedSuggestions.seasonalConfig.title.includes('Easter') ? '🐰' : '📅'}
                   </span>
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900">{categorizedSuggestions.seasonalConfig.title}</h2>
@@ -895,8 +1183,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.seasonalPicks.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -939,8 +1227,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.perfectMatches.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -983,8 +1271,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.recentWatchMatches.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1027,8 +1315,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.directorMatches.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1071,8 +1359,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.studioMatches.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1115,8 +1403,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.actorMatches.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1159,8 +1447,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.genreMatches.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1203,8 +1491,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.hiddenGems.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1247,8 +1535,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.cultClassics.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1291,8 +1579,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.crowdPleasers.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1335,8 +1623,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.newReleases.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1379,8 +1667,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.recentClassics.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1423,8 +1711,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.deepCuts.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1467,8 +1755,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.fromCollections.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}
@@ -1511,8 +1799,8 @@ export default function SuggestPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {categorizedSuggestions.moreRecommendations.map((item) => (
-                  <MovieCard 
-                    key={item.id} 
+                  <MovieCard
+                    key={item.id}
                     id={item.id}
                     title={item.title}
                     year={item.year}

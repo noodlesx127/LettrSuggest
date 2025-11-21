@@ -25,25 +25,25 @@ export async function fetchTrendingIds(period: 'day' | 'week' = 'day', limit = 1
  */
 export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10): Promise<number[]> {
   const allIds = new Set<number>();
-  
+
   // Limit seeds to avoid too many API calls
   const limitedSeeds = seedIds.slice(0, 10);
-  
+
   for (const seedId of limitedSeeds) {
     try {
       // Fetch similar movies for this seed
       const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
       u.searchParams.set('id', String(seedId));
       u.searchParams.set('_t', String(Date.now())); // Cache buster
-      
+
       const r = await fetch(u.toString(), { cache: 'no-store' });
       const j = await r.json();
-      
+
       if (j.ok && j.movie) {
         // Get similar movies from the movie's recommendations
         const similar = (j.movie as any).similar?.results || [];
         const recommendations = (j.movie as any).recommendations?.results || [];
-        
+
         [...similar, ...recommendations]
           .slice(0, limitPerSeed)
           .forEach((m: any) => {
@@ -54,7 +54,7 @@ export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10)
       console.error(`[TMDB] Failed to fetch similar for ${seedId}`, e);
     }
   }
-  
+
   return Array.from(allIds);
 }
 
@@ -64,8 +64,10 @@ export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10)
  */
 export async function discoverMoviesByProfile(options: {
   genres?: number[];
+  genreMode?: 'AND' | 'OR';
   keywords?: number[];
   people?: number[]; // director/actor IDs
+  peopleMode?: 'AND' | 'OR';
   yearMin?: number;
   yearMax?: number;
   sortBy?: 'vote_average.desc' | 'popularity.desc' | 'primary_release_date.desc';
@@ -74,49 +76,57 @@ export async function discoverMoviesByProfile(options: {
   randomizePage?: boolean; // Add random page offset for variety
 }): Promise<number[]> {
   const allIds = new Set<number>();
-  
+
   // Validate IDs are reasonable
   const validGenres = options.genres?.filter(id => id > 0 && id < 100000) ?? [];
   const validKeywords = options.keywords?.filter(id => id > 0 && id < 1000000) ?? [];
   const validPeople = options.people?.filter(id => id > 0 && id < 10000000) ?? [];
-  
+
   // Log what we're actually sending
   const filterSummary = {
     genres: validGenres,
+    genreMode: options.genreMode || 'AND',
     keywords: validKeywords.slice(0, 5),
     people: validPeople.slice(0, 3),
+    peopleMode: options.peopleMode || 'AND',
     yearMin: options.yearMin,
     yearMax: options.yearMax,
     sortBy: options.sortBy,
     minVotes: options.minVotes,
     limit: options.limit ?? 20
   };
-  
+
   try {
     const u = new URL('/api/tmdb/discover', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
-    
-    if (validGenres.length) u.searchParams.set('with_genres', validGenres.join(','));
+
+    if (validGenres.length) {
+      const separator = options.genreMode === 'OR' ? '|' : ',';
+      u.searchParams.set('with_genres', validGenres.join(separator));
+    }
     if (validKeywords.length) u.searchParams.set('with_keywords', validKeywords.slice(0, 5).join('|')); // OR logic
-    if (validPeople.length) u.searchParams.set('with_people', validPeople.slice(0, 3).join(','));
+    if (validPeople.length) {
+      const separator = options.peopleMode === 'OR' ? '|' : ',';
+      u.searchParams.set('with_people', validPeople.slice(0, 3).join(separator));
+    }
     if (options.yearMin) u.searchParams.set('primary_release_date.gte', `${options.yearMin}-01-01`);
     if (options.yearMax) u.searchParams.set('primary_release_date.lte', `${options.yearMax}-12-31`);
     if (options.sortBy) u.searchParams.set('sort_by', options.sortBy);
     if (options.minVotes) u.searchParams.set('vote_count.gte', String(options.minVotes));
-    
-    // Randomize starting page for variety (pages 1-5)
+
+    // Randomize starting page for variety (pages 1-10 for much wider coverage)
     if (options.randomizePage !== false) {
-      const randomPage = Math.floor(Math.random() * 5) + 1;
+      const randomPage = Math.floor(Math.random() * 10) + 1;
       u.searchParams.set('page', String(randomPage));
     }
-    
+
     const limit = options.limit ?? 20;
     u.searchParams.set('limit', String(limit));
     u.searchParams.set('_t', String(Date.now())); // Cache buster
-    
+
     console.log('[TMDB] discover start', filterSummary);
     const r = await fetch(u.toString(), { cache: 'no-store' });
     const j = await r.json();
-    
+
     if (j.ok && j.results) {
       j.results.forEach((m: any) => {
         if (m.id) allIds.add(m.id);
@@ -128,7 +138,7 @@ export async function discoverMoviesByProfile(options: {
   } catch (e) {
     console.error('[TMDB] discover exception', { filters: filterSummary, error: e });
   }
-  
+
   return Array.from(allIds);
 }
 
@@ -175,43 +185,76 @@ export async function generateSmartCandidates(profile: {
     console.error('[SmartCandidates] Similar failed', e);
   }
 
-  // 3. Discover by top genres + keywords (with progressive fallbacks)
+  // 3. Discover by top genres + keywords (with progressive fallbacks and temporal diversity)
   try {
     if (profile.topGenres.length > 0) {
-      // Shuffle genre/keyword selection
+      // Shuffle genre/keyword selection more aggressively
       const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
       const shuffledKeywords = [...profile.topKeywords].sort(() => Math.random() - 0.5);
-      
-      // Try 1: Genres + keywords, no year restriction, high quality
+
+      // Randomly vary how many genres/keywords we use (1-3 instead of always 2)
+      const genreCount = Math.floor(Math.random() * 3) + 1;
+      const keywordCount = Math.floor(Math.random() * 4) + 1;
+
+      // Randomly select sort method for variety
+      const sortMethods = ['vote_average.desc', 'popularity.desc', 'primary_release_date.desc'] as const;
+      const randomSort = sortMethods[Math.floor(Math.random() * sortMethods.length)];
+
+      // Add temporal diversity - randomly pick a year range or none
+      const currentYear = new Date().getFullYear();
+      const temporalStrategies = [
+        {}, // No year filter
+        { yearMin: 2020, yearMax: currentYear }, // Recent
+        { yearMin: 2010, yearMax: 2019 }, // Modern classics
+        { yearMin: 2000, yearMax: 2009 }, // 2000s
+        { yearMin: 1990, yearMax: 1999 }, // 90s
+      ];
+      const temporalFilter = temporalStrategies[Math.floor(Math.random() * temporalStrategies.length)];
+
+      // Try 1: Genres + keywords with random temporal filter
       let genreDiscovered = await discoverMoviesByProfile({
-        genres: shuffledGenres.slice(0, 2).map(g => g.id),
-        keywords: shuffledKeywords.slice(0, 3).map(k => k.id),
-        sortBy: 'vote_average.desc',
+        genres: shuffledGenres.slice(0, genreCount).map(g => g.id),
+        genreMode: 'OR', // Match ANY of the top genres
+        keywords: shuffledKeywords.slice(0, keywordCount).map(k => k.id),
+        sortBy: randomSort,
         minVotes: 100,
-        limit: 150
+        limit: 150,
+        ...temporalFilter
       });
       results.discovered.push(...genreDiscovered);
-      console.log('[SmartCandidates] Genre+keyword discovery', { count: genreDiscovered.length });
-      
-      // Fallback 1: Just genres, no keywords
+      console.log('[SmartCandidates] Genre+keyword discovery', {
+        count: genreDiscovered.length,
+        genreCount,
+        keywordCount,
+        sortBy: randomSort,
+        temporal: temporalFilter
+      });
+
+      // Fallback 1: Just genres with different temporal filter
       if (genreDiscovered.length < 30) {
+        const altTemporalFilter = temporalStrategies[Math.floor(Math.random() * temporalStrategies.length)];
         const genreOnlyDiscovered = await discoverMoviesByProfile({
-          genres: shuffledGenres.slice(0, 2).map(g => g.id),
-          sortBy: 'vote_average.desc',
+          genres: shuffledGenres.slice(0, Math.floor(Math.random() * 3) + 1).map(g => g.id),
+          genreMode: 'OR',
+          sortBy: sortMethods[Math.floor(Math.random() * sortMethods.length)],
           minVotes: 50,
-          limit: 150
+          limit: 150,
+          ...altTemporalFilter
         });
         results.discovered.push(...genreOnlyDiscovered);
         console.log('[SmartCandidates] Genre-only fallback', { count: genreOnlyDiscovered.length });
       }
-      
-      // Fallback 2: Popular in genres (lower vote threshold)
+
+      // Fallback 2: Popular in genres (lower vote threshold, different temporal)
       if (results.discovered.length < 100) {
+        const altTemporalFilter = temporalStrategies[Math.floor(Math.random() * temporalStrategies.length)];
         const popularDiscovered = await discoverMoviesByProfile({
-          genres: shuffledGenres.slice(0, 2).map(g => g.id),
+          genres: shuffledGenres.slice(0, Math.floor(Math.random() * 3) + 1).map(g => g.id),
+          genreMode: 'OR',
           sortBy: 'popularity.desc',
           minVotes: 20,
-          limit: 150
+          limit: 150,
+          ...altTemporalFilter
         });
         results.discovered.push(...popularDiscovered);
         console.log('[SmartCandidates] Popular fallback', { count: popularDiscovered.length });
@@ -226,19 +269,20 @@ export async function generateSmartCandidates(profile: {
     if (profile.topDirectors.length > 0) {
       // Shuffle director selection for variety
       const shuffledDirectors = [...profile.topDirectors].sort(() => Math.random() - 0.5);
-      
+
       // Try with top directors, no year filter
       const directorDiscovered = await discoverMoviesByProfile({
-        people: shuffledDirectors.slice(0, 2).map(d => d.id),
+        people: shuffledDirectors.slice(0, 3).map(d => d.id),
+        peopleMode: 'OR', // Match ANY of the top directors
         sortBy: 'vote_average.desc',
         limit: 100
       });
       results.discovered.push(...directorDiscovered);
-      console.log('[SmartCandidates] Director discovery', { 
-        count: directorDiscovered.length, 
-        directors: shuffledDirectors.slice(0, 2).map(d => ({ id: d.id, name: d.name })) 
+      console.log('[SmartCandidates] Director discovery', {
+        count: directorDiscovered.length,
+        directors: shuffledDirectors.slice(0, 3).map(d => ({ id: d.id, name: d.name }))
       });
-      
+
       // Fallback: Try with single director if multiple directors returned nothing
       if (directorDiscovered.length === 0 && shuffledDirectors.length > 0) {
         const singleDirector = await discoverMoviesByProfile({
@@ -266,7 +310,7 @@ export async function generateSmartCandidates(profile: {
         limit: 100
       });
       results.discovered.push(...nicheDiscovered);
-      console.log('[SmartCandidates] Niche keyword discovery', { 
+      console.log('[SmartCandidates] Niche keyword discovery', {
         count: nicheDiscovered.length,
         keywords: shuffledKeywords.slice(0, 2).map(k => ({ id: k.id, name: k.name }))
       });
@@ -275,15 +319,29 @@ export async function generateSmartCandidates(profile: {
     console.error('[SmartCandidates] Niche discovery failed', e);
   }
 
-  // 6. Add pure genre-based discovery (no restrictions) for more variety
+  // 6. Add pure genre-based discovery with varied temporal ranges
   try {
     if (profile.topGenres.length > 0 && results.discovered.length < 200) {
       const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
+      const sortMethods = ['vote_average.desc', 'popularity.desc', 'primary_release_date.desc'] as const;
+      const currentYear = new Date().getFullYear();
+
+      // Randomly select temporal range
+      const temporalOptions = [
+        {},
+        { yearMin: 2015, yearMax: currentYear },
+        { yearMin: 2000, yearMax: 2014 },
+        { yearMin: 1980, yearMax: 1999 },
+      ];
+      const temporal = temporalOptions[Math.floor(Math.random() * temporalOptions.length)];
+
       const pureGenreDiscovered = await discoverMoviesByProfile({
-        genres: shuffledGenres.slice(0, 2).map(g => g.id),
-        sortBy: Math.random() > 0.5 ? 'vote_average.desc' : 'popularity.desc',
+        genres: shuffledGenres.slice(0, Math.floor(Math.random() * 3) + 1).map(g => g.id),
+        genreMode: 'OR',
+        sortBy: sortMethods[Math.floor(Math.random() * sortMethods.length)],
         minVotes: 100,
-        limit: 100
+        limit: 100,
+        ...temporal
       });
       results.discovered.push(...pureGenreDiscovered);
     }
@@ -303,7 +361,7 @@ export async function generateSmartCandidates(profile: {
         limit: 100
       });
       results.discovered.push(...singleGenreDiscovered);
-      console.log('[SmartCandidates] Single genre discovery', { 
+      console.log('[SmartCandidates] Single genre discovery', {
         count: singleGenreDiscovered.length,
         genreId: topGenre.id
       });
@@ -321,3 +379,4 @@ export async function generateSmartCandidates(profile: {
 
   return results;
 }
+
