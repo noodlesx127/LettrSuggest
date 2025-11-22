@@ -303,65 +303,70 @@ export default function MovieCard({
 
       <div className={`border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'}`}>
         <div className="flex gap-4 p-4 flex-1">
-          {/* Poster */}
-          <div className="flex-shrink-0 w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
-            {posterPath ? (
-              <Image
-                src={`https://image.tmdb.org/t/p/w185${posterPath}`}
-                alt={title}
-                fill
-                sizes="96px"
-                className="object-cover"
-                unoptimized
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs text-center p-2">
-                No poster
-              </div>
-            )}
-
-            {/* Trailer toggle button */}
-            {trailerKey && showTrailer && (
-              <button
-                onClick={() => setShowVideo(true)}
-                className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-60 transition-all flex items-center justify-center group"
-                aria-label="Play trailer"
-              >
-                <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
-                  <svg className="w-6 h-6 text-white ml-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
-                  </svg>
+          {/* Poster Column */}
+          <div className="flex-shrink-0 flex flex-col gap-2">
+            {/* Poster */}
+            <div className="w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
+              {posterPath ? (
+                <Image
+                  src={`https://image.tmdb.org/t/p/w185${posterPath}`}
+                  alt={title}
+                  fill
+                  sizes="96px"
+                  className="object-cover"
+                  unoptimized
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs text-center p-2">
+                  No poster
                 </div>
-              </button>
-            )}
+              )}
+
+              {/* Trailer toggle button */}
+              {trailerKey && showTrailer && (
+                <button
+                  onClick={() => setShowVideo(true)}
+                  className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-60 transition-all flex items-center justify-center group"
+                  aria-label="Play trailer"
+                >
+                  <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+                    <svg className="w-6 h-6 text-white ml-0.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                    </svg>
+                  </div>
+                </button>
+              )}
+            </div>
+
+            {/* Badges under poster */}
+            <div className="flex flex-col gap-1 w-24">
+              {trailerKey && (
+                <button
+                  className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded hover:bg-red-200 transition-colors text-center"
+                  onClick={() => setShowVideo(true)}
+                  title="Watch trailer">
+                  ▶️ Trailer
+                </button>
+              )}
+              {isInWatchlist && (
+                <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded text-center" title="In your watchlist">
+                  📋 Watchlist
+                </span>
+              )}
+              {voteCategoryBadge && (
+                <span className={`px-2 py-1 text-xs font-medium rounded text-center ${voteCategoryBadge.className}`}>
+                  {voteCategoryBadge.label}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Content */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2 mb-1">
-              <h3 className="font-semibold text-lg flex-1" title={title}>
+          <div className="flex-1 overflow-hidden">
+            <div className="mb-1">
+              <h3 className="font-semibold text-lg break-words" title={title}>
                 {title}
               </h3>
-              <div className="flex gap-1 flex-wrap justify-end">
-                {trailerKey && (
-                  <span
-                    className="flex-shrink-0 px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded cursor-pointer hover:bg-red-200 transition-colors"
-                    onClick={() => setShowVideo(true)}
-                    title="Watch trailer">
-                    ▶️ Trailer
-                  </span>
-                )}
-                {isInWatchlist && (
-                  <span className="flex-shrink-0 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded" title="This movie is already in your watchlist">
-                    📋 Watchlist
-                  </span>
-                )}
-                {voteCategoryBadge && (
-                  <span className={`flex-shrink-0 px-2 py-0.5 text-xs font-medium rounded ${voteCategoryBadge.className}`}>
-                    {voteCategoryBadge.label}
-                  </span>
-                )}
-              </div>
             </div>
 
             {(year || vote_average || collectionName) && (
