@@ -340,7 +340,7 @@ export default function MovieCard({
                 <p className={`text-xs text-gray-600 leading-relaxed ${descriptionExpanded ? '' : 'line-clamp-3'}`}>
                   {overview}
                 </p>
-                {overview.length > 150 && (
+                {overview.length > 100 && (
                   <button
                     onClick={() => setDescriptionExpanded(!descriptionExpanded)}
                     className="mt-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
