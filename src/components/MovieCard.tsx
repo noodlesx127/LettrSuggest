@@ -339,7 +339,7 @@ export default function MovieCard({
           {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2 mb-1">
-              <h3 className="font-semibold text-lg line-clamp-2 flex-1" title={title}>
+              <h3 className="font-semibold text-lg line-clamp-3 flex-1" title={title}>
                 {title}
               </h3>
               <div className="flex gap-1 flex-wrap justify-end">
