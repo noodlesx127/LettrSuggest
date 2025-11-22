@@ -705,6 +705,7 @@ export async function suggestByOverlap(params: {
   voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
   voteAverage?: number;
   voteCount?: number;
+  contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
 }>> {
   // Build user profile from liked/highly-rated mapped films.
   // Use as much history as possible, but cap TMDB fetches to avoid huge fan-out
@@ -849,6 +850,64 @@ export async function suggestByOverlap(params: {
     if (f.isChildrens) likedChildrensCount++;
   }
 
+  // Build lookup maps: track which films contribute to each feature
+  // This allows us to show users which specific films triggered each recommendation
+  const filmLookup = {
+    genres: new Map<string, Array<{ id: number; title: string }>>(),
+    directors: new Map<string, Array<{ id: number; title: string }>>(),
+    cast: new Map<string, Array<{ id: number; title: string }>>(),
+    keywords: new Map<string, Array<{ id: number; title: string }>>(),
+    studios: new Map<string, Array<{ id: number; title: string }>>(),
+  };
+
+  // Build film lookup from liked films (limit to top films by weight for each feature)
+  for (let i = 0; i < likedFeats.length; i++) {
+    const f = likedFeats[i];
+    const filmData = likedFilmData[i];
+    const movie = likedMovies[i];
+    const weight = getPreferenceWeight(filmData?.rating, filmData?.liked);
+
+    // Only track films with meaningful weight (>= 1.0)
+    if (weight < 1.0 || !movie) continue;
+
+    const filmInfo = { id: likedIds[i], title: movie.title || `Film #${likedIds[i]}` };
+
+    // Track genres
+    for (const g of f.genres) {
+      if (!filmLookup.genres.has(g)) filmLookup.genres.set(g, []);
+      const list = filmLookup.genres.get(g)!;
+      if (list.length < 20) list.push(filmInfo); // Cap at 20 per feature
+    }
+
+    // Track directors
+    for (const d of f.directors) {
+      if (!filmLookup.directors.has(d)) filmLookup.directors.set(d, []);
+      const list = filmLookup.directors.get(d)!;
+      if (list.length < 20) list.push(filmInfo);
+    }
+
+    // Track cast
+    for (const c of f.cast) {
+      if (!filmLookup.cast.has(c)) filmLookup.cast.set(c, []);
+      const list = filmLookup.cast.get(c)!;
+      if (list.length < 20) list.push(filmInfo);
+    }
+
+    // Track keywords
+    for (const k of f.keywords) {
+      if (!filmLookup.keywords.has(k)) filmLookup.keywords.set(k, []);
+      const list = filmLookup.keywords.get(k)!;
+      if (list.length < 20) list.push(filmInfo);
+    }
+
+    // Track studios
+    for (const studio of f.productionCompanies) {
+      if (!filmLookup.studios.has(studio)) filmLookup.studios.set(studio, []);
+      const list = filmLookup.studios.get(studio)!;
+      if (list.length < 20) list.push(filmInfo);
+    }
+  }
+
   // Track recent watches (last 20 liked films) for recency boost
   const recentLiked = likedFeats.slice(-20);
   for (const f of recentLiked) {
@@ -938,7 +997,7 @@ export async function suggestByOverlap(params: {
     return await fetchTmdbMovieCached(id);
   }
 
-  const resultsAcc: Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null }> = [];
+  const resultsAcc: Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null; contributingFilms?: Record<string, Array<{ id: number; title: string }>> }> = [];
   const pool = await mapLimit(params.candidates.slice(0, maxC), params.concurrency ?? 8, async (cid) => {
     if (seenIds.has(cid)) return null; // skip already-liked
     const m = await fetchFromCache(cid);
@@ -1230,6 +1289,56 @@ export async function suggestByOverlap(params: {
       // If still no score, filter out standard films with no taste matches
       if (score <= 0) return null;
     }
+
+    // Build contributingFilms map for this suggestion
+    // Map each matched feature to the user's films that have that feature
+    const contributingFilms: Record<string, Array<{ id: number; title: string }>> = {};
+
+    // Add films for matched genres
+    const gHitsForLookup = feats.genres.filter((g) => pref.genres.has(g));
+    for (const g of gHitsForLookup) {
+      const films = filmLookup.genres.get(g) || [];
+      if (films.length > 0) {
+        contributingFilms[`genre:${g}`] = films.slice(0, 10); // Limit to 10 films per feature
+      }
+    }
+
+    // Add films for matched directors
+    const dHitsForLookup = feats.directors.filter((d) => pref.directors.has(d));
+    for (const d of dHitsForLookup) {
+      const films = filmLookup.directors.get(d) || [];
+      if (films.length > 0) {
+        contributingFilms[`director:${d}`] = films.slice(0, 10);
+      }
+    }
+
+    // Add films for matched cast
+    const cHitsForLookup = feats.cast.filter((c) => pref.cast.has(c));
+    for (const c of cHitsForLookup) {
+      const films = filmLookup.cast.get(c) || [];
+      if (films.length > 0) {
+        contributingFilms[`cast:${c}`] = films.slice(0, 10);
+      }
+    }
+
+    // Add films for matched keywords
+    const kHitsForLookup = feats.keywords.filter((k) => pref.keywords.has(k));
+    for (const k of kHitsForLookup) {
+      const films = filmLookup.keywords.get(k) || [];
+      if (films.length > 0) {
+        contributingFilms[`keyword:${k}`] = films.slice(0, 10);
+      }
+    }
+
+    // Add films for matched studios
+    const studioHitsForLookup = feats.productionCompanies.filter(s => pref.productionCompanies.has(s));
+    for (const s of studioHitsForLookup) {
+      const films = filmLookup.studios.get(s) || [];
+      if (films.length > 0) {
+        contributingFilms[`studio:${s}`] = films.slice(0, 10);
+      }
+    }
+
     const r = {
       tmdbId: cid,
       score,
@@ -1240,7 +1349,8 @@ export async function suggestByOverlap(params: {
       poster_path: m.poster_path,
       voteCategory: feats.voteCategory,
       voteAverage: feats.voteAverage,
-      voteCount: feats.voteCount
+      voteCount: feats.voteCount,
+      contributingFilms
     };
     resultsAcc.push(r);
     // Early return the result; caller will slice after sorting
@@ -1257,6 +1367,7 @@ export async function suggestByOverlap(params: {
     voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
     voteAverage?: number;
     voteCount?: number;
+    contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
   }>;
   results.sort((a, b) => b.score - a.score);
   return results.slice(0, desired);

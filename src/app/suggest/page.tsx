@@ -24,6 +24,7 @@ type MovieItem = {
   vote_average?: number;
   vote_count?: number;
   overview?: string;
+  contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
 };
 
 export default function SuggestPage() {
@@ -589,7 +590,8 @@ export default function SuggestPage() {
               genres,
               vote_average: movie.vote_average,
               vote_count: movie.vote_count,
-              overview: movie.overview
+              overview: movie.overview,
+              contributingFilms: s.contributingFilms
             };
           }
         } catch (e) {
@@ -818,7 +820,8 @@ export default function SuggestPage() {
           genres,
           vote_average: movie.vote_average,
           vote_count: movie.vote_count,
-          overview: movie.overview
+          overview: movie.overview,
+          contributingFilms: s.contributingFilms
         };
       }
 
@@ -942,7 +945,8 @@ export default function SuggestPage() {
               genres,
               vote_average: movie.vote_average,
               vote_count: movie.vote_count,
-              overview: movie.overview
+              overview: movie.overview,
+              contributingFilms: s.contributingFilms
             };
             return movieItem;
           }
@@ -1258,6 +1262,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1305,6 +1310,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1352,6 +1358,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1399,6 +1406,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1446,6 +1454,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1493,6 +1502,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1540,6 +1550,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1587,6 +1598,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1634,6 +1646,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1681,6 +1694,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1728,6 +1742,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1775,6 +1790,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>
@@ -1822,6 +1838,7 @@ export default function SuggestPage() {
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
                     overview={item.overview}
+                    contributingFilms={item.contributingFilms}
                   />
                 ))}
               </div>

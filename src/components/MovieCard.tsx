@@ -18,39 +18,118 @@ type MovieCardProps = {
   vote_average?: number;
   vote_count?: number;
   overview?: string;
+  contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
 };
 
-// Helper function to parse and enhance reason text with clickable counts
-function enhanceReasonText(reason: string, reasonIndex: number) {
-  // Patterns to match:
-  // 1. (X similar films)
-  // 2. (X highly-rated similar films)
-  // 3. (X+ highly-rated films)
-  // 4. X films by this/these directors
-  // 5. X films from this studio
+// Helper function to extract genres, directors, keywords, etc. from a reason string
+function extractFeatureInfo(reason: string): { type: 'genre' | 'director' | 'keyword' | 'cast' | 'studio' | null; names: string[] } {
+  // Extract genres from patterns like "Matches your taste in Drama, Thriller (X films)"
+  const genreMatch = reason.match(/Matches your (?:specific )?taste in ([^(]+)/);
+  if (genreMatch) {
+    const names = genreMatch[1].split(/,| \+ /).map(s => s.trim()).filter(Boolean);
+    return { type: 'genre', names };
+  }
 
+  // Extract directors from "Directed by Christopher Nolan, ..."
+  const directorMatch = reason.match(/Directed by ([^—]+)/);
+  if (directorMatch) {
+    const names = directorMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+    return { type: 'director', names };
+  }
+
+  // Extract keywords from "Matches specific themes you ... : theme1, theme2, theme3"
+  const keywordMatch = reason.match(/(?:Matches specific themes|explores) (?:you )?(?:especially love|enjoy)[^:]*: ([^(]+)/);
+  if (keywordMatch) {
+    const names = keywordMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+    return { type: 'keyword', names };
+  }
+
+  // Extract studios from "From A24 —"
+  const studioMatch = reason.match(/From ([^—]+)/);
+  if (studioMatch) {
+    const names = studioMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+    return { type: 'studio', names };
+  }
+
+  // Extract cast from "Stars Actor Name, ..."
+  const castMatch = reason.match(/Stars ([^—]+)/);
+  if (castMatch) {
+    const names = castMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+    return { type: 'cast', names };
+  }
+
+  return { type: null, names: [] };
+}
+
+// Helper function to get contributing films for a reason
+function getContributingFilmsForReason(
+  reason: string,
+  contributingFilms?: Record<string, Array<{ id: number; title: string }>>
+): Array<{ id: number; title: string }> {
+  if (!contributingFilms) return [];
+
+  const { type, names } = extractFeatureInfo(reason);
+  if (!type || names.length === 0) return [];
+
+  const allFilms = new Map<number, { id: number; title: string }>();
+
+  // Collect all films that match the extracted feature names
+  for (const name of names) {
+    const key = `${type}:${name}`;
+    const films = contributingFilms[key] || [];
+    films.forEach(f => allFilms.set(f.id, f));
+  }
+
+  return Array.from(allFilms.values());
+}
+
+// Helper function to enhance reason text with clickable counts and tooltips
+function enhanceReasonText(
+  reason: string,
+  reasonIndex: number,
+  contributingFilms?: Record<string, Array<{ id: number; title: string }>>
+) {
+  // Patterns to match film counts
   const patterns = [
-    { regex: /\((\d+) similar films?\)/g, type: 'genre' },
-    { regex: /\((\d+) highly-rated similar films?\)/g, type: 'genre-combo' },
-    { regex: /\((\d+\+?) highly-rated films?\)/g, type: 'keyword' },
-    { regex: /(\d+) films? by (this|these) directors?/g, type: 'director' },
-    { regex: /(\d+) films? from this studio/g, type: 'studio' },
+    { regex: /\((\d+) similar films?\)/g, type: 'count' },
+    { regex: /\((\d+) highly-rated similar films?\)/g, type: 'count' },
+    { regex: /\((\d+\+?) highly-rated films?\)/g, type: 'count' },
+    { regex: /(\d+) films? by (this|these) directors?/g, type: 'count' },
+    { regex: /(\d+) films? from this studio/g, type: 'count' },
   ];
 
   let enhancedReason = reason;
   let matchFound = false;
 
+  // Get the contributing films for this specific reason
+  const films = getContributingFilmsForReason(reason, contributingFilms);
+
   for (const pattern of patterns) {
     const matches = Array.from(reason.matchAll(pattern.regex));
 
-    if (matches.length > 0) {
+    if (matches.length > 0 && films.length > 0) {
       matches.forEach((match) => {
         const fullMatch = match[0];
         const count = match[1];
-        const tooltipText = `Based on ${count} film${count !== '1' ? 's' : ''} you've rated highly in your library`;
 
-        // Replace the match with a clickable span
-        const replacement = `<span class="film-count-interactive" data-count="${count}" data-type="${pattern.type}" title="${tooltipText}">${fullMatch}</span>`;
+        // Build tooltip with actual film titles
+        const filmList = films.slice(0, 15).map(f => f.title).join('\n• ');
+        const tooltipText = films.length > 0
+          ? `Based on these ${films.length} films you rated highly:\n• ${filmList}${films.length > 15 ? `\n...and ${films.length - 15} more` : ''}`
+          : `Based on ${count} films you rated highly`;
+
+        // Replace with clickable span
+        const replacement = `<span class="film-count-interactive" data-count="${count}" data-reason-idx="${reasonIndex}" title="${tooltipText}">${fullMatch}</span>`;
+        enhancedReason = enhancedReason.replace(fullMatch, replacement);
+        matchFound = true;
+      });
+    } else if (matches.length > 0) {
+      // Fallback if no contributing films data
+      matches.forEach((match) => {
+        const fullMatch = match[0];
+        const count = match[1];
+        const tooltipText = `Based on ${count} films you've rated highly in your library`;
+        const replacement = `<span class="film-count-interactive" data-count="${count}" data-reason-idx="${reasonIndex}" title="${tooltipText}">${fullMatch}</span>`;
         enhancedReason = enhancedReason.replace(fullMatch, replacement);
         matchFound = true;
       });
@@ -75,7 +154,8 @@ export default function MovieCard({
   onRemove,
   vote_average,
   vote_count,
-  overview
+  overview,
+  contributingFilms
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -212,7 +292,7 @@ export default function MovieCard({
               <div>
                 <ul className="space-y-1.5 overflow-hidden">
                   {displayedReasons?.map((r, i) => {
-                    const { text: enhancedText, hasInteractive } = enhanceReasonText(r, i);
+                    const { text: enhancedText, hasInteractive } = enhanceReasonText(r, i, contributingFilms);
 
                     return (
                       <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
@@ -227,7 +307,8 @@ export default function MovieCard({
                         )}
                       </li>
                     );
-                  })}</ul>
+                  })}
+                </ul>
                 {hasMoreReasons && (
                   <button
                     onClick={() => setExpanded(!expanded)}
@@ -295,10 +376,15 @@ export default function MovieCard({
           text-decoration-style: dotted;
           cursor: help;
           font-weight: 500;
+          position: relative;
         }
         .film-count-interactive:hover {
           color: #1d4ed8;
           text-decoration-style: solid;
+        }
+        /* Enhanced tooltip styling */
+        .film-count-interactive[title] {
+          white-space: pre-line;
         }
       `}</style>
     </>
