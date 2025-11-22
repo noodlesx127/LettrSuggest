@@ -83,11 +83,60 @@ function getContributingFilmsForReason(
   return Array.from(allFilms.values());
 }
 
-// Helper function to enhance reason text with clickable counts and tooltips
+// Custom popover component for film lists
+function FilmListPopover({ films, count, isOpen, onClose, position }: {
+  films: Array<{ id: number; title: string }>;
+  count: string;
+  isOpen: boolean;
+  onClose: () => void;
+  position: { x: number; y: number };
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <>
+      {/* Backdrop to capture clicks */}
+      <div
+        className="fixed inset-0 z-40"
+        onClick={onClose}
+      />
+
+      {/* Popover */}
+      <div
+        className="fixed z-50 bg-white rounded-lg shadow-2xl border border-gray-200 p-3 max-w-xs"
+        style={{
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          transform: 'translate(-50%, -100%) translateY(-8px)'
+        }}
+      >
+        <div className="text-xs font-semibold text-gray-700 mb-2">
+          Based on {films.length} film{films.length !== 1 ? 's' : ''} you rated highly:
+        </div>
+        <div className="max-h-64 overflow-y-auto space-y-1">
+          {films.slice(0, 20).map((film, idx) => (
+            <div key={film.id} className="text-xs text-gray-600 flex items-start gap-1.5">
+              <span className="text-blue-500 flex-shrink-0">•</span>
+              <span className="flex-1">{film.title}</span>
+            </div>
+          ))}
+          {films.length > 20 && (
+            <div className="text-xs text-gray-500 italic pt-1">
+              ...and {films.length - 20} more
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Helper function to enhance reason text with clickable counts
 function enhanceReasonText(
   reason: string,
   reasonIndex: number,
-  contributingFilms?: Record<string, Array<{ id: number; title: string }>>
+  contributingFilms: Record<string, Array<{ id: number; title: string }>> | undefined,
+  onCountClick: (films: Array<{ id: number; title: string }>, count: string, event: React.MouseEvent) => void
 ) {
   // Patterns to match film counts
   const patterns = [
@@ -98,45 +147,66 @@ function enhanceReasonText(
     { regex: /(\d+) films? from this studio/g, type: 'count' },
   ];
 
-  let enhancedReason = reason;
-  let matchFound = false;
-
   // Get the contributing films for this specific reason
   const films = getContributingFilmsForReason(reason, contributingFilms);
 
+  // Check if any pattern matches
+  let hasMatch = false;
   for (const pattern of patterns) {
-    const matches = Array.from(reason.matchAll(pattern.regex));
-
-    if (matches.length > 0 && films.length > 0) {
-      matches.forEach((match) => {
-        const fullMatch = match[0];
-        const count = match[1];
-
-        // Build tooltip with actual film titles
-        const filmList = films.slice(0, 15).map(f => f.title).join('\n• ');
-        const tooltipText = films.length > 0
-          ? `Based on these ${films.length} films you rated highly:\n• ${filmList}${films.length > 15 ? `\n...and ${films.length - 15} more` : ''}`
-          : `Based on ${count} films you rated highly`;
-
-        // Replace with clickable span
-        const replacement = `<span class="film-count-interactive" data-count="${count}" data-reason-idx="${reasonIndex}" title="${tooltipText}">${fullMatch}</span>`;
-        enhancedReason = enhancedReason.replace(fullMatch, replacement);
-        matchFound = true;
-      });
-    } else if (matches.length > 0) {
-      // Fallback if no contributing films data
-      matches.forEach((match) => {
-        const fullMatch = match[0];
-        const count = match[1];
-        const tooltipText = `Based on ${count} films you've rated highly in your library`;
-        const replacement = `<span class="film-count-interactive" data-count="${count}" data-reason-idx="${reasonIndex}" title="${tooltipText}">${fullMatch}</span>`;
-        enhancedReason = enhancedReason.replace(fullMatch, replacement);
-        matchFound = true;
-      });
+    if (pattern.regex.test(reason)) {
+      hasMatch = true;
+      break;
     }
   }
 
-  return { text: enhancedReason, hasInteractive: matchFound };
+  if (!hasMatch || films.length === 0) {
+    return <span className="flex-1">{reason}</span>;
+  }
+
+  // Split the reason by the patterns and create interactive elements
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let partKey = 0;
+
+  for (const pattern of patterns) {
+    pattern.regex.lastIndex = 0; // Reset regex
+    const matches = Array.from(reason.matchAll(pattern.regex));
+
+    for (const match of matches) {
+      const matchStart = match.index!;
+      const matchEnd = matchStart + match[0].length;
+      const count = match[1];
+
+      // Add text before match
+      if (matchStart > lastIndex) {
+        parts.push(
+          <span key={`text-${partKey++}`}>{reason.substring(lastIndex, matchStart)}</span>
+        );
+      }
+
+      // Add interactive count
+      parts.push(
+        <span
+          key={`count-${partKey++}`}
+          className="film-count-interactive"
+          onClick={(e) => onCountClick(films, count, e)}
+        >
+          {match[0]}
+        </span>
+      );
+
+      lastIndex = matchEnd;
+    }
+  }
+
+  // Add remaining text
+  if (lastIndex < reason.length) {
+    parts.push(
+      <span key={`text-${partKey++}`}>{reason.substring(lastIndex)}</span>
+    );
+  }
+
+  return <span className="flex-1">{parts}</span>;
 }
 
 export default function MovieCard({
@@ -160,6 +230,11 @@ export default function MovieCard({
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [popover, setPopover] = useState<{
+    films: Array<{ id: number; title: string }>;
+    count: string;
+    position: { x: number; y: number };
+  } | null>(null);
 
   const voteCategoryBadge = voteCategory && voteCategory !== 'standard' ? {
     'hidden-gem': { label: '💎 Hidden Gem', className: 'bg-purple-100 text-purple-800' },
@@ -169,6 +244,21 @@ export default function MovieCard({
 
   const displayedReasons = expanded ? reasons : reasons?.slice(0, 3);
   const hasMoreReasons = reasons && reasons.length > 3;
+
+  const handleCountClick = (films: Array<{ id: number; title: string }>, count: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const rect = (event.target as HTMLElement).getBoundingClientRect();
+    setPopover({
+      films,
+      count,
+      position: {
+        x: rect.left + rect.width / 2,
+        y: rect.top
+      }
+    });
+  };
 
   return (
     <>
@@ -198,6 +288,17 @@ export default function MovieCard({
             </button>
           </div>
         </div>
+      )}
+
+      {/* Film List Popover */}
+      {popover && (
+        <FilmListPopover
+          films={popover.films}
+          count={popover.count}
+          isOpen={!!popover}
+          onClose={() => setPopover(null)}
+          position={popover.position}
+        />
       )}
 
       <div className={`border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'}`}>
@@ -291,23 +392,12 @@ export default function MovieCard({
             {reasons && reasons.length > 0 && (
               <div>
                 <ul className="space-y-1.5 overflow-hidden">
-                  {displayedReasons?.map((r, i) => {
-                    const { text: enhancedText, hasInteractive } = enhanceReasonText(r, i, contributingFilms);
-
-                    return (
-                      <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
-                        <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
-                        {hasInteractive ? (
-                          <span
-                            className="flex-1"
-                            dangerouslySetInnerHTML={{ __html: enhancedText }}
-                          />
-                        ) : (
-                          <span className="flex-1">{r}</span>
-                        )}
-                      </li>
-                    );
-                  })}
+                  {displayedReasons?.map((r, i) => (
+                    <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
+                      <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
+                      {enhanceReasonText(r, i, contributingFilms, handleCountClick)}
+                    </li>
+                  ))}
                 </ul>
                 {hasMoreReasons && (
                   <button
@@ -374,17 +464,12 @@ export default function MovieCard({
           color: #2563eb;
           text-decoration: underline;
           text-decoration-style: dotted;
-          cursor: help;
+          cursor: pointer;
           font-weight: 500;
-          position: relative;
         }
         .film-count-interactive:hover {
           color: #1d4ed8;
           text-decoration-style: solid;
-        }
-        /* Enhanced tooltip styling */
-        .film-count-interactive[title] {
-          white-space: pre-line;
         }
       `}</style>
     </>
