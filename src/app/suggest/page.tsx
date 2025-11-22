@@ -4,7 +4,7 @@ import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion } from '@/lib/enrich';
+import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -47,6 +47,7 @@ export default function SuggestPage() {
   const [shownIds, setShownIds] = useState<Set<number>>(new Set());
   const [cacheKey, setCacheKey] = useState<number>(Date.now());
   const [progress, setProgress] = useState({ current: 0, total: 5, stage: '' });
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
@@ -976,36 +977,45 @@ export default function SuggestPage() {
     }
   }, [uid, sourceFilms, blockedIds, shownIds, items, getSectionFilter]);
 
-  // Handle removing a suggestion
-  const handleRemoveSuggestion = async (tmdbId: number) => {
+  // Handle feedback
+  const handleFeedback = async (tmdbId: number, type: 'negative' | 'positive') => {
     if (!uid) return;
     try {
-      // Block the suggestion in the background
-      await blockSuggestion(uid, tmdbId);
-      setBlockedIds(prev => new Set([...prev, tmdbId]));
+      if (type === 'negative') {
+        // Block the suggestion in the background
+        await addFeedback(uid, tmdbId, 'negative');
+        setBlockedIds(prev => new Set([...prev, tmdbId]));
 
-      // Fetch a replacement suggestion
-      const replacement = await fetchReplacementSuggestion();
+        // Fetch a replacement suggestion
+        const replacement = await fetchReplacementSuggestion();
 
-      // Update items: remove the old one and add replacement if available
-      setItems(prev => {
-        if (!prev) return prev;
-        const filtered = prev.filter(item => item.id !== tmdbId);
+        // Update items: remove the old one and add replacement if available
+        setItems(prev => {
+          if (!prev) return prev;
+          const filtered = prev.filter(item => item.id !== tmdbId);
+          if (replacement) {
+            // Add replacement at the end
+            return [...filtered, replacement];
+          }
+          return filtered;
+        });
+
+        // Track the replacement as shown
         if (replacement) {
-          // Add replacement at the end
-          return [...filtered, replacement];
+          setShownIds(prev => new Set([...prev, replacement.id]));
         }
-        return filtered;
-      });
-
-      // Track the replacement as shown
-      if (replacement) {
-        setShownIds(prev => new Set([...prev, replacement.id]));
+      } else {
+        // Positive feedback
+        await addFeedback(uid, tmdbId, 'positive');
+        setFeedbackMessage("Thanks! We'll show more movies like this.");
+        setTimeout(() => setFeedbackMessage(null), 3000);
       }
     } catch (e) {
-      console.error('Failed to block suggestion:', e);
-      // On error, just remove the item
-      setItems(prev => prev ? prev.filter(item => item.id !== tmdbId) : prev);
+      console.error('Failed to submit feedback:', e);
+      // On error for negative feedback, just remove the item to avoid broken UI state
+      if (type === 'negative') {
+        setItems(prev => prev ? prev.filter(item => item.id !== tmdbId) : prev);
+      }
     }
   };
 
@@ -1074,6 +1084,12 @@ export default function SuggestPage() {
 
   return (
     <AuthGate>
+      {/* Feedback Toast */}
+      {feedbackMessage && (
+        <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded shadow-lg z-50 animate-fade-in-up">
+          {feedbackMessage}
+        </div>
+      )}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Suggestions</h1>
@@ -1140,759 +1156,767 @@ export default function SuggestPage() {
         </div>
       </div>
       {loadingFilms && <p className="text-sm text-gray-600">Loading your library from database…</p>}
-      {loading && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-sm text-gray-600">
-            <span>Computing your recommendations…</span>
-            <span className="text-xs">{Math.round((progress.current / progress.total) * 100)}%</span>
+      {
+        loading && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm text-gray-600">
+              <span>Computing your recommendations…</span>
+              <span className="text-xs">{Math.round((progress.current / progress.total) * 100)}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+              <div
+                className="h-full bg-blue-600 transition-all duration-500 ease-out"
+                style={{ width: `${(progress.current / progress.total) * 100}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-500">{progress.stage}</p>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-            <div
-              className="h-full bg-blue-600 transition-all duration-500 ease-out"
-              style={{ width: `${(progress.current / progress.total) * 100}%` }}
-            />
-          </div>
-          <p className="text-xs text-gray-500">{progress.stage}</p>
-        </div>
-      )}
+        )
+      }
       {error && <p className="text-sm text-red-600">{error}</p>}
-      {!loading && !error && noCandidatesReason && (
-        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
-          {noCandidatesReason}
-        </p>
-      )}
-      {items && categorizedSuggestions && (
-        <div className="space-y-8">
-          {sourceLabel && (
-            <p className="text-xs text-gray-500 mb-4">Source: {sourceLabel}</p>
-          )}
+      {
+        !loading && !error && noCandidatesReason && (
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
+            {noCandidatesReason}
+          </p>
+        )
+      }
+      {
+        items && categorizedSuggestions && (
+          <div className="space-y-8">
+            {sourceLabel && (
+              <p className="text-xs text-gray-500 mb-4">Source: {sourceLabel}</p>
+            )}
 
-          {/* Seasonal/Holiday Recommendations Section */}
-          {categorizedSuggestions.seasonalPicks.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">
-                    {categorizedSuggestions.seasonalConfig.title.includes('Christmas') ? '🎄' :
-                      categorizedSuggestions.seasonalConfig.title.includes('Halloween') ? '🎃' :
-                        categorizedSuggestions.seasonalConfig.title.includes('Thanksgiving') ? '🦃' :
-                          categorizedSuggestions.seasonalConfig.title.includes('Valentine') ? '💝' :
-                            categorizedSuggestions.seasonalConfig.title.includes('Fourth') || categorizedSuggestions.seasonalConfig.title.includes('Independence') ? '🎆' :
-                              categorizedSuggestions.seasonalConfig.title.includes('Easter') ? '🐰' : '📅'}
-                  </span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">{categorizedSuggestions.seasonalConfig.title}</h2>
-                    <p className="text-xs text-gray-600">{categorizedSuggestions.seasonalConfig.description}</p>
+            {/* Seasonal/Holiday Recommendations Section */}
+            {categorizedSuggestions.seasonalPicks.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">
+                      {categorizedSuggestions.seasonalConfig.title.includes('Christmas') ? '🎄' :
+                        categorizedSuggestions.seasonalConfig.title.includes('Halloween') ? '🎃' :
+                          categorizedSuggestions.seasonalConfig.title.includes('Thanksgiving') ? '🦃' :
+                            categorizedSuggestions.seasonalConfig.title.includes('Valentine') ? '💝' :
+                              categorizedSuggestions.seasonalConfig.title.includes('Fourth') || categorizedSuggestions.seasonalConfig.title.includes('Independence') ? '🎆' :
+                                categorizedSuggestions.seasonalConfig.title.includes('Easter') ? '🐰' : '📅'}
+                    </span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">{categorizedSuggestions.seasonalConfig.title}</h2>
+                      <p className="text-xs text-gray-600">{categorizedSuggestions.seasonalConfig.description}</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('seasonalPicks')}
+                    disabled={refreshingSections.has('seasonalPicks')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('seasonalPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('seasonalPicks')}
-                  disabled={refreshingSections.has('seasonalPicks')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('seasonalPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.seasonalPicks.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.seasonalPicks.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* Perfect Matches Section */}
-          {categorizedSuggestions.perfectMatches.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🎯</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Perfect Matches</h2>
-                    <p className="text-xs text-gray-600">These match everything you love</p>
+            {/* Perfect Matches Section */}
+            {categorizedSuggestions.perfectMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎯</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Perfect Matches</h2>
+                      <p className="text-xs text-gray-600">These match everything you love</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('perfectMatches')}
+                    disabled={refreshingSections.has('perfectMatches')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('perfectMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('perfectMatches')}
-                  disabled={refreshingSections.has('perfectMatches')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('perfectMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.perfectMatches.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.perfectMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* Based on Recent Watches Section */}
-          {categorizedSuggestions.recentWatchMatches.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">⏱️</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Based on Recent Watches</h2>
-                    <p className="text-xs text-gray-600">Similar to films you&apos;ve enjoyed recently</p>
+            {/* Based on Recent Watches Section */}
+            {categorizedSuggestions.recentWatchMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">⏱️</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Based on Recent Watches</h2>
+                      <p className="text-xs text-gray-600">Similar to films you&apos;ve enjoyed recently</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('recentWatchMatches')}
+                    disabled={refreshingSections.has('recentWatchMatches')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('recentWatchMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('recentWatchMatches')}
-                  disabled={refreshingSections.has('recentWatchMatches')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('recentWatchMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.recentWatchMatches.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.recentWatchMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* Inspired by Directors You Love Section */}
-          {categorizedSuggestions.directorMatches.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🎬</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Inspired by Directors You Love</h2>
-                    <p className="text-xs text-gray-600">From filmmakers you enjoy and directors with similar styles</p>
+            {/* Inspired by Directors You Love Section */}
+            {categorizedSuggestions.directorMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎬</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Inspired by Directors You Love</h2>
+                      <p className="text-xs text-gray-600">From filmmakers you enjoy and directors with similar styles</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('directorMatches')}
+                    disabled={refreshingSections.has('directorMatches')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('directorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('directorMatches')}
-                  disabled={refreshingSections.has('directorMatches')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('directorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.directorMatches.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.directorMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* From Studios You Love Section */}
-          {categorizedSuggestions.studioMatches.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🎞️</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">From Studios You Love</h2>
-                    <p className="text-xs text-gray-600">More from production companies whose style you enjoy</p>
+            {/* From Studios You Love Section */}
+            {categorizedSuggestions.studioMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎞️</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">From Studios You Love</h2>
+                      <p className="text-xs text-gray-600">More from production companies whose style you enjoy</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('studioMatches')}
+                    disabled={refreshingSections.has('studioMatches')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('studioMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('studioMatches')}
-                  disabled={refreshingSections.has('studioMatches')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('studioMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.studioMatches.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.studioMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* From Actors You Love Section */}
-          {categorizedSuggestions.actorMatches.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">⭐</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">From Actors You Love</h2>
-                    <p className="text-xs text-gray-600">More from your favorite performers</p>
+            {/* From Actors You Love Section */}
+            {categorizedSuggestions.actorMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">⭐</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">From Actors You Love</h2>
+                      <p className="text-xs text-gray-600">More from your favorite performers</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('actorMatches')}
+                    disabled={refreshingSections.has('actorMatches')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('actorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('actorMatches')}
-                  disabled={refreshingSections.has('actorMatches')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('actorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.actorMatches.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.actorMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* Your Favorite Genres Section */}
-          {categorizedSuggestions.genreMatches.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🎭</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Your Favorite Genres</h2>
-                    <p className="text-xs text-gray-600">Based on genres you watch most</p>
+            {/* Your Favorite Genres Section */}
+            {categorizedSuggestions.genreMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎭</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Your Favorite Genres</h2>
+                      <p className="text-xs text-gray-600">Based on genres you watch most</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('genreMatches')}
+                    disabled={refreshingSections.has('genreMatches')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('genreMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('genreMatches')}
-                  disabled={refreshingSections.has('genreMatches')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('genreMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.genreMatches.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.genreMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* Hidden Gems Section */}
-          {categorizedSuggestions.hiddenGems.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🔍</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Hidden Gems</h2>
-                    <p className="text-xs text-gray-600">Older films that match your taste</p>
+            {/* Hidden Gems Section */}
+            {categorizedSuggestions.hiddenGems.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🔍</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Hidden Gems</h2>
+                      <p className="text-xs text-gray-600">Older films that match your taste</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('hiddenGems')}
+                    disabled={refreshingSections.has('hiddenGems')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('hiddenGems') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('hiddenGems')}
-                  disabled={refreshingSections.has('hiddenGems')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('hiddenGems') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.hiddenGems.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.hiddenGems.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* Cult Classics Section */}
-          {categorizedSuggestions.cultClassics.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🎭</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Cult Classics</h2>
-                    <p className="text-xs text-gray-600">Films with dedicated followings</p>
+            {/* Cult Classics Section */}
+            {categorizedSuggestions.cultClassics.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎭</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Cult Classics</h2>
+                      <p className="text-xs text-gray-600">Films with dedicated followings</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('cultClassics')}
+                    disabled={refreshingSections.has('cultClassics')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('cultClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('cultClassics')}
-                  disabled={refreshingSections.has('cultClassics')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('cultClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.cultClassics.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.cultClassics.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* Crowd Pleasers Section */}
-          {categorizedSuggestions.crowdPleasers.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🎉</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Crowd Pleasers</h2>
-                    <p className="text-xs text-gray-600">Widely loved and highly rated</p>
+            {/* Crowd Pleasers Section */}
+            {categorizedSuggestions.crowdPleasers.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎉</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Crowd Pleasers</h2>
+                      <p className="text-xs text-gray-600">Widely loved and highly rated</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('crowdPleasers')}
+                    disabled={refreshingSections.has('crowdPleasers')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('crowdPleasers') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('crowdPleasers')}
-                  disabled={refreshingSections.has('crowdPleasers')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('crowdPleasers') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.crowdPleasers.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.crowdPleasers.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* New & Trending Section */}
-          {categorizedSuggestions.newReleases.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">✨</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">New & Trending</h2>
-                    <p className="text-xs text-gray-600">Fresh picks based on your taste</p>
+            {/* New & Trending Section */}
+            {categorizedSuggestions.newReleases.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">✨</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">New & Trending</h2>
+                      <p className="text-xs text-gray-600">Fresh picks based on your taste</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('newReleases')}
+                    disabled={refreshingSections.has('newReleases')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('newReleases') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('newReleases')}
-                  disabled={refreshingSections.has('newReleases')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('newReleases') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.newReleases.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.newReleases.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* Recent Classics Section */}
-          {categorizedSuggestions.recentClassics.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🎬</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Recent Classics</h2>
-                    <p className="text-xs text-gray-600">Great films from 2015-2022</p>
+            {/* Recent Classics Section */}
+            {categorizedSuggestions.recentClassics.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎬</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Recent Classics</h2>
+                      <p className="text-xs text-gray-600">Great films from 2015-2022</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('recentClassics')}
+                    disabled={refreshingSections.has('recentClassics')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('recentClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('recentClassics')}
-                  disabled={refreshingSections.has('recentClassics')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('recentClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.recentClassics.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.recentClassics.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* Deep Cuts Section */}
-          {categorizedSuggestions.deepCuts.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🌟</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Deep Cuts</h2>
-                    <p className="text-xs text-gray-600">Niche matches for your specific taste</p>
+            {/* Deep Cuts Section */}
+            {categorizedSuggestions.deepCuts.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🌟</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Deep Cuts</h2>
+                      <p className="text-xs text-gray-600">Niche matches for your specific taste</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('deepCuts')}
+                    disabled={refreshingSections.has('deepCuts')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('deepCuts') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('deepCuts')}
-                  disabled={refreshingSections.has('deepCuts')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('deepCuts') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.deepCuts.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.deepCuts.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* From Collections Section */}
-          {categorizedSuggestions.fromCollections.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">📚</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">From Collections</h2>
-                    <p className="text-xs text-gray-600">Complete franchises and series</p>
+            {/* From Collections Section */}
+            {categorizedSuggestions.fromCollections.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📚</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">From Collections</h2>
+                      <p className="text-xs text-gray-600">Complete franchises and series</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('fromCollections')}
+                    disabled={refreshingSections.has('fromCollections')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('fromCollections') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('fromCollections')}
-                  disabled={refreshingSections.has('fromCollections')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('fromCollections') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.fromCollections.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                    vote_average={item.vote_average}
-                    vote_count={item.vote_count}
-                    overview={item.overview}
-                    contributingFilms={item.contributingFilms}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.fromCollections.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-          {/* More Recommendations Section - Fallback for remaining suggestions */}
-          {categorizedSuggestions.moreRecommendations.length >= 1 && (
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🎥</span>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">More Recommendations</h2>
-                    <p className="text-xs text-gray-600">Additional films you might enjoy</p>
+            {/* More Recommendations Section - Fallback for remaining suggestions */}
+            {categorizedSuggestions.moreRecommendations.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎥</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">More Recommendations</h2>
+                      <p className="text-xs text-gray-600">Additional films you might enjoy</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleRefreshSection('moreRecommendations')}
+                    disabled={refreshingSections.has('moreRecommendations')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('moreRecommendations') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRefreshSection('moreRecommendations')}
-                  disabled={refreshingSections.has('moreRecommendations')}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                  title="Refresh this section"
-                >
-                  <svg className={`w-3 h-3 ${refreshingSections.has('moreRecommendations') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  <span>Refresh</span>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {categorizedSuggestions.moreRecommendations.map((item) => (
-                  <MovieCard
-                    key={item.id}
-                    id={item.id}
-                    title={item.title}
-                    year={item.year}
-                    posterPath={posters[item.id]}
-                    trailerKey={item.trailerKey}
-                    isInWatchlist={watchlistTmdbIds.has(item.id)}
-                    reasons={item.reasons}
-                    score={item.score}
-                    voteCategory={item.voteCategory}
-                    collectionName={item.collectionName}
-                    onRemove={handleRemoveSuggestion}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-      )}
-      {!items && (
-        <p className="text-gray-700">Your personalized recommendations will appear here.</p>
-      )}
-    </AuthGate>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.moreRecommendations.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
+        )
+      }
+      {
+        !items && (
+          <p className="text-gray-700">Your personalized recommendations will appear here.</p>
+        )
+      }
+    </AuthGate >
   );
 }
