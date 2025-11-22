@@ -4,17 +4,16 @@ import { supabase } from '@/lib/supabaseClient';
 
 export default function NavBar() {
   const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     async function checkUser() {
       if (!supabase) {
-        setLoading(false);
         return;
       }
       const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user ?? null);
-      setLoading(false);
     }
     checkUser();
 
@@ -48,15 +47,15 @@ export default function NavBar() {
             <a href="/stats" className="text-sm text-gray-600 hover:text-gray-900">Stats</a>
           </>
         )}
-        <div className="ml-auto flex gap-3 items-center">
-          {loading ? (
+        <div className="ml-auto flex gap-3 items-center" suppressHydrationWarning>
+          {!mounted ? (
             <span className="text-sm text-gray-400">...</span>
           ) : user ? (
             <>
               <a href="/profile" className="text-sm text-gray-600 hover:text-gray-900">
                 {user.email}
               </a>
-              <button 
+              <button
                 onClick={handleSignOut}
                 className="text-sm text-gray-600 hover:text-gray-900 underline"
               >

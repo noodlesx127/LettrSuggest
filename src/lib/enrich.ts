@@ -161,6 +161,34 @@ export async function getBlockedSuggestions(userId: string): Promise<Set<number>
   return new Set((data ?? []).map(row => Number(row.tmdb_id)));
 }
 
+export async function addFeedback(userId: string, tmdbId: number, type: 'negative' | 'positive') {
+  if (!supabase) throw new Error('Supabase not initialized');
+  const { error } = await supabase.from('suggestion_feedback').insert({ user_id: userId, tmdb_id: tmdbId, feedback_type: type });
+  if (error) {
+    console.error('[Supabase] addFeedback error', { userId, tmdbId, type, error });
+    throw error;
+  }
+}
+
+export async function getFeedback(userId: string): Promise<Map<number, 'negative' | 'positive'>> {
+  if (!supabase) throw new Error('Supabase not initialized');
+  const { data, error } = await supabase
+    .from('suggestion_feedback')
+    .select('tmdb_id, feedback_type')
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('[Supabase] getFeedback error', { userId, error });
+    return new Map();
+  }
+
+  const map = new Map<number, 'negative' | 'positive'>();
+  data?.forEach((row: any) => {
+    map.set(row.tmdb_id, row.feedback_type);
+  });
+  return map;
+}
+
 export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
   // Fetch from TMDB (primary source)
   console.log('[UnifiedAPI] fetch movie from TMDB', { id });
@@ -714,6 +742,27 @@ export async function suggestByOverlap(params: {
   const liked = params.films.filter((f) => (f.liked || (f.rating ?? 0) >= 4) && params.mappings.get(f.uri));
   const likedIdsAll = liked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
 
+  // Fetch user feedback to adjust weights and filter candidates
+  const feedbackMap = await getFeedback(params.userId);
+  const negativeFeedbackIds = new Set<number>();
+  const positiveFeedbackIds = new Set<number>();
+
+  for (const [id, type] of feedbackMap.entries()) {
+    if (type === 'negative') negativeFeedbackIds.add(id);
+    else if (type === 'positive') positiveFeedbackIds.add(id);
+  }
+
+  // Filter out candidates with negative feedback
+  // We modify the input candidates array in place or filter it
+  // But wait, candidates is a number[], we should filter it before processing?
+  // The function signature takes candidates as input.
+  // However, the logic below uses `candidates` to find overlaps.
+  // We should filter `candidates` here if possible, but `candidates` is passed in.
+  // Let's filter it effectively by ignoring them during scoring or just removing them from the set if we could.
+  // Actually, `suggestByOverlap` iterates over `candidates` later?
+  // No, it iterates over `params.films` (the user's library) and finds overlaps with `candidates`.
+  // Wait, let's check how `candidates` is used.
+
   // Also identify watched but NOT liked films for negative signals
   const watchedNotLiked = params.films.filter((f) =>
     !f.liked &&
@@ -721,6 +770,25 @@ export async function suggestByOverlap(params: {
     params.mappings.get(f.uri)
   );
   const dislikedIdsAll = watchedNotLiked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
+
+  // Add negative feedback IDs to disliked list to penalize their features
+  dislikedIdsAll.push(...Array.from(negativeFeedbackIds));
+
+  // Add positive feedback IDs to liked list to boost their features
+  likedIdsAll.push(...Array.from(positiveFeedbackIds));
+
+  // Filter out candidates that have negative feedback
+  // We need to modify the candidates array that will be used for scoring
+  // Since params.candidates is passed by value (reference to array), we can just use a local filtered version
+  // But wait, suggestByOverlap uses params.candidates later?
+  // Let's check the rest of the file.
+  // Actually, we should probably filter it right here.
+  const validCandidates = params.candidates.filter(id => !negativeFeedbackIds.has(id));
+
+  // Use validCandidates instead of params.candidates in the rest of the function
+  // We need to make sure we replace usages of params.candidates with validCandidates
+  // Or we can just reassign params.candidates if it wasn't const (it is in the function signature object)
+  // So we'll define a new variable and use it.
 
   const likedCap = 800;
   const dislikedCap = 400;
@@ -989,7 +1057,7 @@ export async function suggestByOverlap(params: {
     for (const id of params.excludeWatchedIds) seenIds.add(id);
   }
 
-  const maxC = Math.min(params.maxCandidates ?? 120, params.candidates.length);
+  const maxC = Math.min(params.maxCandidates ?? 120, validCandidates.length);
   const desired = Math.max(10, Math.min(30, params.desiredResults ?? 20));
 
   // Helper to fetch from cache first in bulk where possible
@@ -998,7 +1066,7 @@ export async function suggestByOverlap(params: {
   }
 
   const resultsAcc: Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null; contributingFilms?: Record<string, Array<{ id: number; title: string }>> }> = [];
-  const pool = await mapLimit(params.candidates.slice(0, maxC), params.concurrency ?? 8, async (cid) => {
+  const pool = await mapLimit(validCandidates.slice(0, maxC), params.concurrency ?? 8, async (cid) => {
     if (seenIds.has(cid)) return null; // skip already-liked
     const m = await fetchFromCache(cid);
     if (!m) return null;

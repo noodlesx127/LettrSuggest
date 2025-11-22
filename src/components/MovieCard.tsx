@@ -14,7 +14,7 @@ type MovieCardProps = {
   voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
   collectionName?: string;
   showTrailer?: boolean;
-  onRemove?: (id: number) => void;
+  onFeedback?: (id: number, type: 'negative' | 'positive') => void;
   vote_average?: number;
   vote_count?: number;
   overview?: string;
@@ -221,7 +221,7 @@ export default function MovieCard({
   voteCategory,
   collectionName,
   showTrailer = true,
-  onRemove,
+  onFeedback,
   vote_average,
   vote_count,
   overview,
@@ -446,18 +446,30 @@ export default function MovieCard({
               </div>
             )}
 
-            {/* Remove button (only shown if onRemove is provided) */}
-            {onRemove && (
-              <button
-                onClick={() => onRemove(id)}
-                className="mt-2 text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1 transition-colors"
-                title="Remove this suggestion"
-              >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                <span>Remove suggestion</span>
-              </button>
+            {/* Feedback buttons */}
+            {onFeedback && (
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  onClick={() => onFeedback(id, 'negative')}
+                  className="flex-1 py-1.5 px-2 rounded bg-gray-50 hover:bg-gray-100 text-xs text-gray-600 hover:text-gray-900 font-medium flex items-center justify-center gap-1.5 transition-colors border border-gray-200"
+                  title="Not interested in this suggestion"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+                  </svg>
+                  <span>Not Interested</span>
+                </button>
+                <button
+                  onClick={() => onFeedback(id, 'positive')}
+                  className="flex-1 py-1.5 px-2 rounded bg-blue-50 hover:bg-blue-100 text-xs text-blue-700 hover:text-blue-900 font-medium flex items-center justify-center gap-1.5 transition-colors border border-blue-100"
+                  title="Show more suggestions like this"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+                  </svg>
+                  <span>More Like This</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
