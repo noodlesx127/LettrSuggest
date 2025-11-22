@@ -20,6 +20,46 @@ type MovieCardProps = {
   overview?: string;
 };
 
+// Helper function to parse and enhance reason text with clickable counts
+function enhanceReasonText(reason: string, reasonIndex: number) {
+  // Patterns to match:
+  // 1. (X similar films)
+  // 2. (X highly-rated similar films)
+  // 3. (X+ highly-rated films)
+  // 4. X films by this/these directors
+  // 5. X films from this studio
+
+  const patterns = [
+    { regex: /\((\d+) similar films?\)/g, type: 'genre' },
+    { regex: /\((\d+) highly-rated similar films?\)/g, type: 'genre-combo' },
+    { regex: /\((\d+\+?) highly-rated films?\)/g, type: 'keyword' },
+    { regex: /(\d+) films? by (this|these) directors?/g, type: 'director' },
+    { regex: /(\d+) films? from this studio/g, type: 'studio' },
+  ];
+
+  let enhancedReason = reason;
+  let matchFound = false;
+
+  for (const pattern of patterns) {
+    const matches = Array.from(reason.matchAll(pattern.regex));
+
+    if (matches.length > 0) {
+      matches.forEach((match) => {
+        const fullMatch = match[0];
+        const count = match[1];
+        const tooltipText = `Based on ${count} film${count !== '1' ? 's' : ''} you've rated highly in your library`;
+
+        // Replace the match with a clickable span
+        const replacement = `<span class="film-count-interactive" data-count="${count}" data-type="${pattern.type}" title="${tooltipText}">${fullMatch}</span>`;
+        enhancedReason = enhancedReason.replace(fullMatch, replacement);
+        matchFound = true;
+      });
+    }
+  }
+
+  return { text: enhancedReason, hasInteractive: matchFound };
+}
+
 export default function MovieCard({
   id,
   title,
@@ -171,13 +211,23 @@ export default function MovieCard({
             {reasons && reasons.length > 0 && (
               <div>
                 <ul className="space-y-1.5 overflow-hidden">
-                  {displayedReasons?.map((r, i) => (
-                    <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
-                      <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
-                      <span className="flex-1">{r}</span>
-                    </li>
-                  ))}
-                </ul>
+                  {displayedReasons?.map((r, i) => {
+                    const { text: enhancedText, hasInteractive } = enhanceReasonText(r, i);
+
+                    return (
+                      <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
+                        <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
+                        {hasInteractive ? (
+                          <span
+                            className="flex-1"
+                            dangerouslySetInnerHTML={{ __html: enhancedText }}
+                          />
+                        ) : (
+                          <span className="flex-1">{r}</span>
+                        )}
+                      </li>
+                    );
+                  })}</ul>
                 {hasMoreReasons && (
                   <button
                     onClick={() => setExpanded(!expanded)}
@@ -236,6 +286,21 @@ export default function MovieCard({
           </div>
         </div>
       </div>
+
+      {/* Global styles for interactive film counts */}
+      <style jsx global>{`
+        .film-count-interactive {
+          color: #2563eb;
+          text-decoration: underline;
+          text-decoration-style: dotted;
+          cursor: help;
+          font-weight: 500;
+        }
+        .film-count-interactive:hover {
+          color: #1d4ed8;
+          text-decoration-style: solid;
+        }
+      `}</style>
     </>
   );
 }
