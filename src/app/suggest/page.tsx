@@ -23,6 +23,7 @@ type MovieItem = {
   genres?: string[];
   vote_average?: number;
   vote_count?: number;
+  overview?: string;
 };
 
 export default function SuggestPage() {
@@ -587,7 +588,8 @@ export default function SuggestPage() {
               collectionName,
               genres,
               vote_average: movie.vote_average,
-              vote_count: movie.vote_count
+              vote_count: movie.vote_count,
+              overview: movie.overview
             };
           }
         } catch (e) {
@@ -815,7 +817,8 @@ export default function SuggestPage() {
           collectionName,
           genres,
           vote_average: movie.vote_average,
-          vote_count: movie.vote_count
+          vote_count: movie.vote_count,
+          overview: movie.overview
         };
       }
 
@@ -938,7 +941,8 @@ export default function SuggestPage() {
               collectionName,
               genres,
               vote_average: movie.vote_average,
-              vote_count: movie.vote_count
+              vote_count: movie.vote_count,
+              overview: movie.overview
             };
             return movieItem;
           }
@@ -1206,6 +1210,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1252,6 +1257,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1298,6 +1304,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1344,6 +1351,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1390,6 +1398,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1436,6 +1445,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1482,6 +1492,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1528,6 +1539,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1574,6 +1586,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1620,6 +1633,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1666,6 +1680,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1712,6 +1727,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1758,6 +1774,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>
@@ -1804,6 +1821,7 @@ export default function SuggestPage() {
                     onRemove={handleRemoveSuggestion}
                     vote_average={item.vote_average}
                     vote_count={item.vote_count}
+                    overview={item.overview}
                   />
                 ))}
               </div>

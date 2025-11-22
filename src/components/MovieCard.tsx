@@ -17,6 +17,7 @@ type MovieCardProps = {
   onRemove?: (id: number) => void;
   vote_average?: number;
   vote_count?: number;
+  overview?: string;
 };
 
 export default function MovieCard({
@@ -33,10 +34,12 @@ export default function MovieCard({
   showTrailer = true,
   onRemove,
   vote_average,
-  vote_count
+  vote_count,
+  overview
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
 
   const voteCategoryBadge = voteCategory && voteCategory !== 'standard' ? {
     'hidden-gem': { label: '💎 Hidden Gem', className: 'bg-purple-100 text-purple-800' },
@@ -119,6 +122,14 @@ export default function MovieCard({
                 {title}
               </h3>
               <div className="flex gap-1 flex-wrap justify-end">
+                {trailerKey && (
+                  <span
+                    className="flex-shrink-0 px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded cursor-pointer hover:bg-red-200 transition-colors"
+                    onClick={() => setShowVideo(true)}
+                    title="Watch trailer">
+                    ▶️ Trailer
+                  </span>
+                )}
                 {isInWatchlist && (
                   <span className="flex-shrink-0 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded" title="This movie is already in your watchlist">
                     📋 Watchlist
@@ -163,7 +174,7 @@ export default function MovieCard({
                   {displayedReasons?.map((r, i) => (
                     <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
                       <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
-                      <span className="flex-1 line-clamp-2">{r}</span>
+                      <span className="flex-1">{r}</span>
                     </li>
                   ))}
                 </ul>
@@ -187,6 +198,23 @@ export default function MovieCard({
                         </svg>
                       </>
                     )}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Movie Description */}
+            {overview && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <p className={`text-xs text-gray-600 leading-relaxed ${descriptionExpanded ? '' : 'line-clamp-3'}`}>
+                  {overview}
+                </p>
+                {overview.length > 150 && (
+                  <button
+                    onClick={() => setDescriptionExpanded(!descriptionExpanded)}
+                    className="mt-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+                  >
+                    {descriptionExpanded ? 'Read less' : 'Read more'}
                   </button>
                 )}
               </div>
