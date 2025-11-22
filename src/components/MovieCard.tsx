@@ -339,22 +339,22 @@ export default function MovieCard({
             </div>
 
             {/* Badges under poster */}
-            <div className="flex flex-col gap-1 w-24">
+            <div className="flex flex-col gap-1 w-32">
               {trailerKey && (
                 <button
-                  className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded hover:bg-red-200 transition-colors text-center"
+                  className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded hover:bg-red-200 transition-colors text-center whitespace-nowrap"
                   onClick={() => setShowVideo(true)}
                   title="Watch trailer">
                   ▶️ Trailer
                 </button>
               )}
               {isInWatchlist && (
-                <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded text-center" title="In your watchlist">
+                <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded text-center whitespace-nowrap" title="In your watchlist">
                   📋 Watchlist
                 </span>
               )}
               {voteCategoryBadge && (
-                <span className={`px-2 py-1 text-xs font-medium rounded text-center ${voteCategoryBadge.className}`}>
+                <span className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${voteCategoryBadge.className}`}>
                   {voteCategoryBadge.label}
                 </span>
               )}
