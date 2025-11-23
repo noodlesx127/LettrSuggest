@@ -36,6 +36,7 @@ type CategorizedSuggestions = {
   directorMatches: MovieItem[];
   actorMatches: MovieItem[];
   genreMatches: MovieItem[];
+  documentaries: MovieItem[];
   decadeMatches: MovieItem[];
   smartDiscovery: MovieItem[];
   hiddenGems: MovieItem[];
@@ -205,6 +206,9 @@ export default function SuggestPage() {
     // 5. Your Favorite Genres: Films matching preferred genres
     const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 12);
 
+    // 5b. Documentaries
+    const documentaries = getNextItems(item => item.genres?.includes('Documentary') ?? false, 12);
+
     // 6. Best of the [Decade]s
     const decadeMatches = topDecade ? getNextItems(item => {
       const year = parseInt(item.year || '0');
@@ -256,6 +260,11 @@ export default function SuggestPage() {
     // 14. Fallback: More recommendations (any remaining films)
     const moreRecommendations = getNextItems(() => true, 20);
 
+    // Helper to sort by rating
+    const sortByRating = (items: MovieItem[]) => {
+      return [...items].sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0));
+    };
+
     console.log('[Suggest] Categorization complete', {
       seasonalPicks: seasonalPicks.length,
       perfectMatches: perfectMatches.length,
@@ -264,6 +273,7 @@ export default function SuggestPage() {
       directorMatches: directorMatches.length,
       actorMatches: actorMatches.length,
       genreMatches: genreMatches.length,
+      documentaries: documentaries.length,
       hiddenGems: hiddenGems.length,
       cultClassics: cultClassics.length,
       crowdPleasers: crowdPleasers.length,
@@ -277,24 +287,25 @@ export default function SuggestPage() {
     });
 
     return {
-      seasonalPicks,
+      seasonalPicks: sortByRating(seasonalPicks),
       seasonalConfig,
-      perfectMatches,
-      recentWatchMatches,
-      studioMatches,
-      directorMatches,
-      actorMatches,
-      genreMatches,
-      decadeMatches,
-      smartDiscovery,
-      hiddenGems,
-      cultClassics,
-      crowdPleasers,
-      newReleases,
-      recentClassics,
-      deepCuts,
-      fromCollections,
-      moreRecommendations
+      perfectMatches: sortByRating(perfectMatches),
+      recentWatchMatches: sortByRating(recentWatchMatches),
+      studioMatches: sortByRating(studioMatches),
+      directorMatches: sortByRating(directorMatches),
+      actorMatches: sortByRating(actorMatches),
+      genreMatches: sortByRating(genreMatches),
+      documentaries: sortByRating(documentaries),
+      decadeMatches: sortByRating(decadeMatches),
+      smartDiscovery: sortByRating(smartDiscovery),
+      hiddenGems: sortByRating(hiddenGems),
+      cultClassics: sortByRating(cultClassics),
+      crowdPleasers: sortByRating(crowdPleasers),
+      newReleases: sortByRating(newReleases),
+      recentClassics: sortByRating(recentClassics),
+      deepCuts: sortByRating(deepCuts),
+      fromCollections: sortByRating(fromCollections),
+      moreRecommendations: sortByRating(moreRecommendations)
     };
   }, [topDecade]);
 
@@ -389,6 +400,7 @@ export default function SuggestPage() {
       directorMatches: (item) => hasDirectorMatch(item.reasons),
       actorMatches: (item) => hasActorMatch(item.reasons),
       genreMatches: (item) => hasGenreMatch(item.reasons),
+      documentaries: (item) => item.genres?.includes('Documentary') ?? false,
       decadeMatches: (item) => {
         if (!topDecade) return false;
         const year = parseInt(item.year || '0');
@@ -1662,6 +1674,54 @@ export default function SuggestPage() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {categorizedSuggestions.genreMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Documentaries Section */}
+            {categorizedSuggestions.documentaries.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📹</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Documentaries</h2>
+                      <p className="text-xs text-gray-600">Real stories and factual films</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('documentaries')}
+                    disabled={refreshingSections.has('documentaries')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('documentaries') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.documentaries.map((item) => (
                     <MovieCard
                       key={item.id}
                       id={item.id}
