@@ -1,3 +1,60 @@
+/**
+ * Genre adjacency map for exploration vs exploitation
+ * Maps each genre to related genres for gentle discovery expansion
+ */
+const ADJACENT_GENRES: Record<number, number[]> = {
+  // Thriller (53) -> Mystery, Crime, Horror, Action
+  53: [9648, 80, 27, 28],
+
+  // Drama (18) -> Romance, History, War
+  18: [10749, 36, 10752],
+
+  // Action (28) -> Adventure, Sci-Fi, War, Thriller
+  28: [12, 878, 10752, 53],
+
+  // Comedy (35) -> Romance, Family, Animation
+  35: [10749, 10751, 16],
+
+  // Sci-Fi (878) -> Fantasy, Adventure, Thriller, Mystery
+  878: [14, 12, 53, 9648],
+
+  // Horror (27) -> Thriller, Mystery, Fantasy
+  27: [53, 9648, 14],
+
+  // Romance (10749) -> Drama, Comedy
+  10749: [18, 35],
+
+  // Crime (80) -> Thriller, Mystery, Drama
+  80: [53, 9648, 18],
+
+  // Mystery (9648) -> Thriller, Crime, Horror
+  9648: [53, 80, 27],
+
+  // Fantasy (14) -> Adventure, Sci-Fi, Family
+  14: [12, 878, 10751],
+
+  // Adventure (12) -> Action, Fantasy, Family
+  12: [28, 14, 10751],
+
+  // Animation (16) -> Family, Fantasy, Comedy, Adventure
+  16: [10751, 14, 35, 12],
+
+  // Documentary (99) -> History, War
+  99: [36, 10752],
+
+  // Western (37) -> Action, Drama, Adventure
+  37: [28, 18, 12],
+
+  // Family (10751) -> Animation, Adventure, Fantasy, Comedy
+  10751: [16, 12, 14, 35],
+
+  // History (36) -> Drama, War, Documentary
+  36: [18, 10752, 99],
+
+  // War (10752) -> Action, Drama, History
+  10752: [28, 18, 36]
+};
+
 export async function fetchTrendingIds(period: 'day' | 'week' = 'day', limit = 100): Promise<number[]> {
   const u = new URL('/api/tmdb/trending', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
   u.searchParams.set('period', period);
@@ -447,4 +504,147 @@ export async function getSmartDiscoveryCandidates(profile: {
   }
 
   return Array.from(allIds).slice(0, limit);
+}
+
+/**
+ * Generate exploratory movie picks for discovery
+ * Balances safe bets with adjacent genre exploration and acclaimed films
+ * 
+ * @param profile - User's taste profile with top genres and avoided genres
+ * @param options - Configuration for exploratory picks
+ * @returns Array of TMDB movie IDs for exploratory suggestions
+ */
+export async function generateExploratoryPicks(
+  profile: {
+    topGenres: Array<{ id: number; name: string; weight: number }>;
+    avoidGenres: Array<{ id: number; name: string; weight: number }>;
+  },
+  options: {
+    count: number; // How many exploratory picks to generate
+    minVoteAverage?: number; // Minimum quality threshold
+    minVoteCount?: number; // Minimum vote count for reliability
+  }
+): Promise<number[]> {
+  const exploratoryIds: number[] = [];
+
+  // Strategy 1: Adjacent genres (70% of exploratory picks)
+  const adjacentCount = Math.floor(options.count * 0.7);
+  const adjacentIds = await getAdjacentGenrePicks(profile, adjacentCount, options);
+  exploratoryIds.push(...adjacentIds);
+
+  // Strategy 2: Critically acclaimed outside comfort zone (30% of exploratory picks)
+  const acclaimedCount = options.count - adjacentCount;
+  const acclaimedIds = await getCriticallyAcclaimedPicks(profile, acclaimedCount, options);
+  exploratoryIds.push(...acclaimedIds);
+
+  console.log('[Exploration] Generated exploratory picks', {
+    total: exploratoryIds.length,
+    adjacent: adjacentIds.length,
+    acclaimed: acclaimedIds.length,
+    targetCount: options.count
+  });
+
+  return exploratoryIds;
+}
+
+/**
+ * Get films from adjacent genres for gentle discovery expansion
+ */
+async function getAdjacentGenrePicks(
+  profile: {
+    topGenres: Array<{ id: number; name: string; weight: number }>;
+    avoidGenres: Array<{ id: number; name: string; weight: number }>;
+  },
+  count: number,
+  options: { minVoteAverage?: number; minVoteCount?: number }
+): Promise<number[]> {
+  if (count === 0) return [];
+
+  const adjacentGenres = new Set<number>();
+  const avoidedGenreIds = new Set(profile.avoidGenres.map(g => g.id));
+  const topGenreIds = new Set(profile.topGenres.map(g => g.id));
+
+  // Find adjacent genres to user's top 3 genres
+  for (const genre of profile.topGenres.slice(0, 3)) {
+    const adjacent = ADJACENT_GENRES[genre.id] || [];
+    adjacent.forEach(adjId => {
+      // Don't add if it's already a top genre or an avoided genre
+      const isTopGenre = topGenreIds.has(adjId);
+      const isAvoided = avoidedGenreIds.has(adjId);
+      if (!isTopGenre && !isAvoided) {
+        adjacentGenres.add(adjId);
+      }
+    });
+  }
+
+  if (adjacentGenres.size === 0) {
+    console.log('[Exploration] No adjacent genres found for exploration');
+    return [];
+  }
+
+  // Query TMDB discover API for adjacent genre films
+  const adjacentGenreArray = Array.from(adjacentGenres);
+  const randomGenre = adjacentGenreArray[Math.floor(Math.random() * adjacentGenreArray.length)];
+
+  console.log('[Exploration] Exploring adjacent genre', {
+    genreId: randomGenre,
+    fromTopGenres: profile.topGenres.slice(0, 3).map(g => g.name),
+    availableAdjacent: adjacentGenreArray.length
+  });
+
+  const ids = await discoverMoviesByProfile({
+    genres: [randomGenre],
+    genreMode: 'AND',
+    sortBy: 'vote_average.desc',
+    minVotes: options.minVoteCount || 500,
+    limit: count * 2 // Request more than needed for variety
+  });
+
+  // Shuffle and return requested count
+  return ids.sort(() => Math.random() - 0.5).slice(0, count);
+}
+
+/**
+ * Get critically acclaimed films outside user's top genres
+ */
+async function getCriticallyAcclaimedPicks(
+  profile: {
+    topGenres: Array<{ id: number; name: string; weight: number }>;
+    avoidGenres: Array<{ id: number; name: string; weight: number }>;
+  },
+  count: number,
+  options: { minVoteAverage?: number; minVoteCount?: number }
+): Promise<number[]> {
+  if (count === 0) return [];
+
+  const topGenreIds = new Set(profile.topGenres.map(g => g.id));
+  const avoidedGenreIds = new Set(profile.avoidGenres.map(g => g.id));
+
+  // All major genres
+  const allGenres = [28, 12, 16, 35, 80, 99, 18, 10751, 14, 36, 27, 10402, 9648, 10749, 878, 10770, 53, 10752, 37];
+  const explorationGenres = allGenres.filter(id => !topGenreIds.has(id) && !avoidedGenreIds.has(id));
+
+  if (explorationGenres.length === 0) {
+    console.log('[Exploration] No exploration genres available (all are top or avoided)');
+    return [];
+  }
+
+  // Pick a random exploration genre
+  const randomGenre = explorationGenres[Math.floor(Math.random() * explorationGenres.length)];
+
+  console.log('[Exploration] Exploring acclaimed films in new genre', {
+    genreId: randomGenre,
+    availableGenres: explorationGenres.length
+  });
+
+  // Query for highly-rated films in this genre
+  const ids = await discoverMoviesByProfile({
+    genres: [randomGenre],
+    genreMode: 'AND',
+    sortBy: 'vote_average.desc',
+    minVotes: options.minVoteCount || 1000, // Higher threshold for acclaimed films
+    limit: count * 2
+  });
+
+  return ids.sort(() => Math.random() - 0.5).slice(0, count);
 }
