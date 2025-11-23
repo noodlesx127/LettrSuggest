@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback } from '@/lib/enrich';
-import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates } from '@/lib/trending';
+import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
 import type { FilmEvent } from '@/lib/normalize';
@@ -503,6 +503,20 @@ export default function SuggestPage() {
       // Fetch smart discovery candidates (hidden gems)
       const discoveryCandidates = await getSmartDiscoveryCandidates(tasteProfile);
 
+      // Phase 4: Generate exploratory picks (15% exploration rate)
+      const exploratoryCount = Math.floor(150 * 0.15); // ~22 exploratory picks
+      const exploratoryPicks = await generateExploratoryPicks(
+        {
+          topGenres: tasteProfile.topGenres,
+          avoidGenres: tasteProfile.avoidGenres
+        },
+        {
+          count: exploratoryCount,
+          minVoteAverage: 7.0,
+          minVoteCount: 500
+        }
+      );
+
       // Combine all candidate sources
       let candidatesRaw: number[] = [];
       candidatesRaw.push(...smartCandidates.trending);
@@ -510,11 +524,15 @@ export default function SuggestPage() {
       candidatesRaw.push(...smartCandidates.discovered);
       candidatesRaw.push(...decadeCandidates);
       candidatesRaw.push(...discoveryCandidates);
+      candidatesRaw.push(...exploratoryPicks); // Add exploratory picks
 
       console.log('[Suggest] Smart candidates breakdown', {
         trending: smartCandidates.trending.length,
         similar: smartCandidates.similar.length,
         discovered: smartCandidates.discovered.length,
+        decade: decadeCandidates.length,
+        discovery: discoveryCandidates.length,
+        exploratory: exploratoryPicks.length,
         totalRaw: candidatesRaw.length
       });
 
