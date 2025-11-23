@@ -1902,3 +1902,268 @@ export async function deleteFilmMapping(userId: string, uri: string) {
     .eq('uri', uri);
   if (error) throw error;
 }
+
+// ============================================================================
+// Phase 5+: Adaptive Exploration & Personalized Learning
+// ============================================================================
+
+/**
+ * Get adaptive exploration rate based on user's response to exploratory picks
+ * Rate adjusts between 5-30% based on how user rates exploratory suggestions
+ */
+export async function getAdaptiveExplorationRate(userId: string): Promise<number> {
+  if (!supabase) return 0.15; // Default 15%
+
+  try {
+    const { data, error } = await supabase
+      .from('user_exploration_stats')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[AdaptiveExploration] Error fetching stats:', error);
+      return 0.15;
+    }
+
+    if (!data || data.exploratory_films_rated < 10) {
+      // Need at least 10 rated exploratory films to adjust
+      console.log('[AdaptiveExploration] Using default rate (insufficient data)', {
+        ratedCount: data?.exploratory_films_rated || 0
+      });
+      return 0.15;
+    }
+
+    const avgRating = data.exploratory_avg_rating;
+    let newRate = data.exploration_rate;
+
+    // Adjust rate based on average rating
+    if (avgRating >= 4.0) {
+      // User loves exploratory picks - increase discovery
+      newRate = Math.min(0.30, data.exploration_rate + 0.05);
+      console.log('[AdaptiveExploration] Increasing rate (high satisfaction)', {
+        avgRating,
+        oldRate: data.exploration_rate,
+        newRate
+      });
+    } else if (avgRating < 3.0) {
+      // User dislikes exploratory picks - decrease discovery
+      newRate = Math.max(0.05, data.exploration_rate - 0.05);
+      console.log('[AdaptiveExploration] Decreasing rate (low satisfaction)', {
+        avgRating,
+        oldRate: data.exploration_rate,
+        newRate
+      });
+    } else {
+      console.log('[AdaptiveExploration] Maintaining rate (neutral satisfaction)', {
+        avgRating,
+        rate: data.exploration_rate
+      });
+    }
+
+    // Update rate if changed
+    if (newRate !== data.exploration_rate) {
+      await supabase
+        .from('user_exploration_stats')
+        .update({
+          exploration_rate: newRate,
+          last_updated: new Date().toISOString()
+        })
+        .eq('user_id', userId);
+    }
+
+    return newRate;
+  } catch (e) {
+    console.error('[AdaptiveExploration] Exception:', e);
+    return 0.15;
+  }
+}
+
+/**
+ * Update exploration feedback when user rates an exploratory film
+ * This feeds into the adaptive exploration rate calculation
+ */
+export async function updateExplorationFeedback(
+  userId: string,
+  tmdbId: number,
+  rating: number,
+  wasExploratory: boolean
+) {
+  if (!supabase || !wasExploratory) return;
+
+  try {
+    const { data: current } = await supabase
+      .from('user_exploration_stats')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (!current) {
+      // Create initial record
+      await supabase.from('user_exploration_stats').insert({
+        user_id: userId,
+        exploration_rate: 0.15,
+        exploratory_films_rated: 1,
+        exploratory_avg_rating: rating,
+        last_updated: new Date().toISOString()
+      });
+
+      console.log('[ExplorationFeedback] Created initial stats', { userId, rating });
+    } else {
+      // Update running average
+      const newCount = current.exploratory_films_rated + 1;
+      const newAvg = ((current.exploratory_avg_rating * current.exploratory_films_rated) + rating) / newCount;
+
+      await supabase.from('user_exploration_stats').update({
+        exploratory_films_rated: newCount,
+        exploratory_avg_rating: Number(newAvg.toFixed(2)),
+        last_updated: new Date().toISOString()
+      }).eq('user_id', userId);
+
+      console.log('[ExplorationFeedback] Updated stats', {
+        userId,
+        newCount,
+        newAvg: newAvg.toFixed(2),
+        rating
+      });
+    }
+  } catch (e) {
+    console.error('[ExplorationFeedback] Error:', e);
+  }
+}
+
+/**
+ * Get personalized adjacent genres based on learned preferences
+ * Falls back to generic adjacency map if insufficient data
+ */
+export async function getPersonalizedAdjacentGenres(
+  userId: string,
+  topGenres: Array<{ id: number; name: string }>
+): Promise<Array<{ genreId: number; genreName: string; confidence: number }>> {
+  if (!supabase) return [];
+
+  try {
+    const adjacentGenres: Array<{ genreId: number; genreName: string; confidence: number }> = [];
+
+    for (const genre of topGenres.slice(0, 3)) {
+      // Get learned adjacencies for this genre
+      const { data, error } = await supabase
+        .from('user_adjacent_preferences')
+        .select('to_genre_id, to_genre_name, success_rate, rating_count')
+        .eq('user_id', userId)
+        .eq('from_genre_id', genre.id)
+        .gte('rating_count', 3) // Need at least 3 ratings
+        .gte('success_rate', 0.6) // 60%+ success rate
+        .order('success_rate', { ascending: false });
+
+      if (error) {
+        console.error('[PersonalizedAdjacency] Error:', error);
+        continue;
+      }
+
+      if (data && data.length > 0) {
+        // Use learned adjacencies
+        console.log('[PersonalizedAdjacency] Found learned preferences', {
+          fromGenre: genre.name,
+          count: data.length
+        });
+
+        data.slice(0, 3).forEach(row => {
+          adjacentGenres.push({
+            genreId: row.to_genre_id,
+            genreName: row.to_genre_name,
+            confidence: row.success_rate
+          });
+        });
+      }
+    }
+
+    return adjacentGenres;
+  } catch (e) {
+    console.error('[PersonalizedAdjacency] Exception:', e);
+    return [];
+  }
+}
+
+/**
+ * Update adjacent genre preferences when user rates a film
+ * Tracks which genre transitions are successful for this user
+ */
+export async function updateAdjacentPreferences(
+  userId: string,
+  filmGenres: Array<{ id: number; name: string }>,
+  userTopGenres: Array<{ id: number; name: string }>,
+  rating: number
+) {
+  if (!supabase || !filmGenres || filmGenres.length === 0) return;
+
+  try {
+    const topGenreIds = new Set(userTopGenres.map(g => g.id));
+    const isSuccess = rating >= 3.5;
+
+    // Find adjacent transitions (film genres not in user's top genres)
+    for (const filmGenre of filmGenres) {
+      if (topGenreIds.has(filmGenre.id)) continue; // Skip if already a top genre
+
+      // This is an adjacent genre - find which top genre it's adjacent to
+      for (const topGenre of userTopGenres.slice(0, 3)) {
+        // Check if this transition exists
+        const { data: existing } = await supabase
+          .from('user_adjacent_preferences')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('from_genre_id', topGenre.id)
+          .eq('to_genre_id', filmGenre.id)
+          .maybeSingle();
+
+        if (existing) {
+          // Update existing preference
+          const newCount = existing.rating_count + 1;
+          const newAvg = ((existing.avg_rating * existing.rating_count) + rating) / newCount;
+          const successCount = (existing.success_rate * existing.rating_count) + (isSuccess ? 1 : 0);
+          const newSuccessRate = successCount / newCount;
+
+          await supabase
+            .from('user_adjacent_preferences')
+            .update({
+              rating_count: newCount,
+              avg_rating: Number(newAvg.toFixed(2)),
+              success_rate: Number(newSuccessRate.toFixed(2)),
+              last_updated: new Date().toISOString()
+            })
+            .eq('id', existing.id);
+
+          console.log('[AdjacentPreferences] Updated', {
+            from: topGenre.name,
+            to: filmGenre.name,
+            newCount,
+            newSuccessRate: newSuccessRate.toFixed(2)
+          });
+        } else {
+          // Create new preference
+          await supabase
+            .from('user_adjacent_preferences')
+            .insert({
+              user_id: userId,
+              from_genre_id: topGenre.id,
+              from_genre_name: topGenre.name,
+              to_genre_id: filmGenre.id,
+              to_genre_name: filmGenre.name,
+              rating_count: 1,
+              avg_rating: rating,
+              success_rate: isSuccess ? 1.0 : 0.0,
+              last_updated: new Date().toISOString()
+            });
+
+          console.log('[AdjacentPreferences] Created', {
+            from: topGenre.name,
+            to: filmGenre.name,
+            rating
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[AdjacentPreferences] Error:', e);
+  }
+}
