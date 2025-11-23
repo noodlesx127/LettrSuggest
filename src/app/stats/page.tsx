@@ -779,7 +779,7 @@ export default function StatsPage() {
             <div className="mt-4 bg-white rounded-lg p-3 border border-blue-200">
               <p className="text-xs text-gray-600 mb-2">How this helps:</p>
               <ul className="text-xs text-gray-700 space-y-1">
-                <li>• <strong>Normalized ratings</strong>: Your 4★ might be someone else's 5★ - we account for that</li>
+                <li>• <strong>Normalized ratings</strong>: Your 4★ might be someone else&apos;s 5★ - we account for that</li>
                 <li>• <strong>Rewatch signal</strong>: Films you rewatch get 1.8x weight (strong preference indicator)</li>
                 <li>• <strong>Recency decay</strong>: Recent watches weighted more (your taste evolves)</li>
               </ul>
