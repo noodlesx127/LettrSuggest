@@ -41,16 +41,16 @@ export default function StatsPage() {
 
   const filteredFilms = useMemo(() => {
     if (!films) return [];
-    
+
     const watched = films.filter(f => (f.watchCount ?? 0) > 0);
-    
+
     if (timeFilter === 'all') return watched;
-    
+
     const now = new Date();
-    const cutoff = timeFilter === 'year' 
+    const cutoff = timeFilter === 'year'
       ? new Date(now.getFullYear(), 0, 1)
       : new Date(now.getFullYear(), now.getMonth(), 1);
-    
+
     return watched.filter(f => {
       if (!f.lastDate) return false;
       const filmDate = new Date(f.lastDate);
@@ -64,19 +64,19 @@ export default function StatsPage() {
       console.log('[Stats] Skipping TMDB load:', { uid, filmCount: filteredFilms.length });
       return;
     }
-    
+
     async function loadTmdbDetails() {
       console.log('[Stats] Starting TMDB details load', { uid, filmCount: filteredFilms.length });
       setLoadingDetails(true);
       setDetailsError(null);
-      
+
       // Add timeout protection (60 seconds for large libraries)
       const timeoutId = setTimeout(() => {
         console.error('[Stats] Load timeout after 60 seconds');
         setDetailsError('Loading took too long. Please try again or reduce your time filter.');
         setLoadingDetails(false);
       }, 60000);
-      
+
       try {
         // Get ALL mappings for this user instead of using .in() which can hit query limits
         console.log('[Stats] Fetching mappings for user');
@@ -84,7 +84,7 @@ export default function StatsPage() {
           .from('film_tmdb_map')
           .select('uri, tmdb_id')
           .eq('user_id', uid);
-        
+
         if (mappingError) {
           console.error('[Stats] Error fetching mappings:', mappingError);
           setDetailsError(`Error loading mappings: ${mappingError.message}`);
@@ -92,58 +92,58 @@ export default function StatsPage() {
           setLoadingDetails(false);
           return;
         }
-        
+
         if (!allMappings || allMappings.length === 0) {
           console.log('[Stats] No mappings found for user');
           clearTimeout(timeoutId);
           setLoadingDetails(false);
           return;
         }
-        
+
         console.log('[Stats] Mappings loaded:', allMappings.length);
-        
+
         // Store mappings for preference calculation
         const mappingsMap = new Map<string, number>();
         const filteredUris = new Set(filteredFilms.map(f => f.uri));
-        
+
         // Filter to only mappings for currently filtered films
         const relevantMappings = allMappings.filter(m => filteredUris.has(m.uri));
         console.log('[Stats] Relevant mappings:', relevantMappings.length);
-        
+
         relevantMappings.forEach(m => mappingsMap.set(m.uri, m.tmdb_id));
         setFilmMappings(mappingsMap);
-        
+
         const tmdbIds = relevantMappings.map(m => m.tmdb_id);
-        
+
         if (tmdbIds.length === 0) {
           console.log('[Stats] No TMDB IDs to fetch');
           clearTimeout(timeoutId);
           setLoadingDetails(false);
           return;
         }
-        
+
         console.log('[Stats] Fetching cached TMDB details for', tmdbIds.length, 'IDs');
-        
+
         // Fetch from cache in batches to avoid query size limits
         const batchSize = 500;
         const detailsMap = new Map<number, TMDBDetails>();
-        
+
         for (let i = 0; i < tmdbIds.length; i += batchSize) {
           const batch = tmdbIds.slice(i, i + batchSize);
           console.log(`[Stats] Fetching batch ${i / batchSize + 1}:`, batch.length, 'IDs');
-          
+
           const { data: cached, error: cacheError } = await supabase!
             .from('tmdb_movies')
             .select('tmdb_id, data')
             .in('tmdb_id', batch);
-          
+
           if (cacheError) {
             console.error('[Stats] Error fetching cached movies:', cacheError);
             continue;
           }
-          
+
           console.log('[Stats] Cached results for batch:', cached?.length ?? 0);
-          
+
           for (const row of cached ?? []) {
             const data = row.data as any;
             // Accept cached data even if incomplete - we'll use what's available
@@ -153,7 +153,7 @@ export default function StatsPage() {
             }
           }
         }
-        
+
         console.log('[Stats] Total details loaded:', detailsMap.size);
         setTmdbDetails(detailsMap);
         clearTimeout(timeoutId);
@@ -166,7 +166,7 @@ export default function StatsPage() {
         setLoadingDetails(false);
       }
     }
-    
+
     loadTmdbDetails();
   }, [uid, filteredFilms]);
 
@@ -174,7 +174,7 @@ export default function StatsPage() {
   const getPreferenceWeight = (rating?: number, isLiked?: boolean): number => {
     const r = rating ?? 3;
     let weight = 0.0;
-    
+
     if (r >= 4.5) {
       weight = isLiked ? 2.0 : 1.5;
     } else if (r >= 3.5) {
@@ -186,7 +186,7 @@ export default function StatsPage() {
     } else {
       weight = isLiked ? 0.5 : 0.0;
     }
-    
+
     return weight;
   };
 
@@ -205,7 +205,7 @@ export default function StatsPage() {
       if (r >= 0 && r <= 5) ratingsBuckets[r] += 1;
     }
 
-    const avgRating = rated.length > 0 
+    const avgRating = rated.length > 0
       ? (rated.reduce((sum, f) => sum + (f.rating ?? 0), 0) / rated.length).toFixed(2)
       : '0.00';
 
@@ -231,9 +231,9 @@ export default function StatsPage() {
     const totalWatches = filteredFilms.reduce((sum, f) => sum + (f.watchCount ?? 0), 0);
 
     // Most watched film
-    const mostWatched = filteredFilms.reduce((max, f) => 
+    const mostWatched = filteredFilms.reduce((max, f) =>
       (f.watchCount ?? 0) > (max.watchCount ?? 0) ? f : max
-    , filteredFilms[0]);
+      , filteredFilms[0]);
 
     // Genre analysis with weighted preferences
     const genreCounts = new Map<string, number>();
@@ -244,27 +244,27 @@ export default function StatsPage() {
     const directorWeights = new Map<string, number>();
     const keywordWeights = new Map<string, number>(); // Sub-genres/themes
     const studioWeights = new Map<string, number>(); // Production companies
-    
+
     // Track films by preference strength for the "Taste Profile" section
     const absoluteFavorites = filteredFilms.filter(f => (f.rating ?? 0) >= 4.5 && f.liked);
     const highlyRated = filteredFilms.filter(f => (f.rating ?? 0) >= 4);
     const likedFilms = filteredFilms.filter(f => f.liked);
     const lowRatedButLiked = filteredFilms.filter(f => (f.rating ?? 0) < 3 && (f.rating ?? 0) > 0 && f.liked);
-    
+
     for (const film of filteredFilms) {
       const weight = getPreferenceWeight(film.rating, film.liked);
-      
+
       // Find TMDB ID for this film
       const tmdbId = filmMappings.get(film.uri);
       const details = tmdbId ? tmdbDetails.get(tmdbId) : undefined;
-      
+
       if (details) {
         // Count genres (both raw count and weighted)
         details.genres?.forEach(genre => {
           genreCounts.set(genre.name, (genreCounts.get(genre.name) ?? 0) + 1);
           genreWeights.set(genre.name, (genreWeights.get(genre.name) ?? 0) + weight);
         });
-        
+
         // Count top 5 actors (both raw and weighted)
         details.credits?.cast?.slice(0, 5).forEach(actor => {
           const current = actorCounts.get(actor.name) ?? { count: 0 };
@@ -274,7 +274,7 @@ export default function StatsPage() {
           });
           actorWeights.set(actor.name, (actorWeights.get(actor.name) ?? 0) + weight);
         });
-        
+
         // Count directors (both raw and weighted)
         details.credits?.crew?.filter(c => c.job === 'Director').forEach(director => {
           const current = directorCounts.get(director.name) ?? { count: 0 };
@@ -284,13 +284,13 @@ export default function StatsPage() {
           });
           directorWeights.set(director.name, (directorWeights.get(director.name) ?? 0) + weight);
         });
-        
+
         // Extract keywords if available (these are sub-genres/themes)
         const keywords = (details as any).keywords?.keywords || (details as any).keywords?.results || [];
         keywords.forEach((k: { name: string }) => {
           keywordWeights.set(k.name, (keywordWeights.get(k.name) ?? 0) + weight);
         });
-        
+
         // Extract production companies/studios
         const companies = details.production_companies || [];
         companies.forEach((c: { name: string }) => {
@@ -302,54 +302,54 @@ export default function StatsPage() {
     const topGenres = Array.from(genreCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
-    
+
     const topGenresByWeight = Array.from(genreWeights.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
-    
+
     const topActors = Array.from(actorCounts.entries())
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 5);
-    
+
     const topActorsByWeight = Array.from(actorWeights.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([name, weight]) => ({ name, weight, ...actorCounts.get(name)! }));
-    
+
     const topDirectors = Array.from(directorCounts.entries())
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 5);
-    
+
     const topDirectorsByWeight = Array.from(directorWeights.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([name, weight]) => ({ name, weight, ...directorCounts.get(name)! }));
-    
+
     const topKeywords = Array.from(keywordWeights.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 15);
-    
+
     // Top sub-genres (keywords are essentially sub-genres/themes)
     const topSubgenres = Array.from(keywordWeights.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
-    
+
     // Top studios
     const topStudios = Array.from(studioWeights.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
-    
+
     // Categorize studios (indie vs major)
-    const indieStudios = ['A24', 'Neon', 'Annapurna Pictures', 'Focus Features', 'Blumhouse Productions', 
-                          'Studio Ghibli', 'Searchlight Pictures', 'Fox Searchlight Pictures', 'IFC Films', 
-                          'Magnolia Pictures', 'Miramax', '24 Frames', 'Plan B Entertainment', 'Participant'];
-    const majorStudios = ['Warner Bros.', 'Universal Pictures', 'Paramount Pictures', '20th Century Fox', 
-                          'Columbia Pictures', 'Walt Disney Pictures', 'Sony Pictures', 'Metro-Goldwyn-Mayer',
-                          'Lionsgate', 'New Line Cinema', 'DreamWorks', 'Legendary Pictures'];
-    
+    const indieStudios = ['A24', 'Neon', 'Annapurna Pictures', 'Focus Features', 'Blumhouse Productions',
+      'Studio Ghibli', 'Searchlight Pictures', 'Fox Searchlight Pictures', 'IFC Films',
+      'Magnolia Pictures', 'Miramax', '24 Frames', 'Plan B Entertainment', 'Participant'];
+    const majorStudios = ['Warner Bros.', 'Universal Pictures', 'Paramount Pictures', '20th Century Fox',
+      'Columbia Pictures', 'Walt Disney Pictures', 'Sony Pictures', 'Metro-Goldwyn-Mayer',
+      'Lionsgate', 'New Line Cinema', 'DreamWorks', 'Legendary Pictures'];
+
     let indieWeight = 0;
     let majorWeight = 0;
-    
+
     for (const [studio, weight] of studioWeights.entries()) {
       if (indieStudios.some(indie => studio.includes(indie))) {
         indieWeight += weight;
@@ -357,7 +357,7 @@ export default function StatsPage() {
         majorWeight += weight;
       }
     }
-    
+
     const studioPreference = {
       indie: indieWeight,
       major: majorWeight,
@@ -417,7 +417,7 @@ export default function StatsPage() {
     const month = now.getMonth();
     let currentSeason = 'Winter';
     let seasonalGenres: string[] = [];
-    
+
     if (month >= 2 && month <= 4) {
       currentSeason = 'Spring';
       seasonalGenres = ['Romance', 'Drama', 'Documentary'];
@@ -499,8 +499,8 @@ export default function StatsPage() {
 
   const byYearOption = {
     tooltip: { trigger: 'axis' },
-    xAxis: { 
-      type: 'category', 
+    xAxis: {
+      type: 'category',
       data: stats.years,
       axisLabel: { interval: Math.floor(stats.years.length / 10) || 0 }
     },
@@ -603,7 +603,7 @@ export default function StatsPage() {
             <p className="text-sm text-gray-600 mb-4">
               These weighted preferences drive your movie suggestions. Higher weights mean stronger influence.
             </p>
-            
+
             {/* Preference Strength Breakdown */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
               <div className="bg-white rounded-lg p-3 border border-green-200">
@@ -716,7 +716,7 @@ export default function StatsPage() {
                   <span>Favorite Studios</span>
                 </h3>
                 <p className="text-xs text-gray-600 mb-2">Production companies whose films resonate with you</p>
-                
+
                 {/* Indie vs Major breakdown */}
                 {stats.studioPreference.total > 0 && (
                   <div className="mb-3 bg-gray-50 rounded-lg p-3">
@@ -724,13 +724,13 @@ export default function StatsPage() {
                       <span className="text-xs font-medium text-gray-700">Studio Type Preference:</span>
                     </div>
                     <div className="flex gap-2 h-8">
-                      <div 
+                      <div
                         className="bg-orange-500 flex items-center justify-center text-white text-xs font-medium rounded transition-all"
                         style={{ width: `${(stats.studioPreference.indie / stats.studioPreference.total) * 100}%` }}
                       >
                         {stats.studioPreference.indie > 0 && `Indie ${stats.studioPreference.indie.toFixed(1)}`}
                       </div>
-                      <div 
+                      <div
                         className="bg-blue-500 flex items-center justify-center text-white text-xs font-medium rounded transition-all"
                         style={{ width: `${(stats.studioPreference.major / stats.studioPreference.total) * 100}%` }}
                       >
@@ -739,7 +739,7 @@ export default function StatsPage() {
                     </div>
                   </div>
                 )}
-                
+
                 <div className="flex flex-wrap gap-2">
                   {stats.topStudios.slice(0, 10).map(([studio, weight]) => {
                     return (
@@ -751,6 +751,39 @@ export default function StatsPage() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* User Statistics - Phase 1 Enhancement */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-gray-900 text-lg">📊 Your Rating Statistics</h2>
+              <span className="text-xs text-blue-700 bg-blue-100 px-2 py-1 rounded">Algorithm Insights</span>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              These statistics help normalize your ratings to your personal scale for better recommendations.
+            </p>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-white rounded-lg p-3 border border-blue-200">
+                <p className="text-xs text-gray-600 mb-1">Average Rating</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.avgRating}★</p>
+                <p className="text-xs text-gray-500">{stats.rewatchedCount} rewatched</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 border border-blue-200">
+                <p className="text-xs text-gray-600 mb-1">Total Films</p>
+                <p className="text-2xl font-bold text-gray-900">{filteredFilms.length}</p>
+                <p className="text-xs text-gray-500">In profile</p>
+              </div>
+            </div>
+
+            <div className="mt-4 bg-white rounded-lg p-3 border border-blue-200">
+              <p className="text-xs text-gray-600 mb-2">How this helps:</p>
+              <ul className="text-xs text-gray-700 space-y-1">
+                <li>• <strong>Normalized ratings</strong>: Your 4★ might be someone else's 5★ - we account for that</li>
+                <li>• <strong>Rewatch signal</strong>: Films you rewatch get 1.8x weight (strong preference indicator)</li>
+                <li>• <strong>Recency decay</strong>: Recent watches weighted more (your taste evolves)</li>
+              </ul>
+            </div>
           </div>
 
           {/* Additional Taste Insights - Informational Only */}
@@ -771,7 +804,7 @@ export default function StatsPage() {
                       <div key={decade} className="flex items-center gap-2">
                         <span className="text-sm font-medium text-gray-700 w-16">{decade}</span>
                         <div className="flex-1 bg-gray-200 rounded-full h-6 relative overflow-hidden">
-                          <div 
+                          <div
                             className="bg-indigo-500 h-full rounded-full transition-all"
                             style={{ width: `${percentage}%` }}
                           />
@@ -808,7 +841,7 @@ export default function StatsPage() {
                       <div key={lang} className="flex items-center gap-2">
                         <span className="text-sm font-medium text-gray-700 w-20">{displayName}</span>
                         <div className="flex-1 bg-gray-200 rounded-full h-6 relative overflow-hidden">
-                          <div 
+                          <div
                             className="bg-teal-500 h-full rounded-full transition-all"
                             style={{ width: `${percentage}%` }}
                           />
@@ -898,8 +931,8 @@ export default function StatsPage() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-red-800 font-medium">Error loading detailed stats</p>
           <p className="text-xs text-red-600 mt-1">{detailsError}</p>
-          <button 
-            onClick={() => window.location.reload()} 
+          <button
+            onClick={() => window.location.reload()}
             className="mt-2 px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
           >
             Refresh Page
