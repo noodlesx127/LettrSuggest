@@ -4,7 +4,7 @@ import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback } from '@/lib/enrich';
+import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getAdaptiveExplorationRate } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -503,8 +503,15 @@ export default function SuggestPage() {
       // Fetch smart discovery candidates (hidden gems)
       const discoveryCandidates = await getSmartDiscoveryCandidates(tasteProfile);
 
-      // Phase 4: Generate exploratory picks (15% exploration rate)
-      const exploratoryCount = Math.floor(150 * 0.15); // ~22 exploratory picks
+      // Phase 5+: Adaptive exploration rate (5-30% based on user feedback)
+      const explorationRate = await getAdaptiveExplorationRate(uid);
+      const exploratoryCount = Math.floor(150 * explorationRate);
+      console.log('[Suggest][Phase5+] Using adaptive exploration', {
+        rate: explorationRate,
+        count: exploratoryCount,
+        message: explorationRate !== 0.15 ? 'Rate adjusted based on your feedback!' : 'Using default rate (will adjust after rating exploratory picks)'
+      });
+
       const exploratoryPicks = await generateExploratoryPicks(
         {
           topGenres: tasteProfile.topGenres,
