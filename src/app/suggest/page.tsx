@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback } from '@/lib/enrich';
-import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates } from '@/lib/trending';
+import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
 import type { FilmEvent } from '@/lib/normalize';
@@ -48,6 +48,7 @@ export default function SuggestPage() {
   const [cacheKey, setCacheKey] = useState<number>(Date.now());
   const [progress, setProgress] = useState({ current: 0, total: 5, stage: '' });
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [topDecade, setTopDecade] = useState<number | null>(null);
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
@@ -181,7 +182,18 @@ export default function SuggestPage() {
     // 5. Your Favorite Genres: Films matching preferred genres
     const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 12);
 
-    // 6. Hidden Gems: Pre-2015 films with high scores but low recognition
+    // 6. Best of the [Decade]s
+    const decadeMatches = topDecade ? getNextItems(item => {
+      const year = parseInt(item.year || '0');
+      return year >= topDecade && year < topDecade + 10;
+    }, 12) : [];
+
+    // 7. Hidden Gems for You (Smart Discovery)
+    const smartDiscovery = getNextItems(item => {
+      return item.voteCategory === 'hidden-gem';
+    }, 12);
+
+    // 8. Classic Hidden Gems: Pre-2015 films with high scores but low recognition (fallback)
     const hiddenGems = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
@@ -250,6 +262,8 @@ export default function SuggestPage() {
       directorMatches,
       actorMatches,
       genreMatches,
+      decadeMatches,
+      smartDiscovery,
       hiddenGems,
       cultClassics,
       crowdPleasers,
@@ -259,7 +273,7 @@ export default function SuggestPage() {
       fromCollections,
       moreRecommendations
     };
-  }, [items]);
+  }, [items, topDecade]);
 
   // Section filter mapping for individual section refresh
   const getSectionFilter = useCallback((sectionName: string, seasonalConfig: any) => {
@@ -343,6 +357,12 @@ export default function SuggestPage() {
       directorMatches: (item) => hasDirectorMatch(item.reasons),
       actorMatches: (item) => hasActorMatch(item.reasons),
       genreMatches: (item) => hasGenreMatch(item.reasons),
+      decadeMatches: (item) => {
+        if (!topDecade) return false;
+        const year = parseInt(item.year || '0');
+        return year >= topDecade && year < topDecade + 10;
+      },
+      smartDiscovery: (item) => item.voteCategory === 'hidden-gem',
       hiddenGems: (item) => {
         const year = parseInt(item.year || '0');
         return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
@@ -364,7 +384,7 @@ export default function SuggestPage() {
     };
 
     return filters[sectionName] || (() => true);
-  }, []);
+  }, [topDecade]);
 
   useEffect(() => {
     const init = async () => {
@@ -450,6 +470,11 @@ export default function SuggestPage() {
         topN: 10
       });
 
+      // Set top decade for UI
+      if (tasteProfile.topDecades.length > 0) {
+        setTopDecade(tasteProfile.topDecades[0].decade);
+      }
+
       // Get highly-rated film IDs for similar movie recommendations
       const highlyRated = filteredFilms
         .filter(f => (f.rating ?? 0) >= 4 || f.liked)
@@ -463,14 +488,28 @@ export default function SuggestPage() {
         highlyRatedIds: highlyRated,
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
-        topDirectors: tasteProfile.topDirectors
+        topDirectors: tasteProfile.topDirectors,
+        topActors: tasteProfile.topActors,
+        topStudios: tasteProfile.topStudios
       });
+
+      // Fetch decade candidates
+      let decadeCandidates: number[] = [];
+      if (tasteProfile.topDecades.length > 0) {
+        const topDecade = tasteProfile.topDecades[0].decade;
+        decadeCandidates = await getDecadeCandidates(topDecade);
+      }
+
+      // Fetch smart discovery candidates (hidden gems)
+      const discoveryCandidates = await getSmartDiscoveryCandidates(tasteProfile);
 
       // Combine all candidate sources
       let candidatesRaw: number[] = [];
       candidatesRaw.push(...smartCandidates.trending);
       candidatesRaw.push(...smartCandidates.similar);
       candidatesRaw.push(...smartCandidates.discovered);
+      candidatesRaw.push(...decadeCandidates);
+      candidatesRaw.push(...discoveryCandidates);
 
       console.log('[Suggest] Smart candidates breakdown', {
         trending: smartCandidates.trending.length,
@@ -1507,6 +1546,102 @@ export default function SuggestPage() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {categorizedSuggestions.genreMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Best of the [Decade]s Section */}
+            {categorizedSuggestions.decadeMatches.length >= 1 && topDecade && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📅</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Best of the {topDecade}s</h2>
+                      <p className="text-xs text-gray-600">Top picks from your favorite era</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('decadeMatches')}
+                    disabled={refreshingSections.has('decadeMatches')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('decadeMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.decadeMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Smart Discovery (Hidden Gems) Section */}
+            {categorizedSuggestions.smartDiscovery.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">💎</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Hidden Gems for You</h2>
+                      <p className="text-xs text-gray-600">Highly rated films you might have missed</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('smartDiscovery')}
+                    disabled={refreshingSections.has('smartDiscovery')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('smartDiscovery') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.smartDiscovery.map((item) => (
                     <MovieCard
                       key={item.id}
                       id={item.id}

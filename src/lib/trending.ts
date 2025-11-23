@@ -151,13 +151,17 @@ export async function generateSmartCandidates(profile: {
   topGenres: Array<{ id: number; weight: number }>;
   topKeywords: Array<{ id: number; name: string; weight: number }>;
   topDirectors: Array<{ id: number; name: string; weight: number }>;
+  topActors?: Array<{ id: number; name: string; weight: number }>;
+  topStudios?: Array<{ id: number; name: string; weight: number }>;
   excludeYearRange?: { min?: number; max?: number };
 }): Promise<{ trending: number[]; similar: number[]; discovered: number[] }> {
-  console.log('[SmartCandidates] Generating with profile', {
+  console.log('[SmartCandidates] Generating with enhanced profile', {
     highlyRatedCount: profile.highlyRatedIds.length,
     topGenresCount: profile.topGenres.length,
     topKeywordsCount: profile.topKeywords.length,
-    topDirectorsCount: profile.topDirectors.length
+    topDirectorsCount: profile.topDirectors.length,
+    topActorsCount: profile.topActors?.length ?? 0,
+    topStudiosCount: profile.topStudios?.length ?? 0
   });
 
   const results = {
@@ -380,3 +384,67 @@ export async function generateSmartCandidates(profile: {
   return results;
 }
 
+
+/**
+ * Fetch popular movies from a specific decade
+ */
+export async function getDecadeCandidates(decade: number, limit = 20): Promise<number[]> {
+  const yearMin = decade;
+  const yearMax = decade + 9;
+
+  console.log(`[DecadeCandidates] Fetching for ${decade}s (${yearMin}-${yearMax})`);
+
+  return discoverMoviesByProfile({
+    yearMin,
+    yearMax,
+    sortBy: 'popularity.desc',
+    minVotes: 50,
+    limit
+  });
+}
+
+/**
+ * Fetch "Hidden Gems" - highly rated but less mainstream movies
+ * Matches user's top genres/decades but filters for specific vote counts
+ */
+export async function getSmartDiscoveryCandidates(profile: {
+  topGenres: Array<{ id: number; weight: number }>;
+  topDecades: Array<{ decade: number; weight: number }>;
+}, limit = 20): Promise<number[]> {
+  console.log('[SmartDiscovery] Fetching hidden gems');
+
+  const allIds = new Set<number>();
+
+  // Strategy 1: Top genres, high rating, moderate popularity (hidden gems)
+  if (profile.topGenres.length > 0) {
+    const genreIds = profile.topGenres.slice(0, 3).map(g => g.id);
+    const gems = await discoverMoviesByProfile({
+      genres: genreIds,
+      genreMode: 'OR',
+      sortBy: 'vote_average.desc',
+      minVotes: 50, // Enough to be valid
+      // We can't easily max votes in discover API directly without complex logic, 
+      // but we can sort by vote_average which tends to surface smaller films if minVotes is low.
+      // Alternatively, we rely on the fact that we're asking for high rated stuff.
+      limit: limit * 2
+    });
+
+    // Client-side filter if needed, but for now just take them
+    gems.forEach(id => allIds.add(id));
+  }
+
+  // Strategy 2: Top decades, high rating
+  if (profile.topDecades.length > 0) {
+    const decade = profile.topDecades[0].decade;
+    const decadeGems = await discoverMoviesByProfile({
+      yearMin: decade,
+      yearMax: decade + 9,
+      sortBy: 'vote_average.desc',
+      minVotes: 50,
+      limit: limit
+    });
+    decadeGems.forEach(id => allIds.add(id));
+  }
+
+  return Array.from(allIds).slice(0, limit);
+}
