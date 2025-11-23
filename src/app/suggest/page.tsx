@@ -1068,8 +1068,14 @@ export default function SuggestPage() {
     try {
       if (type === 'negative') {
         // Block the suggestion in the background
-        await addFeedback(uid, tmdbId, 'negative');
+        await Promise.all([
+          addFeedback(uid, tmdbId, 'negative'),
+          blockSuggestion(uid, tmdbId)
+        ]);
+
         setBlockedIds(prev => new Set([...prev, tmdbId]));
+        setFeedbackMessage("Got it, we won't show this movie again.");
+        setTimeout(() => setFeedbackMessage(null), 3000);
 
         // Fetch a replacement suggestion
         const replacement = await fetchReplacementSuggestion();
