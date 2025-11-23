@@ -613,33 +613,85 @@ export async function discoverFromLists(
 }
 
 /**
- * Build a taste profile with IDs for TMDB discovery
- * Extracts top genres, keywords, and directors with their IDs and weights
+ * Build an enhanced taste profile with IDs for TMDB discovery
+ * Extracts top genres, keywords, directors, actors, studios with weighted preferences
+ * Includes negative signals, user statistics, and recency-aware weighting
  */
 export async function buildTasteProfile(params: {
-  films: Array<{ uri: string; rating?: number; liked?: boolean }>;
+  films: Array<{ uri: string; rating?: number; liked?: boolean; rewatch?: boolean; lastDate?: string }>;
   mappings: Map<string, number>;
   topN?: number;
 }): Promise<{
   topGenres: Array<{ id: number; name: string; weight: number }>;
   topKeywords: Array<{ id: number; name: string; weight: number }>;
   topDirectors: Array<{ id: number; name: string; weight: number }>;
+  topDecades: Array<{ decade: number; weight: number }>;
+  topActors: Array<{ id: number; name: string; weight: number }>;
+  topStudios: Array<{ id: number; name: string; weight: number }>;
+  avoidGenres: Array<{ id: number; name: string; weight: number }>;
+  avoidKeywords: Array<{ id: number; name: string; weight: number }>;
+  avoidDirectors: Array<{ id: number; name: string; weight: number }>;
+  userStats: {
+    avgRating: number;
+    stdDevRating: number;
+    totalFilms: number;
+    rewatchRate: number;
+  };
 }> {
   const topN = params.topN ?? 10;
 
-  // Helper to calculate preference weight
-  const getWeight = (rating?: number, isLiked?: boolean): number => {
-    const r = rating ?? 3;
-    if (r >= 4.5) return isLiked ? 2.0 : 1.5;
-    if (r >= 3.5) return isLiked ? 1.5 : 1.2;
-    if (r >= 2.5) return isLiked ? 1.0 : 0.3;
-    if (r >= 1.5) return isLiked ? 0.7 : 0.1;
-    return isLiked ? 0.5 : 0.0;
+  // Calculate user statistics
+  const ratedFilms = params.films.filter(f => f.rating != null);
+  const ratings = ratedFilms.map(f => f.rating!);
+  const avgRating = ratings.length > 0
+    ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
+    : 3.0;
+  const variance = ratings.length > 0
+    ? ratings.reduce((sum, r) => sum + Math.pow(r - avgRating, 2), 0) / ratings.length
+    : 1.0;
+  const stdDevRating = Math.sqrt(variance);
+  const rewatchCount = params.films.filter(f => f.rewatch).length;
+  const rewatchRate = params.films.length > 0 ? rewatchCount / params.films.length : 0;
+
+  const userStats = {
+    avgRating,
+    stdDevRating,
+    totalFilms: params.films.length,
+    rewatchRate
   };
 
-  // Get highly-rated/liked films
+  // Enhanced weighting function with recency and rewatch signals
+  const getEnhancedWeight = (film: typeof params.films[0]): number => {
+    const r = film.rating ?? avgRating;
+    const now = new Date();
+    const watchDate = film.lastDate ? new Date(film.lastDate) : new Date();
+    const daysSinceWatch = (now.getTime() - watchDate.getTime()) / (1000 * 60 * 60 * 24);
+
+    // Normalize rating to user's scale (z-score), only positive weights
+    const normalizedRating = (r - avgRating) / Math.max(stdDevRating, 0.5);
+    let weight = Math.max(0, normalizedRating + 1); // Shift to ensure positive
+
+    // Boost for liked films
+    if (film.liked) weight *= 1.5;
+
+    // Strong boost for rewatches (indicates strong preference)
+    if (film.rewatch) weight *= 1.8;
+
+    // Recency decay (exponential, half-life of 1 year)
+    const recencyFactor = Math.exp(-daysSinceWatch / 365);
+    weight *= (0.5 + 0.5 * recencyFactor); // 50% base + 50% recency-based
+
+    return weight;
+  };
+
+  // Get highly-rated/liked films for positive profile
   const likedFilms = params.films.filter(f =>
     (f.liked || (f.rating ?? 0) >= 4) && params.mappings.has(f.uri)
+  );
+
+  // Get low-rated films for negative signals
+  const dislikedFilms = params.films.filter(f =>
+    (f.rating ?? 0) < 2.5 && f.rating != null && params.mappings.has(f.uri)
   );
 
   const likedIds = likedFilms
@@ -647,23 +699,47 @@ export async function buildTasteProfile(params: {
     .filter(Boolean)
     .slice(0, 100); // Cap to avoid too many API calls
 
-  // Fetch movie details
-  const movies = await Promise.all(
-    likedIds.map(id => fetchTmdbMovieCached(id))
-  );
+  const dislikedIds = dislikedFilms
+    .map(f => params.mappings.get(f.uri)!)
+    .filter(Boolean)
+    .slice(0, 50); // Cap negative signals
 
+  // Fetch movie details
+  const [likedMovies, dislikedMovies] = await Promise.all([
+    Promise.all(likedIds.map(id => fetchTmdbMovieCached(id))),
+    Promise.all(dislikedIds.map(id => fetchTmdbMovieCached(id)))
+  ]);
+
+  // Positive profile weights
   const genreWeights = new Map<number, { name: string; weight: number }>();
   const keywordWeights = new Map<number, { name: string; weight: number }>();
   const directorWeights = new Map<number, { name: string; weight: number }>();
+  const actorWeights = new Map<number, { name: string; weight: number }>();
+  const studioWeights = new Map<number, { name: string; weight: number }>();
+  const decadeWeights = new Map<number, number>();
 
-  // Accumulate weighted preferences
-  for (let i = 0; i < movies.length; i++) {
-    const movie = movies[i];
+  // Negative profile weights
+  const avoidGenreWeights = new Map<number, { name: string; weight: number }>();
+  const avoidKeywordWeights = new Map<number, { name: string; weight: number }>();
+  const avoidDirectorWeights = new Map<number, { name: string; weight: number }>();
+
+  // Accumulate positive weighted preferences
+  for (let i = 0; i < likedMovies.length; i++) {
+    const movie = likedMovies[i];
     if (!movie) continue;
 
     const film = likedFilms[i];
-    const weight = getWeight(film.rating, film.liked);
+    const weight = getEnhancedWeight(film);
     const feats = extractFeatures(movie);
+
+    // Decades
+    if (movie.release_date) {
+      const year = parseInt(movie.release_date.slice(0, 4));
+      if (!isNaN(year)) {
+        const decade = Math.floor(year / 10) * 10;
+        decadeWeights.set(decade, (decadeWeights.get(decade) || 0) + weight);
+      }
+    }
 
     // Genres with IDs
     feats.genreIds.forEach((id, idx) => {
@@ -685,9 +761,58 @@ export async function buildTasteProfile(params: {
       const current = directorWeights.get(id) || { name, weight: 0 };
       directorWeights.set(id, { name, weight: current.weight + weight });
     });
+
+    // Actors with IDs (top 5 billed, with billing position weighting)
+    const castData = movie.credits?.cast || [];
+    castData.slice(0, 5).forEach((actor, idx) => {
+      const billingWeight = 1 / (idx + 1); // Lead = 1.0, 2nd = 0.5, 3rd = 0.33, etc.
+      const current = actorWeights.get(actor.id) || { name: actor.name, weight: 0 };
+      actorWeights.set(actor.id, {
+        name: actor.name,
+        weight: current.weight + (weight * billingWeight)
+      });
+    });
+
+    // Production companies/studios with IDs
+    feats.productionCompanyIds.forEach((id, idx) => {
+      const name = feats.productionCompanies[idx];
+      const current = studioWeights.get(id) || { name, weight: 0 };
+      studioWeights.set(id, { name, weight: current.weight + weight });
+    });
   }
 
-  // Sort and return top N
+  // Accumulate negative signals from disliked films
+  for (let i = 0; i < dislikedMovies.length; i++) {
+    const movie = dislikedMovies[i];
+    if (!movie) continue;
+
+    const film = dislikedFilms[i];
+    const negWeight = Math.abs((film.rating ?? 2.5) - 2.5); // Stronger signal for lower ratings
+    const feats = extractFeatures(movie);
+
+    // Genres to avoid
+    feats.genreIds.forEach((id, idx) => {
+      const name = feats.genres[idx];
+      const current = avoidGenreWeights.get(id) || { name, weight: 0 };
+      avoidGenreWeights.set(id, { name, weight: current.weight + negWeight });
+    });
+
+    // Keywords to avoid
+    feats.keywordIds.forEach((id, idx) => {
+      const name = feats.keywords[idx];
+      const current = avoidKeywordWeights.get(id) || { name, weight: 0 };
+      avoidKeywordWeights.set(id, { name, weight: current.weight + negWeight });
+    });
+
+    // Directors to avoid
+    feats.directorIds.forEach((id, idx) => {
+      const name = feats.directors[idx];
+      const current = avoidDirectorWeights.get(id) || { name, weight: 0 };
+      avoidDirectorWeights.set(id, { name, weight: current.weight + negWeight });
+    });
+  }
+
+  // Sort and return top N for each category
   const topGenres = Array.from(genreWeights.entries())
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, topN)
@@ -703,13 +828,63 @@ export async function buildTasteProfile(params: {
     .slice(0, topN)
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
-  console.log('[TasteProfile] Built', {
+  const topActors = Array.from(actorWeights.entries())
+    .sort((a, b) => b[1].weight - a[1].weight)
+    .slice(0, topN)
+    .map(([id, { name, weight }]) => ({ id, name, weight }));
+
+  const topStudios = Array.from(studioWeights.entries())
+    .sort((a, b) => b[1].weight - a[1].weight)
+    .slice(0, topN)
+    .map(([id, { name, weight }]) => ({ id, name, weight }));
+
+  const topDecades = Array.from(decadeWeights.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([decade, weight]) => ({ decade, weight }));
+
+  const avoidGenres = Array.from(avoidGenreWeights.entries())
+    .sort((a, b) => b[1].weight - a[1].weight)
+    .slice(0, 5) // Top 5 to avoid
+    .map(([id, { name, weight }]) => ({ id, name, weight }));
+
+  const avoidKeywords = Array.from(avoidKeywordWeights.entries())
+    .sort((a, b) => b[1].weight - a[1].weight)
+    .slice(0, 5)
+    .map(([id, { name, weight }]) => ({ id, name, weight }));
+
+  const avoidDirectors = Array.from(avoidDirectorWeights.entries())
+    .sort((a, b) => b[1].weight - a[1].weight)
+    .slice(0, 3)
+    .map(([id, { name, weight }]) => ({ id, name, weight }));
+
+  console.log('[TasteProfile] Enhanced profile built', {
     topGenres: topGenres.slice(0, 3).map(g => `${g.name}(${g.weight.toFixed(1)})`),
     topKeywords: topKeywords.slice(0, 3).map(k => `${k.name}(${k.weight.toFixed(1)})`),
-    topDirectors: topDirectors.slice(0, 3).map(d => `${d.name}(${d.weight.toFixed(1)})`)
+    topDirectors: topDirectors.slice(0, 3).map(d => `${d.name}(${d.weight.toFixed(1)})`),
+    topActors: topActors.slice(0, 3).map(a => `${a.name}(${a.weight.toFixed(1)})`),
+    topStudios: topStudios.slice(0, 3).map(s => `${s.name}(${s.weight.toFixed(1)})`),
+    topDecades: topDecades.map(d => `${d.decade}s(${d.weight.toFixed(1)})`),
+    avoidGenres: avoidGenres.map(g => g.name),
+    userStats: {
+      avgRating: avgRating.toFixed(2),
+      stdDev: stdDevRating.toFixed(2),
+      rewatchRate: (rewatchRate * 100).toFixed(1) + '%'
+    }
   });
 
-  return { topGenres, topKeywords, topDirectors };
+  return {
+    topGenres,
+    topKeywords,
+    topDirectors,
+    topDecades,
+    topActors,
+    topStudios,
+    avoidGenres,
+    avoidKeywords,
+    avoidDirectors,
+    userStats
+  };
 }
 
 export async function suggestByOverlap(params: {
@@ -722,6 +897,7 @@ export async function suggestByOverlap(params: {
   concurrency?: number;
   excludeWatchedIds?: Set<number>;
   desiredResults?: number;
+  feedbackMap?: Map<number, 'negative' | 'positive'>;
 }): Promise<Array<{
   tmdbId: number;
   score: number;
@@ -743,7 +919,7 @@ export async function suggestByOverlap(params: {
   const likedIdsAll = liked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
 
   // Fetch user feedback to adjust weights and filter candidates
-  const feedbackMap = await getFeedback(params.userId);
+  const feedbackMap = params.feedbackMap ?? await getFeedback(params.userId);
   const negativeFeedbackIds = new Set<number>();
   const positiveFeedbackIds = new Set<number>();
 
