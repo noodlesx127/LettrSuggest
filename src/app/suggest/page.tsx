@@ -27,6 +27,27 @@ type MovieItem = {
   contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
 };
 
+type CategorizedSuggestions = {
+  seasonalPicks: MovieItem[];
+  seasonalConfig: any;
+  perfectMatches: MovieItem[];
+  recentWatchMatches: MovieItem[];
+  studioMatches: MovieItem[];
+  directorMatches: MovieItem[];
+  actorMatches: MovieItem[];
+  genreMatches: MovieItem[];
+  decadeMatches: MovieItem[];
+  smartDiscovery: MovieItem[];
+  hiddenGems: MovieItem[];
+  cultClassics: MovieItem[];
+  crowdPleasers: MovieItem[];
+  newReleases: MovieItem[];
+  recentClassics: MovieItem[];
+  deepCuts: MovieItem[];
+  fromCollections: MovieItem[];
+  moreRecommendations: MovieItem[];
+};
+
 export default function SuggestPage() {
   const { films, loading: loadingFilms } = useImportData();
   const [uid, setUid] = useState<string | null>(null);
@@ -55,7 +76,9 @@ export default function SuggestPage() {
   const { posters, mutate: refreshPosters } = usePostersSWR(tmdbIds);
 
   // Categorize suggestions into sections
-  const categorizedSuggestions = useMemo(() => {
+  const [categorizedSuggestions, setCategorizedSuggestions] = useState<CategorizedSuggestions | null>(null);
+
+  const categorizeItems = useCallback((items: MovieItem[]): CategorizedSuggestions | null => {
     if (!items || items.length === 0) return null;
 
     const currentYear = new Date().getFullYear();
@@ -273,7 +296,16 @@ export default function SuggestPage() {
       fromCollections,
       moreRecommendations
     };
-  }, [items, topDecade]);
+  }, [topDecade]);
+
+  // Update categories when items change
+  useEffect(() => {
+    if (items && items.length > 0) {
+      setCategorizedSuggestions(categorizeItems(items));
+    } else {
+      setCategorizedSuggestions(null);
+    }
+  }, [items, categorizeItems]);
 
   // Section filter mapping for individual section refresh
   const getSectionFilter = useCallback((sectionName: string, seasonalConfig: any) => {
@@ -1080,15 +1112,35 @@ export default function SuggestPage() {
         // Fetch a replacement suggestion
         const replacement = await fetchReplacementSuggestion();
 
-        // Update items: remove the old one and add replacement if available
-        setItems(prev => {
+        // Update categorizedSuggestions in place to avoid layout shift
+        setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
           if (!prev) return prev;
-          const filtered = prev.filter(item => item.id !== tmdbId);
-          if (replacement) {
-            // Add replacement at the end
-            return [...filtered, replacement];
+          const next = { ...prev };
+
+          // Find which section contains the item and replace it
+          for (const key in next) {
+            // @ts-ignore - dynamic key access
+            const section = next[key as keyof CategorizedSuggestions];
+            if (Array.isArray(section)) {
+              const idx = section.findIndex((item: MovieItem) => item.id === tmdbId);
+              if (idx !== -1) {
+                if (replacement) {
+                  // Replace with new item
+                  const newArray = [...section];
+                  newArray[idx] = replacement;
+                  // @ts-ignore - dynamic key assignment
+                  next[key as keyof CategorizedSuggestions] = newArray;
+                } else {
+                  // If no replacement, just remove it (fallback)
+                  // @ts-ignore - dynamic key assignment
+                  next[key as keyof CategorizedSuggestions] = section.filter((item: MovieItem) => item.id !== tmdbId);
+                }
+                break;
+              }
+            }
           }
-          return filtered;
+
+          return next;
         });
 
         // Track the replacement as shown
@@ -1103,9 +1155,21 @@ export default function SuggestPage() {
       }
     } catch (e) {
       console.error('Failed to submit feedback:', e);
-      // On error for negative feedback, just remove the item to avoid broken UI state
+      // On error for negative feedback, just remove the item from categories
       if (type === 'negative') {
-        setItems(prev => prev ? prev.filter(item => item.id !== tmdbId) : prev);
+        setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
+          if (!prev) return prev;
+          const next = { ...prev };
+          for (const key in next) {
+            // @ts-ignore - dynamic key access
+            const section = next[key as keyof CategorizedSuggestions];
+            if (Array.isArray(section)) {
+              // @ts-ignore - dynamic key assignment
+              next[key as keyof CategorizedSuggestions] = section.filter((item: MovieItem) => item.id !== tmdbId);
+            }
+          }
+          return next;
+        });
       }
     }
   };
