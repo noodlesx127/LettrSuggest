@@ -887,6 +887,151 @@ export async function buildTasteProfile(params: {
   };
 }
 
+/**
+ * Apply diversity filtering to prevent too many similar suggestions
+ * Limits the number of films from the same director, genre, decade, studio, or actor
+ */
+function applyDiversityFilter<T extends {
+  directors?: string[];
+  genres?: string[];
+  release_date?: string;
+  studios?: string[];
+  actors?: string[];
+  score: number;
+}>(
+  suggestions: T[],
+  options?: {
+    maxSameDirector?: number;
+    maxSameGenre?: number;
+    maxSameDecade?: number;
+    maxSameStudio?: number;
+    maxSameActor?: number;
+  }
+): T[] {
+  const defaults = {
+    maxSameDirector: 2,
+    maxSameGenre: 5,
+    maxSameDecade: 4,
+    maxSameStudio: 3,
+    maxSameActor: 3
+  };
+
+  const limits = { ...defaults, ...options };
+
+  // Track counts
+  const directorCounts = new Map<string, number>();
+  const genreCounts = new Map<string, number>();
+  const decadeCounts = new Map<number, number>();
+  const studioCounts = new Map<string, number>();
+  const actorCounts = new Map<string, number>();
+
+  const filtered: T[] = [];
+  let skippedCount = 0;
+
+  for (const suggestion of suggestions) {
+    let shouldInclude = true;
+    const skipReasons: string[] = [];
+
+    // Check directors
+    if (shouldInclude && suggestion.directors) {
+      for (const director of suggestion.directors) {
+        if ((directorCounts.get(director) || 0) >= limits.maxSameDirector) {
+          shouldInclude = false;
+          skipReasons.push(`max ${limits.maxSameDirector} from ${director}`);
+          break;
+        }
+      }
+    }
+
+    // Check genres (primary genre only)
+    if (shouldInclude && suggestion.genres && suggestion.genres.length > 0) {
+      const primaryGenre = suggestion.genres[0];
+      if ((genreCounts.get(primaryGenre) || 0) >= limits.maxSameGenre) {
+        shouldInclude = false;
+        skipReasons.push(`max ${limits.maxSameGenre} ${primaryGenre} films`);
+      }
+    }
+
+    // Check decade
+    if (shouldInclude && suggestion.release_date) {
+      const year = parseInt(suggestion.release_date.slice(0, 4));
+      if (!isNaN(year)) {
+        const decade = Math.floor(year / 10) * 10;
+        if ((decadeCounts.get(decade) || 0) >= limits.maxSameDecade) {
+          shouldInclude = false;
+          skipReasons.push(`max ${limits.maxSameDecade} from ${decade}s`);
+        }
+      }
+    }
+
+    // Check studios
+    if (shouldInclude && suggestion.studios) {
+      for (const studio of suggestion.studios) {
+        if ((studioCounts.get(studio) || 0) >= limits.maxSameStudio) {
+          shouldInclude = false;
+          skipReasons.push(`max ${limits.maxSameStudio} from ${studio}`);
+          break;
+        }
+      }
+    }
+
+    // Check actors (top billed only)
+    if (shouldInclude && suggestion.actors) {
+      for (const actor of suggestion.actors.slice(0, 2)) {
+        if ((actorCounts.get(actor) || 0) >= limits.maxSameActor) {
+          shouldInclude = false;
+          skipReasons.push(`max ${limits.maxSameActor} with ${actor}`);
+          break;
+        }
+      }
+    }
+
+    if (shouldInclude) {
+      filtered.push(suggestion);
+
+      // Update counts
+      if (suggestion.directors) {
+        for (const director of suggestion.directors) {
+          directorCounts.set(director, (directorCounts.get(director) || 0) + 1);
+        }
+      }
+      if (suggestion.genres && suggestion.genres.length > 0) {
+        const primaryGenre = suggestion.genres[0];
+        genreCounts.set(primaryGenre, (genreCounts.get(primaryGenre) || 0) + 1);
+      }
+      if (suggestion.release_date) {
+        const year = parseInt(suggestion.release_date.slice(0, 4));
+        if (!isNaN(year)) {
+          const decade = Math.floor(year / 10) * 10;
+          decadeCounts.set(decade, (decadeCounts.get(decade) || 0) + 1);
+        }
+      }
+      if (suggestion.studios) {
+        for (const studio of suggestion.studios) {
+          studioCounts.set(studio, (studioCounts.get(studio) || 0) + 1);
+        }
+      }
+      if (suggestion.actors) {
+        for (const actor of suggestion.actors.slice(0, 2)) {
+          actorCounts.set(actor, (actorCounts.get(actor) || 0) + 1);
+        }
+      }
+    } else {
+      skippedCount++;
+    }
+  }
+
+  console.log('[DiversityFilter] Applied diversity filtering', {
+    original: suggestions.length,
+    filtered: filtered.length,
+    skipped: skippedCount,
+    directorCounts: Array.from(directorCounts.entries()).filter(([_, count]) => count > 1).slice(0, 3),
+    genreCounts: Array.from(genreCounts.entries()).slice(0, 5)
+  });
+
+  return filtered;
+}
+
 export async function suggestByOverlap(params: {
   userId: string;
   films: FilmEventLite[];
@@ -917,6 +1062,10 @@ export async function suggestByOverlap(params: {
   voteAverage?: number;
   voteCount?: number;
   contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
+  // Phase 3: For diversity filtering
+  directors?: string[];
+  studios?: string[];
+  actors?: string[];
 }>> {
   // Build user profile from liked/highly-rated mapped films.
   // Use as much history as possible, but cap TMDB fetches to avoid huge fan-out
@@ -1704,7 +1853,11 @@ export async function suggestByOverlap(params: {
       voteCategory: feats.voteCategory,
       voteAverage: feats.voteAverage,
       voteCount: feats.voteCount,
-      contributingFilms
+      contributingFilms,
+      // Phase 3: For diversity filtering
+      directors: feats.directors,
+      studios: feats.productionCompanies,
+      actors: feats.cast.slice(0, 3) // Top 3 billed actors
     };
     resultsAcc.push(r);
     // Early return the result; caller will slice after sorting
@@ -1722,9 +1875,22 @@ export async function suggestByOverlap(params: {
     voteAverage?: number;
     voteCount?: number;
     contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
+    directors?: string[];
+    studios?: string[];
+    actors?: string[];
   }>;
   results.sort((a, b) => b.score - a.score);
-  return results.slice(0, desired);
+
+  // Phase 3: Apply diversity filtering
+  const diversified = applyDiversityFilter(results, {
+    maxSameDirector: 2,
+    maxSameGenre: 5,
+    maxSameDecade: 4,
+    maxSameStudio: 3,
+    maxSameActor: 3
+  });
+
+  return diversified.slice(0, desired);
 }
 
 export async function deleteFilmMapping(userId: string, uri: string) {
