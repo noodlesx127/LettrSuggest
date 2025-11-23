@@ -559,6 +559,13 @@ export default function SuggestPage() {
         concurrency: 6,
         excludeWatchedIds: watchedIds,
         desiredResults: 150, // Request more suggestions to fill all 15 sections with variety
+        enhancedProfile: {
+          topActors: tasteProfile.topActors,
+          topStudios: tasteProfile.topStudios,
+          avoidGenres: tasteProfile.avoidGenres,
+          avoidKeywords: tasteProfile.avoidKeywords,
+          avoidDirectors: tasteProfile.avoidDirectors
+        }
       });
       // Best-effort: ensure posters/backdrops exist for suggested ids.
       if (suggestions.length) {
@@ -808,6 +815,13 @@ export default function SuggestPage() {
         concurrency: 1,
         excludeWatchedIds: watchedIds,
         desiredResults: 1,
+        enhancedProfile: {
+          topActors: tasteProfile.topActors,
+          topStudios: tasteProfile.topStudios,
+          avoidGenres: tasteProfile.avoidGenres,
+          avoidKeywords: tasteProfile.avoidKeywords,
+          avoidDirectors: tasteProfile.avoidDirectors
+        }
       });
 
       if (suggestions.length === 0) return null;
@@ -945,6 +959,13 @@ export default function SuggestPage() {
         concurrency: 3,
         excludeWatchedIds: watchedIds,
         desiredResults: count * 3, // Request more than needed to ensure enough after filtering
+        enhancedProfile: {
+          topActors: tasteProfile.topActors,
+          topStudios: tasteProfile.topStudios,
+          avoidGenres: tasteProfile.avoidGenres,
+          avoidKeywords: tasteProfile.avoidKeywords,
+          avoidDirectors: tasteProfile.avoidDirectors
+        }
       });
 
       if (suggestions.length === 0) return [];

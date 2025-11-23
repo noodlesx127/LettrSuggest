@@ -898,6 +898,13 @@ export async function suggestByOverlap(params: {
   excludeWatchedIds?: Set<number>;
   desiredResults?: number;
   feedbackMap?: Map<number, 'negative' | 'positive'>;
+  enhancedProfile?: {
+    topActors: Array<{ id: number; name: string; weight: number }>;
+    topStudios: Array<{ id: number; name: string; weight: number }>;
+    avoidGenres: Array<{ id: number; name: string; weight: number }>;
+    avoidKeywords: Array<{ id: number; name: string; weight: number }>;
+    avoidDirectors: Array<{ id: number; name: string; weight: number }>;
+  };
 }): Promise<Array<{
   tmdbId: number;
   score: number;
@@ -988,13 +995,28 @@ export async function suggestByOverlap(params: {
   // Map TMDB IDs back to original film data for weighting
   const likedFilmData = liked.filter(f => params.mappings.has(f.uri));
 
-  // Adjusted weights: keywords are now more important for subgenre detection
+  // Multi-factor scoring weights (Phase 2 enhancements)
+  // Total positive weights: 100% distributed across factors
+  // Negative penalties applied separately
   const weights = {
-    genre: 0.8,
-    genreCombo: 1.2, // Reward exact genre combinations
-    director: 1.5,
-    cast: 0.5,
-    keyword: 1.0, // Increased from 0.4 to better capture subgenres
+    // Primary factors (70%)
+    genre: 1.2,           // 30% - Genre matching (base weight, scaled by matches)
+    genreCombo: 1.8,      // Bonus for exact genre combinations (subgenre specificity)
+    director: 1.0,        // 20% - Director matching
+    actor: 0.75,          // 15% - Actor matching (NEW)
+
+    // Secondary factors (20%)
+    keyword: 0.5,         // 10% - Keyword/subgenre matching
+    studio: 0.5,          // 10% - Production company matching (NEW)
+
+    // Tertiary factors (10%)
+    cast: 0.2,            // 5% - Supporting cast matching
+    crossGenre: 0.2,      // 5% - Cross-genre pattern bonus
+
+    // Negative penalties (applied as deductions)
+    avoidGenrePenalty: -2.0,    // Strong penalty for avoided genres
+    avoidKeywordPenalty: -1.0,  // Moderate penalty for avoided keywords
+    avoidDirectorPenalty: -3.0, // Very strong penalty for avoided directors
   };
 
   // Build positive feature bags (things the user likes)
@@ -1461,6 +1483,94 @@ export async function suggestByOverlap(params: {
       } else {
         reasons.push(`From ${studioHits.slice(0, 2).join(', ')} — studios you enjoy`);
       }
+    }
+
+    // PHASE 2: Enhanced actor matching using taste profile
+    if (params.enhancedProfile?.topActors) {
+      const actorIds = new Set(m.credits?.cast?.map(c => c.id) || []);
+      const matchedActors = params.enhancedProfile.topActors.filter(a => actorIds.has(a.id));
+
+      if (matchedActors.length > 0) {
+        // Weight by actor preference strength and billing position
+        const actorScore = matchedActors.reduce((sum, actor) => {
+          const castMember = m.credits?.cast?.find(c => c.id === actor.id);
+          const billingBonus = castMember && castMember.order != null ? (1 / (castMember.order + 1)) : 0.5;
+          return sum + (actor.weight * billingBonus);
+        }, 0);
+
+        score += actorScore * weights.actor;
+
+        const topActor = matchedActors[0];
+        const actorCount = matchedActors.length;
+        if (actorCount === 1) {
+          reasons.push(`Stars ${topActor.name} — one of your favorite actors`);
+        } else {
+          reasons.push(`Stars ${matchedActors.slice(0, 2).map(a => a.name).join(' and ')} — ${actorCount} actors you love`);
+        }
+      }
+    }
+
+    // PHASE 2: Enhanced studio matching using taste profile
+    if (params.enhancedProfile?.topStudios) {
+      const studioIds = new Set(feats.productionCompanyIds);
+      const matchedStudios = params.enhancedProfile.topStudios.filter(s => studioIds.has(s.id));
+
+      if (matchedStudios.length > 0) {
+        const studioScore = matchedStudios.reduce((sum, studio) => sum + studio.weight, 0);
+        score += studioScore * weights.studio;
+
+        // Only add reason if not already added by legacy studio matching
+        if (!studioHits.length) {
+          const topStudio = matchedStudios[0];
+          reasons.push(`From ${topStudio.name} — a studio whose films you consistently enjoy`);
+        }
+      }
+    }
+
+    // PHASE 2: Negative signal penalties (avoid genres/keywords/directors)
+    let totalPenalty = 0;
+    const penaltyReasons: string[] = [];
+
+    if (params.enhancedProfile?.avoidGenres) {
+      const avoidedGenreIds = new Set(params.enhancedProfile.avoidGenres.map(g => g.id));
+      const matchedAvoidGenres = feats.genreIds.filter(id => avoidedGenreIds.has(id));
+
+      if (matchedAvoidGenres.length > 0) {
+        const genrePenalty = matchedAvoidGenres.length * weights.avoidGenrePenalty;
+        totalPenalty += genrePenalty;
+        const avoidedGenre = params.enhancedProfile.avoidGenres.find(g => g.id === matchedAvoidGenres[0]);
+        penaltyReasons.push(`Contains ${avoidedGenre?.name || 'genre'} you typically avoid`);
+      }
+    }
+
+    if (params.enhancedProfile?.avoidKeywords) {
+      const avoidedKeywordIds = new Set(params.enhancedProfile.avoidKeywords.map(k => k.id));
+      const matchedAvoidKeywords = feats.keywordIds.filter(id => avoidedKeywordIds.has(id));
+
+      if (matchedAvoidKeywords.length > 0) {
+        const keywordPenalty = matchedAvoidKeywords.length * weights.avoidKeywordPenalty;
+        totalPenalty += keywordPenalty;
+        const avoidedKeyword = params.enhancedProfile.avoidKeywords.find(k => k.id === matchedAvoidKeywords[0]);
+        penaltyReasons.push(`Has themes (${avoidedKeyword?.name || 'keyword'}) you dislike`);
+      }
+    }
+
+    if (params.enhancedProfile?.avoidDirectors) {
+      const avoidedDirectorIds = new Set(params.enhancedProfile.avoidDirectors.map(d => d.id));
+      const matchedAvoidDirectors = feats.directorIds.filter(id => avoidedDirectorIds.has(id));
+
+      if (matchedAvoidDirectors.length > 0) {
+        const directorPenalty = matchedAvoidDirectors.length * weights.avoidDirectorPenalty;
+        totalPenalty += directorPenalty;
+        const avoidedDirector = params.enhancedProfile.avoidDirectors.find(d => d.id === matchedAvoidDirectors[0]);
+        penaltyReasons.push(`Directed by ${avoidedDirector?.name || 'director'} whose films you don't enjoy`);
+      }
+    }
+
+    // Apply penalties to score
+    if (totalPenalty < 0) {
+      score += totalPenalty; // totalPenalty is negative, so this reduces the score
+      console.log(`[NegativePenalty] Penalized "${m.title}" by ${Math.abs(totalPenalty).toFixed(2)} - ${penaltyReasons.join('; ')}`);
     }
 
     // Recent watches boost - if matches genres/directors/cast/keywords from last 20 films
