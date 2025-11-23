@@ -690,8 +690,9 @@ export async function buildTasteProfile(params: {
   );
 
   // Get low-rated films for negative signals
+  // IMPORTANT: Exclude "liked" films even if rated low (guilty pleasures)
   const dislikedFilms = params.films.filter(f =>
-    (f.rating ?? 0) < 2.5 && f.rating != null && params.mappings.has(f.uri)
+    (f.rating ?? 0) < 2.5 && f.rating != null && params.mappings.has(f.uri) && !f.liked
   );
 
   const likedIds = likedFilms
@@ -2165,5 +2166,165 @@ export async function updateAdjacentPreferences(
     }
   } catch (e) {
     console.error('[AdjacentPreferences] Error:', e);
+  }
+}
+
+/**
+ * Batch process historical ratings on import to populate adaptive learning data
+ * This gives new users personalized recommendations immediately
+ */
+export async function learnFromHistoricalData(userId: string) {
+  if (!supabase) {
+    console.log('[BatchLearning] Supabase not initialized');
+    return;
+  }
+
+  try {
+    console.log('[BatchLearning] Starting analysis of historical data for user:', userId);
+
+    // 1. Get all film events for this user
+    const { data: films, error: filmsError } = await supabase
+      .from('film_events')
+      .select('uri, title, rating, liked')
+      .eq('user_id', userId)
+      .not('rating', 'is', null); // Only rated films
+
+    if (filmsError) {
+      console.error('[BatchLearning] Error fetching films:', filmsError);
+      return;
+    }
+
+    if (!films || films.length < 10) {
+      console.log('[BatchLearning] Not enough rated films for learning', { count: films?.length || 0 });
+      return;
+    }
+
+    console.log('[BatchLearning] Processing', films.length, 'rated films');
+
+    // 2. Get film mappings to TMDB IDs
+    const { data: mappings, error: mappingsError } = await supabase
+      .from('film_tmdb_map')
+      .select('uri, tmdb_id')
+      .eq('user_id', userId);
+
+    if (mappingsError || !mappings) {
+      console.error('[BatchLearning] Error fetching mappings:', mappingsError);
+      return;
+    }
+
+    const uriToTmdbId = new Map(mappings.map(m => [m.uri, m.tmdb_id]));
+    console.log('[BatchLearning] Found', mappings.length, 'TMDB mappings');
+
+    // 3. Get TMDB details for mapped films (in batches)
+    const tmdbIds = Array.from(new Set(mappings.map(m => m.tmdb_id)));
+    const batchSize = 100;
+    const tmdbDetails = new Map<number, any>();
+
+    for (let i = 0; i < tmdbIds.length; i += batchSize) {
+      const batch = tmdbIds.slice(i, i + batchSize);
+      const { data: cached } = await supabase
+        .from('tmdb_movies')
+        .select('tmdb_id, data')
+        .in('tmdb_id', batch);
+
+      cached?.forEach(row => {
+        if (row.data) {
+          tmdbDetails.set(row.tmdb_id, row.data);
+        }
+      });
+    }
+
+    console.log('[BatchLearning] Loaded TMDB details for', tmdbDetails.size, 'films');
+
+    // 4. Build taste profile to get top genres
+    const mappingsMap = new Map(mappings.map(m => [m.uri, m.tmdb_id]));
+    const profile = await buildTasteProfile({
+      films: films.map(f => ({
+        uri: f.uri,
+        title: f.title,
+        rating: f.rating,
+        liked: f.liked
+      })),
+      mappings: mappingsMap,
+      topN: 10
+    });
+
+    console.log('[BatchLearning] Built taste profile', {
+      topGenres: profile.topGenres.length,
+      totalFilms: films.length
+    });
+
+    // 5. Analyze genre transitions and populate adjacency preferences
+    let transitionsProcessed = 0;
+    const topGenreIds = new Set(profile.topGenres.slice(0, 3).map(g => g.id));
+
+    for (const film of films) {
+      const tmdbId = uriToTmdbId.get(film.uri);
+      if (!tmdbId) continue;
+
+      const details = tmdbDetails.get(tmdbId);
+      if (!details || !details.genres) continue;
+
+      const rating = film.rating ?? 0;
+      if (rating < 1) continue; // Skip unrated
+
+      // Check for adjacent genre transitions
+      const filmGenres = details.genres as Array<{ id: number; name: string }>;
+
+      await updateAdjacentPreferences(
+        userId,
+        filmGenres,
+        profile.topGenres,
+        rating
+      );
+
+      transitionsProcessed++;
+    }
+
+    console.log('[BatchLearning] Processed', transitionsProcessed, 'genre transitions');
+
+    // 6. Calculate initial exploration stats based on high-rated variety
+    const highRated = films.filter(f => (f.rating ?? 0) >= 4);
+    const exploratory = films.filter(f => {
+      const tmdbId = uriToTmdbId.get(f.uri);
+      if (!tmdbId) return false;
+
+      const details = tmdbDetails.get(tmdbId);
+      if (!details || !details.genres) return false;
+
+      // Film is exploratory if it has genres outside top 3
+      const filmGenres = details.genres as Array<{ id: number }>;
+      return filmGenres.some(g => !topGenreIds.has(g.id));
+    });
+
+    if (exploratory.length > 0) {
+      const exploratoryAvg = exploratory.reduce((sum, f) => sum + (f.rating ?? 0), 0) / exploratory.length;
+
+      // Seed exploration stats
+      await supabase
+        .from('user_exploration_stats')
+        .upsert({
+          user_id: userId,
+          exploration_rate: 0.15, // Start at default
+          exploratory_films_rated: exploratory.length,
+          exploratory_avg_rating: Number(exploratoryAvg.toFixed(2)),
+          last_updated: new Date().toISOString()
+        });
+
+      console.log('[BatchLearning] Seeded exploration stats', {
+        exploratoryFilms: exploratory.length,
+        avgRating: exploratoryAvg.toFixed(2)
+      });
+    }
+
+    console.log('[BatchLearning] ✅ Historical learning complete!', {
+      totalFilms: films.length,
+      highRated: highRated.length,
+      exploratoryFilms: exploratory.length,
+      transitionsTracked: transitionsProcessed
+    });
+
+  } catch (e) {
+    console.error('[BatchLearning] Error during batch learning:', e);
   }
 }

@@ -6,7 +6,7 @@ import JSZip from 'jszip';
 import { normalizeData } from '@/lib/normalize';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { searchTmdb, upsertFilmMapping, upsertTmdbCache } from '@/lib/enrich';
+import { searchTmdb, upsertFilmMapping, upsertTmdbCache, learnFromHistoricalData } from '@/lib/enrich';
 import { upsertDiaryEvents } from '@/lib/diary';
 import { saveFilmsLocally } from '@/lib/db';
 import type { FilmEvent } from '@/lib/normalize';
@@ -35,7 +35,7 @@ export default function ImportPage() {
   const [autoMappingActive, setAutoMappingActive] = useState(false);
   const [mappingProgress, setMappingProgress] = useState<{ current: number; total: number } | null>(null);
 
-    const autoSaveToSupabase = useCallback(async (filmList: FilmEvent[]) => {
+  const autoSaveToSupabase = useCallback(async (filmList: FilmEvent[]) => {
     try {
       if (!supabase) throw new Error('Supabase not initialized');
       const { data: sessionRes, error: sessErr } = await supabase.auth.getSession();
@@ -62,7 +62,7 @@ export default function ImportPage() {
           liked: f.liked ?? null,
           on_watchlist: f.onWatchlist ?? null,
         }));
-        
+
         // Retry logic for schema cache errors
         let retries = 2;
         let lastError = null;
@@ -71,7 +71,7 @@ export default function ImportPage() {
           if (!error) {
             break; // Success
           }
-          
+
           lastError = error;
           // If schema cache error, wait and retry
           if (error.message?.includes('schema cache') || error.message?.includes('column')) {
@@ -84,9 +84,9 @@ export default function ImportPage() {
           }
           throw error; // Non-retryable error
         }
-        
+
         if (lastError) throw lastError;
-        
+
         saved += chunk.length;
         setSavedCount(saved);
         setStatus(`Saving to Supabase… ${saved}/${total}`);
@@ -108,7 +108,7 @@ export default function ImportPage() {
         setAutoMappingActive(false);
         return;
       }
-      
+
       // First, get existing mappings to skip already-mapped films
       let existingMappings = new Set<string>();
       try {
@@ -122,11 +122,11 @@ export default function ImportPage() {
       } catch (e) {
         console.warn('[Import] Could not fetch existing mappings, will attempt all', e);
       }
-      
+
       // Filter to only films that need mapping
       const toTry = filmList.filter(f => f.title && !existingMappings.has(f.uri));
       console.log(`[Import] Need to map ${toTry.length} of ${filmList.length} films (${existingMappings.size} already mapped, ${filmList.filter(f => !f.title).length} have no title)`);
-      
+
       let mapped = 0;
       let skipped = 0; // No TMDB results found
       let failed = 0; // API errors
@@ -134,18 +134,18 @@ export default function ImportPage() {
       const concurrency = 2; // Reduced to avoid rate limits
       let lastRequestTime = 0;
       const minDelay = 300; // 300ms between requests (max ~3 requests/sec)
-      
+
       setMappingProgress({ current: 0, total: toTry.length });
       setStatus(`Mapping films to TMDB database… 0/${toTry.length}`);
-      
+
       const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-      
+
       const worker = async () => {
         while (true) {
           const i = next++;
           if (i >= toTry.length) break;
           const f = toTry[i];
-          
+
           // Rate limiting: ensure minimum delay between requests
           const now = Date.now();
           const timeSinceLastRequest = now - lastRequestTime;
@@ -153,12 +153,12 @@ export default function ImportPage() {
             await sleep(minDelay - timeSinceLastRequest);
           }
           lastRequestTime = Date.now();
-          
+
           // Retry logic with exponential backoff
           let retries = 3;
           let backoff = 1000; // Start with 1 second
           let success = false;
-          
+
           while (retries > 0) {
             try {
               const results = await searchTmdb(f.title, f.year ?? undefined);
@@ -199,7 +199,7 @@ export default function ImportPage() {
         }
       };
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
-      
+
       const totalMapped = mapped + existingMappings.size;
       setStatus(`✓ Successfully mapped ${totalMapped} of ${filmList.length} films to TMDB (${mapped} new, ${existingMappings.size} existing, ${skipped} no match, ${failed} failed)`);
       setMappingProgress(null);
@@ -277,8 +277,8 @@ export default function ImportPage() {
       console.log('[Import] normalizeData done', { filmCount: norm.films.length, distinctFilms: norm.distinctFilms });
       setDistinct(norm.distinctFilms);
       setFilms(norm.films);
-  // Persist locally (IndexedDB)
-  await saveFilmsLocally(norm.films);
+      // Persist locally (IndexedDB)
+      await saveFilmsLocally(norm.films);
       console.log('[Import] films saved locally');
       setStatus('Parsed and normalized. Saving to Supabase…');
       console.log('[Import] autoSaveToSupabase start');
@@ -310,6 +310,22 @@ export default function ImportPage() {
       console.log('[Import] autoMapBatch start', { filmCount: norm.films.length });
       await autoMapBatch(norm.films);
       console.log('[Import] autoMapBatch complete');
+
+      // Phase 5+: Batch learn from historical ratings
+      console.log('[Import] Starting batch learning from historical data');
+      setStatus('Analyzing your ratings for personalized recommendations…');
+      const { data: sessionRes2 } = supabase ? await supabase.auth.getSession() : ({ data: { session: null } } as any);
+      const uid2 = sessionRes2?.session?.user?.id;
+      if (uid2) {
+        try {
+          await learnFromHistoricalData(uid2);
+          console.log('[Import] Batch learning complete');
+          setStatus('✓ Import complete! Your personalized recommendation algorithm is ready.');
+        } catch (e) {
+          console.error('[Import] Batch learning failed (non-critical):', e);
+          setStatus('✓ Import complete!');
+        }
+      }
     } catch (e: any) {
       console.error('[Import] error in handleFiles normalization/save', e);
       setStatus('Parsed');
@@ -367,7 +383,7 @@ export default function ImportPage() {
         </div>
         {status && <p className="text-sm text-gray-600" aria-live="polite">{status}</p>}
         {error && <p className="text-sm text-red-600" aria-live="assertive">{error}</p>}
-        
+
         {/* Progress bar for mapping */}
         {mappingProgress && (
           <div className="mt-3">
