@@ -8,6 +8,7 @@ import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTastePr
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
+import { saveMovie, getSavedMovies } from '@/lib/lists';
 import type { FilmEvent } from '@/lib/normalize';
 
 type MovieItem = {
@@ -71,6 +72,7 @@ export default function SuggestPage() {
   const [progress, setProgress] = useState({ current: 0, total: 5, stage: '' });
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [topDecade, setTopDecade] = useState<number | null>(null);
+  const [savedMovieIds, setSavedMovieIds] = useState<Set<number>>(new Set());
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
@@ -449,6 +451,16 @@ export default function SuggestPage() {
     };
     void init();
   }, []);
+
+  // Load saved movies
+  useEffect(() => {
+    const loadSavedMovies = async () => {
+      if (!uid) return;
+      const { movies } = await getSavedMovies(uid);
+      setSavedMovieIds(new Set(movies.map(m => m.tmdb_id)));
+    };
+    void loadSavedMovies();
+  }, [uid]);
 
   const sourceFilms = useMemo(() => (films && films.length ? films : (fallbackFilms ?? [])), [films, fallbackFilms]);
 
@@ -1186,6 +1198,38 @@ export default function SuggestPage() {
     }
   };
 
+  // Handle saving a movie to the list
+  const handleSave = async (tmdbId: number, title: string, year?: string, posterPath?: string | null) => {
+    if (!uid) return;
+    try {
+      const result = await saveMovie(uid, {
+        tmdb_id: tmdbId,
+        title,
+        year: year || null,
+        poster_path: posterPath || null
+      });
+
+      if (result.success) {
+        setSavedMovieIds(prev => new Set([...prev, tmdbId]));
+        setFeedbackMessage('Saved to your list!');
+        setTimeout(() => setFeedbackMessage(null), 3000);
+      } else {
+        console.error('Failed to save movie:', result.error);
+        // Check if it's a duplicate error
+        if (result.error?.includes('duplicate') || result.error?.includes('unique')) {
+          setFeedbackMessage('Already in your list!');
+        } else {
+          setFeedbackMessage('Failed to save movie');
+        }
+        setTimeout(() => setFeedbackMessage(null), 3000);
+      }
+    } catch (e) {
+      console.error('Error saving movie:', e);
+      setFeedbackMessage('Failed to save movie');
+      setTimeout(() => setFeedbackMessage(null), 3000);
+    }
+  };
+
   // Handle refreshing a specific section
   const handleRefreshSection = async (sectionName: string) => {
     if (!uid || !categorizedSuggestions) return;
@@ -1400,6 +1444,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
