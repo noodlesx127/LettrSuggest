@@ -29,14 +29,11 @@ export default function StatsPage() {
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [uid, setUid] = useState<string | null>(null);
   const [filmMappings, setFilmMappings] = useState<Map<string, number>>(new Map());
-
-  // Phase 5+: Exploration stats for transparency
   const [explorationStats, setExplorationStats] = useState<{
     exploration_rate: number;
     exploratory_films_rated: number;
     exploratory_avg_rating: number;
   } | null>(null);
-
   const [adjacentPrefs, setAdjacentPrefs] = useState<Array<{
     from_genre_name: string;
     to_genre_name: string;
@@ -53,7 +50,7 @@ export default function StatsPage() {
     getUid();
   }, []);
 
-  // Phase 5+: Fetch exploration stats and learned adjacencies
+  // Fetch exploration stats and adjacent preferences
   useEffect(() => {
     async function fetchExplorationStats() {
       if (!supabase || !uid) return;
@@ -68,13 +65,13 @@ export default function StatsPage() {
 
         setExplorationStats(stats);
 
-        // Fetch learned adjacencies (successful genre transitions)
+        // Fetch learned adjacencies
         const { data: prefs } = await supabase
           .from('user_adjacent_preferences')
           .select('from_genre_name, to_genre_name, success_rate, rating_count')
           .eq('user_id', uid)
-          .gte('rating_count', 3) // Only show with enough data
-          .gte('success_rate', 0.6) // Only show successful transitions
+          .gte('rating_count', 3)
+          .gte('success_rate', 0.6)
           .order('success_rate', { ascending: false })
           .limit(10);
 
@@ -86,6 +83,7 @@ export default function StatsPage() {
 
     fetchExplorationStats();
   }, [uid]);
+
 
   const filteredFilms = useMemo(() => {
     if (!films) return [];
@@ -1045,124 +1043,6 @@ export default function StatsPage() {
               </div>
             </div>
           )}
-
-          {/* PHASE 5+: USER STATISTICS WITH EXPLANATIONS */}
-          {stats && (
-            <div className="bg-white border rounded-lg p-4 mb-6">
-              <h2 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                📊 Your Rating Patterns
-                <span className="text-xs text-gray-500 font-normal">
-                  (How these inform recommendations)
-                </span>
-              </h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-blue-50 rounded p-3">
-                  <div className="text-sm text-gray-600">Average Rating</div>
-                  <div className="text-2xl font-bold text-gray-900">{stats.avgRating}★</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Used to normalize your ratings vs others
-                  </div>
-                </div>
-
-                <div className="bg-green-50 rounded p-3">
-                  <div className="text-sm text-gray-600">Rewatch Rate</div>
-                  <div className="text-2xl font-bold text-gray-900">
-                    {stats.rewatchedCount > 0 ? ((stats.rewatchedCount / stats.watchedCount) * 100).toFixed(1) : '0.0'}%
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Rewatched films get 1.8x boost in similar suggestions
-                  </div>
-                </div>
-
-                <div className="bg-purple-50 rounded p-3">
-                  <div className="text-sm text-gray-600">Total Films</div>
-                  <div className="text-2xl font-bold text-gray-900">
-                    {stats.watchedCount.toLocaleString()}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {stats.ratedCount} rated, {stats.likedCount} liked
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* PHASE 5+: EXPLORATION STATS - ADAPTIVE LEARNING */}
-          {explorationStats && (
-            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4 mb-6">
-              <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                🔍 Your Discovery Preferences
-                <span className="text-xs text-indigo-600 font-normal">
-                  (Adaptive Learning Active)
-                </span>
-              </h2>
-
-              <div className="space-y-3">
-                <div className="bg-white rounded p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-sm font-medium text-gray-900">Current Exploration Rate</div>
-                    <div className="text-lg font-bold text-indigo-600">
-                      {(explorationStats.exploration_rate * 100).toFixed(0)}%
-                    </div>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-indigo-600 h-2 rounded-full transition-all"
-                      style={{ width: `${explorationStats.exploration_rate * 100}%` }}
-                    />
-                  </div>
-                  <div className="text-xs text-gray-600 mt-2">
-                    {explorationStats.exploration_rate !== 0.15 ? (
-                      explorationStats.exploration_rate > 0.15 ? (
-                        <span className="text-green-700">
-                          ✓ Increased because you enjoy exploratory picks (avg {explorationStats.exploratory_avg_rating.toFixed(1)}★)
-                        </span>
-                      ) : (
-                        <span className="text-orange-700">
-                          ↓ Decreased to focus on safer recommendations (avg {explorationStats.exploratory_avg_rating.toFixed(1)}★)
-                        </span>
-                      )
-                    ) : (
-                      <span>
-                        Default rate • Will adjust based on your ratings ({explorationStats.exploratory_films_rated} exploratory films rated so far)
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="text-xs text-gray-600 bg-white rounded p-2">
-                  <strong>What this means:</strong> {(explorationStats.exploration_rate * 100).toFixed(0)}% of your suggestions
-                  will be &quot;discovery picks&quot; from adjacent genres or acclaimed films outside your usual taste.
-                  The other {(100 - explorationStats.exploration_rate * 100).toFixed(0)}% are high-confidence matches.
-                </div>
-
-                {/* Learned Adjacencies */}
-                {adjacentPrefs.length > 0 && (
-                  <div className="bg-white rounded p-3">
-                    <div className="text-sm font-medium text-gray-900 mb-2">
-                      Learned Genre Transitions
-                    </div>
-                    <div className="space-y-1">
-                      {adjacentPrefs.slice(0, 5).map((pref, idx) => (
-                        <div key={idx} className="flex items-center justify-between text-xs">
-                          <span className="text-gray-700">
-                            {pref.from_genre_name} → {pref.to_genre_name}
-                          </span>
-                          <span className="text-green-700 font-medium">
-                            {(pref.success_rate * 100).toFixed(0)}% success ({pref.rating_count} films)
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-2">
-                      Algorithm learned which genre combinations you enjoy!
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </>
       )}
 
@@ -1189,6 +1069,125 @@ export default function StatsPage() {
           <h2 className="font-semibold text-gray-900 mb-3">Films by Decade</h2>
           <Chart option={byDecadeOption} />
         </div>
+
+        {/* User Statistics Section - Phase 5+ Transparency */}
+        {stats && (
+          <div className="bg-white border rounded-lg p-4">
+            <h2 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              📊 Your Rating Patterns
+              <span className="text-xs text-gray-500 font-normal">
+                (How these inform recommendations)
+              </span>
+            </h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-blue-50 rounded p-3">
+                <div className="text-sm text-gray-600">Average Rating</div>
+                <div className="text-2xl font-bold text-gray-900">{stats.avgRating}★</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Used to normalize your ratings vs others
+                </div>
+              </div>
+
+              <div className="bg-green-50 rounded p-3">
+                <div className="text-sm text-gray-600">Rewatch Rate</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {stats.rewatchedCount && stats.totalWatches ?
+                    ((stats.rewatchedCount / stats.totalWatches) * 100).toFixed(1) : '0.0'}%
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Rewatched films get 1.8x boost in similar suggestions
+                </div>
+              </div>
+
+              <div className="bg-purple-50 rounded p-3">
+                <div className="text-sm text-gray-600">Total Films</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {stats.watchedCount?.toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {stats.ratedCount} rated, {stats.likedCount} liked
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Exploration Stats Section - Phase 5+ Adaptive Learning */}
+        {explorationStats && (
+          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4">
+            <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              🔍 Your Discovery Preferences
+              <span className="text-xs text-indigo-600 font-normal">
+                (Adaptive Learning Active)
+              </span>
+            </h2>
+
+            <div className="space-y-3">
+              <div className="bg-white rounded p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm font-medium text-gray-900">Current Exploration Rate</div>
+                  <div className="text-lg font-bold text-indigo-600">
+                    {(explorationStats.exploration_rate * 100).toFixed(0)}%
+                  </div>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-indigo-600 h-2 rounded-full transition-all"
+                    style={{ width: `${explorationStats.exploration_rate * 3.33 * 100}%` }}
+                  />
+                </div>
+                <div className="text-xs text-gray-600 mt-2">
+                  {explorationStats.exploration_rate !== 0.15 ? (
+                    explorationStats.exploration_rate > 0.15 ? (
+                      <span className="text-green-700">
+                        ✓ Increased because you enjoy exploratory picks (avg {explorationStats.exploratory_avg_rating.toFixed(1)}★)
+                      </span>
+                    ) : (
+                      <span className="text-orange-700">
+                        ↓ Decreased to focus on safer recommendations (avg {explorationStats.exploratory_avg_rating.toFixed(1)}★)
+                      </span>
+                    )
+                  ) : (
+                    <span>
+                      Default rate • Will adjust based on your ratings ({explorationStats.exploratory_films_rated} exploratory films rated so far)
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-xs text-gray-600 bg-white rounded p-2">
+                <strong>What this means:</strong> {(explorationStats.exploration_rate * 100).toFixed(0)}% of your suggestions
+                will be "discovery picks" from adjacent genres or acclaimed films outside your usual taste.
+                The other {(100 - explorationStats.exploration_rate * 100).toFixed(0)}% are high-confidence matches.
+              </div>
+
+              {/* Learned Adjacencies */}
+              {adjacentPrefs.length > 0 && (
+                <div className="bg-white rounded p-3">
+                  <div className="text-sm font-medium text-gray-900 mb-2">
+                    Learned Genre Transitions
+                  </div>
+                  <div className="space-y-1">
+                    {adjacentPrefs.slice(0, 5).map((pref, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-700">
+                          {pref.from_genre_name} → {pref.to_genre_name}
+                        </span>
+                        <span className="text-green-700 font-medium">
+                          {(pref.success_rate * 100).toFixed(0)}% success ({pref.rating_count} films)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-2">
+                    Algorithm learned which genre combinations you enjoy!
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </AuthGate>
   );
