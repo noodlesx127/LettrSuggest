@@ -636,7 +636,7 @@ export default function SuggestPage() {
         mappings,
         candidates,
         excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: mode === 'quick' ? 1000 : 1500,
+        maxCandidates: mode === 'quick' ? 250 : 600,
         concurrency: 6,
         excludeWatchedIds: watchedIds,
         desiredResults: 150, // Request more suggestions to fill all 15 sections with variety
@@ -1493,6 +1493,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1541,6 +1543,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1589,6 +1593,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1637,6 +1643,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1685,6 +1693,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1733,6 +1743,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1781,6 +1793,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1829,6 +1843,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1877,6 +1893,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1925,6 +1943,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -1973,6 +1993,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -2021,6 +2043,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -2069,6 +2093,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -2117,6 +2143,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -2165,6 +2193,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -2213,6 +2243,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
@@ -2261,6 +2293,8 @@ export default function SuggestPage() {
                       voteCategory={item.voteCategory}
                       collectionName={item.collectionName}
                       onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
                     />
                   ))}
                 </div>
