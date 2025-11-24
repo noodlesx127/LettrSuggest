@@ -21,6 +21,7 @@ type MovieCardProps = {
   vote_count?: number;
   overview?: string;
   contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
+  dismissed?: boolean;
 };
 
 // Helper function to extract genres, directors, keywords, etc. from a reason string
@@ -229,7 +230,8 @@ export default function MovieCard({
   vote_average,
   vote_count,
   overview,
-  contributingFilms
+  contributingFilms,
+  dismissed = false
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -309,7 +311,16 @@ export default function MovieCard({
         />
       )}
 
-      <div className={`border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'}`}>
+      <div className={`border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'} relative`}>
+        {/* Gray overlay when dismissed */}
+        {dismissed && (
+          <div className="absolute inset-0 bg-gray-900 bg-opacity-60 z-10 flex items-center justify-center rounded-lg">
+            <div className="bg-white px-4 py-2 rounded-lg shadow-lg">
+              <p className="text-sm font-medium text-gray-900">Dismissed</p>
+              <p className="text-xs text-gray-600">Will be removed on refresh</p>
+            </div>
+          </div>
+        )}
         <div className="flex gap-4 p-4 flex-1">
           {/* Poster Column */}
           <div className="flex-shrink-0 flex flex-col gap-2">

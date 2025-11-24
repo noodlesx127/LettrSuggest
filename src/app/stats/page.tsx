@@ -375,11 +375,6 @@ export default function StatsPage() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 15);
 
-    // Top sub-genres (keywords are essentially sub-genres/themes)
-    const topSubgenres = Array.from(keywordWeights.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
-
     // Top studios
     const topStudios = Array.from(studioWeights.entries())
       .sort((a, b) => b[1] - a[1])
@@ -500,7 +495,6 @@ export default function StatsPage() {
       topDirectors,
       topDirectorsByWeight,
       topKeywords,
-      topSubgenres,
       topStudios,
       studioPreference,
       absoluteFavorites: absoluteFavorites.length,
@@ -700,26 +694,6 @@ export default function StatsPage() {
                   return (
                     <span key={keyword} className={`px-3 py-1 rounded-full text-xs font-medium ${colorClass}`}>
                       {keyword} ({weight.toFixed(1)})
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Sub-Genres Section */}
-            <div className="mb-4">
-              <h3 className="font-medium text-gray-900 mb-2 text-sm flex items-center gap-2">
-                <span>🎯</span>
-                <span>Top Sub-Genres</span>
-              </h3>
-              <p className="text-xs text-gray-600 mb-2">Specific themes and sub-genres you love most</p>
-              <div className="flex flex-wrap gap-2">
-                {stats.topSubgenres.slice(0, 10).map(([subgenre, weight]) => {
-                  const strength = weight >= 3.0 ? 'strong' : weight >= 1.5 ? 'moderate' : 'light';
-                  const colorClass = strength === 'strong' ? 'bg-purple-600 text-white' : strength === 'moderate' ? 'bg-purple-400 text-white' : 'bg-purple-200 text-purple-900';
-                  return (
-                    <span key={subgenre} className={`px-3 py-1 rounded-full text-xs font-medium ${colorClass}`}>
-                      {subgenre} ({weight.toFixed(1)})
                     </span>
                   );
                 })}

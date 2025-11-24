@@ -26,6 +26,7 @@ type MovieItem = {
   vote_count?: number;
   overview?: string;
   contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
+  dismissed?: boolean;
 };
 
 type CategorizedSuggestions = {
@@ -1133,32 +1134,23 @@ export default function SuggestPage() {
         setFeedbackMessage("Got it, we won't show this movie again.");
         setTimeout(() => setFeedbackMessage(null), 3000);
 
-        // Fetch a replacement suggestion
-        const replacement = await fetchReplacementSuggestion();
-
-        // Update categorizedSuggestions in place to avoid layout shift
+        // Mark the item as dismissed in categorizedSuggestions
         setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
           if (!prev) return prev;
           const next = { ...prev };
 
-          // Find which section contains the item and replace it
+          // Find which section contains the item and mark it as dismissed
           for (const key in next) {
             // @ts-ignore - dynamic key access
             const section = next[key as keyof CategorizedSuggestions];
             if (Array.isArray(section)) {
               const idx = section.findIndex((item: MovieItem) => item.id === tmdbId);
               if (idx !== -1) {
-                if (replacement) {
-                  // Replace with new item
-                  const newArray = [...section];
-                  newArray[idx] = replacement;
-                  // @ts-ignore - dynamic key assignment
-                  next[key as keyof CategorizedSuggestions] = newArray;
-                } else {
-                  // If no replacement, just remove it (fallback)
-                  // @ts-ignore - dynamic key assignment
-                  next[key as keyof CategorizedSuggestions] = section.filter((item: MovieItem) => item.id !== tmdbId);
-                }
+                // Mark as dismissed
+                const newArray = [...section];
+                newArray[idx] = { ...newArray[idx], dismissed: true };
+                // @ts-ignore - dynamic key assignment
+                next[key as keyof CategorizedSuggestions] = newArray;
                 break;
               }
             }
@@ -1166,11 +1158,6 @@ export default function SuggestPage() {
 
           return next;
         });
-
-        // Track the replacement as shown
-        if (replacement) {
-          setShownIds(prev => new Set([...prev, replacement.id]));
-        }
       } else {
         // Positive feedback
         await addFeedback(uid, tmdbId, 'positive');
@@ -1239,13 +1226,16 @@ export default function SuggestPage() {
     try {
       console.log(`[SectionRefresh] Refreshing section: ${sectionName}`);
 
-      // Get the movie IDs currently in this section
+      // Get the movie IDs currently in this section (excluding dismissed ones)
       const currentSectionMovies = (categorizedSuggestions as any)[sectionName] || [];
+      const nonDismissedMovies = currentSectionMovies.filter((m: MovieItem) => !m.dismissed);
+      const dismissedMovies = currentSectionMovies.filter((m: MovieItem) => m.dismissed);
       const currentSectionIds = new Set(currentSectionMovies.map((m: MovieItem) => m.id));
+      const dismissedIds = new Set(dismissedMovies.map((m: MovieItem) => m.id));
 
-      console.log(`[SectionRefresh] Current section has ${currentSectionIds.size} movies`);
+      console.log(`[SectionRefresh] Current section has ${currentSectionIds.size} movies (${dismissedIds.size} dismissed)`);
 
-      // Fetch replacement movies for this section
+      // Fetch replacement movies for this section (replace both non-dismissed and dismissed)
       const replacements = await fetchSectionReplacements(sectionName, currentSectionIds.size || 12);
 
       if (replacements.length === 0) {
@@ -1348,14 +1338,6 @@ export default function SuggestPage() {
           <input value={yearMax} onChange={(e) => setYearMax(e.target.value)} placeholder="e.g., 2025" className="border rounded px-2 py-1 text-sm w-24" />
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button
-            className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
-            title="Clear cache and show completely new suggestions"
-            onClick={() => { setItems(null); setShownIds(new Set()); setBlockedIds(new Set()); setCacheKey(Date.now()); setRefreshTick((x) => x + 1); void runSuggest(); }}
-          >
-            <span>🗑️</span>
-            <span>Clear Cache</span>
-          </button>
           <button
             className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
             title="Get completely fresh suggestions (clears history)"
@@ -1499,6 +1481,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1549,6 +1532,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1599,6 +1583,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1649,6 +1634,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1699,6 +1685,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1749,6 +1736,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1799,6 +1787,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1849,6 +1838,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1899,6 +1889,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1949,6 +1940,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -1999,6 +1991,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -2049,6 +2042,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -2099,6 +2093,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -2149,6 +2144,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -2199,6 +2195,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -2249,6 +2246,7 @@ export default function SuggestPage() {
                       vote_count={item.vote_count}
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
                     />
                   ))}
                 </div>
@@ -2311,3 +2309,5 @@ export default function SuggestPage() {
     </AuthGate >
   );
 }
+
+
