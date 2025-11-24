@@ -1136,8 +1136,8 @@ export async function suggestByOverlap(params: {
     filmPreferenceMap.set(f.uri, { rating: f.rating, liked: f.liked });
   }
 
-  const likedMovies = await Promise.all(likedIds.map((id) => fetchTmdbMovieCached(id)));
-  const dislikedMovies = await Promise.all(dislikedIds.map((id) => fetchTmdbMovieCached(id)));
+  const likedMovies = await mapLimit(likedIds, 10, (id) => fetchTmdbMovieCached(id));
+  const dislikedMovies = await mapLimit(dislikedIds, 10, (id) => fetchTmdbMovieCached(id));
 
   const likedFeats = likedMovies.filter(Boolean).map((m) => extractFeatures(m as TMDBMovie));
   const dislikedFeats = dislikedMovies.filter(Boolean).map((m) => extractFeatures(m as TMDBMovie));
@@ -1369,7 +1369,7 @@ export async function suggestByOverlap(params: {
     .slice(-400); // Cap at 400 most recent to avoid excessive fetches
 
   const mappedIds = mappedFilmsForAnalysis.map(f => params.mappings.get(f.uri)!);
-  const moviesForAnalysis = await Promise.all(mappedIds.map(id => fetchTmdbMovieCached(id)));
+  const moviesForAnalysis = await mapLimit(mappedIds, 10, (id) => fetchTmdbMovieCached(id));
 
   const filmsForSubgenreAnalysis = mappedFilmsForAnalysis.map((f, idx) => {
     const cached = moviesForAnalysis[idx];
