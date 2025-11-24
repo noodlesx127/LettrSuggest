@@ -367,6 +367,112 @@ export default function MovieCard({
                 </span>
               )}
             </div>
+
+            {/* Feedback and Save buttons moved under poster */}
+            {(onFeedback || onSave) && (
+              <div className="flex flex-col gap-2 w-32 mt-1">
+                {onFeedback && (
+                  <>
+                    <button
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        if (feedbackState) return;
+                        setFeedbackState('negative');
+                        await onFeedback(id, 'negative');
+                        setFeedbackState(null);
+                      }}
+                      disabled={!!feedbackState}
+                      className={`w-full py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border ${feedbackState === 'negative'
+                        ? 'bg-gray-200 text-gray-400 border-gray-200 cursor-wait'
+                        : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 border-gray-200'
+                        }`}
+                      title="Not interested in this suggestion"
+                    >
+                      {feedbackState === 'negative' ? (
+                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      ) : (
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+                        </svg>
+                      )}
+                      <span>{feedbackState === 'negative' ? 'Removing...' : 'Not Interested'}</span>
+                    </button>
+                    <button
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        if (feedbackState) return;
+                        setFeedbackState('positive');
+                        await onFeedback(id, 'positive');
+                        setFeedbackState(null);
+                      }}
+                      disabled={!!feedbackState}
+                      className={`w-full py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border ${feedbackState === 'positive'
+                        ? 'bg-blue-100 text-blue-400 border-blue-100 cursor-wait'
+                        : 'bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border-blue-100'
+                        }`}
+                      title="Show more suggestions like this"
+                    >
+                      {feedbackState === 'positive' ? (
+                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      ) : (
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+                        </svg>
+                      )}
+                      <span>{feedbackState === 'positive' ? 'Updating...' : 'More Like This'}</span>
+                    </button>
+                  </>
+                )}
+                {onSave && (
+                  <button
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      if (saveState !== 'idle') return;
+                      setSaveState('saving');
+                      try {
+                        await onSave(id, title, year, posterPath);
+                        setSaveState('saved');
+                      } catch (error) {
+                        console.error('Error saving movie:', error);
+                        setSaveState('idle');
+                      }
+                    }}
+                    disabled={saveState !== 'idle'}
+                    className={`w-full py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border ${saveState === 'saved'
+                      ? 'bg-green-100 text-green-700 border-green-200'
+                      : saveState === 'saving'
+                        ? 'bg-purple-100 text-purple-400 border-purple-100 cursor-wait'
+                        : 'bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-900 border-purple-100'
+                      }`}
+                    title={saveState === 'saved' ? 'Saved to your list' : 'Save to your list'}
+                  >
+                    {saveState === 'saving' ? (
+                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    ) : saveState === 'saved' ? (
+                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                    )}
+                    <span>
+                      {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : 'Save to List'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Content */}
@@ -454,111 +560,7 @@ export default function MovieCard({
               </div>
             )}
 
-            {/* Feedback and Save buttons */}
-            {(onFeedback || onSave) && (
-              <div className="mt-3 flex items-center gap-2">
-                {onFeedback && (
-                  <>
-                    <button
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        if (feedbackState) return;
-                        setFeedbackState('negative');
-                        await onFeedback(id, 'negative');
-                        setFeedbackState(null);
-                      }}
-                      disabled={!!feedbackState}
-                      className={`flex-1 py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border ${feedbackState === 'negative'
-                        ? 'bg-gray-200 text-gray-400 border-gray-200 cursor-wait'
-                        : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 border-gray-200'
-                        }`}
-                      title="Not interested in this suggestion"
-                    >
-                      {feedbackState === 'negative' ? (
-                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                      ) : (
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
-                        </svg>
-                      )}
-                      <span>{feedbackState === 'negative' ? 'Removing...' : 'Not Interested'}</span>
-                    </button>
-                    <button
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        if (feedbackState) return;
-                        setFeedbackState('positive');
-                        await onFeedback(id, 'positive');
-                        setFeedbackState(null);
-                      }}
-                      disabled={!!feedbackState}
-                      className={`flex-1 py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border ${feedbackState === 'positive'
-                        ? 'bg-blue-100 text-blue-400 border-blue-100 cursor-wait'
-                        : 'bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border-blue-100'
-                        }`}
-                      title="Show more suggestions like this"
-                    >
-                      {feedbackState === 'positive' ? (
-                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                      ) : (
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
-                        </svg>
-                      )}
-                      <span>{feedbackState === 'positive' ? 'Updating...' : 'More Like This'}</span>
-                    </button>
-                  </>
-                )}
-                {onSave && (
-                  <button
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      if (saveState !== 'idle') return;
-                      setSaveState('saving');
-                      try {
-                        await onSave(id, title, year, posterPath);
-                        setSaveState('saved');
-                      } catch (error) {
-                        console.error('Error saving movie:', error);
-                        setSaveState('idle');
-                      }
-                    }}
-                    disabled={saveState !== 'idle'}
-                    className={`flex-1 py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border ${saveState === 'saved'
-                        ? 'bg-green-100 text-green-700 border-green-200'
-                        : saveState === 'saving'
-                          ? 'bg-purple-100 text-purple-400 border-purple-100 cursor-wait'
-                          : 'bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-900 border-purple-100'
-                      }`}
-                    title={saveState === 'saved' ? 'Saved to your list' : 'Save to your list'}
-                  >
-                    {saveState === 'saving' ? (
-                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                    ) : saveState === 'saved' ? (
-                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    ) : (
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                      </svg>
-                    )}
-                    <span>
-                      {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : 'Save to List'}
-                    </span>
-                  </button>
-                )}
-              </div>
-            )}
+
           </div>
         </div>
       </div>
