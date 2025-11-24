@@ -1048,21 +1048,13 @@ export default function StatsPage() {
         {stats && (
           <div className="bg-white border rounded-lg p-4">
             <h2 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              📊 Your Rating Patterns
+              📊 Algorithm Insights
               <span className="text-xs text-gray-500 font-normal">
-                (How these inform recommendations)
+                (How your behavior influences recommendations)
               </span>
             </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-blue-50 rounded p-3">
-                <div className="text-sm text-gray-600">Average Rating</div>
-                <div className="text-2xl font-bold text-gray-900">{stats.avgRating}★</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Used to normalize your ratings vs others
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-green-50 rounded p-3">
                 <div className="text-sm text-gray-600">Rewatch Rate</div>
                 <div className="text-2xl font-bold text-gray-900">
@@ -1075,12 +1067,12 @@ export default function StatsPage() {
               </div>
 
               <div className="bg-purple-50 rounded p-3">
-                <div className="text-sm text-gray-600">Total Films</div>
+                <div className="text-sm text-gray-600">Liked Films</div>
                 <div className="text-2xl font-bold text-gray-900">
-                  {stats.watchedCount?.toLocaleString()}
+                  {stats.likedCount?.toLocaleString()}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  {stats.ratedCount} rated, {stats.likedCount} liked
+                  Liked films receive 1.5-2.0x weight in taste profile
                 </div>
               </div>
             </div>
