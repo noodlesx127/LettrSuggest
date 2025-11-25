@@ -276,6 +276,18 @@ export default function StatsPage() {
 
     const totalWatches = filteredFilms.reduce((sum, f) => sum + (f.watchCount ?? 0), 0);
 
+    // Calculate total rewatch entries (not just unique films that were rewatched)
+    // If a film has watchCount=3 and rewatch=true, that means 2 of those watches were rewatches
+    // (first watch + 2 rewatches = 3 total)
+    const totalRewatchEntries = filteredFilms.reduce((sum, f) => {
+      if (f.rewatch && (f.watchCount ?? 0) > 1) {
+        // If marked as rewatch, all watches except the first are rewatches
+        return sum + ((f.watchCount ?? 0) - 1);
+      }
+      return sum;
+    }, 0);
+
+
     // Most watched film
     const mostWatched = filteredFilms.reduce((max, f) =>
       (f.watchCount ?? 0) > (max.watchCount ?? 0) ? f : max
@@ -482,6 +494,7 @@ export default function StatsPage() {
       likedCount: liked.length,
       avgRating,
       totalWatches,
+      totalRewatchEntries,
       mostWatched,
       ratingsBuckets,
       years,
@@ -1001,8 +1014,8 @@ export default function StatsPage() {
             <div className="bg-green-50 rounded p-3">
               <div className="text-sm text-gray-600">Rewatch Rate</div>
               <div className="text-2xl font-bold text-gray-900">
-                {stats.rewatchedCount && stats.totalWatches ?
-                  ((stats.rewatchedCount / stats.totalWatches) * 100).toFixed(1) : '0.0'}%
+                {stats.totalRewatchEntries && stats.totalWatches ?
+                  ((stats.totalRewatchEntries / stats.totalWatches) * 100).toFixed(1) : '0.0'}%
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 Rewatched films get 1.8x boost in similar suggestions
