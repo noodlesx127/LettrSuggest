@@ -10,18 +10,21 @@ Personalized movie suggestions and rich stats from your Letterboxd data.
 - Supabase (Auth, Database, Edge Functions)
 - Netlify hosting
 - ECharts for charts
+- TMDB + TuiMDB + Trakt APIs for movie data
 
 ## Getting Started
 1. Install dependencies
 ```pwsh
 npm install
 ```
-2. Create `.env.local` with Supabase client config and TMDB server secret
+2. Create `.env.local` with Supabase client config and API keys
 ```
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
-# Server-only TMDB v4 Bearer token used by Next.js API routes
+# Server-only API keys used by Next.js API routes
 TMDB_API_KEY=
+TUIMDB_API_KEY=
+TRAKT_CLIENT_ID=
 ```
 3. Initialize the database (once)
 - In Supabase SQL editor, run the contents of `supabase/schema.sql` to create tables and RLS policies.
@@ -32,7 +35,8 @@ npm run dev
 
 ## Deployment
 - Connect GitHub repo to Netlify
-- Set env vars in Netlify: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `TMDB_API_KEY` (server secret for the built-in Next.js API proxy).
+- Set env vars in Netlify: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `TMDB_API_KEY`, `TUIMDB_API_KEY`, and `TRAKT_CLIENT_ID`
+- Or use Netlify CLI: `netlify env:set TRAKT_CLIENT_ID "your_client_id"`
 
 ### Netlify
 - Live site: https://lettrsuggest.netlify.app/
@@ -54,17 +58,17 @@ npm run dev
 ## Usage
 1) Sign in or register via `/auth/login` or `/auth/register`.
 2) Go to `/import` and upload your Letterboxd export (ZIP or CSVs/folder).
-3) Review the preview, then click “Save to Supabase” to upsert into `film_events`.
-4) Click “Map to TMDB” to:
+3) Review the preview, then click "Save to Supabase" to upsert into `film_events`.
+4) Click "Map to TMDB" to:
 	- Auto-map all unmapped titles (best-effort, concurrency-limited), and/or
 	- Manually search and map remaining titles.
 	Mappings are stored in `film_tmdb_map` and movie metadata cached in `tmdb_movies`.
-5) Open `/stats` to see charts; use “Load from Supabase” to render from your cloud data.
+5) Open `/stats` to see charts; use "Load from Supabase" to render from your cloud data.
 6) Visit `/library` to browse a poster grid of your watched films, inspect accurate watch counts, and adjust TMDB mappings.
 
 ## Security & Secrets
 - Never commit secrets. Use `.env.local` for local dev and Netlify env vars for deploys.
-- Public client config lives behind `NEXT_PUBLIC_*`; do not expose server secrets (e.g., `TMDB_API_KEY`).
+- Public client config lives behind `NEXT_PUBLIC_*`; do not expose server secrets (e.g., `TMDB_API_KEY`, `TRAKT_CLIENT_ID`).
 - GitHub Actions runs a secret scan (`.github/workflows/secret-scan.yml`) using Gitleaks on every push/PR.
 - `.gitleaks.toml` allows NEXT_PUBLIC_* while flagging other keys.
 
@@ -73,6 +77,8 @@ npm run dev
 - Shared movie metadata cache lives in `tmdb_movies`.
 - Client also writes a local IndexedDB cache for quick reloads without hitting the network.
 
-## TMDB Proxy (built-in)
-- Server routes: `/api/tmdb/search?query=Heat&year=1995`, `/api/tmdb/movie?id=123`
-- Requires `TMDB_API_KEY` (TMDB v4 Bearer token) set in env. The key is never exposed to the browser.
+## API Integrations
+- **TMDB**: Primary movie metadata source. Server routes: `/api/tmdb/search?query=Heat&year=1995`, `/api/tmdb/movie?id=123`
+- **TuiMDB**: Enhanced genre data and seasonal recommendations. Fallback for TMDB.
+- **Trakt**: Related movies for discovery. Server route: `/api/trakt/related?id=550`
+- All API keys are server-side only and never exposed to the browser.
