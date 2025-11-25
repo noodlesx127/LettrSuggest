@@ -1040,10 +1040,22 @@ export default function SuggestPage() {
         .map(f => mappings.get(f.uri))
         .filter((id): id is number => id != null);
 
+      // Fetch negative feedback to learn from dislikes
+      let negativeFeedbackIds: number[] = [];
+      try {
+        const feedbackMap = await getFeedback(uid);
+        negativeFeedbackIds = Array.from(feedbackMap.entries())
+          .filter((entry): entry is [number, 'negative' | 'positive'] => entry[1] === 'negative')
+          .map((entry) => entry[0]);
+      } catch (e) {
+        console.error('[SectionRefresh] Failed to fetch feedback', e);
+      }
+
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
-        topN: 10
+        topN: 10,
+        negativeFeedbackIds
       });
 
       const smartCandidates = await generateSmartCandidates({
