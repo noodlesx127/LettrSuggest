@@ -216,25 +216,42 @@ export default function StatsPage() {
     loadTmdbDetails();
   }, [uid, filteredFilms]);
 
-  // Helper function to calculate preference weight (same as in enrich.ts)
-  const getPreferenceWeight = (rating?: number, isLiked?: boolean): number => {
-    const r = rating ?? 3;
-    let weight = 0.0;
+  // Calculate user statistics for enhanced weighting
+  const ratedFilms = filteredFilms.filter(f => f.rating != null);
+  const ratings = ratedFilms.map(f => f.rating!);
+  const avgRating = ratings.length > 0
+    ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
+    : 3.0;
+  const variance = ratings.length > 0
+    ? ratings.reduce((sum, r) => sum + Math.pow(r - avgRating, 2), 0) / ratings.length
+    : 1.0;
+  const stdDevRating = Math.sqrt(variance);
 
-    if (r >= 4.5) {
-      weight = isLiked ? 2.0 : 1.5;
-    } else if (r >= 3.5) {
-      weight = isLiked ? 1.5 : 1.2;
-    } else if (r >= 2.5) {
-      weight = isLiked ? 1.0 : 0.3;
-    } else if (r >= 1.5) {
-      weight = isLiked ? 0.7 : 0.1;
-    } else {
-      weight = isLiked ? 0.5 : 0.0;
-    }
+  // Enhanced weighting function matching the Suggestions algorithm
+  // Includes: rating normalization, liked boost, rewatch boost, and recency decay
+  const getEnhancedWeight = (film: typeof filteredFilms[0]): number => {
+    const r = film.rating ?? avgRating;
+    const now = new Date();
+    const watchDate = film.lastDate ? new Date(film.lastDate) : new Date();
+    const daysSinceWatch = (now.getTime() - watchDate.getTime()) / (1000 * 60 * 60 * 24);
+
+    // Normalize rating to user's scale (z-score), only positive weights
+    const normalizedRating = (r - avgRating) / Math.max(stdDevRating, 0.5);
+    let weight = Math.max(0, normalizedRating + 1); // Shift to ensure positive
+
+    // Boost for liked films (1.5x)
+    if (film.liked) weight *= 1.5;
+
+    // Strong boost for rewatches (1.8x - indicates strong preference)
+    if (film.rewatch) weight *= 1.8;
+
+    // Recency decay (exponential, half-life of 1 year)
+    const recencyFactor = Math.exp(-daysSinceWatch / 365);
+    weight *= (0.5 + 0.5 * recencyFactor); // 50% base + 50% recency-based
 
     return weight;
   };
+
 
   const stats = useMemo(() => {
     if (!filteredFilms || filteredFilms.length === 0) return null;
@@ -310,7 +327,7 @@ export default function StatsPage() {
     const lowRatedButLiked = filteredFilms.filter(f => (f.rating ?? 0) < 3 && (f.rating ?? 0) > 0 && f.liked);
 
     for (const film of filteredFilms) {
-      const weight = getPreferenceWeight(film.rating, film.liked);
+      const weight = getEnhancedWeight(film);
 
       // Find TMDB ID for this film
       const tmdbId = filmMappings.get(film.uri);
@@ -422,7 +439,7 @@ export default function StatsPage() {
     for (const film of filteredFilms) {
       if (film.year != null) {
         const decade = `${Math.floor(film.year / 10) * 10}s`;
-        const weight = getPreferenceWeight(film.rating, film.liked);
+        const weight = getEnhancedWeight(film);
         decadeWeights.set(decade, (decadeWeights.get(decade) ?? 0) + weight);
       }
     }
@@ -438,7 +455,7 @@ export default function StatsPage() {
       if (details) {
         const lang = (details as any).original_language;
         if (lang) {
-          const weight = getPreferenceWeight(film.rating, film.liked);
+          const weight = getEnhancedWeight(film);
           languageWeights.set(lang, (languageWeights.get(lang) ?? 0) + weight);
         }
       }
