@@ -74,6 +74,36 @@ export default function SuggestPage() {
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [topDecade, setTopDecade] = useState<number | null>(null);
   const [savedMovieIds, setSavedMovieIds] = useState<Set<number>>(new Set());
+  const [hasCheckedStorage, setHasCheckedStorage] = useState(false);
+
+  // Load from session storage on mount
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('lettrsuggest_items');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.log('[Suggest] Restored items from session storage', parsed.length);
+          setItems(parsed);
+        }
+      }
+    } catch (e) {
+      console.error('[Suggest] Failed to restore from session storage', e);
+    } finally {
+      setHasCheckedStorage(true);
+    }
+  }, []);
+
+  // Save to session storage when items change
+  useEffect(() => {
+    if (items && items.length > 0) {
+      try {
+        sessionStorage.setItem('lettrsuggest_items', JSON.stringify(items));
+      } catch (e) {
+        console.error('[Suggest] Failed to save to session storage', e);
+      }
+    }
+  }, [items]);
 
   // Get posters for all suggested movies
   const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
@@ -800,8 +830,9 @@ export default function SuggestPage() {
     if (sourceFilms.length === 0) return;
     if (loading) return;
     if (items !== null) return;
+    if (!hasCheckedStorage) return; // Wait for storage check
     void runSuggest();
-  }, [uid, sourceFilms.length, loading, items, runSuggest]);
+  }, [uid, sourceFilms.length, loading, items, runSuggest, hasCheckedStorage]);
 
   // Recompute when mapping updates are emitted
   useEffect(() => {
