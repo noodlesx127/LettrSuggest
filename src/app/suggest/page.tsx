@@ -1165,6 +1165,14 @@ export default function SuggestPage() {
         setFeedbackMessage("Got it, we won't show this movie again.");
         setTimeout(() => setFeedbackMessage(null), 3000);
 
+        // Mark the item as dismissed in items (source of truth for storage)
+        setItems(prev => {
+          if (!prev) return prev;
+          return prev.map(item =>
+            item.id === tmdbId ? { ...item, dismissed: true } : item
+          );
+        });
+
         // Mark the item as dismissed in categorizedSuggestions
         setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
           if (!prev) return prev;
