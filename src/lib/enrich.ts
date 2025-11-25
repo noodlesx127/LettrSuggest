@@ -621,6 +621,7 @@ export async function buildTasteProfile(params: {
   films: Array<{ uri: string; rating?: number; liked?: boolean; rewatch?: boolean; lastDate?: string }>;
   mappings: Map<string, number>;
   topN?: number;
+  negativeFeedbackIds?: number[]; // IDs of movies explicitly dismissed/disliked
 }): Promise<{
   topGenres: Array<{ id: number; name: string; weight: number }>;
   topKeywords: Array<{ id: number; name: string; weight: number }>;
@@ -706,9 +707,10 @@ export async function buildTasteProfile(params: {
     .slice(0, 50); // Cap negative signals
 
   // Fetch movie details
-  const [likedMovies, dislikedMovies] = await Promise.all([
+  const [likedMovies, dislikedMovies, negativeFeedbackMovies] = await Promise.all([
     Promise.all(likedIds.map(id => fetchTmdbMovieCached(id))),
-    Promise.all(dislikedIds.map(id => fetchTmdbMovieCached(id)))
+    Promise.all(dislikedIds.map(id => fetchTmdbMovieCached(id))),
+    Promise.all((params.negativeFeedbackIds || []).map(id => fetchTmdbMovieCached(id)))
   ]);
 
   // Positive profile weights
@@ -789,6 +791,36 @@ export async function buildTasteProfile(params: {
 
     const film = dislikedFilms[i];
     const negWeight = Math.abs((film.rating ?? 2.5) - 2.5); // Stronger signal for lower ratings
+    const feats = extractFeatures(movie);
+
+    // Genres to avoid
+    feats.genreIds.forEach((id, idx) => {
+      const name = feats.genres[idx];
+      const current = avoidGenreWeights.get(id) || { name, weight: 0 };
+      avoidGenreWeights.set(id, { name, weight: current.weight + negWeight });
+    });
+
+    // Keywords to avoid
+    feats.keywordIds.forEach((id, idx) => {
+      const name = feats.keywords[idx];
+      const current = avoidKeywordWeights.get(id) || { name, weight: 0 };
+      avoidKeywordWeights.set(id, { name, weight: current.weight + negWeight });
+    });
+
+    // Directors to avoid
+    feats.directorIds.forEach((id, idx) => {
+      const name = feats.directors[idx];
+      const current = avoidDirectorWeights.get(id) || { name, weight: 0 };
+      avoidDirectorWeights.set(id, { name, weight: current.weight + negWeight });
+    });
+  }
+
+  // Accumulate negative signals from explicitly dismissed/negative feedback movies
+  // These are treated as VERY strong negative signals (weight = 3.0)
+  for (const movie of negativeFeedbackMovies) {
+    if (!movie) continue;
+
+    const negWeight = 3.0; // Strong penalty for explicitly dismissed items
     const feats = extractFeatures(movie);
 
     // Genres to avoid
