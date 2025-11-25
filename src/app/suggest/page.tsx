@@ -4,7 +4,7 @@ import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getAdaptiveExplorationRate } from '@/lib/enrich';
+import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getFeedback, getAdaptiveExplorationRate } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -551,10 +551,24 @@ export default function SuggestPage() {
       // Build taste profile with IDs for smarter discovery
       console.log('[Suggest] Building taste profile for smart discovery');
       setProgress({ current: 2, total: 5, stage: 'Analyzing your taste profile...' });
+
+      // Fetch negative feedback to learn from dislikes
+      let negativeFeedbackIds: number[] = [];
+      try {
+        const feedbackMap = await getFeedback(uid);
+        negativeFeedbackIds = Array.from(feedbackMap.entries())
+          .filter((entry): entry is [number, 'negative' | 'positive'] => entry[1] === 'negative')
+          .map((entry) => entry[0]);
+        console.log('[Suggest] Found negative feedback', { count: negativeFeedbackIds.length });
+      } catch (e) {
+        console.error('[Suggest] Failed to fetch feedback', e);
+      }
+
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
-        topN: 10
+        topN: 10,
+        negativeFeedbackIds
       });
 
       // Set top decade for UI
