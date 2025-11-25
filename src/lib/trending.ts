@@ -77,8 +77,36 @@ export async function fetchTrendingIds(period: 'day' | 'week' = 'day', limit = 1
 }
 
 /**
+ * Fetch related movies from Trakt API for a single seed movie
+ * This supplements TMDB's similar/recommendations with community-driven data
+ */
+async function fetchTraktRelatedIds(seedId: number, limit = 10): Promise<number[]> {
+  try {
+    const u = new URL('/api/trakt/related', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+    u.searchParams.set('id', String(seedId));
+    u.searchParams.set('limit', String(limit));
+    u.searchParams.set('_t', String(Date.now())); // Cache buster
+
+    const r = await fetch(u.toString(), { cache: 'no-store' });
+    const j = await r.json();
+
+    if (j.ok && j.ids) {
+      console.log(`[Trakt] Found ${j.ids.length} related movies for ${seedId}`);
+      return j.ids as number[];
+    } else {
+      console.warn(`[Trakt] No related movies for ${seedId}:`, j.error || 'Unknown error');
+      return [];
+    }
+  } catch (e) {
+    console.error(`[Trakt] Failed to fetch related for ${seedId}`, e);
+    return [];
+  }
+}
+
+/**
  * Fetch similar/recommended movies for a set of seed movie IDs
  * This provides more personalized candidates based on specific films the user liked
+ * Now combines TMDB similar/recommendations with Trakt related movies for better diversity
  */
 export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10): Promise<number[]> {
   const allIds = new Set<number>();
@@ -88,7 +116,7 @@ export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10)
 
   for (const seedId of limitedSeeds) {
     try {
-      // Fetch similar movies for this seed
+      // 1. Fetch TMDB similar/recommendations (existing)
       const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
       u.searchParams.set('id', String(seedId));
       u.searchParams.set('_t', String(Date.now())); // Cache buster
@@ -107,13 +135,20 @@ export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10)
             if (m.id) allIds.add(m.id);
           });
       }
+
+      // 2. Fetch Trakt related movies (NEW)
+      const traktIds = await fetchTraktRelatedIds(seedId, limitPerSeed);
+      traktIds.forEach(id => allIds.add(id));
+
     } catch (e) {
       console.error(`[TMDB] Failed to fetch similar for ${seedId}`, e);
     }
   }
 
+  console.log(`[Discovery] Combined similar movies from TMDB + Trakt: ${allIds.size} unique candidates`);
   return Array.from(allIds);
 }
+
 
 /**
  * Discover movies using TMDB's discover API with specific filters
