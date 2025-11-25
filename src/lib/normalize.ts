@@ -64,7 +64,8 @@ export function normalizeData(raw: {
     upd(
       uri,
       {
-        rewatch: (byURI.get(uri)?.rewatch || rewatch) || undefined,
+        // Set rewatch to true if current entry is a rewatch OR if already marked as rewatch
+        rewatch: (byURI.get(uri)?.rewatch || rewatch) ? true : undefined,
         rating: rating ?? byURI.get(uri)?.rating,
         lastDate: d ?? byURI.get(uri)?.lastDate,
       },
@@ -101,7 +102,12 @@ export function normalizeData(raw: {
       if (watchedSet.has(uri) || (f.rating != null)) wc = 1;
     }
     const ld = latestDate.get(uri) ?? f.lastDate;
-    byURI.set(uri, { ...f, watchCount: wc, lastDate: ld });
+
+    // Mark as rewatch if watch count > 1 (appeared multiple times in diary)
+    // OR if already marked as rewatch from diary entry
+    const isRewatch = f.rewatch || wc > 1;
+
+    byURI.set(uri, { ...f, watchCount: wc, lastDate: ld, rewatch: isRewatch ? true : undefined });
   }
 
   const films = [...byURI.values()];
