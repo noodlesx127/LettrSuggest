@@ -17,6 +17,9 @@ type ParsedData = {
   ratings?: Record<string, string>[];
   watchlist?: Record<string, string>[];
   likesFilms?: Record<string, string>[];
+  reviews?: Record<string, string>[];
+  lists?: Record<string, string>[];
+  tags?: Record<string, string>[];
 };
 
 function parseCsv(text: string) {
@@ -234,12 +237,22 @@ export default function ImportPage() {
             if (key === 'diary.csv') return 'diary';
             if (key === 'ratings.csv') return 'ratings';
             if (key === 'watchlist.csv') return 'watchlist';
+            if (key === 'reviews.csv') return 'reviews';
+            if (key === 'tags.csv') return 'tags';
             if (entry.toLowerCase().endsWith('likes/films.csv')) return 'likesFilms';
+            if (entry.toLowerCase().includes('lists/') && entry.toLowerCase().endsWith('.csv')) return 'lists';
             return null;
           })();
           if (!logical) continue;
           const fileText = await zip.files[entry].async('string');
-          (next as any)[logical] = parseCsv(fileText);
+          const parsed = parseCsv(fileText);
+
+          if (logical === 'lists') {
+            // Aggregate lists
+            next.lists = [...(next.lists || []), ...parsed];
+          } else {
+            (next as any)[logical] = parsed;
+          }
         }
       } catch (e: any) {
         console.error('[Import] error reading ZIP', e);
@@ -256,10 +269,20 @@ export default function ImportPage() {
         else if (lower.endsWith('diary.csv')) logical = 'diary';
         else if (lower.endsWith('ratings.csv')) logical = 'ratings';
         else if (lower.endsWith('watchlist.csv')) logical = 'watchlist';
+        else if (lower.endsWith('reviews.csv')) logical = 'reviews';
+        else if (lower.endsWith('tags.csv')) logical = 'tags';
         else if (lower.endsWith('likes/films.csv')) logical = 'likesFilms';
+        else if (lower.includes('lists/')) logical = 'lists';
+
         if (!logical) continue;
         const text = await f.text();
-        (next as any)[logical] = parseCsv(text);
+        const parsed = parseCsv(text);
+
+        if (logical === 'lists') {
+          next.lists = [...(next.lists || []), ...parsed];
+        } else {
+          (next as any)[logical] = parsed;
+        }
       }
     }
 
@@ -269,6 +292,9 @@ export default function ImportPage() {
       ratings: next.ratings?.length ?? 0,
       watchlist: next.watchlist?.length ?? 0,
       likesFilms: next.likesFilms?.length ?? 0,
+      reviews: next.reviews?.length ?? 0,
+      lists: next.lists?.length ?? 0,
+      tags: next.tags?.length ?? 0,
     });
     setData(next);
     try {
@@ -336,10 +362,20 @@ export default function ImportPage() {
   const summary = useMemo(() => {
     const s: { label: string; count: number }[] = [];
     if (data.watched) s.push({ label: 'watched', count: data.watched.length });
-    if (data.diary) s.push({ label: 'diary', count: data.diary.length });
+    if (data.diary) {
+      s.push({ label: 'diary', count: data.diary.length });
+      // Calculate rewatches
+      const rewatchCount = data.diary.filter(entry => (entry['Rewatch'] || '').toLowerCase() === 'yes').length;
+      if (rewatchCount > 0) {
+        s.push({ label: 'rewatches', count: rewatchCount });
+      }
+    }
     if (data.ratings) s.push({ label: 'ratings', count: data.ratings.length });
     if (data.watchlist) s.push({ label: 'watchlist', count: data.watchlist.length });
     if (data.likesFilms) s.push({ label: 'likes/films', count: data.likesFilms.length });
+    if (data.reviews) s.push({ label: 'reviews', count: data.reviews.length });
+    if (data.lists) s.push({ label: 'lists (entries)', count: data.lists.length });
+    if (data.tags) s.push({ label: 'tags', count: data.tags.length });
     return s;
   }, [data]);
 

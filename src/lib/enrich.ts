@@ -11,6 +11,7 @@ import {
 import { checkNicheCompatibility } from './advancedFiltering';
 import { getTuiMDBMovie, type TuiMDBMovie } from './tuimdb';
 import { mergeEnhancedGenres, getCurrentSeasonalGenres, boostSeasonalGenres } from './genreEnhancement';
+import { updateExplorationStats } from './adaptiveLearning';
 
 export type TMDBMovie = {
   id: number;
@@ -1082,6 +1083,8 @@ export async function suggestByOverlap(params: {
     avoidGenres: Array<{ id: number; name: string; weight: number }>;
     avoidKeywords: Array<{ id: number; name: string; weight: number }>;
     avoidDirectors: Array<{ id: number; name: string; weight: number }>;
+    adjacentGenres?: Map<string, Array<{ genre: string; weight: number }>>; // Adaptive learning transitions
+    recentGenres?: string[]; // Recent genres to trigger transitions
   };
 }): Promise<Array<{
   tmdbId: number;
@@ -1437,6 +1440,23 @@ export async function suggestByOverlap(params: {
     for (const id of params.excludeWatchedIds) seenIds.add(id);
   }
 
+  // Pre-process adjacent genres for fast lookup
+  // We want to boost genres that are "adjacent" to the user's recent watches
+  const adjacentBoosts = new Map<string, number>();
+  if (params.enhancedProfile?.adjacentGenres && params.enhancedProfile?.recentGenres) {
+    // For each recent genre, find its adjacent targets
+    for (const recent of params.enhancedProfile.recentGenres) {
+      const targets = params.enhancedProfile.adjacentGenres.get(recent);
+      if (targets) {
+        for (const t of targets) {
+          // Accumulate boosts (max 2.0)
+          const current = adjacentBoosts.get(t.genre) || 0;
+          adjacentBoosts.set(t.genre, Math.min(2.0, current + (t.weight * 0.5)));
+        }
+      }
+    }
+  }
+
   const maxC = Math.min(params.maxCandidates ?? 120, validCandidates.length);
   const desired = Math.max(10, Math.min(30, params.desiredResults ?? 20));
 
@@ -1532,6 +1552,40 @@ export async function suggestByOverlap(params: {
       if (crossGenreBoost.reason) {
         reasons.push(crossGenreBoost.reason);
         console.log(`[CrossGenreBoost] Boosted "${m.title}" by ${crossGenreBoost.boost.toFixed(2)} - ${crossGenreBoost.reason}`);
+      }
+    }
+
+    // ADAPTIVE LEARNING BOOST: Check if matches learned genre transitions
+    // E.g. User watched Drama recently -> Boost Sci-Fi if that's a learned transition
+    if (adjacentBoosts.size > 0) {
+      let maxAdjBoost = 0;
+      let boostedGenre = '';
+
+      for (const g of feats.genres) {
+        const boost = adjacentBoosts.get(g);
+        if (boost && boost > maxAdjBoost) {
+          maxAdjBoost = boost;
+          boostedGenre = g;
+        }
+      }
+
+      if (maxAdjBoost > 0) {
+        // Prevent double boosting: If user already loves this genre (high weight), 
+        // the transition boost is redundant or should be minimal.
+        const existingWeight = pref.genres.get(boostedGenre) || 0;
+
+        if (existingWeight > 5.0) {
+          // User already strongly loves this genre, no need for transition boost
+          maxAdjBoost = 0;
+        } else if (existingWeight > 2.0) {
+          // User likes this genre, reduce transition boost
+          maxAdjBoost *= 0.5;
+        }
+
+        if (maxAdjBoost > 0) {
+          score += maxAdjBoost;
+          reasons.push(`Matches your learned preference for ${boostedGenre} after recent watches`);
+        }
       }
     }
 

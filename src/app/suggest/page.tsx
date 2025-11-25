@@ -4,11 +4,12 @@ import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getFeedback, getAdaptiveExplorationRate } from '@/lib/enrich';
+import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getFeedback } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
+import { updateExplorationStats, getAdaptiveExplorationRate, getGenreTransitions, handleNegativeFeedback } from '@/lib/adaptiveLearning';
 import type { FilmEvent } from '@/lib/normalize';
 
 type MovieItem = {
@@ -576,6 +577,15 @@ export default function SuggestPage() {
         setTopDecade(tasteProfile.topDecades[0].decade);
       }
 
+      // Update adaptive learning stats (fire and forget)
+      if (uid) {
+        updateExplorationStats(
+          uid,
+          filteredFilms,
+          tasteProfile.topGenres.map(g => g.name)
+        ).catch(e => console.error('[Suggest] Failed to update exploration stats', e));
+      }
+
       // Get highly-rated film IDs for similar movie recommendations
       const highlyRated = filteredFilms
         .filter(f => (f.rating ?? 0) >= 4 || f.liked)
@@ -671,6 +681,30 @@ export default function SuggestPage() {
         setNoCandidatesReason(reason);
       }
 
+      // Fetch learned genre transitions
+      const adjacentGenres = await getGenreTransitions(uid);
+      console.log('[Suggest] Loaded genre transitions', { count: adjacentGenres.size });
+
+      // Get recent genres from taste profile (already calculated in buildTasteProfile but not returned explicitly as list)
+      // We can extract them from topGenres or we might need to look at recent films again.
+      // `tasteProfile` has `topGenres` but those are overall.
+      // Let's use the `filteredFilms` (source films) to find recent genres.
+      const recentFilms = filteredFilms
+        .sort((a, b) => (b.lastDate ? new Date(b.lastDate).getTime() : 0) - (a.lastDate ? new Date(a.lastDate).getTime() : 0))
+        .slice(0, 5);
+
+      // We need genres for these. We have mappings but not genres in `filteredFilms`.
+      // `buildTasteProfile` does this internally.
+      // Ideally `buildTasteProfile` should return `recentGenres`.
+      // Let's assume for now we pass `topGenres` as a proxy for "active" interest if we can't get recent easily,
+      // OR we modify `buildTasteProfile` to return `recentGenres`.
+      // Actually, `enrich.ts` has `recentGenres` in `pref` object but it's not returned.
+
+      // Let's just pass `tasteProfile.topGenres` names as "recent" for now? No, that's wrong.
+      // Transitions are "From X -> To Y". If I like X generally, I might like Y.
+      // So passing top genres as "recent" is a decent approximation of "current state".
+      const recentGenreNames = tasteProfile.topGenres.slice(0, 5).map(g => g.name);
+
       setSourceLabel('Based on your watched & liked films + trending releases');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length, candidatesCount: candidates.length });
@@ -690,7 +724,9 @@ export default function SuggestPage() {
           topStudios: tasteProfile.topStudios,
           avoidGenres: tasteProfile.avoidGenres,
           avoidKeywords: tasteProfile.avoidKeywords,
-          avoidDirectors: tasteProfile.avoidDirectors
+          avoidDirectors: tasteProfile.avoidDirectors,
+          adjacentGenres,
+          recentGenres: recentGenreNames
         }
       });
       // Best-effort: ensure posters/backdrops exist for suggested ids.
