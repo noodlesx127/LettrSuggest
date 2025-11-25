@@ -1,3 +1,10 @@
+import {
+  getCachedTraktRelated,
+  setCachedTraktRelated,
+  getCachedTMDBSimilar,
+  setCachedTMDBSimilar,
+} from './apiCache';
+
 /**
  * Genre adjacency map for exploration vs exploitation
  * Maps each genre to related genres for gentle discovery expansion
@@ -79,8 +86,16 @@ export async function fetchTrendingIds(period: 'day' | 'week' = 'day', limit = 1
 /**
  * Fetch related movies from Trakt API for a single seed movie
  * This supplements TMDB's similar/recommendations with community-driven data
+ * Uses cache-first strategy to reduce API calls
  */
 async function fetchTraktRelatedIds(seedId: number, limit = 10): Promise<number[]> {
+  // Check cache first
+  const cached = await getCachedTraktRelated(seedId);
+  if (cached !== null) {
+    return cached;
+  }
+
+  // Cache miss - fetch from API
   try {
     const u = new URL('/api/trakt/related', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
     u.searchParams.set('id', String(seedId));
@@ -91,8 +106,13 @@ async function fetchTraktRelatedIds(seedId: number, limit = 10): Promise<number[
     const j = await r.json();
 
     if (j.ok && j.ids) {
-      console.log(`[Trakt] Found ${j.ids.length} related movies for ${seedId}`);
-      return j.ids as number[];
+      const ids = j.ids as number[];
+      console.log(`[Trakt] API fetch: Found ${ids.length} related movies for ${seedId}`);
+
+      // Store in cache for future use
+      await setCachedTraktRelated(seedId, ids);
+
+      return ids;
     } else {
       console.warn(`[Trakt] No related movies for ${seedId}:`, j.error || 'Unknown error');
       return [];
@@ -116,27 +136,41 @@ export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10)
 
   for (const seedId of limitedSeeds) {
     try {
-      // 1. Fetch TMDB similar/recommendations (existing)
-      const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
-      u.searchParams.set('id', String(seedId));
-      u.searchParams.set('_t', String(Date.now())); // Cache buster
+      // 1. Fetch TMDB similar/recommendations with caching
+      const cachedSimilar = await getCachedTMDBSimilar(seedId);
 
-      const r = await fetch(u.toString(), { cache: 'no-store' });
-      const j = await r.json();
-
-      if (j.ok && j.movie) {
-        // Get similar movies from the movie's recommendations
-        const similar = (j.movie as any).similar?.results || [];
-        const recommendations = (j.movie as any).recommendations?.results || [];
-
-        [...similar, ...recommendations]
+      if (cachedSimilar !== null) {
+        // Cache hit - use cached data
+        [...cachedSimilar.similar, ...cachedSimilar.recommendations]
           .slice(0, limitPerSeed)
-          .forEach((m: any) => {
-            if (m.id) allIds.add(m.id);
-          });
+          .forEach(id => allIds.add(id));
+      } else {
+        // Cache miss - fetch from API
+        const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+        u.searchParams.set('id', String(seedId));
+        u.searchParams.set('_t', String(Date.now())); // Cache buster
+
+        const r = await fetch(u.toString(), { cache: 'no-store' });
+        const j = await r.json();
+
+        if (j.ok && j.movie) {
+          // Get similar movies from the movie's recommendations
+          const similar = (j.movie as any).similar?.results || [];
+          const recommendations = (j.movie as any).recommendations?.results || [];
+
+          const similarIds = similar.map((m: any) => m.id).filter((id: number) => id != null);
+          const recIds = recommendations.map((m: any) => m.id).filter((id: number) => id != null);
+
+          // Store in cache
+          await setCachedTMDBSimilar(seedId, similarIds, recIds);
+
+          [...similarIds, ...recIds]
+            .slice(0, limitPerSeed)
+            .forEach(id => allIds.add(id));
+        }
       }
 
-      // 2. Fetch Trakt related movies (NEW)
+      // 2. Fetch Trakt related movies (with caching)
       const traktIds = await fetchTraktRelatedIds(seedId, limitPerSeed);
       traktIds.forEach(id => allIds.add(id));
 
