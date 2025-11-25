@@ -773,39 +773,6 @@ export default function StatsPage() {
             )}
           </div>
 
-          {/* User Statistics - Phase 1 Enhancement */}
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-gray-900 text-lg">📊 Your Rating Statistics</h2>
-              <span className="text-xs text-blue-700 bg-blue-100 px-2 py-1 rounded">Algorithm Insights</span>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">
-              These statistics help normalize your ratings to your personal scale for better recommendations.
-            </p>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="bg-white rounded-lg p-3 border border-blue-200">
-                <p className="text-xs text-gray-600 mb-1">Average Rating</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.avgRating}★</p>
-                <p className="text-xs text-gray-500">{stats.rewatchedCount} rewatched</p>
-              </div>
-              <div className="bg-white rounded-lg p-3 border border-blue-200">
-                <p className="text-xs text-gray-600 mb-1">Total Films</p>
-                <p className="text-2xl font-bold text-gray-900">{filteredFilms.length}</p>
-                <p className="text-xs text-gray-500">In profile</p>
-              </div>
-            </div>
-
-            <div className="mt-4 bg-white rounded-lg p-3 border border-blue-200">
-              <p className="text-xs text-gray-600 mb-2">How this helps:</p>
-              <ul className="text-xs text-gray-700 space-y-1">
-                <li>• <strong>Normalized ratings</strong>: Your 4★ might be someone else&apos;s 5★ - we account for that</li>
-                <li>• <strong>Rewatch signal</strong>: Films you rewatch get 1.8x weight (strong preference indicator)</li>
-                <li>• <strong>Recency decay</strong>: Recent watches weighted more (your taste evolves)</li>
-              </ul>
-            </div>
-          </div>
-
           {/* Additional Taste Insights - Informational Only */}
           <div className="grid md:grid-cols-2 gap-6 mb-6">
             {/* Era Preferences */}
@@ -1020,6 +987,117 @@ export default function StatsPage() {
         </>
       )}
 
+      {/* Algorithm Insights Section - Phase 5+ Transparency */}
+      {stats && (
+        <div className="bg-white border rounded-lg p-4 mb-6">
+          <h2 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            📊 Algorithm Insights
+            <span className="text-xs text-gray-500 font-normal">
+              (How your behavior influences recommendations)
+            </span>
+          </h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-green-50 rounded p-3">
+              <div className="text-sm text-gray-600">Rewatch Rate</div>
+              <div className="text-2xl font-bold text-gray-900">
+                {stats.rewatchedCount && stats.totalWatches ?
+                  ((stats.rewatchedCount / stats.totalWatches) * 100).toFixed(1) : '0.0'}%
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                Rewatched films get 1.8x boost in similar suggestions
+              </div>
+            </div>
+
+            <div className="bg-purple-50 rounded p-3">
+              <div className="text-sm text-gray-600">Liked Films</div>
+              <div className="text-2xl font-bold text-gray-900">
+                {stats.likedCount?.toLocaleString()}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                Liked films receive 1.5-2.0x weight in taste profile
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Discovery Preferences Section - Phase 5+ Adaptive Learning */}
+      {explorationStats && (
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4 mb-6">
+          <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            🔍 Your Discovery Preferences
+            <span className="text-xs text-indigo-600 font-normal">
+              (Adaptive Learning Active)
+            </span>
+          </h2>
+
+          <div className="space-y-3">
+            <div className="bg-white rounded p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-medium text-gray-900">Current Exploration Rate</div>
+                <div className="text-lg font-bold text-indigo-600">
+                  {(explorationStats.exploration_rate * 100).toFixed(0)}%
+                </div>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-indigo-600 h-2 rounded-full transition-all"
+                  style={{ width: `${explorationStats.exploration_rate * 3.33 * 100}%` }}
+                />
+              </div>
+              <div className="text-xs text-gray-600 mt-2">
+                {explorationStats.exploration_rate !== 0.15 ? (
+                  explorationStats.exploration_rate > 0.15 ? (
+                    <span className="text-green-700">
+                      ✓ Increased because you enjoy exploratory picks (avg {explorationStats.exploratory_avg_rating.toFixed(1)}★)
+                    </span>
+                  ) : (
+                    <span className="text-orange-700">
+                      ↓ Decreased to focus on safer recommendations (avg {explorationStats.exploratory_avg_rating.toFixed(1)}★)
+                    </span>
+                  )
+                ) : (
+                  <span>
+                    Default rate • Will adjust based on your ratings ({explorationStats.exploratory_films_rated} exploratory films rated so far)
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="text-xs text-gray-600 bg-white rounded p-2">
+              <strong>What this means:</strong> {(explorationStats.exploration_rate * 100).toFixed(0)}% of your suggestions
+              will be &quot;discovery picks&quot; from adjacent genres or acclaimed films outside your usual taste.
+              The other {(100 - explorationStats.exploration_rate * 100).toFixed(0)}% are high-confidence matches.
+            </div>
+
+            {/* Learned Adjacencies */}
+            {adjacentPrefs.length > 0 && (
+              <div className="bg-white rounded p-3">
+                <div className="text-sm font-medium text-gray-900 mb-2">
+                  Learned Genre Transitions
+                </div>
+                <div className="space-y-1">
+                  {adjacentPrefs.slice(0, 5).map((pref, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-xs">
+                      <span className="text-gray-700">
+                        {pref.from_genre_name} → {pref.to_genre_name}
+                      </span>
+                      <span className="text-green-700 font-medium">
+                        {(pref.success_rate * 100).toFixed(0)}% success ({pref.rating_count} films)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-xs text-gray-500 mt-2">
+                  Algorithm learned which genre combinations you enjoy!
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Charts */}
       <div className="grid gap-6">
         {stats.topGenres.length > 0 && (
@@ -1044,116 +1122,7 @@ export default function StatsPage() {
           <Chart option={byDecadeOption} />
         </div>
 
-        {/* User Statistics Section - Phase 5+ Transparency */}
-        {stats && (
-          <div className="bg-white border rounded-lg p-4">
-            <h2 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              📊 Algorithm Insights
-              <span className="text-xs text-gray-500 font-normal">
-                (How your behavior influences recommendations)
-              </span>
-            </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-green-50 rounded p-3">
-                <div className="text-sm text-gray-600">Rewatch Rate</div>
-                <div className="text-2xl font-bold text-gray-900">
-                  {stats.rewatchedCount && stats.totalWatches ?
-                    ((stats.rewatchedCount / stats.totalWatches) * 100).toFixed(1) : '0.0'}%
-                </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Rewatched films get 1.8x boost in similar suggestions
-                </div>
-              </div>
-
-              <div className="bg-purple-50 rounded p-3">
-                <div className="text-sm text-gray-600">Liked Films</div>
-                <div className="text-2xl font-bold text-gray-900">
-                  {stats.likedCount?.toLocaleString()}
-                </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Liked films receive 1.5-2.0x weight in taste profile
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Exploration Stats Section - Phase 5+ Adaptive Learning */}
-        {explorationStats && (
-          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4">
-            <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-              🔍 Your Discovery Preferences
-              <span className="text-xs text-indigo-600 font-normal">
-                (Adaptive Learning Active)
-              </span>
-            </h2>
-
-            <div className="space-y-3">
-              <div className="bg-white rounded p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-sm font-medium text-gray-900">Current Exploration Rate</div>
-                  <div className="text-lg font-bold text-indigo-600">
-                    {(explorationStats.exploration_rate * 100).toFixed(0)}%
-                  </div>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-indigo-600 h-2 rounded-full transition-all"
-                    style={{ width: `${explorationStats.exploration_rate * 3.33 * 100}%` }}
-                  />
-                </div>
-                <div className="text-xs text-gray-600 mt-2">
-                  {explorationStats.exploration_rate !== 0.15 ? (
-                    explorationStats.exploration_rate > 0.15 ? (
-                      <span className="text-green-700">
-                        ✓ Increased because you enjoy exploratory picks (avg {explorationStats.exploratory_avg_rating.toFixed(1)}★)
-                      </span>
-                    ) : (
-                      <span className="text-orange-700">
-                        ↓ Decreased to focus on safer recommendations (avg {explorationStats.exploratory_avg_rating.toFixed(1)}★)
-                      </span>
-                    )
-                  ) : (
-                    <span>
-                      Default rate • Will adjust based on your ratings ({explorationStats.exploratory_films_rated} exploratory films rated so far)
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="text-xs text-gray-600 bg-white rounded p-2">
-                <strong>What this means:</strong> {(explorationStats.exploration_rate * 100).toFixed(0)}% of your suggestions
-                will be "discovery picks" from adjacent genres or acclaimed films outside your usual taste.
-                The other {(100 - explorationStats.exploration_rate * 100).toFixed(0)}% are high-confidence matches.
-              </div>
-
-              {/* Learned Adjacencies */}
-              {adjacentPrefs.length > 0 && (
-                <div className="bg-white rounded p-3">
-                  <div className="text-sm font-medium text-gray-900 mb-2">
-                    Learned Genre Transitions
-                  </div>
-                  <div className="space-y-1">
-                    {adjacentPrefs.slice(0, 5).map((pref, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-xs">
-                        <span className="text-gray-700">
-                          {pref.from_genre_name} → {pref.to_genre_name}
-                        </span>
-                        <span className="text-green-700 font-medium">
-                          {(pref.success_rate * 100).toFixed(0)}% success ({pref.rating_count} films)
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-2">
-                    Algorithm learned which genre combinations you enjoy!
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </AuthGate>
   );
