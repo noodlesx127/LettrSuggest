@@ -92,6 +92,7 @@ export function ImportDataProvider({ children }: { children: ReactNode }) {
     if (!films || films.length === 0 || loading) return;
 
     const updateAdaptiveStats = async () => {
+      if (!supabase) return;
       try {
         const { data: sessionData } = await supabase.auth.getSession();
         const uid = sessionData?.session?.user?.id;
