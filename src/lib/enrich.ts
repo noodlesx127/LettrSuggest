@@ -434,30 +434,9 @@ export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null
         return cached;
       }
 
-      // If OMDb data is stale but we have IMDB ID, refresh OMDb
-      if (hasCompleteMetadata && cached.imdb_id && !hasRecentOMDb) {
-        try {
-          const { getOMDbByIMDB, omdbToCache } = await import('./omdb');
-          const { updateOMDbCache } = await import('./apiCache');
-
-          console.log('[OMDb] Refreshing stale OMDb data', { tmdbId: id });
-          const omdbData = await getOMDbByIMDB(cached.imdb_id, { plot: 'full' });
-
-          if (omdbData) {
-            // Update cache with new OMDb data
-            await updateOMDbCache(id, omdbToCache(omdbData));
-
-            // Merge and return
-            const { mergeTMDBAndOMDb } = await import('./omdb');
-            return mergeTMDBAndOMDb(cached, omdbData);
-          }
-        } catch (omdbErr) {
-          console.log('[OMDb] Refresh failed, using cached data', omdbErr);
-        }
-
-        // Return cached even if OMDb refresh failed
-        return cached;
-      }
+      // OMDb enrichment is handled server-side through /api/tmdb/movie route
+      // Client-side code should not attempt to refresh OMDb data
+      // Just return the cached data (which may include OMDb fields if previously enriched)
 
       // Otherwise fall through to refetch enriched details
     }
