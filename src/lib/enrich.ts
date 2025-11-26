@@ -399,18 +399,9 @@ export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null
       // No database - fetch fresh from TMDB
       const fresh = await withTimeout(fetchTmdbMovie(id));
 
-      // Try to enrich with OMDb if we have IMDB ID
-      if (fresh?.imdb_id) {
-        try {
-          const { getOMDbByIMDB, mergeTMDBAndOMDb } = await import('./omdb');
-          const omdbData = await getOMDbByIMDB(fresh.imdb_id, { plot: 'full' });
-          if (omdbData) {
-            return mergeTMDBAndOMDb(fresh, omdbData);
-          }
-        } catch (omdbErr) {
-          console.log('[OMDb] Enrichment failed, using TMDB only', omdbErr);
-        }
-      }
+
+      // OMDb enrichment is handled server-side through /api/tmdb/movie route
+      // Client-side code should not attempt OMDb enrichment
 
       return fresh;
     }
