@@ -435,23 +435,31 @@ export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null
     // ignore cache errors
   }
 
-  // Fetch fresh data from TMDB
+  // Fetch from API route which handles both TMDB and OMDb enrichment server-side
   try {
+    const apiUrl = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+    apiUrl.searchParams.set('id', String(id));
+    apiUrl.searchParams.set('_t', String(Date.now()));
+
+    const response = await fetch(apiUrl.toString());
+    if (!response.ok) {
+      console.warn('[Enrich] API route failed, falling back to direct TMDB fetch');
+      const fresh = await withTimeout(fetchTmdbMovie(id));
+      return fresh;
+    }
+
+    const json = await response.json();
+    if (json.ok && json.movie) {
+      return json.movie;
+    }
+
+    // Fallback to direct fetch if API response is malformed
     const fresh = await withTimeout(fetchTmdbMovie(id));
-
-
-    // OMDb enrichment is handled server-side through /api/tmdb/movie route
-    // Client-side code should not attempt OMDb enrichment
-
-
-    // Upsert TMDB data (without OMDb if enrichment failed)
-    try {
-      await upsertTmdbCache(fresh);
-    } catch { }
-
     return fresh;
-  } catch {
-    return null;
+  } catch (apiError) {
+    console.warn('[Enrich] API route error, falling back to direct TMDB fetch:', apiError);
+    const fresh = await withTimeout(fetchTmdbMovie(id));
+    return fresh;
   }
 }
 
