@@ -28,6 +28,10 @@ type MovieItem = {
   overview?: string;
   contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
   dismissed?: boolean;
+  imdb_rating?: string;
+  rotten_tomatoes?: string;
+  metacritic?: string;
+  awards?: string;
 };
 
 type CategorizedSuggestions = {
@@ -1583,6 +1587,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -1634,6 +1642,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -1685,6 +1697,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -1736,6 +1752,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -1787,6 +1807,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -1838,6 +1862,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -1889,6 +1917,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -1940,6 +1972,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -1991,6 +2027,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -2042,6 +2082,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -2093,6 +2137,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -2144,6 +2192,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -2195,6 +2247,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -2246,6 +2302,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -2297,6 +2357,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>
@@ -2348,6 +2412,10 @@ export default function SuggestPage() {
                       overview={item.overview}
                       contributingFilms={item.contributingFilms}
                       dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
                     />
                   ))}
                 </div>

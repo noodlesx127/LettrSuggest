@@ -22,6 +22,10 @@ type MovieCardProps = {
   overview?: string;
   contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
   dismissed?: boolean;
+  imdb_rating?: string;
+  rotten_tomatoes?: string;
+  metacritic?: string;
+  awards?: string;
 };
 
 // Helper function to extract genres, directors, keywords, etc. from a reason string
@@ -231,7 +235,11 @@ export default function MovieCard({
   vote_count,
   overview,
   contributingFilms,
-  dismissed = false
+  dismissed = false,
+  imdb_rating,
+  rotten_tomatoes,
+  metacritic,
+  awards
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -506,6 +514,39 @@ export default function MovieCard({
                       <span className="text-gray-400 text-xs">/{10}</span>
                     </span>
                   </>
+                )}
+                {imdb_rating && (
+                  <>
+                    <span>•</span>
+                    <span className="flex items-center gap-1" title={`IMDb Rating: ${imdb_rating}`}>
+                      <span className="text-yellow-500">📈</span>
+                      <span className="font-medium">{imdb_rating}</span>
+                    </span>
+                  </>
+                )}
+                {rotten_tomatoes && (
+                  <>
+                    <span>•</span>
+                    <span className="flex items-center gap-1" title={`Rotten Tomatoes: ${rotten_tomatoes}`}>
+                      <span className="text-red-500">🍅</span>
+                      <span className="font-medium">{rotten_tomatoes}</span>
+                    </span>
+                  </>
+                )}
+                {metacritic && (
+                  <>
+                    <span>•</span>
+                    <span className="flex items-center gap-1" title={`Metacritic: ${metacritic}`}>
+                      <span className="text-green-600">Ⓜ️</span>
+                      <span className="font-medium">{metacritic}</span>
+                    </span>
+                  </>
+                )}
+                {awards && awards !== 'N/A' && (
+                  <div className="w-full mt-1 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-100 flex items-center gap-1">
+                    <span>🏆</span>
+                    <span className="truncate" title={awards}>{awards}</span>
+                  </div>
                 )}
                 {collectionName && (
                   <>

@@ -32,6 +32,17 @@ export type TMDBMovie = {
   lists?: { results?: Array<{ id: number; name: string; description?: string; item_count?: number }> };
   tuimdb_uid?: number; // TuiMDB's internal UID for cross-referencing
   enhanced_genres?: Array<{ id: number; name: string; source: 'tmdb' | 'tuimdb' }>; // Merged TMDB + TuiMDB genres
+  // OMDb enrichment fields
+  imdb_id?: string; // IMDB ID from TMDB (e.g., "tt0111161")
+  imdb_rating?: string; // IMDB rating from OMDb (e.g., "9.3")
+  imdb_votes?: string; // IMDB vote count (e.g., "2,500,000")
+  rotten_tomatoes?: string; // Rotten Tomatoes score (e.g., "91%")
+  metacritic?: string; // Metacritic score (e.g., "82")
+  awards?: string; // Awards text (e.g., "Won 3 Oscars. 145 wins & 142 nominations")
+  box_office?: string; // Box office gross (e.g., "$28,767,189")
+  rated?: string; // Content rating (e.g., "PG-13", "R")
+  omdb_plot_full?: string; // Full plot from OMDb
+  omdb_poster?: string; // OMDb poster URL (fallback if TMDB missing)
 };
 
 /**
@@ -384,27 +395,114 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000): Promise<T> {
 // Fetch with simple cache: prefer Supabase row if present; if missing/partial, fetch from API and upsert
 export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null> {
   try {
-    if (!supabase) return await withTimeout(fetchTmdbMovie(id));
+    if (!supabase) {
+      // No database - fetch fresh from TMDB
+      const fresh = await withTimeout(fetchTmdbMovie(id));
+
+      // Try to enrich with OMDb if we have IMDB ID
+      if (fresh?.imdb_id) {
+        try {
+          const { getOMDbByIMDB, mergeTMDBAndOMDb } = await import('./omdb');
+          const omdbData = await getOMDbByIMDB(fresh.imdb_id, { plot: 'full' });
+          if (omdbData) {
+            return mergeTMDBAndOMDb(fresh, omdbData);
+          }
+        } catch (omdbErr) {
+          console.log('[OMDb] Enrichment failed, using TMDB only', omdbErr);
+        }
+      }
+
+      return fresh;
+    }
+
+    // Check cache
     const { data, error } = await supabase
       .from('tmdb_movies')
-      .select('data')
+      .select('data, omdb_fetched_at, imdb_rating')
       .eq('tmdb_id', id)
       .maybeSingle();
+
     if (!error && data && data.data) {
       const cached = data.data as TMDBMovie;
-      // If cached has credits/keywords, use it directly
-      if ((cached.credits && cached.credits.cast && cached.credits.crew) || cached.keywords) {
+
+      // If cached has credits/keywords AND recent OMDb data, use it directly
+      const hasCompleteMetadata = (cached.credits && cached.credits.cast && cached.credits.crew) || cached.keywords;
+      const hasRecentOMDb = data.omdb_fetched_at &&
+        (Date.now() - new Date(data.omdb_fetched_at).getTime()) < (7 * 24 * 60 * 60 * 1000); // 7 days
+
+      if (hasCompleteMetadata && (hasRecentOMDb || !cached.imdb_id)) {
         return cached;
       }
+
+      // If OMDb data is stale but we have IMDB ID, refresh OMDb
+      if (hasCompleteMetadata && cached.imdb_id && !hasRecentOMDb) {
+        try {
+          const { getOMDbByIMDB, omdbToCache } = await import('./omdb');
+          const { updateOMDbCache } = await import('./apiCache');
+
+          console.log('[OMDb] Refreshing stale OMDb data', { tmdbId: id });
+          const omdbData = await getOMDbByIMDB(cached.imdb_id, { plot: 'full' });
+
+          if (omdbData) {
+            // Update cache with new OMDb data
+            await updateOMDbCache(id, omdbToCache(omdbData));
+
+            // Merge and return
+            const { mergeTMDBAndOMDb } = await import('./omdb');
+            return mergeTMDBAndOMDb(cached, omdbData);
+          }
+        } catch (omdbErr) {
+          console.log('[OMDb] Refresh failed, using cached data', omdbErr);
+        }
+
+        // Return cached even if OMDb refresh failed
+        return cached;
+      }
+
       // Otherwise fall through to refetch enriched details
     }
   } catch {
     // ignore cache errors
   }
+
+  // Fetch fresh data from TMDB
   try {
     const fresh = await withTimeout(fetchTmdbMovie(id));
-    // best-effort upsert
-    try { await upsertTmdbCache(fresh); } catch { }
+
+    // Parallel OMDb enrichment if we have IMDB ID
+    if (fresh?.imdb_id) {
+      try {
+        const { getOMDbByIMDB, mergeTMDBAndOMDb, omdbToCache } = await import('./omdb');
+        const { updateOMDbCache } = await import('./apiCache');
+
+        console.log('[OMDb] Fetching data for', { tmdbId: id, imdbId: fresh.imdb_id });
+        const omdbData = await getOMDbByIMDB(fresh.imdb_id, { plot: 'full' });
+
+        if (omdbData) {
+          // Merge TMDB + OMDb
+          const enriched = mergeTMDBAndOMDb(fresh, omdbData);
+
+          // Cache merged result
+          try {
+            await upsertTmdbCache(enriched);
+            // Also update OMDb-specific fields
+            await updateOMDbCache(id, omdbToCache(omdbData));
+          } catch (cacheErr) {
+            console.log('[Cache] Failed to cache enriched data', cacheErr);
+          }
+
+          return enriched;
+        }
+      } catch (omdbErr) {
+        console.log('[OMDb] Enrichment failed, using TMDB only', omdbErr);
+      }
+    }
+
+    // Upsert TMDB data (without OMDb if enrichment failed)
+    try {
+      await upsertTmdbCache(fresh);
+    } catch { }
+
     return fresh;
   } catch {
     return null;

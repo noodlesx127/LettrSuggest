@@ -278,3 +278,90 @@ export async function getCacheStats(): Promise<CacheStats | null> {
         return null;
     }
 }
+
+// ============================================================================
+// OMDb Data Cache (merged with TMDB in tmdb_movies table)
+// ============================================================================
+
+const OMDB_CACHE_TTL_DAYS = 7;
+
+/**
+ * Check if OMDb data needs to be refreshed for a movie
+ * Returns true if never fetched or if cache is older than 7 days
+ */
+export async function needsOMDbRefresh(tmdbId: number): Promise<boolean> {
+    if (!supabase) {
+        console.warn('[Cache] Supabase client not initialized');
+        return true; // Fetch if we can't check cache
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('tmdb_movies')
+            .select('omdb_fetched_at')
+            .eq('id', tmdbId)
+            .single();
+
+        if (error || !data) {
+            return true; // Fetch if movie not in cache
+        }
+
+        if (!data.omdb_fetched_at) {
+            return true; // Fetch if OMDb data never fetched
+        }
+
+        // Check if cache is still valid
+        const isValid = isCacheValid(data.omdb_fetched_at, OMDB_CACHE_TTL_DAYS);
+
+        if (!isValid) {
+            console.log(`[Cache] OMDb cache expired for TMDB ${tmdbId}`);
+        }
+
+        return !isValid; // Return true if needs refresh
+    } catch (e) {
+        console.error('[Cache] Error checking OMDb cache:', e);
+        return true; // Fetch on error
+    }
+}
+
+/**
+ * Update OMDb data in tmdb_movies table
+ * Used after fetching from OMDb API
+ */
+export async function updateOMDbCache(
+    tmdbId: number,
+    omdbData: {
+        imdb_rating?: string;
+        imdb_votes?: string;
+        rotten_tomatoes?: string;
+        metacritic?: string;
+        awards?: string;
+        box_office?: string;
+        rated?: string;
+        omdb_plot_full?: string;
+    }
+): Promise<void> {
+    if (!supabase) {
+        console.warn('[Cache] Supabase client not initialized');
+        return;
+    }
+
+    try {
+        const { error } = await supabase
+            .from('tmdb_movies')
+            .update({
+                ...omdbData,
+                omdb_fetched_at: new Date().toISOString()
+            })
+            .eq('id', tmdbId);
+
+        if (error) {
+            console.error('[Cache] Error updating OMDb cache:', error);
+        } else {
+            console.log(`[Cache] OMDb cache updated for TMDB ${tmdbId}`);
+        }
+    } catch (e) {
+        console.error('[Cache] Exception updating OMDb cache:', e);
+    }
+}
+
