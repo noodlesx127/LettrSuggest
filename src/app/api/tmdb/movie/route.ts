@@ -31,17 +31,23 @@ export async function GET(req: Request) {
     // 2. Fetch from OMDb if IMDB ID is present
     if (tmdbData.imdb_id) {
       try {
+        console.log(`[API] Attempting OMDb enrichment for ${tmdbData.imdb_id}`);
         // Fetch OMDb data (server-side, so process.env.OMDB_API_KEY works)
         const omdbData = await getOMDbByIMDB(tmdbData.imdb_id, { plot: 'full' });
 
         // 3. Merge data
         if (omdbData) {
+          console.log(`[API] OMDb data fetched successfully for ${tmdbData.imdb_id}`);
           finalMovie = mergeTMDBAndOMDb(tmdbData, omdbData);
+        } else {
+          console.log(`[API] OMDb returned no data for ${tmdbData.imdb_id}`);
         }
       } catch (error) {
         console.error(`[API] Failed to fetch OMDb data for ${tmdbData.imdb_id}:`, error);
         // Continue with just TMDB data
       }
+    } else {
+      console.log(`[API] No IMDB ID available for TMDB ${tmdbData.id}, skipping OMDb enrichment`);
     }
 
     return NextResponse.json({ ok: true, movie: finalMovie });
