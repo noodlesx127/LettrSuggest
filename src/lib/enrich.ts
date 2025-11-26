@@ -448,34 +448,10 @@ export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null
   try {
     const fresh = await withTimeout(fetchTmdbMovie(id));
 
-    // Parallel OMDb enrichment if we have IMDB ID
-    if (fresh?.imdb_id) {
-      try {
-        const { getOMDbByIMDB, mergeTMDBAndOMDb, omdbToCache } = await import('./omdb');
-        const { updateOMDbCache } = await import('./apiCache');
 
-        console.log('[OMDb] Fetching data for', { tmdbId: id, imdbId: fresh.imdb_id });
-        const omdbData = await getOMDbByIMDB(fresh.imdb_id, { plot: 'full' });
+    // OMDb enrichment is handled server-side through /api/tmdb/movie route
+    // Client-side code should not attempt OMDb enrichment
 
-        if (omdbData) {
-          // Merge TMDB + OMDb
-          const enriched = mergeTMDBAndOMDb(fresh, omdbData);
-
-          // Cache merged result
-          try {
-            await upsertTmdbCache(enriched);
-            // Also update OMDb-specific fields
-            await updateOMDbCache(id, omdbToCache(omdbData));
-          } catch (cacheErr) {
-            console.log('[Cache] Failed to cache enriched data', cacheErr);
-          }
-
-          return enriched;
-        }
-      } catch (omdbErr) {
-        console.log('[OMDb] Enrichment failed, using TMDB only', omdbErr);
-      }
-    }
 
     // Upsert TMDB data (without OMDb if enrichment failed)
     try {
