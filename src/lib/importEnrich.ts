@@ -65,6 +65,7 @@ export async function enrichMovieForImport(
         // This securely handles API keys on the server
         try {
             const serverData = await enrichMovieServerSide(tmdbMovie.id, tmdbMovie.tuimdb_uid);
+            console.log('[ImportEnrich] Server data received:', serverData);
 
             if (serverData.imdb_id) tmdbMovie.imdb_id = serverData.imdb_id;
 

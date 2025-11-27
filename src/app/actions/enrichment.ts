@@ -27,9 +27,9 @@ export async function enrichMovieServerSide(tmdbId: number, tuimdbUid?: number):
         console.log('[EnrichAction] Starting server-side enrichment for TMDB ID:', tmdbId);
 
         // 1. Fetch TMDB details to get IMDb ID
-        const tmdbApiKey = process.env.TMDB_API_KEY;
+        const tmdbApiKey = process.env.TMDB_API_KEY || process.env.NEXT_PUBLIC_TMDB_API_KEY;
         if (!tmdbApiKey) {
-            console.error('[EnrichAction] TMDB_API_KEY not configured');
+            console.error('[EnrichAction] TMDB_API_KEY (or NEXT_PUBLIC_) not configured');
             return {};
         }
 
