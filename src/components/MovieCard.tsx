@@ -23,6 +23,7 @@ type MovieCardProps = {
   contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
   dismissed?: boolean;
   imdb_rating?: string;
+  imdb_source?: 'omdb' | 'tmdb' | 'watchmode' | 'tuimdb';
   rotten_tomatoes?: string;
   metacritic?: string;
   awards?: string;
@@ -237,6 +238,7 @@ export default function MovieCard({
   contributingFilms,
   dismissed = false,
   imdb_rating,
+  imdb_source,
   rotten_tomatoes,
   metacritic,
   awards
@@ -253,6 +255,15 @@ export default function MovieCard({
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>(
     isSaved ? 'saved' : 'idle'
   );
+
+  // Helper to get rating source label
+  const getRatingSourceLabel = (source?: 'omdb' | 'tmdb' | 'watchmode' | 'tuimdb'): string => {
+    if (!source || source === 'omdb') return 'IMDb';
+    if (source === 'tmdb') return 'TMDB';
+    if (source === 'watchmode') return 'Watchmode';
+    if (source === 'tuimdb') return 'TuiMDB';
+    return 'IMDb';
+  };
 
   const voteCategoryBadge = voteCategory && voteCategory !== 'standard' ? {
     'hidden-gem': { label: '💎 Hidden Gem', className: 'bg-purple-100 text-purple-800' },
@@ -518,9 +529,15 @@ export default function MovieCard({
                 {imdb_rating && (
                   <>
                     <span>•</span>
-                    <span className="flex items-center gap-1" title={`IMDb Rating: ${imdb_rating}`}>
-                      <span className="text-yellow-500">📈</span>
+                    <span
+                      className="flex items-center gap-1"
+                      title={`Rating from ${getRatingSourceLabel(imdb_source)}${imdb_source && imdb_source !== 'omdb' ? ' (OMDb unavailable, using fallback)' : ''}`}
+                    >
+                      <span className="text-yellow-500">⭐</span>
                       <span className="font-medium">{imdb_rating}</span>
+                      {imdb_source && imdb_source !== 'omdb' && (
+                        <span className="text-xs text-gray-400 uppercase">({imdb_source})</span>
+                      )}
                     </span>
                   </>
                 )}
