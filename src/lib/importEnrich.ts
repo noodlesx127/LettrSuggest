@@ -8,15 +8,15 @@
  * APIs used:
  * 1. TMDB - Basic movie data, cast, crew, keywords
  * 2. TuiMDB - Enhanced genres, UID mapping
- * 3. OMDb - IMDb ratings, RT, Metacritic, awards
+ * 3. Ratings Aggregator - IMDb ratings, RT, Metacritic (with OMDb → TMDB → Watchmode fallback)
  * 4. Watchmode - Streaming availability
  */
 
 import { searchMovies } from './movieAPI';
 import { getTuiMDBMovie } from './tuimdb';
-import { getOMDbByIMDB } from './omdb';
 import { searchWatchmode, getStreamingSources } from './watchmode';
 import { upsertTmdbCache } from './enrich';
+import { getMovieRatings } from './ratingsAggregator';
 import type { TMDBMovie } from './enrich';
 
 export interface EnrichedImportMovie extends TMDBMovie {
@@ -78,34 +78,32 @@ export async function enrichMovieForImport(
             }
         }
 
-        // Step 3: Get OMDb data (if IMDb ID available)
-        if (tmdbMovie.imdb_id) {
-            try {
-                const omdbData = await getOMDbByIMDB(tmdbMovie.imdb_id);
-                if (omdbData) {
-                    // Manually merge OMDb data into TMDB movie
-                    tmdbMovie.imdb_rating = omdbData.imdbRating;
-                    tmdbMovie.imdb_votes = omdbData.imdbVotes;
-                    tmdbMovie.awards = omdbData.Awards;
-                    tmdbMovie.box_office = omdbData.BoxOffice;
-                    tmdbMovie.rated = omdbData.Rated;
+        // Step 3: Get ratings from aggregator (OMDb → TMDB → Watchmode fallback)
+        try {
+            const ratings = await getMovieRatings(
+                tmdbMovie.id,
+                tmdbMovie.imdb_id,
+                tmdbMovie.vote_average,
+                tmdbMovie.vote_count
+            );
 
-                    // Extract Rotten Tomatoes and Metacritic from Ratings array
-                    if (omdbData.Ratings) {
-                        const rtRating = omdbData.Ratings.find(r => r.Source === 'Rotten Tomatoes');
-                        const mcRating = omdbData.Ratings.find(r => r.Source === 'Metacritic');
-                        if (rtRating) tmdbMovie.rotten_tomatoes = rtRating.Value;
-                        if (mcRating) tmdbMovie.metacritic = mcRating.Value;
-                    }
-
-                    console.log('[ImportEnrich] OMDb data merged', {
-                        imdbRating: tmdbMovie.imdb_rating,
-                        rtScore: tmdbMovie.rotten_tomatoes,
-                    });
-                }
-            } catch (e) {
-                console.warn('[ImportEnrich] OMDb fetch failed (non-critical)', e);
+            // Merge ratings into movie object
+            if (ratings.imdb_rating) {
+                tmdbMovie.imdb_rating = ratings.imdb_rating;
+                tmdbMovie.imdb_votes = ratings.imdb_votes;
             }
+            if (ratings.rotten_tomatoes) tmdbMovie.rotten_tomatoes = ratings.rotten_tomatoes;
+            if (ratings.metacritic) tmdbMovie.metacritic = ratings.metacritic;
+            if (ratings.awards) tmdbMovie.awards = ratings.awards;
+
+            console.log('[ImportEnrich] Ratings aggregated:', {
+                imdb: ratings.imdb_rating,
+                source: ratings.imdb_source,
+                rt: ratings.rotten_tomatoes,
+                mc: ratings.metacritic,
+            });
+        } catch (e) {
+            console.warn('[ImportEnrich] Ratings aggregation failed (non-critical)', e);
         }
 
         // Step 4: Get Watchmode streaming data
@@ -146,7 +144,7 @@ export async function enrichMovieForImport(
 
         console.log('[ImportEnrich] Enrichment complete', {
             tmdbId: enrichedMovie.id,
-            hasOMDb: !!enrichedMovie.imdb_rating,
+            hasRatings: !!enrichedMovie.imdb_rating,
             hasTuiMDB: !!enrichedMovie.enhanced_genres,
             hasWatchmode: !!enrichedMovie.streaming_sources,
         });
