@@ -29,6 +29,7 @@ type MovieItem = {
   contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
   dismissed?: boolean;
   imdb_rating?: string;
+  imdb_source?: 'omdb' | 'tmdb' | 'watchmode' | 'tuimdb'; // Which API provided the rating
   rotten_tomatoes?: string;
   metacritic?: string;
   awards?: string;
