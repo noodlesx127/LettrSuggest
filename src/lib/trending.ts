@@ -500,6 +500,42 @@ export async function generateSmartCandidates(profile: {
     console.error('[SmartCandidates] Single genre discovery failed', e);
   }
 
+  // 4. Multi-Source Aggregation (NEW - Consensus-based recommendations)
+  try {
+    if (profile.highlyRatedIds.length > 0) {
+      console.log('[SmartCandidates] Running multi-source aggregation');
+
+      // Import aggregator (dynamic to avoid circular dependencies)
+      const { aggregateRecommendations } = await import('./recommendationAggregator');
+
+      // Get top 10 highly-rated films as seeds
+      const seedMovies = profile.highlyRatedIds.slice(0, 10).map(tmdbId => ({
+        tmdbId,
+        title: '', // Title not needed for aggregation
+      }));
+
+      const aggregated = await aggregateRecommendations({
+        seedMovies,
+        limit: 50,
+      });
+
+      // Extract TMDB IDs from aggregated recommendations
+      const aggregatedIds = aggregated.map(rec => rec.tmdbId);
+
+      console.log('[SmartCandidates] Multi-source aggregation complete', {
+        total: aggregatedIds.length,
+        highConsensus: aggregated.filter(r => r.consensusLevel === 'high').length,
+        mediumConsensus: aggregated.filter(r => r.consensusLevel === 'medium').length,
+        lowConsensus: aggregated.filter(r => r.consensusLevel === 'low').length,
+      });
+
+      // Add to results (will be merged with other candidates)
+      results.similar = [...new Set([...results.similar, ...aggregatedIds])];
+    }
+  } catch (e) {
+    console.error('[SmartCandidates] Multi-source aggregation failed', e);
+  }
+
   console.log('[SmartCandidates] Generated', {
     trending: results.trending.length,
     similar: results.similar.length,
