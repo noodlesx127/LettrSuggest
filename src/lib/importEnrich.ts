@@ -55,6 +55,48 @@ export async function enrichMovieForImport(
         }
 
         if (!tmdbMovie) {
+            console.log('[ImportEnrich] No TMDB match found', { title, year });
+            return null;
+        }
+
+        console.log('[ImportEnrich] TMDB match found', { tmdbId: tmdbMovie.id, title: tmdbMovie.title });
+
+        // Step 2: Server-Side Enrichment (Ratings, Watchmode, TuiMDB)
+        // This securely handles API keys on the server
+        try {
+            const serverData = await enrichMovieServerSide(tmdbMovie.id, tmdbMovie.tuimdb_uid);
+
+            if (serverData.imdb_id) tmdbMovie.imdb_id = serverData.imdb_id;
+
+            // Handle TuiMDB data
+            if (serverData.tuimdb_movie) {
+                const tuimdbData = serverData.tuimdb_movie;
+                if (tuimdbData.genres) {
+                    console.log('[ImportEnrich] TuiMDB data fetched', { genreCount: tuimdbData.genres.length });
+                }
+            }
+
+            if (serverData.ratings) {
+                const r = serverData.ratings;
+                if (r.imdb_rating) {
+                    tmdbMovie.imdb_rating = r.imdb_rating;
+                    tmdbMovie.imdb_votes = r.imdb_votes;
+                }
+                if (r.rotten_tomatoes) tmdbMovie.rotten_tomatoes = r.rotten_tomatoes;
+                if (r.metacritic) tmdbMovie.metacritic = r.metacritic;
+                if (r.awards) tmdbMovie.awards = r.awards;
+
+                console.log('[ImportEnrich] Ratings aggregated:', {
+                    imdb: r.imdb_rating,
+                    source: r.imdb_source,
+                    rt: r.rotten_tomatoes,
+                });
+            }
+
+            if (serverData.watchmode_id) {
+                (tmdbMovie as EnrichedImportMovie).watchmode_id = serverData.watchmode_id;
+            }
+
             if (serverData.streaming_sources) {
                 (tmdbMovie as EnrichedImportMovie).streaming_sources = serverData.streaming_sources;
                 console.log('[ImportEnrich] Watchmode streaming sources added', { count: serverData.streaming_sources.length });
@@ -64,7 +106,7 @@ export async function enrichMovieForImport(
             console.error('[ImportEnrich] Server enrichment failed', e);
         }
 
-        // Step 4: Cache the enriched movie in Supabase
+        // Step 3: Cache the enriched movie in Supabase
         try {
             await upsertTmdbCache(tmdbMovie);
             console.log('[ImportEnrich] Cached enriched movie', { tmdbId: tmdbMovie.id });
