@@ -13,7 +13,6 @@
  */
 
 import { searchMovies } from './movieAPI';
-import { getTuiMDBMovie } from './tuimdb';
 import { upsertTmdbCache } from './enrich';
 import type { TMDBMovie } from './enrich';
 import { enrichMovieServerSide } from '@/app/actions/enrichment';
@@ -56,54 +55,6 @@ export async function enrichMovieForImport(
         }
 
         if (!tmdbMovie) {
-            console.log('[ImportEnrich] No TMDB match found', { title, year });
-            return null;
-        }
-
-        console.log('[ImportEnrich] TMDB match found', { tmdbId: tmdbMovie.id, title: tmdbMovie.title });
-
-        // Step 2: Get TuiMDB enhanced data (if available)
-        if (tmdbMovie.tuimdb_uid) {
-            try {
-                const tuimdbData = await getTuiMDBMovie(tmdbMovie.tuimdb_uid);
-                if (tuimdbData?.genres) {
-                    console.log('[ImportEnrich] TuiMDB data fetched', { genreCount: tuimdbData.genres.length });
-                    // Note: We're not merging genres here yet, assuming TuiMDB data is used elsewhere or cached separately?
-                    // If we need to merge, we should do it here.
-                }
-            } catch (e) {
-                console.warn('[ImportEnrich] TuiMDB fetch failed (non-critical)', e);
-            }
-        }
-
-        // Step 3: Server-Side Enrichment (Ratings & Watchmode)
-        // This securely handles API keys on the server
-        try {
-            const serverData = await enrichMovieServerSide(tmdbMovie.id);
-
-            if (serverData.imdb_id) tmdbMovie.imdb_id = serverData.imdb_id;
-
-            if (serverData.ratings) {
-                const r = serverData.ratings;
-                if (r.imdb_rating) {
-                    tmdbMovie.imdb_rating = r.imdb_rating;
-                    tmdbMovie.imdb_votes = r.imdb_votes;
-                }
-                if (r.rotten_tomatoes) tmdbMovie.rotten_tomatoes = r.rotten_tomatoes;
-                if (r.metacritic) tmdbMovie.metacritic = r.metacritic;
-                if (r.awards) tmdbMovie.awards = r.awards;
-
-                console.log('[ImportEnrich] Ratings aggregated:', {
-                    imdb: r.imdb_rating,
-                    source: r.imdb_source,
-                    rt: r.rotten_tomatoes,
-                });
-            }
-
-            if (serverData.watchmode_id) {
-                (tmdbMovie as EnrichedImportMovie).watchmode_id = serverData.watchmode_id;
-            }
-
             if (serverData.streaming_sources) {
                 (tmdbMovie as EnrichedImportMovie).streaming_sources = serverData.streaming_sources;
                 console.log('[ImportEnrich] Watchmode streaming sources added', { count: serverData.streaming_sources.length });

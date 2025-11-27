@@ -2,6 +2,7 @@
 
 import { getMovieRatings, type MovieRatings } from '@/lib/ratingsAggregator';
 import { searchWatchmode, getStreamingSources, type WatchmodeSource } from '@/lib/watchmode';
+import { getTuiMDBMovie, type TuiMDBMovie } from '@/lib/tuimdb';
 
 export type EnrichmentResult = {
     imdb_id?: string;
@@ -14,13 +15,14 @@ export type EnrichmentResult = {
         region: string;
         web_url: string;
     }>;
+    tuimdb_movie?: TuiMDBMovie | null;
 };
 
 /**
- * Server Action to enrich a movie with sensitive API data (Ratings, Watchmode)
+ * Server Action to enrich a movie with sensitive API data (Ratings, Watchmode, TuiMDB)
  * This runs on the server, so it can access private environment variables.
  */
-export async function enrichMovieServerSide(tmdbId: number): Promise<EnrichmentResult> {
+export async function enrichMovieServerSide(tmdbId: number, tuimdbUid?: number): Promise<EnrichmentResult> {
     try {
         console.log('[EnrichAction] Starting server-side enrichment for TMDB ID:', tmdbId);
 
@@ -80,11 +82,22 @@ export async function enrichMovieServerSide(tmdbId: number): Promise<EnrichmentR
             console.warn('[EnrichAction] Watchmode fetch failed:', e);
         }
 
+        // 4. Get TuiMDB Data (if UID provided)
+        let tuimdbMovie: TuiMDBMovie | null = null;
+        if (tuimdbUid) {
+            try {
+                tuimdbMovie = await getTuiMDBMovie(tuimdbUid);
+            } catch (e) {
+                console.warn('[EnrichAction] TuiMDB fetch failed:', e);
+            }
+        }
+
         return {
             imdb_id: imdbId,
             ratings,
             watchmode_id: watchmodeId,
             streaming_sources: streamingSources,
+            tuimdb_movie: tuimdbMovie,
         };
 
     } catch (error) {
