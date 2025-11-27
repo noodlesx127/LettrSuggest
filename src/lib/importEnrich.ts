@@ -67,6 +67,11 @@ export async function enrichMovieForImport(
             const serverData = await enrichMovieServerSide(tmdbMovie.id, tmdbMovie.tuimdb_uid);
             console.log('[ImportEnrich] Server data received:', serverData);
 
+            // Merge full TMDB data if available (includes keywords, credits, etc.)
+            if (serverData.tmdbData) {
+                tmdbMovie = { ...tmdbMovie, ...serverData.tmdbData };
+            }
+
             if (serverData.imdb_id) tmdbMovie.imdb_id = serverData.imdb_id;
 
             // Handle TuiMDB data

@@ -16,6 +16,7 @@ export type EnrichmentResult = {
         web_url: string;
     }>;
     tuimdb_movie?: TuiMDBMovie | null;
+    tmdbData?: any; // Full TMDB data for caching
 };
 
 /**
@@ -33,7 +34,8 @@ export async function enrichMovieServerSide(tmdbId: number, tuimdbUid?: number):
             return {};
         }
 
-        const tmdbRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${tmdbApiKey}`, {
+        // Include credits, keywords, videos, images, release_dates for full enrichment
+        const tmdbRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${tmdbApiKey}&append_to_response=credits,keywords,videos,images,release_dates`, {
             next: { revalidate: 3600 } // Cache for 1 hour
         });
 
@@ -98,6 +100,7 @@ export async function enrichMovieServerSide(tmdbId: number, tuimdbUid?: number):
             watchmode_id: watchmodeId,
             streaming_sources: streamingSources,
             tuimdb_movie: tuimdbMovie,
+            tmdbData: tmdbData, // Return full data
         };
 
     } catch (error) {
