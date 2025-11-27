@@ -365,3 +365,143 @@ export async function updateOMDbCache(
     }
 }
 
+// ============================================================================
+// TasteDive Similar Content Cache
+// ============================================================================
+
+const TASTEDIVE_CACHE_TTL_DAYS = 7;
+
+/**
+ * Get cached TasteDive similar content for a movie title
+ * @returns Array of movie titles if cache hit, null if cache miss
+ */
+export async function getCachedTasteDiveSimilar(movieTitle: string): Promise<string[] | null> {
+    if (!supabase) {
+        console.warn('[Cache] Supabase client not initialized');
+        return null;
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('tastedive_cache')
+            .select('similar_titles, cached_at')
+            .eq('movie_title', movieTitle)
+            .single();
+
+        if (error || !data) {
+            return null; // Cache miss
+        }
+
+        // Check if cache is still valid
+        if (!isCacheValid(data.cached_at, TASTEDIVE_CACHE_TTL_DAYS)) {
+            console.log(`[Cache] TasteDive cache expired for "${movieTitle}"`);
+            return null; // Cache expired
+        }
+
+        console.log(`[Cache] TasteDive cache HIT for "${movieTitle}"`);
+        return data.similar_titles as string[];
+    } catch (e) {
+        console.error('[Cache] Error reading TasteDive cache:', e);
+        return null;
+    }
+}
+
+/**
+ * Store TasteDive similar content in cache
+ */
+export async function setCachedTasteDiveSimilar(movieTitle: string, similarTitles: string[]): Promise<void> {
+    if (!supabase) {
+        console.warn('[Cache] Supabase client not initialized');
+        return;
+    }
+
+    try {
+        const { error } = await supabase
+            .from('tastedive_cache')
+            .upsert({
+                movie_title: movieTitle,
+                similar_titles: similarTitles,
+                cached_at: new Date().toISOString(),
+            });
+
+        if (error) {
+            console.error('[Cache] Error writing TasteDive cache:', error);
+        } else {
+            console.log(`[Cache] TasteDive cache SET for "${movieTitle}" (${similarTitles.length} titles)`);
+        }
+    } catch (e) {
+        console.error('[Cache] Exception writing TasteDive cache:', e);
+    }
+}
+
+// ============================================================================
+// Watchmode Streaming Sources Cache
+// ============================================================================
+
+const WATCHMODE_CACHE_TTL_HOURS = 24; // Streaming availability changes frequently
+
+/**
+ * Get cached Watchmode streaming sources for a TMDB ID
+ * @returns Streaming sources if cache hit, null if cache miss
+ */
+export async function getCachedWatchmodeSources(tmdbId: number): Promise<any[] | null> {
+    if (!supabase) {
+        console.warn('[Cache] Supabase client not initialized');
+        return null;
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('watchmode_cache')
+            .select('sources, cached_at')
+            .eq('tmdb_id', tmdbId)
+            .single();
+
+        if (error || !data) {
+            return null; // Cache miss
+        }
+
+        // Check if cache is still valid (24 hours)
+        const cacheDate = new Date(data.cached_at);
+        const expiryDate = new Date(cacheDate.getTime() + WATCHMODE_CACHE_TTL_HOURS * 60 * 60 * 1000);
+
+        if (new Date() >= expiryDate) {
+            console.log(`[Cache] Watchmode cache expired for TMDB ${tmdbId}`);
+            return null; // Cache expired
+        }
+
+        console.log(`[Cache] Watchmode cache HIT for TMDB ${tmdbId}`);
+        return data.sources as any[];
+    } catch (e) {
+        console.error('[Cache] Error reading Watchmode cache:', e);
+        return null;
+    }
+}
+
+/**
+ * Store Watchmode streaming sources in cache
+ */
+export async function setCachedWatchmodeSources(tmdbId: number, sources: any[]): Promise<void> {
+    if (!supabase) {
+        console.warn('[Cache] Supabase client not initialized');
+        return;
+    }
+
+    try {
+        const { error } = await supabase
+            .from('watchmode_cache')
+            .upsert({
+                tmdb_id: tmdbId,
+                sources: sources,
+                cached_at: new Date().toISOString(),
+            });
+
+        if (error) {
+            console.error('[Cache] Error writing Watchmode cache:', error);
+        } else {
+            console.log(`[Cache] Watchmode cache SET for TMDB ${tmdbId} (${sources.length} sources)`);
+        }
+    } catch (e) {
+        console.error('[Cache] Exception writing Watchmode cache:', e);
+    }
+}
