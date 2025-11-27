@@ -4,7 +4,7 @@
  * Purpose: Comprehensive entertainment data including streaming availability,
  * ratings, trending content, and metadata across 200+ services.
  * 
- * API Key: sJAdPbFYPdPdhkHHik51dKStvXgtdhp7yGRSin0S
+ * API Key: Set via WATCHMODE_API_KEY environment variable
  * Rate Limit: Varies by plan
  * Cache Strategy: 24-hour TTL for streaming data (changes frequently)
  */

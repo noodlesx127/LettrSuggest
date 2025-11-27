@@ -4,7 +4,7 @@
  * Purpose: Interface with OMDb API for IMDB ratings, Rotten Tomatoes scores,
  * awards, box office data, and comprehensive movie metadata.
  * 
- * API Key: ba10bd99
+ * API Key: Set via OMDB_API_KEY environment variable
  * Rate Limit: 1,000 requests/day (free tier)
  * Cache Strategy: 7-day TTL (IMDB ratings update weekly)
  */
