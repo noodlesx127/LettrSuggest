@@ -4,7 +4,7 @@
  * Purpose: Cross-media recommendation engine for discovering similar content
  * across movies, TV shows, books, music, and games.
  * 
- * API Key: 1063144-LettrSug-D8AC6FD2
+ * API Key: Set via TASTEDIVE_API_KEY environment variable
  * Rate Limit: 300 requests/hour
  * Cache Strategy: 7-day TTL for similar content recommendations
  */
