@@ -675,6 +675,7 @@ export async function buildTasteProfile(params: {
   mappings: Map<string, number>;
   topN?: number;
   negativeFeedbackIds?: number[]; // IDs of movies explicitly dismissed/disliked
+  tmdbDetails?: Map<number, any>; // Pre-fetched details to avoid API calls
 }): Promise<{
   topGenres: Array<{ id: number; name: string; weight: number }>;
   topKeywords: Array<{ id: number; name: string; weight: number }>;
@@ -739,8 +740,10 @@ export async function buildTasteProfile(params: {
   };
 
   // Get highly-rated/liked films for positive profile
+  // Include "watched" films (unrated) as weak positive signals, unless explicitly disliked
   const likedFilms = params.films.filter(f =>
-    (f.liked || (f.rating ?? 0) >= 4) && params.mappings.has(f.uri)
+    params.mappings.has(f.uri) &&
+    (f.liked || (f.rating ?? 3.0) >= 2.5) // Include if Liked OR (Unrated/Rated >= 2.5)
   );
 
   // Get low-rated films for negative signals
@@ -749,21 +752,30 @@ export async function buildTasteProfile(params: {
     (f.rating ?? 0) < 2.5 && f.rating != null && params.mappings.has(f.uri) && !f.liked
   );
 
+  const limit = params.tmdbDetails ? 2000 : 100; // Higher limit if details are pre-fetched
+
   const likedIds = likedFilms
     .map(f => params.mappings.get(f.uri)!)
     .filter(Boolean)
-    .slice(0, 100); // Cap to avoid too many API calls
+    .slice(0, limit);
 
   const dislikedIds = dislikedFilms
     .map(f => params.mappings.get(f.uri)!)
     .filter(Boolean)
     .slice(0, 50); // Cap negative signals
 
-  // Fetch movie details
+  // Fetch movie details (use pre-fetched if available)
+  const fetchDetails = async (id: number) => {
+    if (params.tmdbDetails?.has(id)) {
+      return params.tmdbDetails.get(id);
+    }
+    return fetchTmdbMovieCached(id);
+  };
+
   const [likedMovies, dislikedMovies, negativeFeedbackMovies] = await Promise.all([
-    Promise.all(likedIds.map(id => fetchTmdbMovieCached(id))),
-    Promise.all(dislikedIds.map(id => fetchTmdbMovieCached(id))),
-    Promise.all((params.negativeFeedbackIds || []).map(id => fetchTmdbMovieCached(id)))
+    Promise.all(likedIds.map(id => fetchDetails(id))),
+    Promise.all(dislikedIds.map(id => fetchDetails(id))),
+    Promise.all((params.negativeFeedbackIds || []).map(id => fetchDetails(id)))
   ]);
 
   // Positive profile weights
@@ -820,7 +832,7 @@ export async function buildTasteProfile(params: {
 
     // Actors with IDs (top 5 billed, with billing position weighting)
     const castData = movie.credits?.cast || [];
-    castData.slice(0, 5).forEach((actor, idx) => {
+    castData.slice(0, 5).forEach((actor: { id: number; name: string }, idx: number) => {
       const billingWeight = 1 / (idx + 1); // Lead = 1.0, 2nd = 0.5, 3rd = 0.33, etc.
       const current = actorWeights.get(actor.id) || { name: actor.name, weight: 0 };
       actorWeights.set(actor.id, {
@@ -2324,8 +2336,8 @@ export async function learnFromHistoricalData(userId: string) {
     const { data: films, error: filmsError } = await supabase
       .from('film_events')
       .select('uri, title, rating, liked')
-      .eq('user_id', userId)
-      .not('rating', 'is', null); // Only rated films
+      .eq('user_id', userId);
+    // .not('rating', 'is', null); // Removed to include all watched films
 
     if (filmsError) {
       console.error('[BatchLearning] Error fetching films:', filmsError);
@@ -2384,7 +2396,8 @@ export async function learnFromHistoricalData(userId: string) {
         liked: f.liked
       })),
       mappings: mappingsMap,
-      topN: 10
+      topN: 10,
+      tmdbDetails: tmdbDetails // Pass pre-fetched details
     });
 
     console.log('[BatchLearning] Built taste profile', {
