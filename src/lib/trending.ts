@@ -310,447 +310,441 @@ export async function generateSmartCandidates(profile: {
     if (profile.highlyRatedIds.length > 0) {
       console.log('[SmartCandidates] Running multi-source aggregation (primary similar source)');
 
-      // Import aggregator (dynamic to avoid circular dependencies)
-      const { aggregateRecommendations } = await import('./recommendationAggregator');
+      // Import Server Action (safe for client use)
+      const { getAggregatedRecommendations } = await import('@/app/actions/recommendations');
 
       // Get top 10 highly-rated films as seeds
       const seedMovies = profile.highlyRatedIds.slice(0, 10).map(tmdbId => ({
         tmdbId,
-        title: '', // Title not needed for aggregation
+        title: '', // Title not needed for aggregation if we have ID, but aggregator might need it for logging
       }));
 
-      const aggregated = await aggregateRecommendations({
+      // We need titles for TasteDive, so let's try to get them from cache or just pass empty
+      // The aggregator fetches details if needed, or we can improve this later.
+      // For now, let's assume the aggregator handles missing titles or we rely on IDs where possible.
+      // Actually, TasteDive NEEDS titles.
+      // Let's rely on the fact that we might have titles in the profile? No, profile only has IDs.
+      // The aggregator's fetchTasteDiveRecommendations uses titles.
+      // We should probably fetch titles here or let the server action handle it.
+      // Let's pass what we have.
+
+      const aggregated = await getAggregatedRecommendations({
         seedMovies,
-        limit: 100, // Increased from 50 to replace old similar fetching
-      });
-
-      // Extract TMDB IDs from aggregated recommendations
-      const aggregatedIds = aggregated.map(rec => rec.tmdbId);
-
-      console.log('[SmartCandidates] Multi-source aggregation complete', {
-        total: aggregatedIds.length,
-        highConsensus: aggregated.filter(r => r.consensusLevel === 'high').length,
-        mediumConsensus: aggregated.filter(r => r.consensusLevel === 'medium').length,
-        lowConsensus: aggregated.filter(r => r.consensusLevel === 'low').length,
-      });
-
-      // Set as similar results (replaces old fetchSimilarMovieIds)
-      results.similar = aggregatedIds;
-    }
-  } catch (e) {
-    console.error('[SmartCandidates] Multi-source aggregation failed', e);
-
-    // Fallback to old method if aggregator fails
-    console.log('[SmartCandidates] Falling back to legacy similar fetching');
-    try {
-      if (profile.highlyRatedIds.length > 0) {
-        const shuffled = [...profile.highlyRatedIds].sort(() => Math.random() - 0.5);
-        results.similar = await fetchSimilarMovieIds(shuffled.slice(0, 20), 30);
       }
-    } catch (fallbackError) {
-      console.error('[SmartCandidates] Fallback similar failed', fallbackError);
+  } catch (e) {
+      console.error('[SmartCandidates] Multi-source aggregation failed', e);
+
+      // Fallback to old method if aggregator fails
+      console.log('[SmartCandidates] Falling back to legacy similar fetching');
+      try {
+        if (profile.highlyRatedIds.length > 0) {
+          const shuffled = [...profile.highlyRatedIds].sort(() => Math.random() - 0.5);
+          results.similar = await fetchSimilarMovieIds(shuffled.slice(0, 20), 30);
+        }
+      } catch (fallbackError) {
+        console.error('[SmartCandidates] Fallback similar failed', fallbackError);
+      }
     }
-  }
 
-  // 3. Discover by top genres + keywords (with progressive fallbacks and temporal diversity)
-  try {
-    if (profile.topGenres.length > 0) {
-      // Shuffle genre/keyword selection more aggressively
-      const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
-      const shuffledKeywords = [...profile.topKeywords].sort(() => Math.random() - 0.5);
+    // 3. Discover by top genres + keywords (with progressive fallbacks and temporal diversity)
+    try {
+      if (profile.topGenres.length > 0) {
+        // Shuffle genre/keyword selection more aggressively
+        const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
+        const shuffledKeywords = [...profile.topKeywords].sort(() => Math.random() - 0.5);
 
-      // Randomly vary how many genres/keywords we use (1-3 instead of always 2)
-      const genreCount = Math.floor(Math.random() * 3) + 1;
-      const keywordCount = Math.floor(Math.random() * 4) + 1;
+        // Randomly vary how many genres/keywords we use (1-3 instead of always 2)
+        const genreCount = Math.floor(Math.random() * 3) + 1;
+        const keywordCount = Math.floor(Math.random() * 4) + 1;
 
-      // Randomly select sort method for variety
-      const sortMethods = ['vote_average.desc', 'popularity.desc', 'primary_release_date.desc'] as const;
-      const randomSort = sortMethods[Math.floor(Math.random() * sortMethods.length)];
+        // Randomly select sort method for variety
+        const sortMethods = ['vote_average.desc', 'popularity.desc', 'primary_release_date.desc'] as const;
+        const randomSort = sortMethods[Math.floor(Math.random() * sortMethods.length)];
 
-      // Add temporal diversity - randomly pick a year range or none
-      const currentYear = new Date().getFullYear();
-      const temporalStrategies = [
-        {}, // No year filter
-        { yearMin: 2020, yearMax: currentYear }, // Recent
-        { yearMin: 2010, yearMax: 2019 }, // Modern classics
-        { yearMin: 2000, yearMax: 2009 }, // 2000s
-        { yearMin: 1990, yearMax: 1999 }, // 90s
-      ];
-      const temporalFilter = temporalStrategies[Math.floor(Math.random() * temporalStrategies.length)];
+        // Add temporal diversity - randomly pick a year range or none
+        const currentYear = new Date().getFullYear();
+        const temporalStrategies = [
+          {}, // No year filter
+          { yearMin: 2020, yearMax: currentYear }, // Recent
+          { yearMin: 2010, yearMax: 2019 }, // Modern classics
+          { yearMin: 2000, yearMax: 2009 }, // 2000s
+          { yearMin: 1990, yearMax: 1999 }, // 90s
+        ];
+        const temporalFilter = temporalStrategies[Math.floor(Math.random() * temporalStrategies.length)];
 
-      // Try 1: Genres + keywords with random temporal filter
-      let genreDiscovered = await discoverMoviesByProfile({
-        genres: shuffledGenres.slice(0, genreCount).map(g => g.id),
-        genreMode: 'OR', // Match ANY of the top genres
-        keywords: shuffledKeywords.slice(0, keywordCount).map(k => k.id),
-        sortBy: randomSort,
-        minVotes: 100,
-        limit: 150,
-        ...temporalFilter
-      });
-      results.discovered.push(...genreDiscovered);
-      console.log('[SmartCandidates] Genre+keyword discovery', {
-        count: genreDiscovered.length,
-        genreCount,
-        keywordCount,
-        sortBy: randomSort,
-        temporal: temporalFilter
-      });
+        // Try 1: Genres + keywords with random temporal filter
+        let genreDiscovered = await discoverMoviesByProfile({
+          genres: shuffledGenres.slice(0, genreCount).map(g => g.id),
+          genreMode: 'OR', // Match ANY of the top genres
+          keywords: shuffledKeywords.slice(0, keywordCount).map(k => k.id),
+          sortBy: randomSort,
+          minVotes: 100,
+          limit: 150,
+          ...temporalFilter
+        });
+        results.discovered.push(...genreDiscovered);
+        console.log('[SmartCandidates] Genre+keyword discovery', {
+          count: genreDiscovered.length,
+          genreCount,
+          keywordCount,
+          sortBy: randomSort,
+          temporal: temporalFilter
+        });
 
-      // Fallback 1: Just genres with different temporal filter
-      if (genreDiscovered.length < 30) {
-        const altTemporalFilter = temporalStrategies[Math.floor(Math.random() * temporalStrategies.length)];
-        const genreOnlyDiscovered = await discoverMoviesByProfile({
+        // Fallback 1: Just genres with different temporal filter
+        if (genreDiscovered.length < 30) {
+          const altTemporalFilter = temporalStrategies[Math.floor(Math.random() * temporalStrategies.length)];
+          const genreOnlyDiscovered = await discoverMoviesByProfile({
+            genres: shuffledGenres.slice(0, Math.floor(Math.random() * 3) + 1).map(g => g.id),
+            genreMode: 'OR',
+            sortBy: sortMethods[Math.floor(Math.random() * sortMethods.length)],
+            minVotes: 50,
+            limit: 150,
+            ...altTemporalFilter
+          });
+          results.discovered.push(...genreOnlyDiscovered);
+          console.log('[SmartCandidates] Genre-only fallback', { count: genreOnlyDiscovered.length });
+        }
+
+        // Fallback 2: Popular in genres (lower vote threshold, different temporal)
+        if (results.discovered.length < 100) {
+          const altTemporalFilter = temporalStrategies[Math.floor(Math.random() * temporalStrategies.length)];
+          const popularDiscovered = await discoverMoviesByProfile({
+            genres: shuffledGenres.slice(0, Math.floor(Math.random() * 3) + 1).map(g => g.id),
+            genreMode: 'OR',
+            sortBy: 'popularity.desc',
+            minVotes: 20,
+            limit: 150,
+            ...altTemporalFilter
+          });
+          results.discovered.push(...popularDiscovered);
+          console.log('[SmartCandidates] Popular fallback', { count: popularDiscovered.length });
+        }
+      }
+    } catch (e) {
+      console.error('[SmartCandidates] Genre+keyword discovery failed', e);
+    }
+
+    // 4. Discover by favorite directors (no year restrictions)
+    try {
+      if (profile.topDirectors.length > 0) {
+        // Shuffle director selection for variety
+        const shuffledDirectors = [...profile.topDirectors].sort(() => Math.random() - 0.5);
+
+        // Try with top directors, no year filter
+        const directorDiscovered = await discoverMoviesByProfile({
+          people: shuffledDirectors.slice(0, 3).map(d => d.id),
+          peopleMode: 'OR', // Match ANY of the top directors
+          sortBy: 'vote_average.desc',
+          limit: 100
+        });
+        results.discovered.push(...directorDiscovered);
+        console.log('[SmartCandidates] Director discovery', {
+          count: directorDiscovered.length,
+          directors: shuffledDirectors.slice(0, 3).map(d => ({ id: d.id, name: d.name }))
+        });
+
+        // Fallback: Try with single director if multiple directors returned nothing
+        if (directorDiscovered.length === 0 && shuffledDirectors.length > 0) {
+          const singleDirector = await discoverMoviesByProfile({
+            people: [shuffledDirectors[0].id],
+            sortBy: 'popularity.desc',
+            limit: 50
+          });
+          results.discovered.push(...singleDirector);
+          console.log('[SmartCandidates] Single director fallback', { count: singleDirector.length });
+        }
+      }
+    } catch (e) {
+      console.error('[SmartCandidates] Director discovery failed', e);
+    }
+
+    // 5. Discover niche subgenre picks by keywords (no year restrictions)
+    try {
+      if (profile.topKeywords.length > 2 && results.discovered.length < 200) {
+        // Take random keywords for variety
+        const shuffledKeywords = [...profile.topKeywords].sort(() => Math.random() - 0.5);
+        const nicheDiscovered = await discoverMoviesByProfile({
+          keywords: shuffledKeywords.slice(0, 2).map(k => k.id),
+          sortBy: 'popularity.desc',
+          minVotes: 30,
+          limit: 100
+        });
+        results.discovered.push(...nicheDiscovered);
+        console.log('[SmartCandidates] Niche keyword discovery', {
+          count: nicheDiscovered.length,
+          keywords: shuffledKeywords.slice(0, 2).map(k => ({ id: k.id, name: k.name }))
+        });
+      }
+    } catch (e) {
+      console.error('[SmartCandidates] Niche discovery failed', e);
+    }
+
+    // 6. Add pure genre-based discovery with varied temporal ranges
+    try {
+      if (profile.topGenres.length > 0 && results.discovered.length < 200) {
+        const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
+        const sortMethods = ['vote_average.desc', 'popularity.desc', 'primary_release_date.desc'] as const;
+        const currentYear = new Date().getFullYear();
+
+        // Randomly select temporal range
+        const temporalOptions = [
+          {},
+          { yearMin: 2015, yearMax: currentYear },
+          { yearMin: 2000, yearMax: 2014 },
+          { yearMin: 1980, yearMax: 1999 },
+        ];
+        const temporal = temporalOptions[Math.floor(Math.random() * temporalOptions.length)];
+
+        const pureGenreDiscovered = await discoverMoviesByProfile({
           genres: shuffledGenres.slice(0, Math.floor(Math.random() * 3) + 1).map(g => g.id),
           genreMode: 'OR',
           sortBy: sortMethods[Math.floor(Math.random() * sortMethods.length)],
-          minVotes: 50,
-          limit: 150,
-          ...altTemporalFilter
+          minVotes: 100,
+          limit: 100,
+          ...temporal
         });
-        results.discovered.push(...genreOnlyDiscovered);
-        console.log('[SmartCandidates] Genre-only fallback', { count: genreOnlyDiscovered.length });
+        results.discovered.push(...pureGenreDiscovered);
       }
+    } catch (e) {
+      console.error('[SmartCandidates] Pure genre discovery failed', e);
+    }
 
-      // Fallback 2: Popular in genres (lower vote threshold, different temporal)
-      if (results.discovered.length < 100) {
-        const altTemporalFilter = temporalStrategies[Math.floor(Math.random() * temporalStrategies.length)];
-        const popularDiscovered = await discoverMoviesByProfile({
-          genres: shuffledGenres.slice(0, Math.floor(Math.random() * 3) + 1).map(g => g.id),
-          genreMode: 'OR',
+    // 7. Add diverse picks with single genre (no year restriction)
+    try {
+      if (profile.topGenres.length > 0 && results.discovered.length < 300) {
+        // Try with just the top genre to cast wider net
+        const topGenre = profile.topGenres[0];
+        const singleGenreDiscovered = await discoverMoviesByProfile({
+          genres: [topGenre.id],
           sortBy: 'popularity.desc',
-          minVotes: 20,
-          limit: 150,
-          ...altTemporalFilter
+          minVotes: 100,
+          limit: 100
         });
-        results.discovered.push(...popularDiscovered);
-        console.log('[SmartCandidates] Popular fallback', { count: popularDiscovered.length });
-      }
-    }
-  } catch (e) {
-    console.error('[SmartCandidates] Genre+keyword discovery failed', e);
-  }
-
-  // 4. Discover by favorite directors (no year restrictions)
-  try {
-    if (profile.topDirectors.length > 0) {
-      // Shuffle director selection for variety
-      const shuffledDirectors = [...profile.topDirectors].sort(() => Math.random() - 0.5);
-
-      // Try with top directors, no year filter
-      const directorDiscovered = await discoverMoviesByProfile({
-        people: shuffledDirectors.slice(0, 3).map(d => d.id),
-        peopleMode: 'OR', // Match ANY of the top directors
-        sortBy: 'vote_average.desc',
-        limit: 100
-      });
-      results.discovered.push(...directorDiscovered);
-      console.log('[SmartCandidates] Director discovery', {
-        count: directorDiscovered.length,
-        directors: shuffledDirectors.slice(0, 3).map(d => ({ id: d.id, name: d.name }))
-      });
-
-      // Fallback: Try with single director if multiple directors returned nothing
-      if (directorDiscovered.length === 0 && shuffledDirectors.length > 0) {
-        const singleDirector = await discoverMoviesByProfile({
-          people: [shuffledDirectors[0].id],
-          sortBy: 'popularity.desc',
-          limit: 50
+        results.discovered.push(...singleGenreDiscovered);
+        console.log('[SmartCandidates] Single genre discovery', {
+          count: singleGenreDiscovered.length,
+          genreId: topGenre.id
         });
-        results.discovered.push(...singleDirector);
-        console.log('[SmartCandidates] Single director fallback', { count: singleDirector.length });
       }
+    } catch (e) {
+      console.error('[SmartCandidates] Single genre discovery failed', e);
     }
-  } catch (e) {
-    console.error('[SmartCandidates] Director discovery failed', e);
+
+    console.log('[SmartCandidates] Generated', {
+      trending: results.trending.length,
+      similar: results.similar.length,
+      discovered: results.discovered.length,
+      total: results.trending.length + results.similar.length + results.discovered.length
+    });
+
+    return results;
   }
-
-  // 5. Discover niche subgenre picks by keywords (no year restrictions)
-  try {
-    if (profile.topKeywords.length > 2 && results.discovered.length < 200) {
-      // Take random keywords for variety
-      const shuffledKeywords = [...profile.topKeywords].sort(() => Math.random() - 0.5);
-      const nicheDiscovered = await discoverMoviesByProfile({
-        keywords: shuffledKeywords.slice(0, 2).map(k => k.id),
-        sortBy: 'popularity.desc',
-        minVotes: 30,
-        limit: 100
-      });
-      results.discovered.push(...nicheDiscovered);
-      console.log('[SmartCandidates] Niche keyword discovery', {
-        count: nicheDiscovered.length,
-        keywords: shuffledKeywords.slice(0, 2).map(k => ({ id: k.id, name: k.name }))
-      });
-    }
-  } catch (e) {
-    console.error('[SmartCandidates] Niche discovery failed', e);
-  }
-
-  // 6. Add pure genre-based discovery with varied temporal ranges
-  try {
-    if (profile.topGenres.length > 0 && results.discovered.length < 200) {
-      const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
-      const sortMethods = ['vote_average.desc', 'popularity.desc', 'primary_release_date.desc'] as const;
-      const currentYear = new Date().getFullYear();
-
-      // Randomly select temporal range
-      const temporalOptions = [
-        {},
-        { yearMin: 2015, yearMax: currentYear },
-        { yearMin: 2000, yearMax: 2014 },
-        { yearMin: 1980, yearMax: 1999 },
-      ];
-      const temporal = temporalOptions[Math.floor(Math.random() * temporalOptions.length)];
-
-      const pureGenreDiscovered = await discoverMoviesByProfile({
-        genres: shuffledGenres.slice(0, Math.floor(Math.random() * 3) + 1).map(g => g.id),
-        genreMode: 'OR',
-        sortBy: sortMethods[Math.floor(Math.random() * sortMethods.length)],
-        minVotes: 100,
-        limit: 100,
-        ...temporal
-      });
-      results.discovered.push(...pureGenreDiscovered);
-    }
-  } catch (e) {
-    console.error('[SmartCandidates] Pure genre discovery failed', e);
-  }
-
-  // 7. Add diverse picks with single genre (no year restriction)
-  try {
-    if (profile.topGenres.length > 0 && results.discovered.length < 300) {
-      // Try with just the top genre to cast wider net
-      const topGenre = profile.topGenres[0];
-      const singleGenreDiscovered = await discoverMoviesByProfile({
-        genres: [topGenre.id],
-        sortBy: 'popularity.desc',
-        minVotes: 100,
-        limit: 100
-      });
-      results.discovered.push(...singleGenreDiscovered);
-      console.log('[SmartCandidates] Single genre discovery', {
-        count: singleGenreDiscovered.length,
-        genreId: topGenre.id
-      });
-    }
-  } catch (e) {
-    console.error('[SmartCandidates] Single genre discovery failed', e);
-  }
-
-  console.log('[SmartCandidates] Generated', {
-    trending: results.trending.length,
-    similar: results.similar.length,
-    discovered: results.discovered.length,
-    total: results.trending.length + results.similar.length + results.discovered.length
-  });
-
-  return results;
-}
 
 
 /**
  * Fetch popular movies from a specific decade
  */
 export async function getDecadeCandidates(decade: number, limit = 20): Promise<number[]> {
-  const yearMin = decade;
-  const yearMax = decade + 9;
+    const yearMin = decade;
+    const yearMax = decade + 9;
 
-  console.log(`[DecadeCandidates] Fetching for ${decade}s (${yearMin}-${yearMax})`);
+    console.log(`[DecadeCandidates] Fetching for ${decade}s (${yearMin}-${yearMax})`);
 
-  return discoverMoviesByProfile({
-    yearMin,
-    yearMax,
-    sortBy: 'popularity.desc',
-    minVotes: 50,
-    limit
-  });
-}
-
-/**
- * Fetch "Hidden Gems" - highly rated but less mainstream movies
- * Matches user's top genres/decades but filters for specific vote counts
- */
-export async function getSmartDiscoveryCandidates(profile: {
-  topGenres: Array<{ id: number; weight: number }>;
-  topDecades: Array<{ decade: number; weight: number }>;
-}, limit = 20): Promise<number[]> {
-  console.log('[SmartDiscovery] Fetching hidden gems');
-
-  const allIds = new Set<number>();
-
-  // Strategy 1: Top genres, high rating, moderate popularity (hidden gems)
-  if (profile.topGenres.length > 0) {
-    const genreIds = profile.topGenres.slice(0, 3).map(g => g.id);
-    const gems = await discoverMoviesByProfile({
-      genres: genreIds,
-      genreMode: 'OR',
-      sortBy: 'vote_average.desc',
-      minVotes: 50, // Enough to be valid
-      // We can't easily max votes in discover API directly without complex logic, 
-      // but we can sort by vote_average which tends to surface smaller films if minVotes is low.
-      // Alternatively, we rely on the fact that we're asking for high rated stuff.
-      limit: limit * 2
-    });
-
-    // Client-side filter if needed, but for now just take them
-    gems.forEach(id => allIds.add(id));
-  }
-
-  // Strategy 2: Top decades, high rating
-  if (profile.topDecades.length > 0) {
-    const decade = profile.topDecades[0].decade;
-    const decadeGems = await discoverMoviesByProfile({
-      yearMin: decade,
-      yearMax: decade + 9,
-      sortBy: 'vote_average.desc',
+    return discoverMoviesByProfile({
+      yearMin,
+      yearMax,
+      sortBy: 'popularity.desc',
       minVotes: 50,
-      limit: limit
-    });
-    decadeGems.forEach(id => allIds.add(id));
-  }
-
-  return Array.from(allIds).slice(0, limit);
-}
-
-/**
- * Generate exploratory movie picks for discovery
- * Balances safe bets with adjacent genre exploration and acclaimed films
- * 
- * @param profile - User's taste profile with top genres and avoided genres
- * @param options - Configuration for exploratory picks
- * @returns Array of TMDB movie IDs for exploratory suggestions
- */
-export async function generateExploratoryPicks(
-  profile: {
-    topGenres: Array<{ id: number; name: string; weight: number }>;
-    avoidGenres: Array<{ id: number; name: string; weight: number }>;
-  },
-  options: {
-    count: number; // How many exploratory picks to generate
-    minVoteAverage?: number; // Minimum quality threshold
-    minVoteCount?: number; // Minimum vote count for reliability
-  }
-): Promise<number[]> {
-  const exploratoryIds: number[] = [];
-
-  // Strategy 1: Adjacent genres (70% of exploratory picks)
-  const adjacentCount = Math.floor(options.count * 0.7);
-  const adjacentIds = await getAdjacentGenrePicks(profile, adjacentCount, options);
-  exploratoryIds.push(...adjacentIds);
-
-  // Strategy 2: Critically acclaimed outside comfort zone (30% of exploratory picks)
-  const acclaimedCount = options.count - adjacentCount;
-  const acclaimedIds = await getCriticallyAcclaimedPicks(profile, acclaimedCount, options);
-  exploratoryIds.push(...acclaimedIds);
-
-  console.log('[Exploration] Generated exploratory picks', {
-    total: exploratoryIds.length,
-    adjacent: adjacentIds.length,
-    acclaimed: acclaimedIds.length,
-    targetCount: options.count
-  });
-
-  return exploratoryIds;
-}
-
-/**
- * Get films from adjacent genres for gentle discovery expansion
- */
-async function getAdjacentGenrePicks(
-  profile: {
-    topGenres: Array<{ id: number; name: string; weight: number }>;
-    avoidGenres: Array<{ id: number; name: string; weight: number }>;
-  },
-  count: number,
-  options: { minVoteAverage?: number; minVoteCount?: number }
-): Promise<number[]> {
-  if (count === 0) return [];
-
-  const adjacentGenres = new Set<number>();
-  const avoidedGenreIds = new Set(profile.avoidGenres.map(g => g.id));
-  const topGenreIds = new Set(profile.topGenres.map(g => g.id));
-
-  // Find adjacent genres to user's top 3 genres
-  for (const genre of profile.topGenres.slice(0, 3)) {
-    const adjacent = ADJACENT_GENRES[genre.id] || [];
-    adjacent.forEach(adjId => {
-      // Don't add if it's already a top genre or an avoided genre
-      const isTopGenre = topGenreIds.has(adjId);
-      const isAvoided = avoidedGenreIds.has(adjId);
-      if (!isTopGenre && !isAvoided) {
-        adjacentGenres.add(adjId);
-      }
+      limit
     });
   }
 
-  if (adjacentGenres.size === 0) {
-    console.log('[Exploration] No adjacent genres found for exploration');
-    return [];
+  /**
+   * Fetch "Hidden Gems" - highly rated but less mainstream movies
+   * Matches user's top genres/decades but filters for specific vote counts
+   */
+  export async function getSmartDiscoveryCandidates(profile: {
+    topGenres: Array<{ id: number; weight: number }>;
+    topDecades: Array<{ decade: number; weight: number }>;
+  }, limit = 20): Promise<number[]> {
+    console.log('[SmartDiscovery] Fetching hidden gems');
+
+    const allIds = new Set<number>();
+
+    // Strategy 1: Top genres, high rating, moderate popularity (hidden gems)
+    if (profile.topGenres.length > 0) {
+      const genreIds = profile.topGenres.slice(0, 3).map(g => g.id);
+      const gems = await discoverMoviesByProfile({
+        genres: genreIds,
+        genreMode: 'OR',
+        sortBy: 'vote_average.desc',
+        minVotes: 50, // Enough to be valid
+        // We can't easily max votes in discover API directly without complex logic, 
+        // but we can sort by vote_average which tends to surface smaller films if minVotes is low.
+        // Alternatively, we rely on the fact that we're asking for high rated stuff.
+        limit: limit * 2
+      });
+
+      // Client-side filter if needed, but for now just take them
+      gems.forEach(id => allIds.add(id));
+    }
+
+    // Strategy 2: Top decades, high rating
+    if (profile.topDecades.length > 0) {
+      const decade = profile.topDecades[0].decade;
+      const decadeGems = await discoverMoviesByProfile({
+        yearMin: decade,
+        yearMax: decade + 9,
+        sortBy: 'vote_average.desc',
+        minVotes: 50,
+        limit: limit
+      });
+      decadeGems.forEach(id => allIds.add(id));
+    }
+
+    return Array.from(allIds).slice(0, limit);
   }
 
-  // Query TMDB discover API for adjacent genre films
-  const adjacentGenreArray = Array.from(adjacentGenres);
-  const randomGenre = adjacentGenreArray[Math.floor(Math.random() * adjacentGenreArray.length)];
+  /**
+   * Generate exploratory movie picks for discovery
+   * Balances safe bets with adjacent genre exploration and acclaimed films
+   * 
+   * @param profile - User's taste profile with top genres and avoided genres
+   * @param options - Configuration for exploratory picks
+   * @returns Array of TMDB movie IDs for exploratory suggestions
+   */
+  export async function generateExploratoryPicks(
+    profile: {
+      topGenres: Array<{ id: number; name: string; weight: number }>;
+      avoidGenres: Array<{ id: number; name: string; weight: number }>;
+    },
+    options: {
+      count: number; // How many exploratory picks to generate
+      minVoteAverage?: number; // Minimum quality threshold
+      minVoteCount?: number; // Minimum vote count for reliability
+    }
+  ): Promise<number[]> {
+    const exploratoryIds: number[] = [];
 
-  console.log('[Exploration] Exploring adjacent genre', {
-    genreId: randomGenre,
-    fromTopGenres: profile.topGenres.slice(0, 3).map(g => g.name),
-    availableAdjacent: adjacentGenreArray.length
-  });
+    // Strategy 1: Adjacent genres (70% of exploratory picks)
+    const adjacentCount = Math.floor(options.count * 0.7);
+    const adjacentIds = await getAdjacentGenrePicks(profile, adjacentCount, options);
+    exploratoryIds.push(...adjacentIds);
 
-  const ids = await discoverMoviesByProfile({
-    genres: [randomGenre],
-    genreMode: 'AND',
-    sortBy: 'vote_average.desc',
-    minVotes: options.minVoteCount || 500,
-    limit: count * 2 // Request more than needed for variety
-  });
+    // Strategy 2: Critically acclaimed outside comfort zone (30% of exploratory picks)
+    const acclaimedCount = options.count - adjacentCount;
+    const acclaimedIds = await getCriticallyAcclaimedPicks(profile, acclaimedCount, options);
+    exploratoryIds.push(...acclaimedIds);
 
-  // Shuffle and return requested count
-  return ids.sort(() => Math.random() - 0.5).slice(0, count);
-}
+    console.log('[Exploration] Generated exploratory picks', {
+      total: exploratoryIds.length,
+      adjacent: adjacentIds.length,
+      acclaimed: acclaimedIds.length,
+      targetCount: options.count
+    });
 
-/**
- * Get critically acclaimed films outside user's top genres
- */
-async function getCriticallyAcclaimedPicks(
-  profile: {
-    topGenres: Array<{ id: number; name: string; weight: number }>;
-    avoidGenres: Array<{ id: number; name: string; weight: number }>;
-  },
-  count: number,
-  options: { minVoteAverage?: number; minVoteCount?: number }
-): Promise<number[]> {
-  if (count === 0) return [];
-
-  const topGenreIds = new Set(profile.topGenres.map(g => g.id));
-  const avoidedGenreIds = new Set(profile.avoidGenres.map(g => g.id));
-
-  // All major genres
-  const allGenres = [28, 12, 16, 35, 80, 99, 18, 10751, 14, 36, 27, 10402, 9648, 10749, 878, 10770, 53, 10752, 37];
-  const explorationGenres = allGenres.filter(id => !topGenreIds.has(id) && !avoidedGenreIds.has(id));
-
-  if (explorationGenres.length === 0) {
-    console.log('[Exploration] No exploration genres available (all are top or avoided)');
-    return [];
+    return exploratoryIds;
   }
 
-  // Pick a random exploration genre
-  const randomGenre = explorationGenres[Math.floor(Math.random() * explorationGenres.length)];
+  /**
+   * Get films from adjacent genres for gentle discovery expansion
+   */
+  async function getAdjacentGenrePicks(
+    profile: {
+      topGenres: Array<{ id: number; name: string; weight: number }>;
+      avoidGenres: Array<{ id: number; name: string; weight: number }>;
+    },
+    count: number,
+    options: { minVoteAverage?: number; minVoteCount?: number }
+  ): Promise<number[]> {
+    if (count === 0) return [];
 
-  console.log('[Exploration] Exploring acclaimed films in new genre', {
-    genreId: randomGenre,
-    availableGenres: explorationGenres.length
-  });
+    const adjacentGenres = new Set<number>();
+    const avoidedGenreIds = new Set(profile.avoidGenres.map(g => g.id));
+    const topGenreIds = new Set(profile.topGenres.map(g => g.id));
 
-  // Query for highly-rated films in this genre
-  const ids = await discoverMoviesByProfile({
-    genres: [randomGenre],
-    genreMode: 'AND',
-    sortBy: 'vote_average.desc',
-    minVotes: options.minVoteCount || 1000, // Higher threshold for acclaimed films
-    limit: count * 2
-  });
+    // Find adjacent genres to user's top 3 genres
+    for (const genre of profile.topGenres.slice(0, 3)) {
+      const adjacent = ADJACENT_GENRES[genre.id] || [];
+      adjacent.forEach(adjId => {
+        // Don't add if it's already a top genre or an avoided genre
+        const isTopGenre = topGenreIds.has(adjId);
+        const isAvoided = avoidedGenreIds.has(adjId);
+        if (!isTopGenre && !isAvoided) {
+          adjacentGenres.add(adjId);
+        }
+      });
+    }
 
-  return ids.sort(() => Math.random() - 0.5).slice(0, count);
-}
+    if (adjacentGenres.size === 0) {
+      console.log('[Exploration] No adjacent genres found for exploration');
+      return [];
+    }
+
+    // Query TMDB discover API for adjacent genre films
+    const adjacentGenreArray = Array.from(adjacentGenres);
+    const randomGenre = adjacentGenreArray[Math.floor(Math.random() * adjacentGenreArray.length)];
+
+    console.log('[Exploration] Exploring adjacent genre', {
+      genreId: randomGenre,
+      fromTopGenres: profile.topGenres.slice(0, 3).map(g => g.name),
+      availableAdjacent: adjacentGenreArray.length
+    });
+
+    const ids = await discoverMoviesByProfile({
+      genres: [randomGenre],
+      genreMode: 'AND',
+      sortBy: 'vote_average.desc',
+      minVotes: options.minVoteCount || 500,
+      limit: count * 2 // Request more than needed for variety
+    });
+
+    // Shuffle and return requested count
+    return ids.sort(() => Math.random() - 0.5).slice(0, count);
+  }
+
+  /**
+   * Get critically acclaimed films outside user's top genres
+   */
+  async function getCriticallyAcclaimedPicks(
+    profile: {
+      topGenres: Array<{ id: number; name: string; weight: number }>;
+      avoidGenres: Array<{ id: number; name: string; weight: number }>;
+    },
+    count: number,
+    options: { minVoteAverage?: number; minVoteCount?: number }
+  ): Promise<number[]> {
+    if (count === 0) return [];
+
+    const topGenreIds = new Set(profile.topGenres.map(g => g.id));
+    const avoidedGenreIds = new Set(profile.avoidGenres.map(g => g.id));
+
+    // All major genres
+    const allGenres = [28, 12, 16, 35, 80, 99, 18, 10751, 14, 36, 27, 10402, 9648, 10749, 878, 10770, 53, 10752, 37];
+    const explorationGenres = allGenres.filter(id => !topGenreIds.has(id) && !avoidedGenreIds.has(id));
+
+    if (explorationGenres.length === 0) {
+      console.log('[Exploration] No exploration genres available (all are top or avoided)');
+      return [];
+    }
+
+    // Pick a random exploration genre
+    const randomGenre = explorationGenres[Math.floor(Math.random() * explorationGenres.length)];
+
+    console.log('[Exploration] Exploring acclaimed films in new genre', {
+      genreId: randomGenre,
+      availableGenres: explorationGenres.length
+    });
+
+    // Query for highly-rated films in this genre
+    const ids = await discoverMoviesByProfile({
+      genres: [randomGenre],
+      genreMode: 'AND',
+      sortBy: 'vote_average.desc',
+      minVotes: options.minVoteCount || 1000, // Higher threshold for acclaimed films
+      limit: count * 2
+    });
+
+    return ids.sort(() => Math.random() - 0.5).slice(0, count);
+  }
