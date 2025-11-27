@@ -304,15 +304,52 @@ export async function generateSmartCandidates(profile: {
     console.error('[SmartCandidates] Trending failed', e);
   }
 
-  // 2. Similar to highly-rated films (randomize seed selection)
+  // 2. Multi-Source Aggregation (REPLACES old TMDB+Trakt similar fetching)
+  // This is now the PRIMARY source for similar movie recommendations
   try {
     if (profile.highlyRatedIds.length > 0) {
-      // Shuffle and take random subset for variety on each refresh
-      const shuffled = [...profile.highlyRatedIds].sort(() => Math.random() - 0.5);
-      results.similar = await fetchSimilarMovieIds(shuffled.slice(0, 20), 30);
+      console.log('[SmartCandidates] Running multi-source aggregation (primary similar source)');
+
+      // Import aggregator (dynamic to avoid circular dependencies)
+      const { aggregateRecommendations } = await import('./recommendationAggregator');
+
+      // Get top 10 highly-rated films as seeds
+      const seedMovies = profile.highlyRatedIds.slice(0, 10).map(tmdbId => ({
+        tmdbId,
+        title: '', // Title not needed for aggregation
+      }));
+
+      const aggregated = await aggregateRecommendations({
+        seedMovies,
+        limit: 100, // Increased from 50 to replace old similar fetching
+      });
+
+      // Extract TMDB IDs from aggregated recommendations
+      const aggregatedIds = aggregated.map(rec => rec.tmdbId);
+
+      console.log('[SmartCandidates] Multi-source aggregation complete', {
+        total: aggregatedIds.length,
+        highConsensus: aggregated.filter(r => r.consensusLevel === 'high').length,
+        mediumConsensus: aggregated.filter(r => r.consensusLevel === 'medium').length,
+        lowConsensus: aggregated.filter(r => r.consensusLevel === 'low').length,
+      });
+
+      // Set as similar results (replaces old fetchSimilarMovieIds)
+      results.similar = aggregatedIds;
     }
   } catch (e) {
-    console.error('[SmartCandidates] Similar failed', e);
+    console.error('[SmartCandidates] Multi-source aggregation failed', e);
+
+    // Fallback to old method if aggregator fails
+    console.log('[SmartCandidates] Falling back to legacy similar fetching');
+    try {
+      if (profile.highlyRatedIds.length > 0) {
+        const shuffled = [...profile.highlyRatedIds].sort(() => Math.random() - 0.5);
+        results.similar = await fetchSimilarMovieIds(shuffled.slice(0, 20), 30);
+      }
+    } catch (fallbackError) {
+      console.error('[SmartCandidates] Fallback similar failed', fallbackError);
+    }
   }
 
   // 3. Discover by top genres + keywords (with progressive fallbacks and temporal diversity)
@@ -498,42 +535,6 @@ export async function generateSmartCandidates(profile: {
     }
   } catch (e) {
     console.error('[SmartCandidates] Single genre discovery failed', e);
-  }
-
-  // 4. Multi-Source Aggregation (NEW - Consensus-based recommendations)
-  try {
-    if (profile.highlyRatedIds.length > 0) {
-      console.log('[SmartCandidates] Running multi-source aggregation');
-
-      // Import aggregator (dynamic to avoid circular dependencies)
-      const { aggregateRecommendations } = await import('./recommendationAggregator');
-
-      // Get top 10 highly-rated films as seeds
-      const seedMovies = profile.highlyRatedIds.slice(0, 10).map(tmdbId => ({
-        tmdbId,
-        title: '', // Title not needed for aggregation
-      }));
-
-      const aggregated = await aggregateRecommendations({
-        seedMovies,
-        limit: 50,
-      });
-
-      // Extract TMDB IDs from aggregated recommendations
-      const aggregatedIds = aggregated.map(rec => rec.tmdbId);
-
-      console.log('[SmartCandidates] Multi-source aggregation complete', {
-        total: aggregatedIds.length,
-        highConsensus: aggregated.filter(r => r.consensusLevel === 'high').length,
-        mediumConsensus: aggregated.filter(r => r.consensusLevel === 'medium').length,
-        lowConsensus: aggregated.filter(r => r.consensusLevel === 'low').length,
-      });
-
-      // Add to results (will be merged with other candidates)
-      results.similar = [...new Set([...results.similar, ...aggregatedIds])];
-    }
-  } catch (e) {
-    console.error('[SmartCandidates] Multi-source aggregation failed', e);
   }
 
   console.log('[SmartCandidates] Generated', {
