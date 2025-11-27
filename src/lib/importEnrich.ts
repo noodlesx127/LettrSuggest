@@ -14,10 +14,9 @@
 
 import { searchMovies } from './movieAPI';
 import { getTuiMDBMovie } from './tuimdb';
-import { searchWatchmode, getStreamingSources } from './watchmode';
 import { upsertTmdbCache } from './enrich';
-import { getMovieRatings } from './ratingsAggregator';
 import type { TMDBMovie } from './enrich';
+import { enrichMovieServerSide } from '@/app/actions/enrichment';
 
 export interface EnrichedImportMovie extends TMDBMovie {
     // All OMDb fields are already in TMDBMovie type
@@ -45,15 +44,13 @@ export async function enrichMovieForImport(
         console.log('[ImportEnrich] Starting enrichment', { title, year, tmdbId });
 
         // Step 1: Get TMDB data (either by ID or search)
+        // We do this on the client because searchMovies is optimized for client use
         let tmdbMovie: TMDBMovie | null = null;
 
         if (tmdbId) {
-            // If we already have TMDB ID, fetch directly
-            // This would require a new function, for now we'll search
             const searchResults = await searchMovies({ query: title, year, preferTuiMDB: true });
             tmdbMovie = searchResults.find(m => m.id === tmdbId) || searchResults[0] || null;
         } else {
-            // Search for the movie
             const searchResults = await searchMovies({ query: title, year, preferTuiMDB: true });
             tmdbMovie = searchResults[0] || null;
         }
@@ -70,86 +67,61 @@ export async function enrichMovieForImport(
             try {
                 const tuimdbData = await getTuiMDBMovie(tmdbMovie.tuimdb_uid);
                 if (tuimdbData?.genres) {
-                    // TuiMDB provides genres, merge with TMDB genres
                     console.log('[ImportEnrich] TuiMDB data fetched', { genreCount: tuimdbData.genres.length });
+                    // Note: We're not merging genres here yet, assuming TuiMDB data is used elsewhere or cached separately?
+                    // If we need to merge, we should do it here.
                 }
             } catch (e) {
                 console.warn('[ImportEnrich] TuiMDB fetch failed (non-critical)', e);
             }
         }
 
-        // Step 3: Get ratings from aggregator (OMDb → TMDB → Watchmode fallback)
+        // Step 3: Server-Side Enrichment (Ratings & Watchmode)
+        // This securely handles API keys on the server
         try {
-            const ratings = await getMovieRatings(
-                tmdbMovie.id,
-                tmdbMovie.imdb_id,
-                tmdbMovie.vote_average,
-                tmdbMovie.vote_count
-            );
+            const serverData = await enrichMovieServerSide(tmdbMovie.id);
 
-            // Merge ratings into movie object
-            if (ratings.imdb_rating) {
-                tmdbMovie.imdb_rating = ratings.imdb_rating;
-                tmdbMovie.imdb_votes = ratings.imdb_votes;
-            }
-            if (ratings.rotten_tomatoes) tmdbMovie.rotten_tomatoes = ratings.rotten_tomatoes;
-            if (ratings.metacritic) tmdbMovie.metacritic = ratings.metacritic;
-            if (ratings.awards) tmdbMovie.awards = ratings.awards;
+            if (serverData.imdb_id) tmdbMovie.imdb_id = serverData.imdb_id;
 
-            console.log('[ImportEnrich] Ratings aggregated:', {
-                imdb: ratings.imdb_rating,
-                source: ratings.imdb_source,
-                rt: ratings.rotten_tomatoes,
-                mc: ratings.metacritic,
-            });
-        } catch (e) {
-            console.warn('[ImportEnrich] Ratings aggregation failed (non-critical)', e);
-        }
-
-        // Step 4: Get Watchmode streaming data
-        const enrichedMovie: EnrichedImportMovie = tmdbMovie as EnrichedImportMovie;
-        try {
-            const watchmodeResults = await searchWatchmode(String(tmdbMovie.id), {
-                searchField: 'tmdb_id',
-            });
-
-            if (watchmodeResults.length > 0) {
-                const watchmodeTitle = watchmodeResults[0];
-                enrichedMovie.watchmode_id = watchmodeTitle.id;
-
-                // Get streaming sources
-                const sources = await getStreamingSources(watchmodeTitle.id, { region: 'US' });
-                if (sources.length > 0) {
-                    enrichedMovie.streaming_sources = sources.map(s => ({
-                        source_id: s.source_id,
-                        name: s.name,
-                        type: s.type,
-                        region: s.region,
-                        web_url: s.web_url,
-                    }));
-                    console.log('[ImportEnrich] Watchmode streaming sources added', { count: sources.length });
+            if (serverData.ratings) {
+                const r = serverData.ratings;
+                if (r.imdb_rating) {
+                    tmdbMovie.imdb_rating = r.imdb_rating;
+                    tmdbMovie.imdb_votes = r.imdb_votes;
                 }
+                if (r.rotten_tomatoes) tmdbMovie.rotten_tomatoes = r.rotten_tomatoes;
+                if (r.metacritic) tmdbMovie.metacritic = r.metacritic;
+                if (r.awards) tmdbMovie.awards = r.awards;
+
+                console.log('[ImportEnrich] Ratings aggregated:', {
+                    imdb: r.imdb_rating,
+                    source: r.imdb_source,
+                    rt: r.rotten_tomatoes,
+                });
             }
+
+            if (serverData.watchmode_id) {
+                (tmdbMovie as EnrichedImportMovie).watchmode_id = serverData.watchmode_id;
+            }
+
+            if (serverData.streaming_sources) {
+                (tmdbMovie as EnrichedImportMovie).streaming_sources = serverData.streaming_sources;
+                console.log('[ImportEnrich] Watchmode streaming sources added', { count: serverData.streaming_sources.length });
+            }
+
         } catch (e) {
-            console.warn('[ImportEnrich] Watchmode fetch failed (non-critical)', e);
+            console.error('[ImportEnrich] Server enrichment failed', e);
         }
 
-        // Step 5: Cache the enriched movie in Supabase
+        // Step 4: Cache the enriched movie in Supabase
         try {
-            await upsertTmdbCache(enrichedMovie);
-            console.log('[ImportEnrich] Cached enriched movie', { tmdbId: enrichedMovie.id });
+            await upsertTmdbCache(tmdbMovie);
+            console.log('[ImportEnrich] Cached enriched movie', { tmdbId: tmdbMovie.id });
         } catch (e) {
             console.error('[ImportEnrich] Cache upsert failed', e);
         }
 
-        console.log('[ImportEnrich] Enrichment complete', {
-            tmdbId: enrichedMovie.id,
-            hasRatings: !!enrichedMovie.imdb_rating,
-            hasTuiMDB: !!enrichedMovie.enhanced_genres,
-            hasWatchmode: !!enrichedMovie.streaming_sources,
-        });
-
-        return enrichedMovie;
+        return tmdbMovie as EnrichedImportMovie;
     } catch (error) {
         console.error('[ImportEnrich] Enrichment failed', { title, year, error });
         return null;
