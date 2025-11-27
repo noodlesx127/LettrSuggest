@@ -128,9 +128,9 @@ export default function ImportPage() {
 
       // Filter to only films that need mapping
       const toTry = filmList.filter(f => f.title && !existingMappings.has(f.uri));
-      console.log(`[Import] Need to map ${toTry.length} of ${filmList.length} films (${existingMappings.size} already mapped, ${filmList.filter(f => !f.title).length} have no title)`);
+      console.log(`[Import] Need to enrich ${toTry.length} of ${filmList.length} films (${existingMappings.size} already mapped, ${filmList.filter(f => !f.title).length} have no title)`);
 
-      let mapped = 0;
+      let enriched = 0;
       let skipped = 0; // No TMDB results found
       let failed = 0; // API errors
       let next = 0;
@@ -139,9 +139,12 @@ export default function ImportPage() {
       const minDelay = 300; // 300ms between requests (max ~3 requests/sec)
 
       setMappingProgress({ current: 0, total: toTry.length });
-      setStatus(`Mapping films to TMDB database… 0/${toTry.length}`);
+      setStatus(`Enriching films with TMDB, OMDb, and Watchmode data… 0/${toTry.length}`);
 
       const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+      // Import the enrichment function
+      const { enrichMovieForImport } = await import('@/lib/importEnrich');
 
       const worker = async () => {
         while (true) {
@@ -164,15 +167,16 @@ export default function ImportPage() {
 
           while (retries > 0) {
             try {
-              const results = await searchTmdb(f.title, f.year ?? undefined);
-              const best = results?.[0];
-              if (best) {
-                await upsertTmdbCache(best);
-                await upsertFilmMapping(uid, f.uri, best.id);
-                mapped += 1;
+              // Use comprehensive enrichment (TMDB + TuiMDB + OMDb + Watchmode)
+              const enrichedMovie = await enrichMovieForImport(f.title, f.year ?? undefined);
+
+              if (enrichedMovie) {
+                // Movie was found and enriched - create mapping
+                await upsertFilmMapping(uid, f.uri, enrichedMovie.id);
+                enriched += 1;
                 success = true;
-                setMappingProgress({ current: mapped + skipped + failed, total: toTry.length });
-                setStatus(`Mapping films to TMDB database… ${mapped + skipped + failed}/${toTry.length} (${mapped} mapped, ${skipped} no match)`);
+                setMappingProgress({ current: enriched + skipped + failed, total: toTry.length });
+                setStatus(`Enriching films… ${enriched + skipped + failed}/${toTry.length} (${enriched} enriched, ${skipped} no match)`);
                 if (typeof window !== 'undefined') {
                   window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
                 }
@@ -181,10 +185,10 @@ export default function ImportPage() {
                 skipped += 1;
                 success = true;
                 console.log(`[Import] No TMDB results for: ${f.title} (${f.year || 'no year'})`);
-                setMappingProgress({ current: mapped + skipped + failed, total: toTry.length });
-                setStatus(`Mapping films to TMDB database… ${mapped + skipped + failed}/${toTry.length} (${mapped} mapped, ${skipped} no match)`);
+                setMappingProgress({ current: enriched + skipped + failed, total: toTry.length });
+                setStatus(`Enriching films… ${enriched + skipped + failed}/${toTry.length} (${enriched} enriched, ${skipped} no match)`);
               }
-              break; // Success (mapped or no results), exit retry loop
+              break; // Success (enriched or no results), exit retry loop
             } catch (e: any) {
               retries--;
               if (retries > 0) {
@@ -192,10 +196,10 @@ export default function ImportPage() {
                 await sleep(backoff);
                 backoff *= 2; // Exponential backoff
               } else {
-                console.error(`[Import] Failed to map ${f.title} after 3 retries`, e);
+                console.error(`[Import] Failed to enrich ${f.title} after 3 retries`, e);
                 failed += 1;
-                setMappingProgress({ current: mapped + skipped + failed, total: toTry.length });
-                setStatus(`Mapping films to TMDB database… ${mapped + skipped + failed}/${toTry.length} (${mapped} mapped, ${failed} failed)`);
+                setMappingProgress({ current: enriched + skipped + failed, total: toTry.length });
+                setStatus(`Enriching films… ${enriched + skipped + failed}/${toTry.length} (${enriched} enriched, ${failed} failed)`);
               }
             }
           }
@@ -203,8 +207,8 @@ export default function ImportPage() {
       };
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
-      const totalMapped = mapped + existingMappings.size;
-      setStatus(`✓ Successfully mapped ${totalMapped} of ${filmList.length} films to TMDB (${mapped} new, ${existingMappings.size} existing, ${skipped} no match, ${failed} failed)`);
+      const totalEnriched = enriched + existingMappings.size;
+      setStatus(`✓ Successfully enriched ${totalEnriched} of ${filmList.length} films with multi-API data (${enriched} new, ${existingMappings.size} existing, ${skipped} no match, ${failed} failed)`);
       setMappingProgress(null);
       setAutoMappingActive(false);
     } catch (e) {
