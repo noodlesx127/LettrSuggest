@@ -72,7 +72,7 @@ export async function enrichMovieForImport(
                 tmdbMovie = { ...tmdbMovie!, ...serverData.tmdbData };
             }
 
-            if (serverData.imdb_id) tmdbMovie.imdb_id = serverData.imdb_id;
+            if (serverData.imdb_id) tmdbMovie!.imdb_id = serverData.imdb_id;
 
             // Handle TuiMDB data
             if (serverData.tuimdb_movie) {
@@ -85,12 +85,12 @@ export async function enrichMovieForImport(
             if (serverData.ratings) {
                 const r = serverData.ratings;
                 if (r.imdb_rating) {
-                    tmdbMovie.imdb_rating = r.imdb_rating;
-                    tmdbMovie.imdb_votes = r.imdb_votes;
+                    tmdbMovie!.imdb_rating = r.imdb_rating;
+                    tmdbMovie!.imdb_votes = r.imdb_votes;
                 }
-                if (r.rotten_tomatoes) tmdbMovie.rotten_tomatoes = r.rotten_tomatoes;
-                if (r.metacritic) tmdbMovie.metacritic = r.metacritic;
-                if (r.awards) tmdbMovie.awards = r.awards;
+                if (r.rotten_tomatoes) tmdbMovie!.rotten_tomatoes = r.rotten_tomatoes;
+                if (r.metacritic) tmdbMovie!.metacritic = r.metacritic;
+                if (r.awards) tmdbMovie!.awards = r.awards;
 
                 console.log('[ImportEnrich] Ratings aggregated:', {
                     imdb: r.imdb_rating,
@@ -100,11 +100,11 @@ export async function enrichMovieForImport(
             }
 
             if (serverData.watchmode_id) {
-                (tmdbMovie as EnrichedImportMovie).watchmode_id = serverData.watchmode_id;
+                (tmdbMovie! as EnrichedImportMovie).watchmode_id = serverData.watchmode_id;
             }
 
             if (serverData.streaming_sources) {
-                (tmdbMovie as EnrichedImportMovie).streaming_sources = serverData.streaming_sources;
+                (tmdbMovie! as EnrichedImportMovie).streaming_sources = serverData.streaming_sources;
                 console.log('[ImportEnrich] Watchmode streaming sources added', { count: serverData.streaming_sources.length });
             }
 
@@ -114,8 +114,8 @@ export async function enrichMovieForImport(
 
         // Step 3: Cache the enriched movie in Supabase
         try {
-            await upsertTmdbCache(tmdbMovie);
-            console.log('[ImportEnrich] Cached enriched movie', { tmdbId: tmdbMovie.id });
+            await upsertTmdbCache(tmdbMovie!);
+            console.log('[ImportEnrich] Cached enriched movie', { tmdbId: tmdbMovie!.id });
         } catch (e) {
             console.error('[ImportEnrich] Cache upsert failed', e);
         }
