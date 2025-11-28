@@ -69,7 +69,7 @@ export async function enrichMovieForImport(
 
             // Merge full TMDB data if available (includes keywords, credits, etc.)
             if (serverData.tmdbData) {
-                tmdbMovie = { ...tmdbMovie, ...serverData.tmdbData };
+                tmdbMovie = { ...tmdbMovie!, ...serverData.tmdbData };
             }
 
             if (serverData.imdb_id) tmdbMovie.imdb_id = serverData.imdb_id;
