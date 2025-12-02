@@ -293,13 +293,19 @@ export default function StatsPage() {
 
     const totalWatches = filteredFilms.reduce((sum, f) => sum + (f.watchCount ?? 0), 0);
 
-    // Calculate total rewatch entries (not just unique films that were rewatched)
-    // If a film has watchCount=3 and rewatch=true, that means 2 of those watches were rewatches
-    // (first watch + 2 rewatches = 3 total)
+    // Calculate total rewatch entries
+    // A film marked as rewatch=true means the user has seen it before (at least once prior to this viewing)
+    // - If rewatch=true and watchCount=1: This is a rewatch of a previously-watched film (count as 1 rewatch)
+    // - If rewatch=true and watchCount>1: Multiple diary entries, all but first are rewatches
+    // - If rewatch=false and watchCount>1: Multiple entries in diary (count watchCount-1 as rewatches)
     const totalRewatchEntries = filteredFilms.reduce((sum, f) => {
-      if (f.rewatch && (f.watchCount ?? 0) > 1) {
-        // If marked as rewatch, all watches except the first are rewatches
-        return sum + ((f.watchCount ?? 0) - 1);
+      const wc = f.watchCount ?? 0;
+      if (f.rewatch) {
+        // Film is marked as rewatch - count at least 1 rewatch, or more if multiple diary entries
+        return sum + Math.max(1, wc - 1);
+      } else if (wc > 1) {
+        // Not marked as rewatch but has multiple diary entries - those are rewatches
+        return sum + (wc - 1);
       }
       return sum;
     }, 0);
