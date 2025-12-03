@@ -177,6 +177,34 @@ This document outlines the improvements to enhance suggestion quality in LettrSu
 
 ---
 
+### 12. Expanded Suggestion Sections
+**Status:** ✅ Completed  
+**File:** `src/app/suggest/page.tsx`  
+**Effort:** Medium | **Impact:** High
+
+**Problem:** Users had limited categories for browsing suggestions (17 sections).
+
+**Why it matters:** More categorization helps users find films based on specific criteria like runtime, language, critical reception, and more.
+
+**New Sections Added:**
+- [x] **Multi-Source Consensus** - Films recommended by 2+ sources (TMDB, TasteDive, Trakt)
+- [x] **International Cinema** - Non-English language films matching user taste
+- [x] **Animation Picks** - Animated films (non-documentary)
+- [x] **Quick Watches** - Films under 100 minutes for busy viewers
+- [x] **Epic Films** - Immersive films over 150 minutes (2.5+ hours)
+- [x] **Critically Acclaimed** - Films with IMDB 8+, RT 90%+, or Metacritic 80+
+
+**Implementation Details:**
+- Extended `MovieItem` type with `runtime`, `original_language`, `spoken_languages`, `production_countries`
+- Added 6 new sections to `CategorizedSuggestions` type
+- Implemented filter functions for each new category
+- Added section refresh capability for all new sections
+- Fetches additional TMDB metadata (runtime, languages, countries) for categorization
+
+**Total Sections:** 24 (was 18)
+
+---
+
 ## 📊 Priority Matrix
 
 | Priority | Improvement | Effort | Impact | Status |
@@ -192,6 +220,10 @@ This document outlines the improvements to enhance suggestion quality in LettrSu
 | 🔴 9 | Reason Success Display | Medium | Low | Not Started |
 | 🔴 10 | Collection Completion | Medium | Medium | Not Started |
 | ✅ 11 | Weighting System Fixes | Low | Medium | Complete |
+| ✅ 12 | Expanded Suggestion Sections | Medium | High | Complete |
+| ✅ 13 | Genre Avoidance Logic Fix | Low | High | Complete |
+| ✅ 14 | Avoidance Profile Display | Low | High | Complete |
+| ✅ 15 | Watchlist Intent Analysis | Medium | High | Complete |
 
 ---
 
@@ -250,6 +282,139 @@ const weights = {
 
 ---
 
+### 13. Genre Avoidance Logic Fix
+**Status:** ✅ Completed  
+**Files:** `src/lib/enrich.ts`, `src/lib/subgenreDetection.ts`  
+**Effort:** Low | **Impact:** High
+
+**Problem:** The system was aggressively penalizing the user's FAVORITE genres, even with no blocked movies or feedback!
+
+**Root Causes Found:**
+1. **`negativeFeedbackMovies`** (blocked movies) contributed to `avoidGenres` with weight 3.0 per movie
+2. **No check against user's actual top genres** - could "avoid" their favorite genres
+3. **Disliked films** (rated <2.5★) contributed to genre avoidance - even if user has 330+ points in that genre from likes
+4. **Subgenre detection was too aggressive** - marked subgenres as "avoided" if rarely watched (<3%), not actually disliked
+5. **No minimum threshold** - one disliked film could penalize an entire genre
+
+**Fixes Applied:**
+- [x] Blocked movies NO LONGER contribute to genre avoidance (only affect director/keyword learning)
+- [x] Top genres are NEVER added to `avoidGenres` - prevents paradox of avoiding what you love
+- [x] Minimum threshold of 3 disliked films required before a genre gets avoided
+- [x] Reduced weight for low-rated films from variable (0-2.5) to capped (0-1.5)
+- [x] **Fixed subgenre detection** - removed "rarely watched = avoided" logic
+- [x] Subgenres now only avoided if user watched 10+ films AND liked <20% (actual dislike pattern)
+- [x] Added logging to show prevented genre avoidances and final avoidance list
+
+**Key Insights:**
+1. "Rarely watched" ≠ "Avoided". A user not watching many spy movies doesn't mean they AVOID spy movies - they may just not have explored that subgenre yet!
+2. **"Guilty Pleasures"** - A low rating + "liked" flag means the user enjoys the movie despite knowing it's "bad". These are NOT treated as dislikes!
+
+**Example Impact:**
+Before: User with Thriller (330.4), Drama (326.3), Action (221.4) as top genres was getting:
+```
+[SubgenreFilter] Filtered "F1" - User avoids drama sports within Drama
+[NegativePenalty] Penalized "Sexy Beast" by 6.00 - Contains Thriller you typically avoid
+```
+
+After: These filters/penalties no longer apply because:
+1. Drama/Thriller are the user's FAVORITE genres (never avoided)
+2. Subgenres require actual dislike evidence, not just low watch counts
+
+---
+
+### 14. Avoidance Profile Display on Stats Page
+**Status:** ✅ Completed  
+**Files:** `src/app/stats/page.tsx`, `src/lib/enrich.ts`  
+**Effort:** Low | **Impact:** High
+
+**Problem:** The system was marking things as "avoided" incorrectly in multiple ways:
+1. Treating 2-star ratings as "dislikes" when they're really "meh/average"
+2. Not distinguishing between "logged without rating" (neutral) and "actively disliked"
+
+**Critical Example from User:**
+- Quentin Tarantino: 8👎 vs 0👍 - User probably just logged these films without rating
+- On Letterboxd, users can: "just log", "log + like", "log + like + review", "log + rate", etc.
+- A film that's just logged without rating or like is NEUTRAL - we don't know the user's opinion!
+
+**Letterboxd Rating Scale Interpretation:**
+- 0.5-1.5 stars = Bad/Poor → **DISLIKE** (active negative signal)
+- 2-2.5 stars = Meh/Average → **NEUTRAL** (not enough signal either way)
+- 3+ stars = Good → **LIKE** (positive signal)
+- No rating + no like = **NEUTRAL** (unknown opinion)
+
+**Why 2 stars ≠ dislike:**
+A 2-star rating often means "it was okay" or "meh" - not "I actively disliked this".
+Only truly bad films (1.5 stars or below) should be treated as dislikes.
+
+**Solution: Proper Threshold-Based Classification**
+- **Liked**: `f.liked || (f.rating != null && f.rating >= 3)`
+- **Disliked**: `f.rating != null && f.rating <= 1.5 && !f.liked`
+- **Neutral**: Everything else (unrated, 2-2.5 star zone, etc.)
+
+**Implementation:**
+- [x] Changed dislike threshold from < 2.5 to <= 1.5 stars
+- [x] Films rated 2-2.5 stars are now NEUTRAL (not counted in avoidance)
+- [x] Unrated films remain NEUTRAL (not assumed to be dislikes)
+- [x] UI updated to explain: "Disliked = ≤1.5 stars"
+- [x] Console logging shows neutral film count for debugging
+
+**Console Logging:**
+```
+[AvoidanceProfile] Film categorization: {
+  totalWatched: 500,
+  likedCount: 235,
+  dislikedCount: 45,  // Much lower now - only truly bad films
+  neutralCount: 220,  // Many films are just "meh" or unrated
+  dislikeThreshold: 1.5,
+  note: 'Films rated 2-2.5 stars are NEUTRAL (meh), not disliked'
+}
+```
+
+---
+
+### 15. Watchlist Analysis for Intent Signals
+**Status:** ✅ Completed  
+**Files:** `src/app/stats/page.tsx`, `src/lib/enrich.ts`, `src/app/suggest/page.tsx`  
+**Effort:** Medium | **Impact:** High
+
+**Problem:** The system was not utilizing the user's watchlist as a positive signal. Watchlist shows explicit INTENT - films the user WANTS to see.
+
+**Why it matters:** 
+- Watchlist is a strong positive signal: "I want to watch more films like this"
+- Watchlist patterns can reveal preferences (e.g., lots of Sci-Fi on watchlist = interested in Sci-Fi)
+- Watchlist can OVERRIDE avoidance signals (if user has Horror films on watchlist, don't avoid Horror)
+
+**Solution: Watchlist-Informed Taste Profile**
+- Extract genres, keywords, directors, actors from watchlist films
+- Boost these in the taste profile (moderate weight: 0.5)
+- Count watchlist occurrences as "liked" for ratio calculations
+- Override avoidance if item appears on watchlist
+
+**Implementation:**
+- [x] `buildTasteProfile` now accepts `watchlistFilms` parameter
+- [x] Process watchlist films to extract: `watchlistGenreIds`, `watchlistKeywordIds`, `watchlistDirectorIds`
+- [x] Boost positive weights for items appearing on watchlist
+- [x] Count watchlist items as "liked" in ratio calculations
+- [x] Check watchlist before applying avoidance filter - if on watchlist, don't avoid
+- [x] All `buildTasteProfile` calls in suggest page updated to pass watchlist
+
+**Stats Page UI:**
+- [x] New "📋 What You Want to Watch" section showing:
+  - Genres You Want (from watchlist)
+  - Directors You Want (from watchlist)
+  - Actors You Want (from watchlist)
+  - Themes You Want (from watchlist)
+- [x] "Avoidance Overrides" subsection showing items that would be avoided but are on watchlist
+
+**Console Logging:**
+```
+[TasteProfile] Processing watchlist for intent signals: { watchlistCount: 47 }
+[TasteProfile] Watchlist signals extracted: { genresOnWatchlist: 12, keywordsOnWatchlist: 89, directorsOnWatchlist: 31 }
+[TasteProfile] Items NOT avoided due to watchlist interest: ["Horror(genre on watchlist)", "David Cronenberg(director on watchlist)"]
+```
+
+---
+
 ## Commits Made
 
 1. **`30affec`** - Fix TMDB API auth, taste profile analysis, and data flow issues
@@ -258,6 +423,7 @@ const weights = {
 4. **`3354e23`** - Add feedback-driven reason weighting and temporal preference matching
 5. **`788666c`** - Fix weighting system issues (studio double-counting, boost caps, discovery boosts)
 6. **`TBD`** - Add multi-source badge display to MovieCard
+7. **`TBD`** - Fix genre avoidance logic (don't penalize favorite genres)
 
 ---
 
@@ -275,3 +441,5 @@ const weights = {
 - TasteDive has 300 requests/hour limit - cache aggressively
 - Aggregator already handles deduplication by TMDB ID
 - All improvements should add to existing flow, not replace it
+- **Blocking a movie ≠ hating its genre** - these are different signals
+- **Low rating + "liked" = guilty pleasure** - respect the like flag over the rating!

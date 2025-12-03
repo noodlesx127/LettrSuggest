@@ -36,6 +36,11 @@ type MovieItem = {
   // Multi-source recommendation data
   sources?: string[];
   consensusLevel?: 'high' | 'medium' | 'low';
+  // Additional metadata for new sections
+  runtime?: number; // in minutes
+  original_language?: string;
+  spoken_languages?: string[];
+  production_countries?: string[];
 };
 
 type CategorizedSuggestions = {
@@ -57,6 +62,12 @@ type CategorizedSuggestions = {
   recentClassics: MovieItem[];
   deepCuts: MovieItem[];
   fromCollections: MovieItem[];
+  multiSourceConsensus: MovieItem[];
+  internationalCinema: MovieItem[];
+  animationPicks: MovieItem[];
+  quickWatches: MovieItem[];
+  epicFilms: MovieItem[];
+  criticallyAcclaimed: MovieItem[];
   moreRecommendations: MovieItem[];
 };
 
@@ -224,7 +235,12 @@ export default function SuggestPage() {
       return results;
     };
 
-    // 0. Seasonal Recommendations (if applicable)
+    // ============================================
+    // PHASE 1: HIGHLY SPECIFIC SECTIONS (extract first to ensure they get items)
+    // These sections have very specific criteria that may only match a few items
+    // ============================================
+
+    // 0. Seasonal Recommendations (if applicable - time-sensitive)
     const seasonalPicks = seasonalConfig.genres.length > 0 ?
       getNextItems(isSeasonalMatch, 12) : [];
 
@@ -234,74 +250,129 @@ export default function SuggestPage() {
       seasonalPicksCount: seasonalPicks.length
     });
 
-    // 1. Based on Recent Watches: Films similar to recent favorites
-    const recentWatchMatches = getNextItems(item => hasRecentWatchMatch(item.reasons), 12);
+    // 1. Multi-Source Consensus: Films recommended by multiple sources (rare, high-value)
+    const multiSourceConsensus = getNextItems(item => {
+      return (item.sources?.length ?? 0) >= 2;
+    }, 12);
 
-    // 2. From Studios You Love: Films from studios whose style you enjoy
-    const studioMatches = getNextItems(item => hasStudioMatch(item.reasons), 12);
+    // 2. Animation Picks: Animated films (specific genre, not many)
+    const animationPicks = getNextItems(item => {
+      if (!item.genres || item.genres.length === 0) return false;
+      const hasAnimation = item.genres.some(g => g === 'Animation');
+      const isDocumentary = item.genres.some(g => g === 'Documentary');
+      return hasAnimation && !isDocumentary;
+    }, 12);
 
-    // 3. Inspired by Directors You Love: Films from or similar to directors you enjoy
-    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 12);
+    // 3. Documentaries (specific genre)
+    const documentaries = getNextItems(item => {
+      if (!item.genres || item.genres.length === 0) return false;
+      return item.genres.some(g => g === 'Documentary');
+    }, 12);
 
-    // 4. From Actors You Love: Films with cast matches or similar actors
-    const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 12);
+    // 4. International Cinema: Non-English films (specific language filter)
+    const internationalCinema = getNextItems(item => {
+      return Boolean(item.original_language && item.original_language !== 'en');
+    }, 12);
 
-    // 5. Your Favorite Genres: Films matching preferred genres
-    const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 12);
+    // 5. Quick Watches: Films under 100 minutes (specific runtime)
+    const quickWatches = getNextItems(item => {
+      return Boolean(item.runtime && item.runtime > 0 && item.runtime <= 100);
+    }, 12);
 
-    // 5b. Documentaries
-    const documentaries = getNextItems(item => item.genres?.includes('Documentary') ?? false, 12);
+    // 6. Epic Films: Films over 150 minutes (specific runtime)
+    const epicFilms = getNextItems(item => {
+      return Boolean(item.runtime && item.runtime >= 150);
+    }, 12);
 
-    // 6. Best of the [Decade]s
-    const decadeMatches = topDecade ? getNextItems(item => {
-      const year = parseInt(item.year || '0');
-      return year >= topDecade && year < topDecade + 10;
-    }, 12) : [];
+    // 7. Critically Acclaimed: Very high ratings (specific threshold)
+    const criticallyAcclaimed = getNextItems(item => {
+      const imdbRating = parseFloat(item.imdb_rating || '0');
+      const rtScore = parseInt(item.rotten_tomatoes?.replace('%', '') || '0');
+      const metaScore = parseInt(item.metacritic || '0');
+      return imdbRating >= 8.0 || rtScore >= 90 || metaScore >= 80;
+    }, 12);
 
-    // 7. Hidden Gems for You (Smart Discovery)
+    // 8. From Collections: Films in same collections/franchises (specific metadata)
+    const fromCollections = getNextItems(item => !!item.collectionName, 12);
+
+    // ============================================
+    // PHASE 2: VOTE CATEGORY SECTIONS (moderately specific)
+    // ============================================
+
+    // 9. Hidden Gems (Smart Discovery): Films with hidden-gem vote category
     const smartDiscovery = getNextItems(item => {
       return item.voteCategory === 'hidden-gem';
     }, 12);
 
-    // 8. Classic Hidden Gems: Pre-2015 films with high scores but low recognition (fallback)
+    // 10. Classic Hidden Gems: Pre-2015 hidden gems
     const hiddenGems = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
     }, 12);
 
-    // 7. Cult Classics: Films with cult following
+    // 11. Cult Classics: Films with cult following
     const cultClassics = getNextItems(item => {
       return item.voteCategory === 'cult-classic';
     }, 12);
 
-    // 8. Crowd Pleasers: Popular high-rated films
+    // 12. Crowd Pleasers: Popular high-rated films
     const crowdPleasers = getNextItems(item => {
       return item.voteCategory === 'crowd-pleaser';
     }, 12);
 
-    // 9. New & Trending: Recent releases (2023+)
+    // ============================================
+    // PHASE 3: REASON-BASED SECTIONS (medium specificity)
+    // ============================================
+
+    // 13. Based on Recent Watches: Films similar to recent favorites
+    const recentWatchMatches = getNextItems(item => hasRecentWatchMatch(item.reasons), 12);
+
+    // 14. Inspired by Directors You Love
+    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 12);
+
+    // 15. From Studios You Love
+    const studioMatches = getNextItems(item => hasStudioMatch(item.reasons), 12);
+
+    // 16. From Actors You Love
+    const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 12);
+
+    // 17. Your Favorite Genres
+    const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 12);
+
+    // 18. Deep Cuts: Films with specific theme/keyword matches
+    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 12);
+
+    // ============================================
+    // PHASE 4: TIME-BASED SECTIONS (broad filters)
+    // ============================================
+
+    // 19. Best of the [Decade]s
+    const decadeMatches = topDecade ? getNextItems(item => {
+      const year = parseInt(item.year || '0');
+      return year >= topDecade && year < topDecade + 10;
+    }, 12) : [];
+
+    // 20. New & Trending: Recent releases (2023+)
     const newReleases = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2023;
     }, 12);
 
-    // 10. Recent Classics: Films from 2015-2022
+    // 21. Recent Classics: Films from 2015-2022
     const recentClassics = getNextItems(item => {
       const year = parseInt(item.year || '0');
       return year >= 2015 && year < 2023;
     }, 12);
 
-    // 11. Deep Cuts: Films with specific theme/keyword matches
-    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 12);
+    // ============================================
+    // PHASE 5: CATCH-ALL SECTIONS (least specific, gets remaining items)
+    // ============================================
 
-    // 12. From Collections: Films in same collections/franchises
-    const fromCollections = getNextItems(item => !!item.collectionName, 12);
-
-    // 13. Perfect Matches: Top highest scoring films that don't fit other categories
+    // 22. Perfect Matches: Top scoring films that haven't been categorized yet
     const perfectMatches = getNextItems(() => true, 12);
 
-    // 14. Fallback: More recommendations (any remaining films)
-    const moreRecommendations = getNextItems(() => true, 20);
+    // 23. More Recommendations: Any remaining films
+    const moreRecommendations = getNextItems(() => true, 24); // Increased to catch more
 
     // Helper to sort by rating
     const sortByRating = (items: MovieItem[]) => {
@@ -324,6 +395,12 @@ export default function SuggestPage() {
       recentClassics: recentClassics.length,
       deepCuts: deepCuts.length,
       fromCollections: fromCollections.length,
+      multiSourceConsensus: multiSourceConsensus.length,
+      internationalCinema: internationalCinema.length,
+      animationPicks: animationPicks.length,
+      quickWatches: quickWatches.length,
+      epicFilms: epicFilms.length,
+      criticallyAcclaimed: criticallyAcclaimed.length,
       moreRecommendations: moreRecommendations.length,
       totalUsed: usedIds.size,
       totalAvailable: items.length
@@ -348,6 +425,12 @@ export default function SuggestPage() {
       recentClassics: sortByRating(recentClassics),
       deepCuts: sortByRating(deepCuts),
       fromCollections: sortByRating(fromCollections),
+      multiSourceConsensus: sortByRating(multiSourceConsensus),
+      internationalCinema: sortByRating(internationalCinema),
+      animationPicks: sortByRating(animationPicks),
+      quickWatches: sortByRating(quickWatches),
+      epicFilms: sortByRating(epicFilms),
+      criticallyAcclaimed: sortByRating(criticallyAcclaimed),
       moreRecommendations: sortByRating(moreRecommendations)
     };
   }, [topDecade]);
@@ -443,7 +526,10 @@ export default function SuggestPage() {
       directorMatches: (item) => hasDirectorMatch(item.reasons),
       actorMatches: (item) => hasActorMatch(item.reasons),
       genreMatches: (item) => hasGenreMatch(item.reasons),
-      documentaries: (item) => item.genres?.includes('Documentary') ?? false,
+      documentaries: (item) => {
+        if (!item.genres || item.genres.length === 0) return false;
+        return item.genres.some(g => g === 'Documentary');
+      },
       decadeMatches: (item) => {
         if (!topDecade) return false;
         const year = parseInt(item.year || '0');
@@ -466,6 +552,22 @@ export default function SuggestPage() {
       },
       deepCuts: (item) => hasDeepCutThemes(item.reasons),
       fromCollections: (item) => !!item.collectionName,
+      multiSourceConsensus: (item) => (item.sources?.length ?? 0) >= 2,
+      internationalCinema: (item) => Boolean(item.original_language && item.original_language !== 'en'),
+      animationPicks: (item) => {
+        if (!item.genres || item.genres.length === 0) return false;
+        const hasAnimation = item.genres.some(g => g === 'Animation');
+        const isDocumentary = item.genres.some(g => g === 'Documentary');
+        return hasAnimation && !isDocumentary;
+      },
+      quickWatches: (item) => Boolean(item.runtime && item.runtime > 0 && item.runtime <= 100),
+      epicFilms: (item) => Boolean(item.runtime && item.runtime >= 150),
+      criticallyAcclaimed: (item) => {
+        const imdbRating = parseFloat(item.imdb_rating || '0');
+        const rtScore = parseInt(item.rotten_tomatoes?.replace('%', '') || '0');
+        const metaScore = parseInt(item.metacritic || '0');
+        return imdbRating >= 8.0 || rtScore >= 90 || metaScore >= 80;
+      },
       perfectMatches: () => true,
       moreRecommendations: () => true,
     };
@@ -588,12 +690,17 @@ export default function SuggestPage() {
         console.error('[Suggest] Failed to fetch feedback', e);
       }
 
+      // Get watchlist films for intent signals
+      const watchlistFilms = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
+      console.log('[Suggest] Watchlist films for taste profile:', watchlistFilms.length);
+
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
         topN: 10,
         negativeFeedbackIds,
-        tmdbDetails: tmdbDetailsMap // Pass pre-fetched details to analyze ALL movies, not just 100
+        tmdbDetails: tmdbDetailsMap, // Pass pre-fetched details to analyze ALL movies, not just 100
+        watchlistFilms // Pass watchlist for intent signals
       });
 
       // Set top decade for UI
@@ -762,10 +869,10 @@ export default function SuggestPage() {
         mappings,
         candidates,
         excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: mode === 'quick' ? 250 : 600,
+        maxCandidates: mode === 'quick' ? 400 : 800,
         concurrency: 6,
         excludeWatchedIds: watchedIds,
-        desiredResults: 150, // Request more suggestions to fill all 15 sections with variety
+        desiredResults: 300, // Increased to fill all 24 sections (24 × 12 = 288 potential items)
         sourceMetadata: smartCandidates.sourceMetadata, // Pass multi-source metadata for badge display
         enhancedProfile: {
           topActors: tasteProfile.topActors,
@@ -835,6 +942,12 @@ export default function SuggestPage() {
             // Extract genres
             const genres = (movie.genres || []).map((g: any) => g.name);
 
+            // Extract additional metadata for new sections
+            const runtime = movie.runtime || undefined;
+            const original_language = movie.original_language || undefined;
+            const spoken_languages = (movie.spoken_languages || []).map((l: any) => l.iso_639_1);
+            const production_countries = (movie.production_countries || []).map((c: any) => c.iso_3166_1);
+
             return {
               id: s.tmdbId,
               title: s.title ?? movie.title ?? `#${s.tmdbId}`,
@@ -851,7 +964,11 @@ export default function SuggestPage() {
               overview: movie.overview,
               contributingFilms: s.contributingFilms,
               sources: s.sources,
-              consensusLevel: s.consensusLevel
+              consensusLevel: s.consensusLevel,
+              runtime,
+              original_language,
+              spoken_languages,
+              production_countries
             };
           }
         } catch (e) {
@@ -871,7 +988,11 @@ export default function SuggestPage() {
           collectionName: undefined,
           genres: [],
           sources: s.sources,
-          consensusLevel: s.consensusLevel
+          consensusLevel: s.consensusLevel,
+          runtime: undefined,
+          original_language: undefined,
+          spoken_languages: undefined,
+          production_countries: undefined
         };
       });
 
@@ -988,10 +1109,14 @@ export default function SuggestPage() {
         .map(f => mappings.get(f.uri))
         .filter((id): id is number => id != null);
 
+      // Get watchlist films for intent signals
+      const watchlistFilmsForMore = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
+
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
-        topN: 10
+        topN: 10,
+        watchlistFilms: watchlistFilmsForMore
       });
 
       const smartCandidates = await generateSmartCandidates({
@@ -1141,11 +1266,15 @@ export default function SuggestPage() {
         console.error('[SectionRefresh] Failed to fetch feedback', e);
       }
 
+      // Get watchlist films for intent signals
+      const watchlistFilmsForRefresh = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
+
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
         topN: 10,
-        negativeFeedbackIds
+        negativeFeedbackIds,
+        watchlistFilms: watchlistFilmsForRefresh
       });
 
       const smartCandidates = await generateSmartCandidates({
@@ -2086,7 +2215,7 @@ export default function SuggestPage() {
               </section>
             )}
 
-            {/* Smart Discovery (Hidden Gems) Section */}}
+            {/* Smart Discovery (Hidden Gems) Section */}
             {categorizedSuggestions.smartDiscovery.length >= 1 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
@@ -2144,7 +2273,7 @@ export default function SuggestPage() {
               </section>
             )}
 
-            {/* Hidden Gems Section */}}
+            {/* Hidden Gems Section */}
             {categorizedSuggestions.hiddenGems.length >= 1 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
@@ -2517,6 +2646,354 @@ export default function SuggestPage() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {categorizedSuggestions.fromCollections.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Multi-Source Consensus Section - Films recommended by multiple sources */}
+            {categorizedSuggestions.multiSourceConsensus.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎯</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Multi-Source Consensus</h2>
+                      <p className="text-xs text-gray-600">Recommended by multiple sources (TMDB, TasteDive, Trakt)</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('multiSourceConsensus')}
+                    disabled={refreshingSections.has('multiSourceConsensus')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('multiSourceConsensus') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.multiSourceConsensus.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* International Cinema Section - Non-English films */}
+            {categorizedSuggestions.internationalCinema.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🌍</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">International Cinema</h2>
+                      <p className="text-xs text-gray-600">World cinema that matches your taste</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('internationalCinema')}
+                    disabled={refreshingSections.has('internationalCinema')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('internationalCinema') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.internationalCinema.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Animation Picks Section */}
+            {categorizedSuggestions.animationPicks.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎨</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Animation Picks</h2>
+                      <p className="text-xs text-gray-600">Animated films for you</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('animationPicks')}
+                    disabled={refreshingSections.has('animationPicks')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('animationPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.animationPicks.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Quick Watches Section - Under 100 minutes */}
+            {categorizedSuggestions.quickWatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">⚡</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Quick Watches</h2>
+                      <p className="text-xs text-gray-600">Great films under 100 minutes</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('quickWatches')}
+                    disabled={refreshingSections.has('quickWatches')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('quickWatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.quickWatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Epic Films Section - Over 150 minutes */}
+            {categorizedSuggestions.epicFilms.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎬</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Epic Films</h2>
+                      <p className="text-xs text-gray-600">Immersive experiences over 2.5 hours</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('epicFilms')}
+                    disabled={refreshingSections.has('epicFilms')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('epicFilms') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.epicFilms.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Critically Acclaimed Section */}
+            {categorizedSuggestions.criticallyAcclaimed.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🏆</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Critically Acclaimed</h2>
+                      <p className="text-xs text-gray-600">Top-rated by critics (IMDB 8+, RT 90%+)</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('criticallyAcclaimed')}
+                    disabled={refreshingSections.has('criticallyAcclaimed')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('criticallyAcclaimed') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.criticallyAcclaimed.map((item) => (
                     <MovieCard
                       key={item.id}
                       id={item.id}

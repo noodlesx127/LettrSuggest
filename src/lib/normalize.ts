@@ -11,6 +11,8 @@ export type FilmEvent = {
 };
 
 export function toNumber(n?: string) {
+  // Empty strings or whitespace-only should return undefined, not 0
+  if (n == null || n.trim() === '') return undefined;
   const x = Number(n);
   return Number.isFinite(x) ? x : undefined;
 }
@@ -26,6 +28,7 @@ export function normalizeData(raw: {
   ratings?: Record<string, string>[];
   watchlist?: Record<string, string>[];
   likesFilms?: Record<string, string>[];
+  reviews?: Record<string, string>[];  // Reviews can have ratings too
 }) {
   const byURI = new Map<string, FilmEvent>();
   const watchedSet = new Set<string>();
@@ -53,7 +56,8 @@ export function normalizeData(raw: {
     if (!uri) continue;
     const rewatch = (r['Rewatch'] ?? '').toLowerCase() === 'yes';
     const rating = toNumber(r['Rating']);
-    const d = r['Date'];
+    // Use 'Watched Date' if available (the actual watch date), fallback to 'Date' (log date)
+    const d = r['Watched Date'] || r['Date'];
     // Count diary entries per URI
     diaryCount.set(uri, (diaryCount.get(uri) ?? 0) + 1);
     // Track latest date lexicographically (YYYY-MM-DD works as string compare)
@@ -67,6 +71,33 @@ export function normalizeData(raw: {
       uri,
       {
         // Set rewatch explicitly to true or false (not undefined)
+        rewatch: isRewatch,
+        rating: rating ?? byURI.get(uri)?.rating,
+        lastDate: d ?? byURI.get(uri)?.lastDate,
+      },
+      { title: r['Name'], year: r['Year'] }
+    );
+  }
+
+  // Process reviews - these can have ratings too (process before ratings.csv to avoid overwrite)
+  for (const r of raw.reviews ?? []) {
+    const uri = r['Letterboxd URI'];
+    if (!uri) continue;
+    const rewatch = (r['Rewatch'] ?? '').toLowerCase() === 'yes';
+    const rating = toNumber(r['Rating']);
+    const d = r['Watched Date'] || r['Date'];
+    
+    // Reviews count as diary entries too
+    diaryCount.set(uri, (diaryCount.get(uri) ?? 0) + 1);
+    if (d) {
+      const prev = latestDate.get(uri);
+      if (!prev || d > prev) latestDate.set(uri, d);
+    }
+    
+    const isRewatch = byURI.get(uri)?.rewatch === true || rewatch;
+    upd(
+      uri,
+      {
         rewatch: isRewatch,
         rating: rating ?? byURI.get(uri)?.rating,
         lastDate: d ?? byURI.get(uri)?.lastDate,
@@ -122,6 +153,7 @@ export function normalizeData(raw: {
       ratings: raw.ratings?.length ?? 0,
       watchlist: raw.watchlist?.length ?? 0,
       likes: raw.likesFilms?.length ?? 0,
+      reviews: raw.reviews?.length ?? 0,
     },
   };
 }

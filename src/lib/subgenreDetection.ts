@@ -152,7 +152,7 @@ export function analyzeSubgenrePatterns(films: Array<{
     }
   }
   
-  // Determine preferred and avoided subgenres (more conservative thresholds)
+  // Determine preferred and avoided subgenres (VERY conservative thresholds)
   for (const [genre, pattern] of patterns.entries()) {
     const totalWatched = Array.from(pattern.subgenres.values()).reduce((sum, s) => sum + s.watched, 0);
     
@@ -167,10 +167,13 @@ export function analyzeSubgenrePatterns(films: Array<{
         pattern.preferredSubgenres.add(subgenre);
       }
       
-      // Avoided: ONLY if we have strong evidence (more conservative)
-      // Require at least 10 watches AND low like ratio < 0.2
-      // OR very rarely watched (< 3% of total) with at least 30 total watched
-      if ((stats.watched >= 10 && likeRatio < 0.2) || (watchRatio < 0.03 && totalWatched >= 30)) {
+      // Avoided: ONLY if we have STRONG evidence of active dislike
+      // REMOVED: the "rarely watched" condition - that's not evidence of dislike!
+      // A user not watching many spy movies doesn't mean they AVOID spy movies
+      // 
+      // New criteria: Must have watched at least 10 films AND actively disliked most (< 20% like ratio)
+      // This ensures we only filter subgenres the user has TRIED and consistently disliked
+      if (stats.watched >= 10 && likeRatio < 0.2) {
         pattern.avoidedSubgenres.add(subgenre);
       }
     }

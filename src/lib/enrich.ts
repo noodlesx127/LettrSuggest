@@ -867,6 +867,7 @@ export async function buildTasteProfile(params: {
   topN?: number;
   negativeFeedbackIds?: number[]; // IDs of movies explicitly dismissed/disliked
   tmdbDetails?: Map<number, any>; // Pre-fetched details to avoid API calls
+  watchlistFilms?: Array<{ uri: string }>; // Watchlist films - show user INTENT
 }): Promise<{
   topGenres: Array<{ id: number; name: string; weight: number }>;
   topKeywords: Array<{ id: number; name: string; weight: number }>;
@@ -891,6 +892,7 @@ export async function buildTasteProfile(params: {
     topN: params.topN,
     negativeFeedbackCount: params.negativeFeedbackIds?.length ?? 0,
     tmdbDetailsCount: params.tmdbDetails?.size ?? 0,
+    watchlistCount: params.watchlistFilms?.length ?? 0,
   });
   
   const topN = params.topN ?? 10;
@@ -939,17 +941,55 @@ export async function buildTasteProfile(params: {
     return weight;
   };
 
+  // === IMPORTANT LOGIC FOR LIKED/DISLIKED ===
+  // Letterboxd ratings scale:
+  //   0.5-1.5 stars = Bad/Poor (DISLIKE)
+  //   2-2.5 stars = Meh/Average (NEUTRAL - not enough signal)
+  //   3+ stars = Good (LIKE)
+  //
+  // CRITICAL: rating = 0 means "no rating" (not "0 stars") - treat same as null!
+  // This happens when Letterboxd exports unrated films as 0 instead of empty.
+  //
+  // A film is considered "liked" if:
+  //   1. User clicked the "like" heart, OR
+  //   2. User rated it >= 3 stars
+  // A film is considered "disliked" if:
+  //   1. User rated it 0.5-1.5 stars AND did NOT click "like"
+  // A film is NEUTRAL (ignored) if:
+  //   1. Just logged without rating or like (rating = null or 0)
+  //   2. Rated 2-2.5 stars - "meh" not strong signal
+  
+  const DISLIKE_THRESHOLD = 1.5;
+  
+  // Helper to check if rating is a real rating (not null/0 which means "no rating")
+  const hasRealRating = (rating: number | null | undefined): boolean => {
+    return rating != null && rating > 0;
+  };
+
   // Get highly-rated/liked films for positive profile
-  // Include "watched" films (unrated) as weak positive signals, unless explicitly disliked
   const likedFilms = params.films.filter(f =>
     params.mappings.has(f.uri) &&
-    (f.liked || (f.rating ?? 3.0) >= 2.5) // Include if Liked OR (Unrated/Rated >= 2.5)
+    (f.liked || (hasRealRating(f.rating) && f.rating! >= 3))
   );
 
   // Get low-rated films for negative signals
-  // IMPORTANT: Exclude "liked" films even if rated low (guilty pleasures)
+  // IMPORTANT: Only 0.5-1.5 stars counts as dislike
+  // rating = 0 means "no rating" NOT "0 stars"!
+  // Exclude "liked" films even if rated low (guilty pleasures)
   const dislikedFilms = params.films.filter(f =>
-    (f.rating ?? 0) < 2.5 && f.rating != null && params.mappings.has(f.uri) && !f.liked
+    hasRealRating(f.rating) && f.rating! <= DISLIKE_THRESHOLD && params.mappings.has(f.uri) && !f.liked
+  );
+
+  // Count "guilty pleasures" - low-rated but liked films (these are NOT treated as dislikes)
+  const guiltyPleasures = params.films.filter(f =>
+    f.liked && hasRealRating(f.rating) && f.rating! <= DISLIKE_THRESHOLD && params.mappings.has(f.uri)
+  );
+
+  // Count neutral films (logged without strong signal)
+  const neutralFilms = params.films.filter(f =>
+    params.mappings.has(f.uri) &&
+    !f.liked &&
+    (!hasRealRating(f.rating) || (f.rating! > DISLIKE_THRESHOLD && f.rating! < 3))
   );
 
   console.log('[TasteProfile] Film filtering:', {
@@ -957,8 +997,13 @@ export async function buildTasteProfile(params: {
     filmsWithMappings: params.films.filter(f => params.mappings.has(f.uri)).length,
     likedFilmsCount: likedFilms.length,
     dislikedFilmsCount: dislikedFilms.length,
+    guiltyPleasuresCount: guiltyPleasures.length,
+    neutralFilmsCount: neutralFilms.length,
+    dislikeThreshold: DISLIKE_THRESHOLD,
+    filmsWithRating0: params.films.filter(f => f.rating === 0).length,
     rewatchFilms: params.films.filter(f => f.rewatch).length,
     likedByLikeFlag: params.films.filter(f => f.liked).length,
+    note: 'rating=0 means "no rating" (same as null), not "0 stars"'
   });
 
   const limit = params.tmdbDetails ? 2000 : 100; // Higher limit if details are pre-fetched
@@ -1039,6 +1084,15 @@ export async function buildTasteProfile(params: {
   const avoidKeywordWeights = new Map<number, { name: string; weight: number }>();
   const avoidDirectorWeights = new Map<number, { name: string; weight: number }>();
 
+  // Track COUNTS of liked vs disliked for ratio-based avoidance
+  // Only avoid something if user dislikes MORE than they like
+  const genreLikedCounts = new Map<number, number>();
+  const keywordLikedCounts = new Map<number, number>();
+  const directorLikedCounts = new Map<number, number>();
+  const genreDislikedCounts = new Map<number, number>();
+  const keywordDislikedCounts = new Map<number, number>();
+  const directorDislikedCounts = new Map<number, number>();
+
   // Accumulate positive weighted preferences
   for (let i = 0; i < likedMovies.length; i++) {
     const movie = likedMovies[i];
@@ -1065,6 +1119,8 @@ export async function buildTasteProfile(params: {
       const name = feats.genres[idx];
       const current = genreWeights.get(id) || { name, weight: 0 };
       genreWeights.set(id, { name, weight: current.weight + (weight * genreFraction) });
+      // Track count for ratio-based avoidance
+      genreLikedCounts.set(id, (genreLikedCounts.get(id) || 0) + 1);
     });
 
     // Keywords with IDs - apply similar fractional weighting
@@ -1074,6 +1130,8 @@ export async function buildTasteProfile(params: {
       const name = feats.keywords[idx];
       const current = keywordWeights.get(id) || { name, weight: 0 };
       keywordWeights.set(id, { name, weight: current.weight + (weight * keywordFraction) });
+      // Track count for ratio-based avoidance
+      keywordLikedCounts.set(id, (keywordLikedCounts.get(id) || 0) + 1);
     });
 
     // Directors with IDs
@@ -1081,6 +1139,8 @@ export async function buildTasteProfile(params: {
       const name = feats.directors[idx];
       const current = directorWeights.get(id) || { name, weight: 0 };
       directorWeights.set(id, { name, weight: current.weight + weight });
+      // Track count for ratio-based avoidance
+      directorLikedCounts.set(id, (directorLikedCounts.get(id) || 0) + 1);
     });
 
     // Actors with IDs (top 5 billed, with billing position weighting)
@@ -1103,15 +1163,31 @@ export async function buildTasteProfile(params: {
   }
 
   // Accumulate negative signals from disliked films
+  // NOTE: Only avoid if user dislikes MORE than they like (ratio-based)
+  // Only films rated <= 1.5 stars are considered "disliked"
+  
   for (let i = 0; i < dislikedMovies.length; i++) {
     const movie = dislikedMovies[i];
     if (!movie) continue;
 
     const film = dislikedFilms[i];
-    const negWeight = Math.abs((film.rating ?? 2.5) - 2.5); // Stronger signal for lower ratings
+    // Use a scaled weight based on how bad the rating is
+    // 0.5 stars = 1.0 weight, 1 star = 0.5 weight, 1.5 stars = 0 weight
+    const negWeight = Math.max(0, (DISLIKE_THRESHOLD - (film.rating ?? DISLIKE_THRESHOLD)) * 1.0);
     const feats = extractFeatures(movie);
 
-    // Genres to avoid
+    // Count disliked films per genre/keyword/director (for ratio checking)
+    feats.genreIds.forEach(id => {
+      genreDislikedCounts.set(id, (genreDislikedCounts.get(id) || 0) + 1);
+    });
+    feats.keywordIds.forEach(id => {
+      keywordDislikedCounts.set(id, (keywordDislikedCounts.get(id) || 0) + 1);
+    });
+    feats.directorIds.forEach(id => {
+      directorDislikedCounts.set(id, (directorDislikedCounts.get(id) || 0) + 1);
+    });
+
+    // Genres to avoid - weights accumulated for final selection
     feats.genreIds.forEach((id, idx) => {
       const name = feats.genres[idx];
       const current = avoidGenreWeights.get(id) || { name, weight: 0 };
@@ -1134,32 +1210,103 @@ export async function buildTasteProfile(params: {
   }
 
   // Accumulate negative signals from explicitly dismissed/negative feedback movies
-  // These are treated as VERY strong negative signals (weight = 3.0)
+  // NOTE: We only learn director/keyword avoidance from these, NOT genre avoidance
+  // Reason: Blocking "Fast X" doesn't mean you hate Action - you just don't want that specific movie
+  // Genre preferences should only come from actual watched film ratings
   for (const movie of negativeFeedbackMovies) {
     if (!movie) continue;
 
     const negWeight = 3.0; // Strong penalty for explicitly dismissed items
     const feats = extractFeatures(movie);
 
-    // Genres to avoid
-    feats.genreIds.forEach((id, idx) => {
-      const name = feats.genres[idx];
-      const current = avoidGenreWeights.get(id) || { name, weight: 0 };
-      avoidGenreWeights.set(id, { name, weight: current.weight + negWeight });
-    });
+    // Do NOT learn genre avoidance from blocked movies - that's too aggressive
+    // A user blocking Harry Potter doesn't mean they hate Fantasy
 
-    // Keywords to avoid
+    // Keywords are more specific, so still learn from those (but with reduced weight)
     feats.keywordIds.forEach((id, idx) => {
       const name = feats.keywords[idx];
       const current = avoidKeywordWeights.get(id) || { name, weight: 0 };
-      avoidKeywordWeights.set(id, { name, weight: current.weight + negWeight });
+      // Use lower weight (1.0) for blocked movies vs disliked (negWeight varies)
+      avoidKeywordWeights.set(id, { name, weight: current.weight + 1.0 });
     });
 
-    // Directors to avoid
+    // Directors to avoid - this makes sense (user may dislike a specific director's style)
     feats.directorIds.forEach((id, idx) => {
       const name = feats.directors[idx];
       const current = avoidDirectorWeights.get(id) || { name, weight: 0 };
       avoidDirectorWeights.set(id, { name, weight: current.weight + negWeight });
+    });
+  }
+
+  // === WATCHLIST PROCESSING ===
+  // Watchlist shows user INTENT - what they WANT to see
+  // This is a positive signal that should:
+  // 1. Boost preferences for genres/keywords/directors on watchlist
+  // 2. Override avoidance signals (if user has X on watchlist, don't avoid X)
+  
+  const watchlistGenreIds = new Set<number>();
+  const watchlistKeywordIds = new Set<number>();
+  const watchlistDirectorIds = new Set<number>();
+  
+  if (params.watchlistFilms && params.watchlistFilms.length > 0) {
+    console.log('[TasteProfile] Processing watchlist for intent signals:', {
+      watchlistCount: params.watchlistFilms.length
+    });
+    
+    // Get TMDB IDs for watchlist films
+    const watchlistIds = params.watchlistFilms
+      .map(f => params.mappings.get(f.uri))
+      .filter((id): id is number => id !== undefined)
+      .slice(0, 200); // Cap to avoid too many API calls
+    
+    console.log('[TasteProfile] Watchlist TMDB IDs found:', watchlistIds.length);
+    
+    // Fetch details for watchlist films
+    const watchlistMovies = await Promise.all(
+      watchlistIds.map(id => fetchDetails(id))
+    );
+    
+    const WATCHLIST_WEIGHT = 0.5; // Moderate boost for watchlist items
+    
+    for (const movie of watchlistMovies) {
+      if (!movie) continue;
+      
+      const feats = extractFeatures(movie);
+      
+      // Track genres user WANTS to see (for override logic)
+      feats.genreIds.forEach((id, idx) => {
+        watchlistGenreIds.add(id);
+        // Also boost the positive weights slightly
+        const name = feats.genres[idx];
+        const current = genreWeights.get(id) || { name, weight: 0 };
+        genreWeights.set(id, { name, weight: current.weight + WATCHLIST_WEIGHT });
+        // Count as "liked" for ratio calculation
+        genreLikedCounts.set(id, (genreLikedCounts.get(id) || 0) + 1);
+      });
+      
+      // Track keywords user WANTS to see
+      feats.keywordIds.forEach((id, idx) => {
+        watchlistKeywordIds.add(id);
+        const name = feats.keywords[idx];
+        const current = keywordWeights.get(id) || { name, weight: 0 };
+        keywordWeights.set(id, { name, weight: current.weight + WATCHLIST_WEIGHT });
+        keywordLikedCounts.set(id, (keywordLikedCounts.get(id) || 0) + 1);
+      });
+      
+      // Track directors user WANTS to see
+      feats.directorIds.forEach((id, idx) => {
+        watchlistDirectorIds.add(id);
+        const name = feats.directors[idx];
+        const current = directorWeights.get(id) || { name, weight: 0 };
+        directorWeights.set(id, { name, weight: current.weight + WATCHLIST_WEIGHT });
+        directorLikedCounts.set(id, (directorLikedCounts.get(id) || 0) + 1);
+      });
+    }
+    
+    console.log('[TasteProfile] Watchlist signals extracted:', {
+      genresOnWatchlist: watchlistGenreIds.size,
+      keywordsOnWatchlist: watchlistKeywordIds.size,
+      directorsOnWatchlist: watchlistDirectorIds.size,
     });
   }
 
@@ -1194,20 +1341,115 @@ export async function buildTasteProfile(params: {
     .slice(0, 3)
     .map(([decade, weight]) => ({ decade, weight }));
 
+  // === RATIO-BASED AVOIDANCE ===
+  // Only avoid something if user dislikes MORE than they like (>60% dislike ratio)
+  // AND it's not on the user's watchlist (watchlist = explicit interest override)
+  // This prevents the system from avoiding things the user actually enjoys
+  
+  const MIN_DISLIKED_FOR_AVOIDANCE = 3;
+  const MIN_DISLIKE_RATIO = 0.6; // Must dislike 60%+ of films with this attribute
+  
+  // Helper to check if item should be avoided based on ratio
+  const shouldAvoid = (likedCount: number, dislikedCount: number, minDisliked: number): boolean => {
+    if (dislikedCount < minDisliked) return false;
+    const total = likedCount + dislikedCount;
+    const dislikeRatio = dislikedCount / total;
+    return dislikeRatio >= MIN_DISLIKE_RATIO;
+  };
+  
+  // Log items that WON'T be avoided because user likes them more than dislikes
+  const protectedByRatio: string[] = [];
+  const protectedByWatchlist: string[] = [];
+  
+  // Filter genres by ratio - only avoid if dislike ratio >= 60% AND not on watchlist
   const avoidGenres = Array.from(avoidGenreWeights.entries())
+    .filter(([id, { name }]) => {
+      // Check watchlist override first
+      if (watchlistGenreIds.has(id)) {
+        protectedByWatchlist.push(`${name}(genre on watchlist)`);
+        return false;
+      }
+      const liked = genreLikedCounts.get(id) || 0;
+      const disliked = genreDislikedCounts.get(id) || 0;
+      if (disliked >= MIN_DISLIKED_FOR_AVOIDANCE && !shouldAvoid(liked, disliked, MIN_DISLIKED_FOR_AVOIDANCE)) {
+        protectedByRatio.push(`${name}(${liked}👍/${disliked}👎)`);
+        return false;
+      }
+      return shouldAvoid(liked, disliked, MIN_DISLIKED_FOR_AVOIDANCE);
+    })
     .sort((a, b) => b[1].weight - a[1].weight)
-    .slice(0, 5) // Top 5 to avoid
+    .slice(0, 5)
     .map(([id, { name, weight }]) => ({ id, name, weight }));
+  
+  if (protectedByRatio.length > 0) {
+    console.log('[TasteProfile] Genres NOT avoided because user likes them more:', protectedByRatio);
+  }
+  if (protectedByWatchlist.length > 0) {
+    console.log('[TasteProfile] Items NOT avoided due to watchlist interest:', protectedByWatchlist);
+  }
+  
+  console.log('[TasteProfile] Genre avoidance analysis:', {
+    genresWithBothLikedAndDisliked: Array.from(genreDislikedCounts.entries())
+      .filter(([id]) => (genreLikedCounts.get(id) || 0) > 0)
+      .map(([id, disliked]) => {
+        const data = avoidGenreWeights.get(id);
+        const liked = genreLikedCounts.get(id) || 0;
+        return `${data?.name || id}(${liked}👍/${disliked}👎)`;
+      }).slice(0, 8),
+    finalAvoidGenres: avoidGenres.map(g => g.name)
+  });
 
+  // Filter keywords by ratio - also check watchlist override
+  const protectedKeywordsByRatio: string[] = [];
   const avoidKeywords = Array.from(avoidKeywordWeights.entries())
+    .filter(([id, { name }]) => {
+      // Check watchlist override first
+      if (watchlistKeywordIds.has(id)) {
+        protectedByWatchlist.push(`${name}(keyword on watchlist)`);
+        return false;
+      }
+      const liked = keywordLikedCounts.get(id) || 0;
+      const disliked = keywordDislikedCounts.get(id) || 0;
+      if (disliked >= 2 && !shouldAvoid(liked, disliked, 2)) {
+        protectedKeywordsByRatio.push(`${name}(${liked}👍/${disliked}👎)`);
+        return false;
+      }
+      return shouldAvoid(liked, disliked, 2);
+    })
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, 5)
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
+  if (protectedKeywordsByRatio.length > 0) {
+    console.log('[TasteProfile] Keywords NOT avoided because user likes them more:', 
+      protectedKeywordsByRatio.slice(0, 10));
+  }
+
+  // Filter directors by ratio - also check watchlist override
+  const protectedDirectorsByRatio: string[] = [];
   const avoidDirectors = Array.from(avoidDirectorWeights.entries())
+    .filter(([id, { name }]) => {
+      // Check watchlist override first
+      if (watchlistDirectorIds.has(id)) {
+        protectedByWatchlist.push(`${name}(director on watchlist)`);
+        return false;
+      }
+      const liked = directorLikedCounts.get(id) || 0;
+      const disliked = directorDislikedCounts.get(id) || 0;
+      if (disliked >= 2 && !shouldAvoid(liked, disliked, 2)) {
+        protectedDirectorsByRatio.push(`${name}(${liked}👍/${disliked}👎)`);
+        return false;
+      }
+      return shouldAvoid(liked, disliked, 2);
+    })
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, 3)
     .map(([id, { name, weight }]) => ({ id, name, weight }));
+
+  if (protectedDirectorsByRatio.length > 0) {
+    console.log('[TasteProfile] Directors NOT avoided because user likes them more:', 
+      protectedDirectorsByRatio);
+  }
 
   console.log('[TasteProfile] Enhanced profile built', {
     topGenres: topGenres.slice(0, 3).map(g => `${g.name}(${g.weight.toFixed(1)})`),
@@ -1217,6 +1459,9 @@ export async function buildTasteProfile(params: {
     topStudios: topStudios.slice(0, 3).map(s => `${s.name}(${s.weight.toFixed(1)})`),
     topDecades: topDecades.map(d => `${d.decade}s(${d.weight.toFixed(1)})`),
     avoidGenres: avoidGenres.map(g => g.name),
+    avoidKeywords: avoidKeywords.map(k => k.name),
+    avoidDirectors: avoidDirectors.map(d => d.name),
+    watchlistOverrides: protectedByWatchlist.length,
     userStats: {
       avgRating: avgRating.toFixed(2),
       stdDev: stdDevRating.toFixed(2),
@@ -1457,9 +1702,12 @@ export async function suggestByOverlap(params: {
   // Wait, let's check how `candidates` is used.
 
   // Also identify watched but NOT liked films for negative signals
+  // IMPORTANT: Respect the "liked" flag - a user may rate a movie low but still enjoy it (guilty pleasure)
+  // Only consider it "disliked" if: rated < 2.5 AND NOT marked as liked
   const watchedNotLiked = params.films.filter((f) =>
-    !f.liked &&
-    (f.rating ?? 0) < 3 &&
+    !f.liked &&                           // Not marked as liked (guilty pleasure check)
+    (f.rating ?? 3) < 2.5 &&              // Rated below 2.5 (neutral=3 default doesn't count)
+    f.rating != null &&                    // Must have an actual rating
     params.mappings.get(f.uri)
   );
   const dislikedIdsAll = watchedNotLiked.map((f) => params.mappings.get(f.uri)!).filter(Boolean) as number[];
@@ -1791,7 +2039,7 @@ export async function suggestByOverlap(params: {
   }
 
   const maxC = Math.min(params.maxCandidates ?? 120, validCandidates.length);
-  const desired = Math.max(10, Math.min(30, params.desiredResults ?? 20));
+  const desired = Math.max(10, Math.min(500, params.desiredResults ?? 50)); // Increased max from 30 to 500 to support 24 sections
 
   // Helper to fetch from cache first in bulk where possible
   async function fetchFromCache(id: number): Promise<TMDBMovie | null> {
@@ -2377,13 +2625,13 @@ export async function suggestByOverlap(params: {
   }>;
   results.sort((a, b) => b.score - a.score);
 
-  // Phase 3: Apply diversity filtering
+  // Phase 3: Apply diversity filtering (limits increased for 24-section UI)
   const diversified = applyDiversityFilter(results, {
-    maxSameDirector: 2,
-    maxSameGenre: 5,
-    maxSameDecade: 4,
-    maxSameStudio: 3,
-    maxSameActor: 3
+    maxSameDirector: 4,
+    maxSameGenre: 15,
+    maxSameDecade: 10,
+    maxSameStudio: 6,
+    maxSameActor: 6
   });
 
   return diversified.slice(0, desired);

@@ -423,6 +423,263 @@ export default function StatsPage() {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
 
+    // === AVOIDANCE TRACKING ===
+    // Track genres, keywords, and directors - comparing LIKED vs DISLIKED
+    // Only avoid something if user dislikes it MORE than they like it
+    
+    // Track both positive and negative signals
+    const genreLikedCount = new Map<string, number>();
+    const genreDislikedCount = new Map<string, number>();
+    const keywordLikedCount = new Map<string, number>();
+    const keywordDislikedCount = new Map<string, number>();
+    const directorLikedCount = new Map<string, number>();
+    const directorDislikedCount = new Map<string, number>();
+
+    // === IMPORTANT LOGIC FOR LIKED/DISLIKED ===
+    // Letterboxd ratings scale:
+    //   0.5-1.5 stars = Bad/Poor (DISLIKE)
+    //   2-2.5 stars = Meh/Average (NEUTRAL - not enough signal)
+    //   3+ stars = Good (LIKE)
+    //
+    // CRITICAL: rating = 0 means "no rating" (not "0 stars") - treat same as null!
+    // This happens when Letterboxd exports unrated films as 0 instead of empty.
+    //
+    // A film is considered "liked" if:
+    //   1. User clicked the "like" heart, OR
+    //   2. User rated it >= 3 stars (positive rating)
+    // A film is considered "disliked" if:
+    //   1. User rated it 0.5-1.5 stars AND did NOT click "like"
+    //   (Rating of 0 means "no rating", 2 is "meh" - neither counts as dislike)
+    // A film is NEUTRAL (ignored for avoidance) if:
+    //   1. Just logged without rating or like - we don't know user's opinion!
+    //   2. Rated 2-2.5 stars - ambiguous "meh" zone, not a strong signal
+    //   3. Rating is 0 - this means "no rating" in Letterboxd exports
+    
+    const DISLIKE_THRESHOLD = 1.5; // Only 0.5-1.5 stars counts as "disliked"
+    
+    // Helper to check if rating is a real rating (not null/0 which means "no rating")
+    const hasRealRating = (rating: number | null | undefined): boolean => {
+      return rating != null && rating > 0;
+    };
+    
+    // Films that are liked (explicit like OR positive rating >= 3)
+    const likedFilmsForAvoidance = filteredFilms.filter(f => 
+      f.liked || (hasRealRating(f.rating) && f.rating! >= 3)
+    );
+
+    // Films that are disliked (very low rating 0.5-1.5 AND not liked)
+    // CRITICAL: rating must be > 0 (real rating) AND <= 1.5
+    // rating = 0 means "no rating" not "0 stars"!
+    const dislikedFilms = filteredFilms.filter(f => 
+      hasRealRating(f.rating) && f.rating! <= DISLIKE_THRESHOLD && !f.liked
+    );
+
+    // Films that are neutral (logged without strong signal)
+    const neutralFilms = filteredFilms.filter(f => 
+      (!hasRealRating(f.rating) && !f.liked) || // Unrated (null or 0) and not liked
+      (hasRealRating(f.rating) && f.rating! > DISLIKE_THRESHOLD && f.rating! < 3 && !f.liked) // 2-2.5 star zone
+    );
+
+    console.log('[AvoidanceProfile] Film categorization:', {
+      totalWatched: filteredFilms.length,
+      likedCount: likedFilmsForAvoidance.length,
+      dislikedCount: dislikedFilms.length,
+      neutralCount: neutralFilms.length,
+      dislikeThreshold: DISLIKE_THRESHOLD,
+      filmsWithRating0: filteredFilms.filter(f => f.rating === 0).length,
+      note: 'rating=0 means "no rating" (same as null), not "0 stars"'
+    });
+
+    // Count LIKED occurrences
+    for (const film of likedFilmsForAvoidance) {
+      const tmdbId = filmMappings.get(film.uri);
+      const details = tmdbId ? tmdbDetails.get(tmdbId) : undefined;
+      if (!details) continue;
+
+      details.genres?.forEach(genre => {
+        genreLikedCount.set(genre.name, (genreLikedCount.get(genre.name) || 0) + 1);
+      });
+
+      const keywords = (details as any).keywords?.keywords || (details as any).keywords?.results || [];
+      keywords.forEach((k: { name: string }) => {
+        keywordLikedCount.set(k.name, (keywordLikedCount.get(k.name) || 0) + 1);
+      });
+
+      details.credits?.crew?.filter(c => c.job === 'Director').forEach(director => {
+        directorLikedCount.set(director.name, (directorLikedCount.get(director.name) || 0) + 1);
+      });
+    }
+
+    // Count DISLIKED occurrences
+    for (const film of dislikedFilms) {
+      const tmdbId = filmMappings.get(film.uri);
+      const details = tmdbId ? tmdbDetails.get(tmdbId) : undefined;
+      if (!details) continue;
+
+      details.genres?.forEach(genre => {
+        genreDislikedCount.set(genre.name, (genreDislikedCount.get(genre.name) || 0) + 1);
+      });
+
+      const keywords = (details as any).keywords?.keywords || (details as any).keywords?.results || [];
+      keywords.forEach((k: { name: string }) => {
+        keywordDislikedCount.set(k.name, (keywordDislikedCount.get(k.name) || 0) + 1);
+      });
+
+      details.credits?.crew?.filter(c => c.job === 'Director').forEach(director => {
+        directorDislikedCount.set(director.name, (directorDislikedCount.get(director.name) || 0) + 1);
+      });
+    }
+
+    // Only avoid if: disliked > liked AND disliked >= minimum threshold
+    // This means user has a NET NEGATIVE experience with this item
+    const MIN_DISLIKED_FOR_AVOIDANCE = 3;
+    const MIN_DISLIKE_RATIO = 0.6; // Must dislike 60%+ of films with this attribute
+
+    const avoidedGenres = Array.from(genreDislikedCount.entries())
+      .filter(([name, disliked]) => {
+        const liked = genreLikedCount.get(name) || 0;
+        const total = liked + disliked;
+        const dislikeRatio = disliked / total;
+        // Avoid only if: 3+ disliked AND dislike ratio > 60%
+        return disliked >= MIN_DISLIKED_FOR_AVOIDANCE && dislikeRatio >= MIN_DISLIKE_RATIO;
+      })
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, disliked]) => {
+        const liked = genreLikedCount.get(name) || 0;
+        return { name, dislikedCount: disliked, likedCount: liked };
+      });
+
+    const avoidedKeywords = Array.from(keywordDislikedCount.entries())
+      .filter(([name, disliked]) => {
+        const liked = keywordLikedCount.get(name) || 0;
+        const total = liked + disliked;
+        const dislikeRatio = disliked / total;
+        // Avoid only if: 2+ disliked AND dislike ratio > 60%
+        return disliked >= 2 && dislikeRatio >= MIN_DISLIKE_RATIO;
+      })
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, disliked]) => {
+        const liked = keywordLikedCount.get(name) || 0;
+        return { name, dislikedCount: disliked, likedCount: liked };
+      });
+
+    const avoidedDirectors = Array.from(directorDislikedCount.entries())
+      .filter(([name, disliked]) => {
+        const liked = directorLikedCount.get(name) || 0;
+        const total = liked + disliked;
+        const dislikeRatio = disliked / total;
+        // Avoid only if: 2+ disliked AND dislike ratio > 60%
+        return disliked >= 2 && dislikeRatio >= MIN_DISLIKE_RATIO;
+      })
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, disliked]) => {
+        const liked = directorLikedCount.get(name) || 0;
+        return { name, dislikedCount: disliked, likedCount: liked };
+      });
+
+    // Track items that WOULD be avoided by count alone but user actually likes them
+    // (disliked >= threshold but liked MORE than disliked)
+    const mixedGenres = Array.from(genreDislikedCount.entries())
+      .filter(([name, disliked]) => {
+        const liked = genreLikedCount.get(name) || 0;
+        // Has significant dislikes but user likes them overall
+        return disliked >= MIN_DISLIKED_FOR_AVOIDANCE && liked > disliked;
+      })
+      .map(([name, disliked]) => {
+        const liked = genreLikedCount.get(name) || 0;
+        return { name, dislikedCount: disliked, likedCount: liked };
+      });
+
+    const mixedDirectors = Array.from(directorDislikedCount.entries())
+      .filter(([name, disliked]) => {
+        const liked = directorLikedCount.get(name) || 0;
+        return disliked >= 2 && liked > disliked;
+      })
+      .map(([name, disliked]) => {
+        const liked = directorLikedCount.get(name) || 0;
+        return { name, dislikedCount: disliked, likedCount: liked };
+      });
+
+    const mixedKeywords = Array.from(keywordDislikedCount.entries())
+      .filter(([name, disliked]) => {
+        const liked = keywordLikedCount.get(name) || 0;
+        return disliked >= 2 && liked > disliked;
+      })
+      .slice(0, 15)
+      .map(([name, disliked]) => {
+        const liked = keywordLikedCount.get(name) || 0;
+        return { name, dislikedCount: disliked, likedCount: liked };
+      });
+
+    // === WATCHLIST ANALYSIS ===
+    // Watchlist shows user INTENT - what they WANT to watch
+    // This is a strong positive signal for taste profile and should override avoidance
+    const watchlistGenreCounts = new Map<string, number>();
+    const watchlistKeywordCounts = new Map<string, number>();
+    const watchlistDirectorCounts = new Map<string, number>();
+    const watchlistActorCounts = new Map<string, number>();
+    
+    for (const film of watchlist) {
+      const tmdbId = filmMappings.get(film.uri);
+      const details = tmdbId ? tmdbDetails.get(tmdbId) : undefined;
+      if (!details) continue;
+
+      // Track genres user WANTS to see
+      details.genres?.forEach(genre => {
+        watchlistGenreCounts.set(genre.name, (watchlistGenreCounts.get(genre.name) || 0) + 1);
+      });
+
+      // Track keywords/themes user WANTS to see
+      const keywords = (details as any).keywords?.keywords || (details as any).keywords?.results || [];
+      keywords.forEach((k: { name: string }) => {
+        watchlistKeywordCounts.set(k.name, (watchlistKeywordCounts.get(k.name) || 0) + 1);
+      });
+
+      // Track directors user WANTS to see
+      details.credits?.crew?.filter(c => c.job === 'Director').forEach(director => {
+        watchlistDirectorCounts.set(director.name, (watchlistDirectorCounts.get(director.name) || 0) + 1);
+      });
+
+      // Track actors user WANTS to see
+      details.credits?.cast?.slice(0, 5).forEach(actor => {
+        watchlistActorCounts.set(actor.name, (watchlistActorCounts.get(actor.name) || 0) + 1);
+      });
+    }
+
+    // Get top items from watchlist (showing user's intent)
+    const watchlistTopGenres = Array.from(watchlistGenreCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, count]) => ({ name, count }));
+
+    const watchlistTopKeywords = Array.from(watchlistKeywordCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([name, count]) => ({ name, count }));
+
+    const watchlistTopDirectors = Array.from(watchlistDirectorCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, count]) => ({ name, count }));
+
+    const watchlistTopActors = Array.from(watchlistActorCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, count]) => ({ name, count }));
+
+    // Find items that would be avoided but user has them on watchlist (override signal)
+    const avoidanceOverrides = {
+      genres: avoidedGenres.filter(g => watchlistGenreCounts.has(g.name))
+        .map(g => ({ ...g, watchlistCount: watchlistGenreCounts.get(g.name) || 0 })),
+      keywords: avoidedKeywords.filter(k => watchlistKeywordCounts.has(k.name))
+        .map(k => ({ ...k, watchlistCount: watchlistKeywordCounts.get(k.name) || 0 })),
+      directors: avoidedDirectors.filter(d => watchlistDirectorCounts.has(d.name))
+        .map(d => ({ ...d, watchlistCount: watchlistDirectorCounts.get(d.name) || 0 })),
+    };
+
     // Categorize studios (indie vs major)
     const indieStudios = ['A24', 'Neon', 'Annapurna Pictures', 'Focus Features', 'Blumhouse Productions',
       'Studio Ghibli', 'Searchlight Pictures', 'Fox Searchlight Pictures', 'IFC Films',
@@ -549,6 +806,22 @@ export default function StatsPage() {
       runtimeStats,
       currentSeason,
       seasonalGenres,
+      // Avoidance data - now based on liked vs disliked ratio
+      dislikedFilmsCount: dislikedFilms.length,
+      likedFilmsCount: likedFilmsForAvoidance.length,
+      avoidedGenres,
+      avoidedKeywords,
+      avoidedDirectors,
+      // Mixed feelings - user has both liked AND disliked but overall positive
+      mixedGenres,
+      mixedDirectors,
+      mixedKeywords,
+      // Watchlist analysis - user intent signals
+      watchlistTopGenres,
+      watchlistTopKeywords,
+      watchlistTopDirectors,
+      watchlistTopActors,
+      avoidanceOverrides,
     };
   }, [filteredFilms, tmdbDetails, films, filmMappings]);
 
@@ -1145,6 +1418,277 @@ export default function StatsPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Watchlist Analysis Section - What the user WANTS to see */}
+      {stats && !loadingDetails && stats.watchlistCount > 0 && (stats.watchlistTopGenres?.length > 0 || stats.watchlistTopDirectors?.length > 0) && (
+        <div className="bg-gradient-to-r from-cyan-50 to-blue-50 border border-cyan-200 rounded-lg p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-gray-900 text-lg">📋 What You Want to Watch</h2>
+            <span className="text-xs text-cyan-700 bg-cyan-100 px-2 py-1 rounded">{stats.watchlistCount} films on watchlist</span>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            Your watchlist shows what you&apos;re interested in — this signals positive intent to the recommendation algorithm.
+          </p>
+
+          {/* Avoidance Overrides - items on watchlist that would otherwise be avoided */}
+          {stats.avoidanceOverrides && (stats.avoidanceOverrides.genres.length > 0 || stats.avoidanceOverrides.keywords.length > 0 || stats.avoidanceOverrides.directors.length > 0) && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
+              <h3 className="font-medium text-green-900 mb-2 text-sm flex items-center gap-2">
+                ✓ Avoidance Overrides
+              </h3>
+              <p className="text-xs text-green-700 mb-3">
+                These would be avoided based on ratings, but your watchlist shows interest — they won&apos;t be filtered out:
+              </p>
+              
+              {stats.avoidanceOverrides.genres.length > 0 && (
+                <div className="mb-2">
+                  <span className="text-xs font-medium text-green-800">Genres: </span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {stats.avoidanceOverrides.genres.map(({ name, watchlistCount }) => (
+                      <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-green-200 text-green-800">
+                        {name} <span className="text-green-600">({watchlistCount} on watchlist)</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {stats.avoidanceOverrides.directors.length > 0 && (
+                <div className="mb-2">
+                  <span className="text-xs font-medium text-green-800">Directors: </span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {stats.avoidanceOverrides.directors.map(({ name, watchlistCount }) => (
+                      <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-blue-200 text-blue-800">
+                        {name} <span className="text-blue-600">({watchlistCount} on watchlist)</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {stats.avoidanceOverrides.keywords.length > 0 && (
+                <div>
+                  <span className="text-xs font-medium text-green-800">Themes: </span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {stats.avoidanceOverrides.keywords.slice(0, 8).map(({ name, watchlistCount }) => (
+                      <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-emerald-200 text-emerald-800">
+                        {name} ({watchlistCount} on watchlist)
+                      </span>
+                    ))}
+                    {stats.avoidanceOverrides.keywords.length > 8 && (
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-gray-200 text-gray-600">
+                        +{stats.avoidanceOverrides.keywords.length - 8} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Watchlist Genres */}
+            {stats.watchlistTopGenres && stats.watchlistTopGenres.length > 0 && (
+              <div className="bg-white rounded-lg p-4 border border-cyan-100">
+                <h3 className="font-medium text-gray-900 mb-2 text-sm">Genres You Want</h3>
+                <div className="flex flex-wrap gap-1">
+                  {stats.watchlistTopGenres.slice(0, 8).map(({ name, count }) => (
+                    <span key={name} className="px-2 py-1 rounded text-xs bg-cyan-100 text-cyan-700">
+                      {name} ({count})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Watchlist Directors */}
+            {stats.watchlistTopDirectors && stats.watchlistTopDirectors.length > 0 && (
+              <div className="bg-white rounded-lg p-4 border border-cyan-100">
+                <h3 className="font-medium text-gray-900 mb-2 text-sm">Directors You Want</h3>
+                <div className="space-y-1">
+                  {stats.watchlistTopDirectors.slice(0, 6).map(({ name, count }) => (
+                    <div key={name} className="flex items-center justify-between">
+                      <span className="text-sm text-gray-700">{name}</span>
+                      <span className="text-xs text-cyan-600">{count} films</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Watchlist Actors */}
+            {stats.watchlistTopActors && stats.watchlistTopActors.length > 0 && (
+              <div className="bg-white rounded-lg p-4 border border-cyan-100">
+                <h3 className="font-medium text-gray-900 mb-2 text-sm">Actors You Want</h3>
+                <div className="space-y-1">
+                  {stats.watchlistTopActors.slice(0, 6).map(({ name, count }) => (
+                    <div key={name} className="flex items-center justify-between">
+                      <span className="text-sm text-gray-700">{name}</span>
+                      <span className="text-xs text-cyan-600">{count} films</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Watchlist Keywords */}
+            {stats.watchlistTopKeywords && stats.watchlistTopKeywords.length > 0 && (
+              <div className="bg-white rounded-lg p-4 border border-cyan-100">
+                <h3 className="font-medium text-gray-900 mb-2 text-sm">Themes You Want</h3>
+                <div className="flex flex-wrap gap-1">
+                  {stats.watchlistTopKeywords.slice(0, 10).map(({ name, count }) => (
+                    <span key={name} className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700">
+                      {name} ({count})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <p className="text-xs text-gray-500 mt-4">
+            💡 Your watchlist helps discover what you want — these patterns boost matching recommendations and can override negative signals.
+          </p>
+        </div>
+      )}
+
+      {/* Avoidance Profile Section - What we're filtering out */}
+      {stats && !loadingDetails && (stats.avoidedGenres?.length > 0 || stats.avoidedKeywords?.length > 0 || stats.avoidedDirectors?.length > 0 || stats.mixedGenres?.length > 0 || stats.mixedKeywords?.length > 0 || stats.mixedDirectors?.length > 0) && (
+        <div className="bg-gradient-to-r from-red-50 to-orange-50 border border-red-200 rounded-lg p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-gray-900 text-lg">🚫 Avoidance Profile</h2>
+            <span className="text-xs text-red-700 bg-red-100 px-2 py-1 rounded">Filters Suggestions</span>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            Comparing {stats.likedFilmsCount} liked films (3+ stars or ❤️) vs {stats.dislikedFilmsCount} disliked films (≤1.5 stars).
+            <strong> Only avoided if you dislike 60%+ of films with that attribute.</strong>
+            <br />
+            <span className="text-xs text-gray-500">Note: Films rated 2-2.5 stars are &quot;meh&quot; (neutral) and don&apos;t count as dislikes. Unrated films are also neutral.</span>
+          </p>
+
+          {/* Mixed Feelings Section - Things user has mixed feelings about */}
+          {((stats.mixedGenres && stats.mixedGenres.length > 0) || 
+            (stats.mixedDirectors && stats.mixedDirectors.length > 0) || 
+            (stats.mixedKeywords && stats.mixedKeywords.length > 0)) && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
+              <h3 className="font-medium text-green-900 mb-2 text-sm flex items-center gap-2">
+                ✓ Mixed Feelings (Not Avoided)
+              </h3>
+              <p className="text-xs text-green-700 mb-3">
+                You&apos;ve disliked some films with these, but you&apos;ve liked MORE — so they&apos;re not avoided:
+              </p>
+              
+              {/* Mixed Genres */}
+              {stats.mixedGenres && stats.mixedGenres.length > 0 && (
+                <div className="mb-2">
+                  <span className="text-xs font-medium text-green-800">Genres: </span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {stats.mixedGenres.map(({ name, likedCount, dislikedCount }) => (
+                      <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-green-200 text-green-800">
+                        {name} <span className="text-green-600">({likedCount}👍 vs {dislikedCount}👎)</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Mixed Directors */}
+              {stats.mixedDirectors && stats.mixedDirectors.length > 0 && (
+                <div className="mb-2">
+                  <span className="text-xs font-medium text-green-800">Directors: </span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {stats.mixedDirectors.map(({ name, likedCount, dislikedCount }) => (
+                      <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-blue-200 text-blue-800">
+                        {name} <span className="text-blue-600">({likedCount}👍 vs {dislikedCount}👎)</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Mixed Keywords */}
+              {stats.mixedKeywords && stats.mixedKeywords.length > 0 && (
+                <div>
+                  <span className="text-xs font-medium text-green-800">Themes: </span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {stats.mixedKeywords.slice(0, 10).map(({ name, likedCount, dislikedCount }) => (
+                      <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-emerald-200 text-emerald-800">
+                        {name} ({likedCount}👍 vs {dislikedCount}👎)
+                      </span>
+                    ))}
+                    {stats.mixedKeywords.length > 10 && (
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-gray-200 text-gray-600">
+                        +{stats.mixedKeywords.length - 10} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-3 gap-4">
+            {/* Avoided Genres */}
+            <div className="bg-white rounded-lg p-4 border border-red-100">
+              <h3 className="font-medium text-gray-900 mb-2 text-sm">Avoided Genres</h3>
+              <p className="text-xs text-gray-500 mb-3">60%+ dislike rate required</p>
+              {stats.avoidedGenres && stats.avoidedGenres.length > 0 ? (
+                <div className="space-y-2">
+                  {stats.avoidedGenres.map(({ name, likedCount, dislikedCount }) => (
+                    <div key={name} className="flex items-center justify-between">
+                      <span className="text-sm text-red-700">{name}</span>
+                      <span className="text-xs text-gray-500">{dislikedCount}👎 vs {likedCount}👍</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">No genres being avoided</p>
+              )}
+            </div>
+
+            {/* Avoided Keywords/Themes */}
+            <div className="bg-white rounded-lg p-4 border border-red-100">
+              <h3 className="font-medium text-gray-900 mb-2 text-sm">Avoided Themes</h3>
+              <p className="text-xs text-gray-500 mb-3">60%+ dislike rate required</p>
+              {stats.avoidedKeywords && stats.avoidedKeywords.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {stats.avoidedKeywords.map(({ name, likedCount, dislikedCount }) => (
+                    <span key={name} className="px-2 py-1 rounded text-xs bg-red-100 text-red-700">
+                      {name} ({dislikedCount}👎/{likedCount}👍)
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">No themes being avoided</p>
+              )}
+            </div>
+
+            {/* Avoided Directors */}
+            <div className="bg-white rounded-lg p-4 border border-red-100">
+              <h3 className="font-medium text-gray-900 mb-2 text-sm">Avoided Directors</h3>
+              <p className="text-xs text-gray-500 mb-3">60%+ dislike rate required</p>
+              {stats.avoidedDirectors && stats.avoidedDirectors.length > 0 ? (
+                <div className="space-y-2">
+                  {stats.avoidedDirectors.map(({ name, likedCount, dislikedCount }) => (
+                    <div key={name} className="flex items-center justify-between">
+                      <span className="text-sm text-red-700">{name}</span>
+                      <span className="text-xs text-gray-500">{dislikedCount}👎 vs {likedCount}👍</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">No directors being avoided</p>
+              )}
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-500 mt-4">
+            💡 &quot;Disliked&quot; = rated ≤1.5 stars. Films rated 2+ stars are not considered dislikes.
+            &quot;Guilty pleasures&quot; (low-rated but ❤️ liked) don&apos;t count as dislikes either.
+            Films just logged without a rating are neutral.
+          </p>
         </div>
       )}
 
