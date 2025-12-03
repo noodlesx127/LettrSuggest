@@ -291,8 +291,9 @@ export default function ImportPage() {
         else if (lower.endsWith('watchlist.csv')) logical = 'watchlist';
         else if (lower.endsWith('reviews.csv')) logical = 'reviews';
         else if (lower.endsWith('tags.csv')) logical = 'tags';
-        else if (lower.endsWith('likes/films.csv')) logical = 'likesFilms';
-        else if (lower.includes('lists/')) logical = 'lists';
+        // Handle both forward slashes (ZIP) and backslashes (Windows folder)
+        else if (lower.endsWith('likes/films.csv') || lower.endsWith('likes\\films.csv')) logical = 'likesFilms';
+        else if (lower.includes('lists/') || lower.includes('lists\\')) logical = 'lists';
 
         if (!logical) continue;
         const text = await f.text();

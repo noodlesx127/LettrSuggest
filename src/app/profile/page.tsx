@@ -124,6 +124,22 @@ export default function ProfilePage() {
       console.log('[Profile] Delete result:', deleteResult, deleteError);
       if (deleteError) throw deleteError;
 
+      // Log what was deleted
+      if (deleteResult?.deleted) {
+        const d = deleteResult.deleted;
+        console.log('[Profile] Deleted data summary:', {
+          filmEvents: d.film_events,
+          filmMappings: d.film_tmdb_map,
+          blockedSuggestions: d.blocked_suggestions,
+          suggestionFeedback: d.suggestion_feedback,
+          explorationStats: d.user_exploration_stats,
+          adjacentPreferences: d.user_adjacent_preferences,
+          savedSuggestions: d.saved_suggestions,
+          reasonPreferences: d.user_reason_preferences,
+          diaryEvents: d.film_diary_events,
+        });
+      }
+
       // Verify deletion
       const { count: remainingCount, error: countError } = await supabase
         .from('film_events')
@@ -131,16 +147,20 @@ export default function ProfilePage() {
         .eq('user_id', uid);
       console.log('[Profile] Verification query:', { remainingCount, countError });
 
-      // 5. Clear local cache
+      // Clear local cache
       clearImportStore();
       if (typeof window !== 'undefined') {
         window.localStorage.removeItem('lettr-import-v1');
+        // Also clear any SWR cache
+        window.localStorage.removeItem('swr-cache');
       }
 
-      // 6. Reset blocked movies state
+      // Reset blocked movies state
       setBlockedMovies([]);
 
-      setSuccess('All your data has been deleted successfully. Reloading page...');
+      const totalDeleted = deleteResult?.deleted ? 
+        Object.values(deleteResult.deleted).reduce((sum: number, n) => sum + (typeof n === 'number' ? n : 0), 0) : 0;
+      setSuccess(`All your data has been deleted (${totalDeleted} records). Reloading page...`);
       setConfirmText('');
       
       // Reload page to clear all cached data and state
