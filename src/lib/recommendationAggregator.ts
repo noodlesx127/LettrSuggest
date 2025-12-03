@@ -201,10 +201,49 @@ async function fetchTMDBRecommendations(
 
     for (const seed of seeds) {
         try {
-            // Note: This would need to call TMDB similar/recommendations API
-            // For now, we'll use the existing trending data as a placeholder
-            // TODO: Implement proper TMDB similar/recommendations fetching
-            console.log('[Aggregator] TMDB recommendations for:', seed.title);
+            // Fetch from our TMDB movie endpoint which includes similar/recommendations
+            const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : (typeof self !== 'undefined' && self.location ? self.location.origin : 'http://localhost'));
+            u.searchParams.set('id', String(seed.tmdbId));
+            
+            const response = await fetch(u.toString());
+            if (!response.ok) continue;
+            
+            const data = await response.json();
+            if (!data.ok || !data.movie) continue;
+            
+            const movie = data.movie;
+            
+            // Process similar movies
+            const similarMovies = movie.similar?.results || [];
+            for (const similar of similarMovies.slice(0, 10)) {
+                recommendations.push({
+                    source: 'tmdb' as const,
+                    tmdbId: similar.id,
+                    title: similar.title,
+                    confidence: 0.85,
+                    reason: `Similar to "${seed.title}"`,
+                });
+            }
+            
+            // Process recommended movies
+            const recommendedMovies = movie.recommendations?.results || [];
+            for (const rec of recommendedMovies.slice(0, 10)) {
+                // Avoid duplicates
+                if (!recommendations.some(r => r.tmdbId === rec.id)) {
+                    recommendations.push({
+                        source: 'tmdb' as const,
+                        tmdbId: rec.id,
+                        title: rec.title,
+                        confidence: 0.9, // Recommendations are slightly more reliable
+                        reason: `Recommended based on "${seed.title}"`,
+                    });
+                }
+            }
+            
+            console.log('[Aggregator] TMDB recommendations for:', seed.title, {
+                similar: similarMovies.length,
+                recommended: recommendedMovies.length
+            });
         } catch (error) {
             console.error('[Aggregator] TMDB fetch error:', error);
         }
@@ -269,10 +308,42 @@ async function fetchTraktRecommendations(
     const recommendations: SourceRecommendation[] = [];
 
     try {
-        // Trakt recommendations are already being fetched in trending.ts
-        // This is a placeholder for the aggregator
-        // The actual Trakt data will come from the existing fetchSimilarMovieIds function
-        console.log('[Aggregator] Trakt recommendations (using existing flow)');
+        // Fetch related movies from Trakt for top 3 seeds
+        const seeds = seedMovies.slice(0, 3);
+        
+        for (const seed of seeds) {
+            try {
+                const u = new URL('/api/trakt/related', typeof window === 'undefined' ? 'http://localhost' : (typeof self !== 'undefined' && self.location ? self.location.origin : 'http://localhost'));
+                u.searchParams.set('id', String(seed.tmdbId));
+                u.searchParams.set('limit', '10');
+                
+                const response = await fetch(u.toString());
+                if (!response.ok) continue;
+                
+                const data = await response.json();
+                if (!data.ok || !data.ids) continue;
+                
+                // Trakt returns TMDB IDs directly
+                for (const tmdbId of data.ids) {
+                    // Avoid duplicates
+                    if (!recommendations.some(r => r.tmdbId === tmdbId)) {
+                        recommendations.push({
+                            source: 'trakt' as const,
+                            tmdbId,
+                            title: '', // We don't have the title from Trakt API response
+                            confidence: 0.75, // Community-driven
+                            reason: `Related to "${seed.title}" (Trakt community)`,
+                        });
+                    }
+                }
+                
+                console.log('[Aggregator] Trakt related for:', seed.title, { count: data.ids?.length || 0 });
+            } catch (err) {
+                console.error('[Aggregator] Trakt error for seed:', seed.title, err);
+            }
+        }
+        
+        console.log('[Aggregator] Trakt total recommendations:', recommendations.length);
     } catch (error) {
         console.error('[Aggregator] Trakt fetch error:', error);
     }

@@ -622,7 +622,8 @@ export default function SuggestPage() {
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors,
         topActors: tasteProfile.topActors,
-        topStudios: tasteProfile.topStudios
+        topStudios: tasteProfile.topStudios,
+        tmdbDetailsMap // Pass details for TasteDive to use titles
       });
 
       // Fetch decade candidates
@@ -634,6 +635,26 @@ export default function SuggestPage() {
 
       // Fetch smart discovery candidates (hidden gems)
       const discoveryCandidates = await getSmartDiscoveryCandidates(tasteProfile);
+
+      // Fetch candidates from TMDB lists containing user's favorites
+      let listCandidates: number[] = [];
+      try {
+        // Build seed films with titles for list discovery
+        const seedFilmsForLists = highlyRated.slice(0, 10).map(tmdbId => {
+          const details = tmdbDetailsMap.get(tmdbId);
+          const film = filteredFilms.find(f => mappings.get(f.uri) === tmdbId);
+          return {
+            tmdbId,
+            title: details?.title ?? '',
+            rating: film?.rating
+          };
+        }).filter(s => s.title);
+
+        listCandidates = await discoverFromLists(seedFilmsForLists);
+        console.log('[Suggest] List candidates:', listCandidates.length);
+      } catch (e) {
+        console.error('[Suggest] List discovery failed', e);
+      }
 
       // Phase 5+: Adaptive exploration rate (5-30% based on user feedback)
       const explorationRate = await getAdaptiveExplorationRate(uid);
@@ -663,6 +684,7 @@ export default function SuggestPage() {
       candidatesRaw.push(...smartCandidates.discovered);
       candidatesRaw.push(...decadeCandidates);
       candidatesRaw.push(...discoveryCandidates);
+      candidatesRaw.push(...listCandidates); // Add list-discovered candidates
       candidatesRaw.push(...exploratoryPicks); // Add exploratory picks
 
       console.log('[Suggest] Smart candidates breakdown', {
@@ -671,6 +693,7 @@ export default function SuggestPage() {
         discovered: smartCandidates.discovered.length,
         decade: decadeCandidates.length,
         discovery: discoveryCandidates.length,
+        lists: listCandidates.length,
         exploratory: exploratoryPicks.length,
         totalRaw: candidatesRaw.length
       });

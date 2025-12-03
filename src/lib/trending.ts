@@ -280,6 +280,7 @@ export async function generateSmartCandidates(profile: {
   topActors?: Array<{ id: number; name: string; weight: number }>;
   topStudios?: Array<{ id: number; name: string; weight: number }>;
   excludeYearRange?: { min?: number; max?: number };
+  tmdbDetailsMap?: Map<number, { title?: string; imdb_id?: string }>;
 }): Promise<{ trending: number[]; similar: number[]; discovered: number[] }> {
   console.log('[SmartCandidates] Generating with enhanced profile', {
     highlyRatedCount: profile.highlyRatedIds.length,
@@ -287,7 +288,8 @@ export async function generateSmartCandidates(profile: {
     topKeywordsCount: profile.topKeywords.length,
     topDirectorsCount: profile.topDirectors.length,
     topActorsCount: profile.topActors?.length ?? 0,
-    topStudiosCount: profile.topStudios?.length ?? 0
+    topStudiosCount: profile.topStudios?.length ?? 0,
+    hasTmdbDetails: !!profile.tmdbDetailsMap
   });
 
   const results = {
@@ -313,20 +315,21 @@ export async function generateSmartCandidates(profile: {
       // Import Server Action (safe for client use)
       const { getAggregatedRecommendations } = await import('@/app/actions/recommendations');
 
-      // Get top 10 highly-rated films as seeds
-      const seedMovies = profile.highlyRatedIds.slice(0, 10).map(tmdbId => ({
-        tmdbId,
-        title: '', // Title not needed for aggregation if we have ID, but aggregator might need it for logging
-      }));
+      // Get top 10 highly-rated films as seeds WITH TITLES from cache
+      const seedMovies = profile.highlyRatedIds.slice(0, 10).map(tmdbId => {
+        const details = profile.tmdbDetailsMap?.get(tmdbId);
+        return {
+          tmdbId,
+          title: details?.title ?? '',
+          imdbId: details?.imdb_id,
+        };
+      }).filter(s => s.title); // Only include seeds where we have a title (TasteDive needs it)
 
-      // We need titles for TasteDive, so let's try to get them from cache or just pass empty
-      // The aggregator fetches details if needed, or we can improve this later.
-      // For now, let's assume the aggregator handles missing titles or we rely on IDs where possible.
-      // Actually, TasteDive NEEDS titles.
-      // Let's rely on the fact that we might have titles in the profile? No, profile only has IDs.
-      // The aggregator's fetchTasteDiveRecommendations uses titles.
-      // We should probably fetch titles here or let the server action handle it.
-      // Let's pass what we have.
+      console.log('[SmartCandidates] Seed movies with titles:', {
+        total: 10,
+        withTitles: seedMovies.length,
+        sampleTitles: seedMovies.slice(0, 3).map(s => s.title)
+      });
 
       const aggregated = await getAggregatedRecommendations({
         seedMovies,

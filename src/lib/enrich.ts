@@ -908,18 +908,23 @@ export async function buildTasteProfile(params: {
       }
     }
 
-    // Genres with IDs
+    // Genres with IDs - FRACTIONAL WEIGHTING
+    // Divide weight among genres so multi-genre films don't over-inflate all genres
+    const genreCount = feats.genreIds.length;
+    const genreFraction = genreCount > 0 ? 1 / Math.sqrt(genreCount) : 1; // Use sqrt for moderate dampening
     feats.genreIds.forEach((id, idx) => {
       const name = feats.genres[idx];
       const current = genreWeights.get(id) || { name, weight: 0 };
-      genreWeights.set(id, { name, weight: current.weight + weight });
+      genreWeights.set(id, { name, weight: current.weight + (weight * genreFraction) });
     });
 
-    // Keywords with IDs
+    // Keywords with IDs - apply similar fractional weighting
+    const keywordCount = feats.keywordIds.length;
+    const keywordFraction = keywordCount > 0 ? 1 / Math.sqrt(Math.min(keywordCount, 10)) : 1;
     feats.keywordIds.forEach((id, idx) => {
       const name = feats.keywords[idx];
       const current = keywordWeights.get(id) || { name, weight: 0 };
-      keywordWeights.set(id, { name, weight: current.weight + weight });
+      keywordWeights.set(id, { name, weight: current.weight + (weight * keywordFraction) });
     });
 
     // Directors with IDs
