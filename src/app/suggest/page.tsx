@@ -1596,6 +1596,13 @@ export default function SuggestPage() {
                       vote_average={item.vote_average}
                       vote_count={item.vote_count}
                       overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -1651,6 +1658,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -1706,6 +1714,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -1761,6 +1770,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -1816,6 +1826,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -1871,6 +1882,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -1926,6 +1938,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -1981,6 +1994,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -2036,13 +2050,14 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
               </section>
             )}
 
-            {/* Smart Discovery (Hidden Gems) Section */}
+            {/* Smart Discovery (Hidden Gems) Section */}}
             {categorizedSuggestions.smartDiscovery.length >= 1 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
@@ -2091,13 +2106,14 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
               </section>
             )}
 
-            {/* Hidden Gems Section */}
+            {/* Hidden Gems Section */}}
             {categorizedSuggestions.hiddenGems.length >= 1 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
@@ -2146,6 +2162,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -2201,6 +2218,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -2256,6 +2274,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -2311,6 +2330,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -2366,6 +2386,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -2421,6 +2442,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
@@ -2476,6 +2498,7 @@ export default function SuggestPage() {
                       rotten_tomatoes={item.rotten_tomatoes}
                       metacritic={item.metacritic}
                       awards={item.awards}
+                      genres={item.genres}
                     />
                   ))}
                 </div>
