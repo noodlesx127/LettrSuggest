@@ -131,8 +131,8 @@ This document outlines the improvements to enhance suggestion quality in LettrSu
 ---
 
 ### 8. Multi-Source Badge Display
-**Status:** 🔴 Not Started  
-**File:** `src/components/MovieCard.tsx`  
+**Status:** ✅ Completed  
+**File:** `src/components/MovieCard.tsx`, `src/lib/trending.ts`, `src/lib/enrich.ts`  
 **Effort:** Low | **Impact:** Medium
 
 **Problem:** Users can't see when a film was recommended by multiple sources (TMDB + TasteDive + Trakt).
@@ -140,10 +140,12 @@ This document outlines the improvements to enhance suggestion quality in LettrSu
 **Why it matters:** Multi-source consensus is a strong quality signal. Showing this builds user trust.
 
 **Implementation:**
-- [ ] Track which sources recommended each candidate in aggregator
-- [ ] Pass source count/names to MovieCard
-- [ ] Display badge like "🎯 Recommended by 3 sources" or source icons
-- [ ] Higher source count could also boost score
+- [x] Updated `generateSmartCandidates` to return `sourceMetadata` map tracking which sources recommended each movie
+- [x] Added `sources` and `consensusLevel` to `suggestByOverlap` params and result type
+- [x] Added `sources` and `consensusLevel` props to MovieCard component
+- [x] Display badge "🎯 N Sources" with color based on consensus level (high=emerald, medium=amber, low=blue)
+- [x] Hover tooltip shows which sources recommended the film (e.g., "Recommended by: TMDB, TasteDive, Trakt")
+- [x] Updated all 17 MovieCard instances in suggest page to pass source data
 
 ---
 
@@ -186,7 +188,7 @@ This document outlines the improvements to enhance suggestion quality in LettrSu
 | ✅ 5 | Genre Display in Cards | Low | Medium | Complete |
 | ✅ 6 | Feedback-Driven Reasons | Medium | Medium | Complete |
 | ✅ 7 | Temporal Preference | Low | Low-Medium | Complete |
-| 🔴 8 | Multi-Source Badge | Low | Medium | Not Started |
+| ✅ 8 | Multi-Source Badge | Low | Medium | Complete |
 | 🔴 9 | Reason Success Display | Medium | Low | Not Started |
 | 🔴 10 | Collection Completion | Medium | Medium | Not Started |
 | ✅ 11 | Weighting System Fixes | Low | Medium | Complete |
@@ -254,7 +256,8 @@ const weights = {
 2. **`da74009`** - Implement recommendation quality improvements (aggregator, TasteDive, lists, fractional weights)
 3. **`756bf50`** - Add genres display to MovieCard and ensure all data props are passed
 4. **`3354e23`** - Add feedback-driven reason weighting and temporal preference matching
-5. **`TBD`** - Fix weighting system issues (studio double-counting, boost caps, discovery boosts)
+5. **`788666c`** - Fix weighting system issues (studio double-counting, boost caps, discovery boosts)
+6. **`TBD`** - Add multi-source badge display to MovieCard
 
 ---
 

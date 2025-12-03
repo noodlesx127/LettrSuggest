@@ -1396,6 +1396,8 @@ export async function suggestByOverlap(params: {
   excludeWatchedIds?: Set<number>;
   desiredResults?: number;
   feedbackMap?: Map<number, 'negative' | 'positive'>;
+  // Multi-source metadata for badge display
+  sourceMetadata?: Map<number, { sources: string[]; consensusLevel: 'high' | 'medium' | 'low' }>;
   enhancedProfile?: {
     topActors: Array<{ id: number; name: string; weight: number }>;
     topStudios: Array<{ id: number; name: string; weight: number }>;
@@ -1422,6 +1424,9 @@ export async function suggestByOverlap(params: {
   directors?: string[];
   studios?: string[];
   actors?: string[];
+  // Multi-source recommendation data
+  sources?: string[];
+  consensusLevel?: 'high' | 'medium' | 'low';
 }>> {
   // Build user profile from liked/highly-rated mapped films.
   // Use as much history as possible, but cap TMDB fetches to avoid huge fan-out
@@ -2325,6 +2330,9 @@ export async function suggestByOverlap(params: {
       }
     }
 
+    // Get source metadata if available (for multi-source badge)
+    const sourceMeta = params.sourceMetadata?.get(cid);
+
     const r = {
       tmdbId: cid,
       score,
@@ -2340,7 +2348,10 @@ export async function suggestByOverlap(params: {
       // Phase 3: For diversity filtering
       directors: feats.directors,
       studios: feats.productionCompanies,
-      actors: feats.cast.slice(0, 3) // Top 3 billed actors
+      actors: feats.cast.slice(0, 3), // Top 3 billed actors
+      // Multi-source recommendation data
+      sources: sourceMeta?.sources,
+      consensusLevel: sourceMeta?.consensusLevel
     };
     resultsAcc.push(r);
     // Early return the result; caller will slice after sorting
@@ -2358,6 +2369,8 @@ export async function suggestByOverlap(params: {
     voteAverage?: number;
     voteCount?: number;
     contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
+    sources?: string[];
+    consensusLevel?: 'high' | 'medium' | 'low';
     directors?: string[];
     studios?: string[];
     actors?: string[];

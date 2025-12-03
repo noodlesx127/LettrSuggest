@@ -33,6 +33,9 @@ type MovieItem = {
   rotten_tomatoes?: string;
   metacritic?: string;
   awards?: string;
+  // Multi-source recommendation data
+  sources?: string[];
+  consensusLevel?: 'high' | 'medium' | 'low';
 };
 
 type CategorizedSuggestions = {
@@ -763,6 +766,7 @@ export default function SuggestPage() {
         concurrency: 6,
         excludeWatchedIds: watchedIds,
         desiredResults: 150, // Request more suggestions to fill all 15 sections with variety
+        sourceMetadata: smartCandidates.sourceMetadata, // Pass multi-source metadata for badge display
         enhancedProfile: {
           topActors: tasteProfile.topActors,
           topStudios: tasteProfile.topStudios,
@@ -845,7 +849,9 @@ export default function SuggestPage() {
               vote_average: movie.vote_average,
               vote_count: movie.vote_count,
               overview: movie.overview,
-              contributingFilms: s.contributingFilms
+              contributingFilms: s.contributingFilms,
+              sources: s.sources,
+              consensusLevel: s.consensusLevel
             };
           }
         } catch (e) {
@@ -863,7 +869,9 @@ export default function SuggestPage() {
           trailerKey: null,
           voteCategory: 'standard' as const,
           collectionName: undefined,
-          genres: []
+          genres: [],
+          sources: s.sources,
+          consensusLevel: s.consensusLevel
         };
       });
 
@@ -1606,6 +1614,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -1662,6 +1672,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -1718,6 +1730,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -1774,6 +1788,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -1830,6 +1846,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -1886,6 +1904,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -1942,6 +1962,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -1998,6 +2020,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -2054,6 +2078,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -2110,6 +2136,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -2166,6 +2194,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -2222,6 +2252,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -2278,6 +2310,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -2334,6 +2368,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -2390,6 +2426,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -2446,6 +2484,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>
@@ -2502,6 +2542,8 @@ export default function SuggestPage() {
                       metacritic={item.metacritic}
                       awards={item.awards}
                       genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
                     />
                   ))}
                 </div>

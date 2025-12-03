@@ -281,7 +281,12 @@ export async function generateSmartCandidates(profile: {
   topStudios?: Array<{ id: number; name: string; weight: number }>;
   excludeYearRange?: { min?: number; max?: number };
   tmdbDetailsMap?: Map<number, { title?: string; imdb_id?: string }>;
-}): Promise<{ trending: number[]; similar: number[]; discovered: number[] }> {
+}): Promise<{ 
+  trending: number[]; 
+  similar: number[]; 
+  discovered: number[]; 
+  sourceMetadata: Map<number, { sources: string[]; consensusLevel: 'high' | 'medium' | 'low' }>;
+}> {
   console.log('[SmartCandidates] Generating with enhanced profile', {
     highlyRatedCount: profile.highlyRatedIds.length,
     topGenresCount: profile.topGenres.length,
@@ -295,7 +300,8 @@ export async function generateSmartCandidates(profile: {
   const results = {
     trending: [] as number[],
     similar: [] as number[],
-    discovered: [] as number[]
+    discovered: [] as number[],
+    sourceMetadata: new Map<number, { sources: string[]; consensusLevel: 'high' | 'medium' | 'low' }>()
   };
 
   // 1. Trending movies (randomize between day/week for variety)
@@ -336,15 +342,22 @@ export async function generateSmartCandidates(profile: {
         limit: 50,
       });
 
-      // Add high-scoring recommendations
+      // Add high-scoring recommendations and track source metadata
       for (const rec of aggregated) {
         // Only add if score is decent
         if (rec.score > 0.5) {
           results.similar.push(rec.tmdbId);
+          
+          // Store source metadata for multi-source badge display
+          results.sourceMetadata.set(rec.tmdbId, {
+            sources: rec.sources.map(s => s.source),
+            consensusLevel: rec.consensusLevel
+          });
         }
       }
 
-      console.log('[SmartCandidates] Aggregated recommendations added:', results.similar.length);
+      console.log('[SmartCandidates] Aggregated recommendations added:', results.similar.length, 
+        'with source tracking:', results.sourceMetadata.size);
     }
   } catch (e) {
     console.error('[SmartCandidates] Multi-source aggregation failed', e);
