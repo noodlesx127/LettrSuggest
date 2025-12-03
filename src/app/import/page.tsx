@@ -234,6 +234,14 @@ export default function ImportPage() {
         const entries = Object.keys(zip.files);
         console.log('[Import] ZIP entries', entries.length);
         for (const entry of entries) {
+          // Skip files in deleted/ or orphaned/ subdirectories
+          const lowerEntry = entry.toLowerCase();
+          if (lowerEntry.includes('/deleted/') || lowerEntry.includes('/orphaned/') ||
+              lowerEntry.startsWith('deleted/') || lowerEntry.startsWith('orphaned/')) {
+            console.log('[Import] Skipping deleted/orphaned file:', entry);
+            continue;
+          }
+          
           const key = entry.replace(/^.*\//, '').toLowerCase();
           // support likes/films.csv nested path
           const logical = ((): keyof ParsedData | null => {
@@ -243,8 +251,8 @@ export default function ImportPage() {
             if (key === 'watchlist.csv') return 'watchlist';
             if (key === 'reviews.csv') return 'reviews';
             if (key === 'tags.csv') return 'tags';
-            if (entry.toLowerCase().endsWith('likes/films.csv')) return 'likesFilms';
-            if (entry.toLowerCase().includes('lists/') && entry.toLowerCase().endsWith('.csv')) return 'lists';
+            if (lowerEntry.endsWith('likes/films.csv')) return 'likesFilms';
+            if (lowerEntry.includes('lists/') && lowerEntry.endsWith('.csv')) return 'lists';
             return null;
           })();
           if (!logical) continue;
@@ -268,6 +276,14 @@ export default function ImportPage() {
       for (const f of fileArr) {
         if (!f.name.toLowerCase().endsWith('.csv')) continue;
         const lower = f.webkitRelativePath?.toLowerCase() || f.name.toLowerCase();
+        
+        // Skip files from deleted/ and orphaned/ subdirectories
+        if (lower.includes('/deleted/') || lower.includes('/orphaned/') || 
+            lower.includes('\\deleted\\') || lower.includes('\\orphaned\\')) {
+          console.log('[Import] skipping deleted/orphaned file:', lower);
+          continue;
+        }
+        
         let logical: keyof ParsedData | null = null;
         if (lower.endsWith('watched.csv')) logical = 'watched';
         else if (lower.endsWith('diary.csv')) logical = 'diary';

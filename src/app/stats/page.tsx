@@ -19,6 +19,10 @@ type TMDBDetails = {
     cast?: Array<{ id: number; name: string; profile_path?: string; order?: number }>;
     crew?: Array<{ id: number; name: string; job?: string; profile_path?: string }>;
   };
+  keywords?: {
+    keywords?: Array<{ id: number; name: string }>;
+    results?: Array<{ id: number; name: string }>;
+  };
 };
 
 export default function StatsPage() {
@@ -29,6 +33,7 @@ export default function StatsPage() {
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [uid, setUid] = useState<string | null>(null);
   const [filmMappings, setFilmMappings] = useState<Map<string, number>>(new Map());
+  const [mappingCoverage, setMappingCoverage] = useState<{ mapped: number; total: number } | null>(null);
   const [explorationStats, setExplorationStats] = useState<{
     exploration_rate: number;
     exploratory_films_rated: number;
@@ -154,7 +159,10 @@ export default function StatsPage() {
 
         // Filter to only mappings for currently filtered films
         const relevantMappings = allMappings.filter(m => filteredUris.has(m.uri));
-        console.log('[Stats] Relevant mappings:', relevantMappings.length);
+        console.log('[Stats] Relevant mappings:', relevantMappings.length, 'of', filteredUris.size, 'films');
+
+        // Track mapping coverage for UI feedback
+        setMappingCoverage({ mapped: relevantMappings.length, total: filteredUris.size });
 
         relevantMappings.forEach(m => mappingsMap.set(m.uri, m.tmdb_id));
         setFilmMappings(mappingsMap);
@@ -544,6 +552,67 @@ export default function StatsPage() {
     };
   }, [filteredFilms, tmdbDetails, films, filmMappings]);
 
+  // Log taste profile build details for debugging
+  useEffect(() => {
+    if (!stats) return;
+    
+    console.log('=== TASTE PROFILE BUILD DEBUG ===');
+    console.log('[TasteProfile] Input data:', {
+      filteredFilmsCount: filteredFilms.length,
+      tmdbDetailsCount: tmdbDetails.size,
+      filmMappingsCount: filmMappings.size,
+      mappingCoverage: mappingCoverage,
+    });
+    
+    console.log('[TasteProfile] Genre Analysis:', {
+      topGenresByWeight: stats.topGenresByWeight,
+      topGenresRaw: stats.topGenres,
+    });
+    
+    console.log('[TasteProfile] Directors:', {
+      topDirectorsByWeight: stats.topDirectorsByWeight,
+      topDirectorsRaw: stats.topDirectors,
+    });
+    
+    console.log('[TasteProfile] Actors:', {
+      topActorsByWeight: stats.topActorsByWeight,
+      topActorsRaw: stats.topActors,
+    });
+    
+    console.log('[TasteProfile] Keywords/Themes:', {
+      topKeywords: stats.topKeywords,
+    });
+    
+    console.log('[TasteProfile] Studios:', {
+      topStudios: stats.topStudios,
+      studioPreference: stats.studioPreference,
+    });
+    
+    console.log('[TasteProfile] Era/Decade Preferences:', {
+      topDecades: stats.topDecades,
+    });
+    
+    console.log('[TasteProfile] Other Stats:', {
+      avgRating: stats.avgRating,
+      rewatchedCount: stats.rewatchedCount,
+      likedCount: stats.likedCount,
+      absoluteFavorites: stats.absoluteFavorites,
+      runtimeStats: stats.runtimeStats,
+    });
+    
+    // Check if taste profile will show
+    const willShowTasteProfile = stats.topGenresByWeight.length > 0;
+    console.log('[TasteProfile] Will show Taste Profile section:', willShowTasteProfile);
+    if (!willShowTasteProfile) {
+      console.warn('[TasteProfile] ⚠️ Taste Profile will NOT show - no genre data!');
+      console.warn('[TasteProfile] Possible causes:');
+      console.warn('  1. TMDB enrichment failed (check for 401 errors)');
+      console.warn('  2. No film_tmdb_map entries for user');
+      console.warn('  3. tmdb_movies cache is empty');
+    }
+    console.log('=== END TASTE PROFILE DEBUG ===');
+  }, [stats, filteredFilms.length, tmdbDetails.size, filmMappings.size, mappingCoverage]);
+
   if (loading) {
     return (
       <AuthGate>
@@ -668,8 +737,27 @@ export default function StatsPage() {
         </div>
       </div>
 
+      {/* Enrichment Warning - show if less than 50% of films are mapped */}
+      {mappingCoverage && mappingCoverage.mapped < mappingCoverage.total * 0.5 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start gap-3">
+            <span className="text-xl">⚠️</span>
+            <div>
+              <h3 className="font-medium text-amber-800">Incomplete Film Enrichment</h3>
+              <p className="text-sm text-amber-700 mt-1">
+                Only {mappingCoverage.mapped} of {mappingCoverage.total} films ({Math.round(mappingCoverage.mapped / mappingCoverage.total * 100)}%) 
+                have TMDB data. This affects Taste Profile, Suggestions, and detailed stats.
+              </p>
+              <p className="text-sm text-amber-700 mt-1">
+                <a href="/import" className="underline font-medium">Re-import your data</a> to complete enrichment and unlock full features.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Taste Profile - Weighted Preferences (Powers Suggestions) */}
-      {!loadingDetails && stats.topKeywords.length > 0 && (
+      {!loadingDetails && stats.topGenresByWeight.length > 0 && (
         <>
           <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
@@ -721,20 +809,22 @@ export default function StatsPage() {
             </div>
 
             {/* Top Keywords/Themes */}
-            <div className="mb-4">
-              <h3 className="font-medium text-gray-900 mb-2 text-sm">Top Themes & Keywords (Weighted)</h3>
-              <div className="flex flex-wrap gap-2">
-                {stats.topKeywords.slice(0, 12).map(([keyword, weight]) => {
-                  const strength = weight >= 3.0 ? 'strong' : weight >= 1.5 ? 'moderate' : 'light';
-                  const colorClass = strength === 'strong' ? 'bg-emerald-600 text-white' : strength === 'moderate' ? 'bg-emerald-400 text-white' : 'bg-emerald-200 text-emerald-900';
-                  return (
-                    <span key={keyword} className={`px-3 py-1 rounded-full text-xs font-medium ${colorClass}`}>
-                      {keyword} ({weight.toFixed(1)})
-                    </span>
-                  );
-                })}
+            {stats.topKeywords.length > 0 && (
+              <div className="mb-4">
+                <h3 className="font-medium text-gray-900 mb-2 text-sm">Top Themes & Keywords (Weighted)</h3>
+                <div className="flex flex-wrap gap-2">
+                  {stats.topKeywords.slice(0, 12).map(([keyword, weight]) => {
+                    const strength = weight >= 3.0 ? 'strong' : weight >= 1.5 ? 'moderate' : 'light';
+                    const colorClass = strength === 'strong' ? 'bg-emerald-600 text-white' : strength === 'moderate' ? 'bg-emerald-400 text-white' : 'bg-emerald-200 text-emerald-900';
+                    return (
+                      <span key={keyword} className={`px-3 py-1 rounded-full text-xs font-medium ${colorClass}`}>
+                        {keyword} ({weight.toFixed(1)})
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Top Directors by Weight */}
             {stats.topDirectorsByWeight.length > 0 && (

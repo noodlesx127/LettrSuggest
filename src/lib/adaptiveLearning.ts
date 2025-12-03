@@ -273,14 +273,15 @@ export async function updateGenreTransitions(
             .select('tmdb_id, data')
             .in('tmdb_id', tmdbIds);
 
-        const tmdbToGenres = new Map<number, string[]>();
+        // Store both genre names AND ids
+        const tmdbToGenres = new Map<number, Array<{ id: number; name: string }>>();
         movieData?.forEach(row => {
-            const genres = row.data.genres?.map((g: any) => g.name) || [];
+            const genres = row.data.genres?.map((g: any) => ({ id: g.id, name: g.name })) || [];
             tmdbToGenres.set(row.tmdb_id, genres);
         });
 
         // 3. Analyze transitions
-        const transitions = new Map<string, { success: number, total: number }>();
+        const transitions = new Map<string, { success: number, total: number, fromId: number, toId: number, fromName: string, toName: string }>();
 
         for (let i = 0; i < recentFilms.length - 1; i++) {
             const current = recentFilms[i];
@@ -304,10 +305,10 @@ export async function updateGenreTransitions(
                 const fromGenre = currentGenres[0];
                 const toGenre = nextGenres[0];
 
-                if (fromGenre === toGenre) continue; // Skip same-genre transitions for now
+                if (fromGenre.name === toGenre.name) continue; // Skip same-genre transitions for now
 
-                const key = `${fromGenre}|${toGenre}`;
-                const stats = transitions.get(key) || { success: 0, total: 0 };
+                const key = `${fromGenre.id}|${toGenre.id}`;
+                const stats = transitions.get(key) || { success: 0, total: 0, fromId: fromGenre.id, toId: toGenre.id, fromName: fromGenre.name, toName: toGenre.name };
 
                 stats.total++;
                 // A "successful" transition is one where the NEXT film was rated highly (>= 3.5)
@@ -321,15 +322,15 @@ export async function updateGenreTransitions(
 
         // 4. Update Database
         for (const [key, stats] of transitions.entries()) {
-            const [from, to] = key.split('|');
+            const { fromId, toId, fromName, toName } = stats as any;
 
-            // Fetch existing
+            // Fetch existing using genre IDs (which is the unique constraint)
             const { data: existing } = await supabase
                 .from('user_adjacent_preferences')
                 .select('*')
                 .eq('user_id', userId)
-                .eq('from_genre_name', from)
-                .eq('to_genre_name', to)
+                .eq('from_genre_id', fromId)
+                .eq('to_genre_id', toId)
                 .maybeSingle();
 
             const oldTotal = existing?.rating_count || 0;
@@ -340,16 +341,22 @@ export async function updateGenreTransitions(
             const newSuccessCount = oldSuccessCount + stats.success;
             const newSuccessRate = newTotal > 0 ? newSuccessCount / newTotal : 0;
 
-            await supabase
+            const { error } = await supabase
                 .from('user_adjacent_preferences')
                 .upsert({
                     user_id: userId,
-                    from_genre_name: from,
-                    to_genre_name: to,
+                    from_genre_id: fromId,
+                    from_genre_name: fromName,
+                    to_genre_id: toId,
+                    to_genre_name: toName,
                     success_rate: newSuccessRate,
                     rating_count: newTotal,
                     last_updated: new Date().toISOString()
-                });
+                }, { onConflict: 'user_id,from_genre_id,to_genre_id' });
+            
+            if (error) {
+                console.error('[AdaptiveLearning] Error upserting transition', { fromName, toName, error });
+            }
         }
 
         console.log('[AdaptiveLearning] Transitions updated', { count: transitions.size });

@@ -18,6 +18,7 @@ export function ImportDataProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   // Load from Supabase on mount, with localStorage as fallback
+  // IMPORTANT: Use whichever source has MORE data (more complete import)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -26,7 +27,20 @@ export function ImportDataProvider({ children }: { children: ReactNode }) {
       setLoading(true);
 
       try {
-        // First, try to load from Supabase
+        // Load from localStorage first
+        let localFilms: FilmEvent[] = [];
+        try {
+          const raw = window.localStorage.getItem(LS_KEY);
+          if (raw) {
+            localFilms = JSON.parse(raw) as FilmEvent[];
+            console.log('[ImportStore] Found localStorage data', { count: localFilms.length });
+          }
+        } catch (e) {
+          console.warn('[ImportStore] Failed to parse localStorage', e);
+        }
+
+        // Try to load from Supabase
+        let supabaseFilms: FilmEvent[] = [];
         if (supabase) {
           const { data: sessionData } = await supabase.auth.getSession();
           const uid = sessionData?.session?.user?.id;
@@ -41,7 +55,7 @@ export function ImportDataProvider({ children }: { children: ReactNode }) {
 
             if (!error && data && data.length > 0) {
               console.log('[ImportStore] Loaded from Supabase', { count: data.length });
-              const mapped: FilmEvent[] = data.map(row => ({
+              supabaseFilms = data.map(row => ({
                 uri: row.uri,
                 title: row.title,
                 year: row.year,
@@ -52,22 +66,32 @@ export function ImportDataProvider({ children }: { children: ReactNode }) {
                 liked: row.liked ?? false,
                 onWatchlist: row.on_watchlist ?? false
               }));
-              setFilmsState(mapped);
-              // Cache to localStorage
-              window.localStorage.setItem(LS_KEY, JSON.stringify(mapped));
-              setLoading(false);
-              return;
             }
           }
         }
 
-        // Fallback to localStorage if Supabase fails or no data
-        console.log('[ImportStore] Falling back to localStorage');
-        const raw = window.localStorage.getItem(LS_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as FilmEvent[];
-          console.log('[ImportStore] Loaded from localStorage', { count: parsed.length });
-          setFilmsState(parsed);
+        // Use whichever source has MORE films (indicates more complete data)
+        // This handles the case where enrichment was interrupted and localStorage has the full import
+        if (localFilms.length > supabaseFilms.length) {
+          console.log('[ImportStore] Using localStorage (more complete)', { 
+            localStorage: localFilms.length, 
+            supabase: supabaseFilms.length 
+          });
+          setFilmsState(localFilms);
+        } else if (supabaseFilms.length > 0) {
+          console.log('[ImportStore] Using Supabase', { 
+            localStorage: localFilms.length, 
+            supabase: supabaseFilms.length 
+          });
+          setFilmsState(supabaseFilms);
+          // Update localStorage with Supabase data
+          window.localStorage.setItem(LS_KEY, JSON.stringify(supabaseFilms));
+        } else if (localFilms.length > 0) {
+          console.log('[ImportStore] Using localStorage (only source)', { count: localFilms.length });
+          setFilmsState(localFilms);
+        } else {
+          console.log('[ImportStore] No film data found in either source');
+          setFilmsState(null);
         }
       } catch (e) {
         console.error('[ImportStore] Error loading films', e);
