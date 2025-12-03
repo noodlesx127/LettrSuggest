@@ -16,12 +16,12 @@ export async function GET(req: Request) {
     }
 
     const tmdbUrl = new URL('https://api.themoviedb.org/3/search/movie');
+    tmdbUrl.searchParams.set('api_key', apiKey);
     tmdbUrl.searchParams.set('query', query);
     if (year) tmdbUrl.searchParams.set('year', year);
 
     const r = await fetch(tmdbUrl.toString(), {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         Accept: 'application/json',
       },
       // Reasonable timeout with AbortController if desired in future

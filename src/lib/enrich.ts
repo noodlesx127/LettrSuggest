@@ -140,6 +140,48 @@ export async function getFilmMappings(userId: string, uris: string[]) {
   return map;
 }
 
+/**
+ * Bulk fetch TMDB movie details from cache for a list of IDs.
+ * This avoids individual API calls by fetching from Supabase tmdb_movies table.
+ * @param tmdbIds - Array of TMDB IDs to fetch
+ * @returns Map of TMDB ID to movie details
+ */
+export async function getBulkTmdbDetails(tmdbIds: number[]): Promise<Map<number, TMDBMovie>> {
+  const detailsMap = new Map<number, TMDBMovie>();
+  if (!supabase || tmdbIds.length === 0) return detailsMap;
+
+  console.log('[BulkTmdb] Fetching cached details', { count: tmdbIds.length });
+
+  try {
+    // Fetch in chunks of 500 to avoid query limits
+    const chunkSize = 500;
+    for (let i = 0; i < tmdbIds.length; i += chunkSize) {
+      const chunk = tmdbIds.slice(i, i + chunkSize);
+      const { data, error } = await supabase
+        .from('tmdb_movies')
+        .select('tmdb_id, data')
+        .in('tmdb_id', chunk);
+
+      if (error) {
+        console.error('[BulkTmdb] Error fetching chunk', { error, chunkStart: i });
+        continue;
+      }
+
+      for (const row of data ?? []) {
+        if (row.tmdb_id && row.data) {
+          detailsMap.set(row.tmdb_id, row.data as TMDBMovie);
+        }
+      }
+    }
+
+    console.log('[BulkTmdb] Fetched details', { requested: tmdbIds.length, found: detailsMap.size });
+  } catch (e) {
+    console.error('[BulkTmdb] Exception', e);
+  }
+
+  return detailsMap;
+}
+
 export async function blockSuggestion(userId: string, tmdbId: number) {
   if (!supabase) throw new Error('Supabase not initialized');
   const { error } = await supabase.from('blocked_suggestions').insert({ user_id: userId, tmdb_id: tmdbId });
@@ -693,6 +735,15 @@ export async function buildTasteProfile(params: {
     rewatchRate: number;
   };
 }> {
+  console.log('=== BUILD TASTE PROFILE START ===');
+  console.log('[TasteProfile] Input params:', {
+    filmsCount: params.films.length,
+    mappingsCount: params.mappings.size,
+    topN: params.topN,
+    negativeFeedbackCount: params.negativeFeedbackIds?.length ?? 0,
+    tmdbDetailsCount: params.tmdbDetails?.size ?? 0,
+  });
+  
   const topN = params.topN ?? 10;
 
   // Calculate user statistics
@@ -752,6 +803,15 @@ export async function buildTasteProfile(params: {
     (f.rating ?? 0) < 2.5 && f.rating != null && params.mappings.has(f.uri) && !f.liked
   );
 
+  console.log('[TasteProfile] Film filtering:', {
+    totalFilms: params.films.length,
+    filmsWithMappings: params.films.filter(f => params.mappings.has(f.uri)).length,
+    likedFilmsCount: likedFilms.length,
+    dislikedFilmsCount: dislikedFilms.length,
+    rewatchFilms: params.films.filter(f => f.rewatch).length,
+    likedByLikeFlag: params.films.filter(f => f.liked).length,
+  });
+
   const limit = params.tmdbDetails ? 2000 : 100; // Higher limit if details are pre-fetched
 
   const likedIds = likedFilms
@@ -763,6 +823,12 @@ export async function buildTasteProfile(params: {
     .map(f => params.mappings.get(f.uri)!)
     .filter(Boolean)
     .slice(0, 50); // Cap negative signals
+
+  console.log('[TasteProfile] TMDB IDs to fetch:', {
+    likedIdsCount: likedIds.length,
+    dislikedIdsCount: dislikedIds.length,
+    limit: limit,
+  });
 
   // Fetch movie details (use pre-fetched if available)
   const fetchDetails = async (id: number) => {
@@ -777,6 +843,39 @@ export async function buildTasteProfile(params: {
     Promise.all(dislikedIds.map(id => fetchDetails(id))),
     Promise.all((params.negativeFeedbackIds || []).map(id => fetchDetails(id)))
   ]);
+
+  // Log details fetch results
+  const likedWithData = likedMovies.filter(m => m != null);
+  const likedWithGenres = likedMovies.filter(m => m?.genres?.length > 0);
+  const likedWithKeywords = likedMovies.filter(m => {
+    const kws = m?.keywords?.keywords || m?.keywords?.results || [];
+    return kws.length > 0;
+  });
+  const likedWithCredits = likedMovies.filter(m => m?.credits?.crew?.length > 0);
+
+  console.log('[TasteProfile] Movie details fetched:', {
+    likedMoviesTotal: likedMovies.length,
+    likedMoviesWithData: likedWithData.length,
+    likedMoviesWithGenres: likedWithGenres.length,
+    likedMoviesWithKeywords: likedWithKeywords.length,
+    likedMoviesWithCredits: likedWithCredits.length,
+    dislikedMoviesTotal: dislikedMovies.length,
+    dislikedMoviesWithData: dislikedMovies.filter(m => m != null).length,
+    negativeFeedbackMovies: negativeFeedbackMovies.length,
+  });
+
+  // Sample a few movies to see their data quality
+  if (likedWithData.length > 0) {
+    const sample = likedWithData[0];
+    console.log('[TasteProfile] Sample movie data:', {
+      title: sample?.title,
+      genres: sample?.genres?.map((g: any) => g.name),
+      keywordCount: (sample?.keywords?.keywords || sample?.keywords?.results || []).length,
+      castCount: sample?.credits?.cast?.length ?? 0,
+      crewCount: sample?.credits?.crew?.length ?? 0,
+      directors: sample?.credits?.crew?.filter((c: any) => c.job === 'Director').map((d: any) => d.name),
+    });
+  }
 
   // Positive profile weights
   const genreWeights = new Map<number, { name: string; weight: number }>();
@@ -970,6 +1069,8 @@ export async function buildTasteProfile(params: {
       rewatchRate: (rewatchRate * 100).toFixed(1) + '%'
     }
   });
+
+  console.log('=== BUILD TASTE PROFILE END ===');
 
   return {
     topGenres,

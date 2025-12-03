@@ -14,11 +14,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     }
 
     // Fetch movie details with credits, genres, keywords, recommendations, collections, lists, videos, and images
-    const tmdbUrl = `https://api.themoviedb.org/3/movie/${movieId}?append_to_response=credits,keywords,similar,recommendations,videos,images,lists`;
+    // Use api_key query parameter for v3 authentication
+    const tmdbUrl = `https://api.themoviedb.org/3/movie/${movieId}?api_key=${apiKey}&append_to_response=credits,keywords,similar,recommendations,videos,images,lists`;
     
     const r = await fetch(tmdbUrl, {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         Accept: 'application/json',
       },
       cache: 'no-store',

@@ -40,12 +40,11 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, ids: existing.map(r => r.tmdb_id), source: 'cache' });
     }
 
-    // Fetch from TMDB trending endpoint
+    // Fetch from TMDB trending endpoint (using api_key for v3 auth)
     console.log('[TrendingAPI] Fetching from TMDB');
-    const tmdbUrl = `https://api.themoviedb.org/3/trending/movie/${period}`;
+    const tmdbUrl = `https://api.themoviedb.org/3/trending/movie/${period}?api_key=${apiKey}`;
     const r = await fetch(tmdbUrl, {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         Accept: 'application/json'
       },
       cache: 'no-store'

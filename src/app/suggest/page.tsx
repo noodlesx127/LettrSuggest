@@ -4,7 +4,7 @@ import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getFeedback } from '@/lib/enrich';
+import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getFeedback } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -76,11 +76,12 @@ export default function SuggestPage() {
   const [refreshingSections, setRefreshingSections] = useState<Set<string>>(new Set());
   const [shownIds, setShownIds] = useState<Set<number>>(new Set());
   const [cacheKey, setCacheKey] = useState<number>(Date.now());
-  const [progress, setProgress] = useState({ current: 0, total: 5, stage: '' });
+  const [progress, setProgress] = useState({ current: 0, total: 6, stage: '' });
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [topDecade, setTopDecade] = useState<number | null>(null);
   const [savedMovieIds, setSavedMovieIds] = useState<Set<number>>(new Set());
   const [hasCheckedStorage, setHasCheckedStorage] = useState(false);
+  const [mappingCoverage, setMappingCoverage] = useState<{ mapped: number; total: number } | null>(null);
 
   // Load from session storage on mount
   useEffect(() => {
@@ -513,7 +514,7 @@ export default function SuggestPage() {
       setError(null);
       setNoCandidatesReason(null);
       setLoading(true);
-      setProgress({ current: 0, total: 5, stage: 'Initializing...' });
+      setProgress({ current: 0, total: 6, stage: 'Initializing...' });
       if (!supabase) throw new Error('Supabase not initialized');
       if (!uid) throw new Error('Not signed in');
       // Apply quick filters to source films
@@ -532,9 +533,12 @@ export default function SuggestPage() {
       });
       const uris = filteredFilms.map((f) => f.uri);
       console.log('[Suggest] fetching mappings for', uris.length, 'films');
-      setProgress({ current: 1, total: 5, stage: 'Loading your library...' });
+      setProgress({ current: 1, total: 6, stage: 'Loading your library...' });
       const mappings = await getFilmMappings(uid, uris);
-      console.log('[Suggest] mappings loaded', { mappingCount: mappings.size });
+      console.log('[Suggest] mappings loaded', { mappingCount: mappings.size, totalFilms: uris.length });
+      
+      // Track mapping coverage for UI feedback
+      setMappingCoverage({ mapped: mappings.size, total: uris.length });
 
       // Build watched TMDB id set
       const watchedIds = new Set<number>();
@@ -554,9 +558,20 @@ export default function SuggestPage() {
       setWatchlistTmdbIds(watchlistIds);
       console.log('[Suggest] watchlist IDs', { count: watchlistIds.size });
 
+      // Pre-fetch all TMDB details from cache for better taste profile analysis
+      console.log('[Suggest] Pre-fetching TMDB details from cache');
+      setProgress({ current: 2, total: 6, stage: 'Loading movie details from cache...' });
+      const allMappedIds = Array.from(mappings.values());
+      const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
+      console.log('[Suggest] TMDB details loaded from cache', { 
+        requested: allMappedIds.length, 
+        found: tmdbDetailsMap.size,
+        coverage: `${((tmdbDetailsMap.size / allMappedIds.length) * 100).toFixed(1)}%`
+      });
+
       // Build taste profile with IDs for smarter discovery
       console.log('[Suggest] Building taste profile for smart discovery');
-      setProgress({ current: 2, total: 5, stage: 'Analyzing your taste profile...' });
+      setProgress({ current: 3, total: 6, stage: 'Analyzing your taste profile...' });
 
       // Fetch negative feedback to learn from dislikes
       let negativeFeedbackIds: number[] = [];
@@ -574,7 +589,8 @@ export default function SuggestPage() {
         films: filteredFilms,
         mappings,
         topN: 10,
-        negativeFeedbackIds
+        negativeFeedbackIds,
+        tmdbDetails: tmdbDetailsMap // Pass pre-fetched details to analyze ALL movies, not just 100
       });
 
       // Set top decade for UI
@@ -599,7 +615,7 @@ export default function SuggestPage() {
 
       // Generate smart candidates using multiple TMDB discovery strategies
       console.log('[Suggest] Generating smart candidates');
-      setProgress({ current: 3, total: 5, stage: 'Discovering movies...' });
+      setProgress({ current: 4, total: 6, stage: 'Discovering movies...' });
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
         topGenres: tasteProfile.topGenres,
@@ -713,7 +729,7 @@ export default function SuggestPage() {
       setSourceLabel('Based on your watched & liked films + trending releases');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length, candidatesCount: candidates.length });
-      setProgress({ current: 4, total: 5, stage: 'Scoring suggestions...' });
+      setProgress({ current: 5, total: 6, stage: 'Scoring suggestions...' });
       const suggestions = await suggestByOverlap({
         userId: uid,
         films: lite,
@@ -754,7 +770,7 @@ export default function SuggestPage() {
       console.log('[Suggest] Tracking shown IDs', { total: recentShownIds.length, newThisRound: suggestions.length, limited: newShownIds.size > 200 });
 
       // Fetch full movie data for each suggestion to get videos, collections, etc.
-      setProgress({ current: 5, total: 5, stage: 'Fetching movie details...' });
+      setProgress({ current: 6, total: 6, stage: 'Fetching movie details...' });
       const detailsPromises = suggestions.map(async (s) => {
         try {
           let movie = null;
@@ -1454,6 +1470,26 @@ export default function SuggestPage() {
           </button>
         </div>
       </div>
+
+      {/* Enrichment Warning - show if less than 50% of films are mapped */}
+      {mappingCoverage && mappingCoverage.mapped < mappingCoverage.total * 0.5 && !loading && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <span className="text-xl">⚠️</span>
+            <div>
+              <h3 className="font-medium text-amber-800">Limited Film Data</h3>
+              <p className="text-sm text-amber-700 mt-1">
+                Only {mappingCoverage.mapped} of {mappingCoverage.total} films ({Math.round(mappingCoverage.mapped / mappingCoverage.total * 100)}%) 
+                have enriched data. Suggestions are based on partial watch history.
+              </p>
+              <p className="text-sm text-amber-700 mt-1">
+                <a href="/import" className="underline font-medium">Re-import your data</a> to get better recommendations.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loadingFilms && <p className="text-sm text-gray-600">Loading your library from database…</p>}
       {
         loading && (

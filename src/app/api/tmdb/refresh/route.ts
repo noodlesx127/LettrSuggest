@@ -10,10 +10,9 @@ export async function GET(req: Request) {
     const apiKey = process.env.TMDB_API_KEY;
     if (!apiKey) return NextResponse.json({ error: 'TMDB_API_KEY not configured' }, { status: 500 });
 
-    const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?append_to_response=credits,keywords`;
+    const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?api_key=${apiKey}&append_to_response=credits,keywords`;
     const r = await fetch(tmdbUrl, {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         Accept: 'application/json',
       },
       cache: 'no-store',

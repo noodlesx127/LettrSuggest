@@ -9,8 +9,9 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'TMDB_API_KEY not configured' }, { status: 500 });
     }
 
-    // Build TMDB discover URL with filters
+    // Build TMDB discover URL with filters (using api_key for v3 auth)
     const tmdbUrl = new URL('https://api.themoviedb.org/3/discover/movie');
+    tmdbUrl.searchParams.set('api_key', apiKey);
     
     // Pass through all query parameters
     const allowedParams = [
@@ -52,7 +53,6 @@ export async function GET(req: Request) {
       
       const r = await fetch(tmdbUrl.toString(), {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
           Accept: 'application/json',
         },
         cache: 'no-store',
