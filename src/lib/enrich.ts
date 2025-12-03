@@ -215,12 +215,161 @@ export async function getBlockedSuggestions(userId: string): Promise<Set<number>
   return new Set((data ?? []).map(row => Number(row.tmdb_id)));
 }
 
-export async function addFeedback(userId: string, tmdbId: number, type: 'negative' | 'positive') {
+/**
+ * Extract reason types from a list of reason strings
+ * Maps reason text patterns to reason type categories
+ */
+function extractReasonTypes(reasons: string[]): string[] {
+  const types = new Set<string>();
+  
+  for (const reason of reasons) {
+    const lower = reason.toLowerCase();
+    
+    // Director matches
+    if (lower.includes('directed by') || lower.includes('director')) {
+      types.add('director');
+    }
+    
+    // Genre matches
+    if (lower.includes('matches your taste in') || lower.includes('genre')) {
+      types.add('genre');
+    }
+    
+    // Actor/cast matches
+    if (lower.includes('stars ') || lower.includes('starring') || lower.includes('cast member') || lower.includes('actor')) {
+      types.add('actor');
+    }
+    
+    // Keyword/theme matches
+    if (lower.includes('theme') || lower.includes('keyword')) {
+      types.add('keyword');
+    }
+    
+    // Studio matches
+    if (lower.includes('from ') && (lower.includes('studio') || lower.includes('a24') || lower.includes('neon') || lower.includes('ghibli'))) {
+      types.add('studio');
+    }
+    
+    // Collection matches
+    if (lower.includes('collection') || lower.includes('franchise') || lower.includes('sequel') || lower.includes('prequel')) {
+      types.add('collection');
+    }
+    
+    // Decade matches
+    if (lower.includes('decade') || lower.includes("'s films") || /\d{4}s/.test(reason)) {
+      types.add('decade');
+    }
+    
+    // Recent watch matches
+    if (lower.includes('recent') && (lower.includes('watch') || lower.includes('favorite'))) {
+      types.add('recent');
+    }
+  }
+  
+  return Array.from(types);
+}
+
+export async function addFeedback(
+  userId: string, 
+  tmdbId: number, 
+  type: 'negative' | 'positive',
+  reasons?: string[]
+) {
   if (!supabase) throw new Error('Supabase not initialized');
-  const { error } = await supabase.from('suggestion_feedback').insert({ user_id: userId, tmdb_id: tmdbId, feedback_type: type });
+  
+  // Extract reason types from the suggestion reasons
+  const reasonTypes = reasons ? extractReasonTypes(reasons) : [];
+  
+  // Insert feedback with reason types
+  const { error } = await supabase.from('suggestion_feedback').insert({ 
+    user_id: userId, 
+    tmdb_id: tmdbId, 
+    feedback_type: type,
+    reason_types: reasonTypes
+  });
+  
   if (error) {
     console.error('[Supabase] addFeedback error', { userId, tmdbId, type, error });
     throw error;
+  }
+  
+  // Update reason type preferences based on feedback
+  if (reasonTypes.length > 0) {
+    await updateReasonPreferences(userId, reasonTypes, type === 'positive');
+  }
+}
+
+/**
+ * Update user's reason type preferences based on feedback
+ */
+async function updateReasonPreferences(userId: string, reasonTypes: string[], isPositive: boolean) {
+  if (!supabase) return;
+  
+  try {
+    for (const reasonType of reasonTypes) {
+      // Upsert the preference record
+      const { data: existing } = await supabase
+        .from('user_reason_preferences')
+        .select('success_count, total_count')
+        .eq('user_id', userId)
+        .eq('reason_type', reasonType)
+        .maybeSingle();
+      
+      const successCount = (existing?.success_count || 0) + (isPositive ? 1 : 0);
+      const totalCount = (existing?.total_count || 0) + 1;
+      const successRate = totalCount > 0 ? successCount / totalCount : 0.5;
+      
+      const { error } = await supabase
+        .from('user_reason_preferences')
+        .upsert({
+          user_id: userId,
+          reason_type: reasonType,
+          success_count: successCount,
+          total_count: totalCount,
+          success_rate: successRate,
+          last_updated: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,reason_type'
+        });
+      
+      if (error) {
+        console.error('[AdaptiveLearning] Error updating reason preference', { reasonType, error });
+      }
+    }
+    
+    console.log('[AdaptiveLearning] Updated reason preferences', { userId, reasonTypes, isPositive });
+  } catch (e) {
+    console.error('[AdaptiveLearning] Error in updateReasonPreferences', e);
+  }
+}
+
+/**
+ * Get user's reason type preferences (success rates)
+ */
+export async function getReasonPreferences(userId: string): Promise<Map<string, number>> {
+  if (!supabase) return new Map();
+  
+  try {
+    const { data, error } = await supabase
+      .from('user_reason_preferences')
+      .select('reason_type, success_rate, total_count')
+      .eq('user_id', userId)
+      .gte('total_count', 3); // Minimum sample size
+    
+    if (error) {
+      console.error('[AdaptiveLearning] Error fetching reason preferences', error);
+      return new Map();
+    }
+    
+    const prefs = new Map<string, number>();
+    data?.forEach((row: any) => {
+      prefs.set(row.reason_type, row.success_rate);
+    });
+    
+    return prefs;
+  } catch (e) {
+    console.error('[AdaptiveLearning] Error in getReasonPreferences', e);
+    return new Map();
   }
 }
 
@@ -1255,6 +1404,7 @@ export async function suggestByOverlap(params: {
     avoidDirectors: Array<{ id: number; name: string; weight: number }>;
     adjacentGenres?: Map<string, Array<{ genre: string; weight: number }>>; // Adaptive learning transitions
     recentGenres?: string[]; // Recent genres to trigger transitions
+    topDecades?: Array<{ decade: number; weight: number }>; // User's preferred eras
   };
 }): Promise<Array<{
   tmdbId: number;
@@ -1314,6 +1464,14 @@ export async function suggestByOverlap(params: {
 
   // Add positive feedback IDs to liked list to boost their features
   likedIdsAll.push(...Array.from(positiveFeedbackIds));
+
+  // Fetch user's reason type preferences for adaptive weighting
+  // This learns which recommendation reasons (genre, director, actor, etc.) lead to positive feedback
+  const reasonPreferences = await getReasonPreferences(params.userId);
+  console.log('[AdaptiveLearning] Loaded reason preferences', { 
+    count: reasonPreferences.size,
+    preferences: Array.from(reasonPreferences.entries()).map(([k, v]) => `${k}:${(v * 100).toFixed(0)}%`)
+  });
 
   // Filter out candidates that have negative feedback
   // We need to modify the candidates array that will be used for scoring
@@ -1933,6 +2091,30 @@ export async function suggestByOverlap(params: {
       }
     }
 
+    // PHASE 2: Decade/era preference matching
+    // Give a boost to films from the user's preferred eras
+    if (params.enhancedProfile?.topDecades && m.release_date) {
+      const year = parseInt(m.release_date.substring(0, 4));
+      if (!isNaN(year)) {
+        const movieDecade = Math.floor(year / 10) * 10;
+        
+        // Check if this decade matches user's preferred eras
+        const matchedDecade = params.enhancedProfile.topDecades.find(d => d.decade === movieDecade);
+        if (matchedDecade) {
+          // Calculate boost based on decade preference weight (scaled down)
+          const decadeBoost = Math.min(matchedDecade.weight * 0.3, 2.0); // Cap at 2.0
+          score += decadeBoost;
+          
+          // Calculate what percentage of their collection is from this era
+          const totalDecadeWeight = params.enhancedProfile.topDecades.reduce((sum, d) => sum + d.weight, 0);
+          const decadePercent = Math.round((matchedDecade.weight / totalDecadeWeight) * 100);
+          
+          reasons.push(`From the ${movieDecade}s — matches your preference for this era (${decadePercent}% of your favorites)`);
+          console.log(`[DecadeBoost] Boosted "${m.title}" (${year}) by ${decadeBoost.toFixed(2)} for ${movieDecade}s era preference`);
+        }
+      }
+    }
+
     // PHASE 2: Negative signal penalties (avoid genres/keywords/directors)
     let totalPenalty = 0;
     const penaltyReasons: string[] = [];
@@ -2031,6 +2213,42 @@ export async function suggestByOverlap(params: {
     //     console.log(`[SeasonalBoost] Boosted "${m.title}" by ${boostAmount.toFixed(2)} for seasonal relevance`);
     //   }
     // }
+
+    // ADAPTIVE LEARNING: Apply reason type preference multipliers
+    // This learns which recommendation reasons (genre, director, actor, etc.) work for this user
+    if (reasonPreferences.size > 0) {
+      // Extract which reason types contributed to this recommendation
+      const reasonTypes = extractReasonTypes(reasons);
+      
+      if (reasonTypes.length > 0) {
+        // Calculate average success rate for the reason types in this recommendation
+        let totalWeight = 0;
+        let weightedSuccessRate = 0;
+        
+        for (const rt of reasonTypes) {
+          const successRate = reasonPreferences.get(rt);
+          if (successRate !== undefined) {
+            // Weight by how much we know about this type (success rate varies from 0 to 1)
+            // Center at 0.5 (neutral), so below 0.5 reduces score, above 0.5 increases
+            const modifier = (successRate - 0.5) * 2; // Ranges from -1 to +1
+            totalWeight += 1;
+            weightedSuccessRate += modifier;
+          }
+        }
+        
+        if (totalWeight > 0) {
+          const avgModifier = weightedSuccessRate / totalWeight;
+          // Apply as a mild multiplier (0.7 to 1.3 range) to avoid dramatic changes
+          const multiplier = 1 + (avgModifier * 0.3);
+          const oldScore = score;
+          score = score * multiplier;
+          
+          if (Math.abs(multiplier - 1) > 0.05) {
+            console.log(`[ReasonPreference] Adjusted "${m.title}" score: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${multiplier.toFixed(2)}x) based on ${reasonTypes.join(', ')} preferences`);
+          }
+        }
+      }
+    }
 
     // Give base score to quality films even without direct taste matches
     // This allows hidden gems, crowd pleasers, and trending films to appear

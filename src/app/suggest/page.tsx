@@ -770,7 +770,8 @@ export default function SuggestPage() {
           avoidKeywords: tasteProfile.avoidKeywords,
           avoidDirectors: tasteProfile.avoidDirectors,
           adjacentGenres,
-          recentGenres: recentGenreNames
+          recentGenres: recentGenreNames,
+          topDecades: tasteProfile.topDecades
         }
       });
       // Best-effort: ensure posters/backdrops exist for suggested ids.
@@ -1027,7 +1028,8 @@ export default function SuggestPage() {
           topStudios: tasteProfile.topStudios,
           avoidGenres: tasteProfile.avoidGenres,
           avoidKeywords: tasteProfile.avoidKeywords,
-          avoidDirectors: tasteProfile.avoidDirectors
+          avoidDirectors: tasteProfile.avoidDirectors,
+          topDecades: tasteProfile.topDecades
         }
       });
 
@@ -1183,7 +1185,8 @@ export default function SuggestPage() {
           topStudios: tasteProfile.topStudios,
           avoidGenres: tasteProfile.avoidGenres,
           avoidKeywords: tasteProfile.avoidKeywords,
-          avoidDirectors: tasteProfile.avoidDirectors
+          avoidDirectors: tasteProfile.avoidDirectors,
+          topDecades: tasteProfile.topDecades
         }
       });
 
@@ -1257,13 +1260,13 @@ export default function SuggestPage() {
   }, [uid, sourceFilms, blockedIds, shownIds, items, getSectionFilter]);
 
   // Handle feedback
-  const handleFeedback = async (tmdbId: number, type: 'negative' | 'positive') => {
+  const handleFeedback = async (tmdbId: number, type: 'negative' | 'positive', reasons?: string[]) => {
     if (!uid) return;
     try {
       if (type === 'negative') {
         // Block the suggestion in the background
         await Promise.all([
-          addFeedback(uid, tmdbId, 'negative'),
+          addFeedback(uid, tmdbId, 'negative', reasons),
           blockSuggestion(uid, tmdbId)
         ]);
 
@@ -1305,7 +1308,7 @@ export default function SuggestPage() {
         });
       } else {
         // Positive feedback
-        await addFeedback(uid, tmdbId, 'positive');
+        await addFeedback(uid, tmdbId, 'positive', reasons);
         setFeedbackMessage("Thanks! We'll show more movies like this.");
         setTimeout(() => setFeedbackMessage(null), 3000);
       }

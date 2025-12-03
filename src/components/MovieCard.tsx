@@ -14,7 +14,7 @@ type MovieCardProps = {
   voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
   collectionName?: string;
   showTrailer?: boolean;
-  onFeedback?: (id: number, type: 'negative' | 'positive') => void;
+  onFeedback?: (id: number, type: 'negative' | 'positive', reasons?: string[]) => void;
   onSave?: (id: number, title: string, year?: string, posterPath?: string | null) => Promise<void>;
   isSaved?: boolean;
   vote_average?: number;
@@ -410,7 +410,7 @@ export default function MovieCard({
                         e.preventDefault();
                         if (feedbackState) return;
                         setFeedbackState('negative');
-                        await onFeedback(id, 'negative');
+                        await onFeedback(id, 'negative', reasons);
                         setFeedbackState(null);
                       }}
                       disabled={!!feedbackState}
@@ -437,7 +437,7 @@ export default function MovieCard({
                         e.preventDefault();
                         if (feedbackState) return;
                         setFeedbackState('positive');
-                        await onFeedback(id, 'positive');
+                        await onFeedback(id, 'positive', reasons);
                         setFeedbackState(null);
                       }}
                       disabled={!!feedbackState}
