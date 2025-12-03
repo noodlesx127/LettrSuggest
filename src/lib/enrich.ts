@@ -1876,10 +1876,12 @@ export async function suggestByOverlap(params: {
     );
 
     if (crossGenreBoost.boost > 0) {
-      score += crossGenreBoost.boost;
+      // Cap cross-genre boost at 3.0 to prevent over-stacking
+      const cappedCrossGenreBoost = Math.min(crossGenreBoost.boost, 3.0);
+      score += cappedCrossGenreBoost;
       if (crossGenreBoost.reason) {
         reasons.push(crossGenreBoost.reason);
-        console.log(`[CrossGenreBoost] Boosted "${m.title}" by ${crossGenreBoost.boost.toFixed(2)} - ${crossGenreBoost.reason}`);
+        console.log(`[CrossGenreBoost] Boosted "${m.title}" by ${cappedCrossGenreBoost.toFixed(2)} - ${crossGenreBoost.reason}`);
       }
     }
 
@@ -1965,7 +1967,7 @@ export async function suggestByOverlap(params: {
       }
 
       if (similarDirectors.length) {
-        score += 0.8 * weights.director; // Lower boost than exact director match
+        score += 1.2 * weights.director; // Meaningful boost for similar directors (increased from 0.8)
         const firstMatch = similarDirectors[0];
         reasons.push(`Similar to ${firstMatch.likedDirector} you love — shares themes like ${firstMatch.sharedThemes.slice(0, 2).join(', ')}`);
       }
@@ -2000,7 +2002,7 @@ export async function suggestByOverlap(params: {
       }
 
       if (similarCast.length) {
-        score += 0.3 * weights.cast; // Small boost for similar actors
+        score += 0.5 * weights.cast; // Modest boost for similar actors (increased from 0.3)
         const firstMatch = similarCast[0];
         reasons.push(`Similar to ${firstMatch.likedActor} you enjoy — works in ${firstMatch.sharedThemes.slice(0, 2).join(', ')} themes`);
       }
@@ -2028,10 +2030,14 @@ export async function suggestByOverlap(params: {
     }
 
     // Studio/Production company matching
+    // NOTE: Only use legacy matching when enhanced profile doesn't have studio data
+    // This prevents double-counting studios (legacy + enhanced profile)
     const studioHits = feats.productionCompanies.filter(s => pref.productionCompanies.has(s));
-    if (studioHits.length) {
+    const hasEnhancedStudioData = params.enhancedProfile?.topStudios && params.enhancedProfile.topStudios.length > 0;
+    
+    if (studioHits.length && !hasEnhancedStudioData) {
       const totalStudioWeight = studioHits.reduce((sum, s) => sum + (pref.productionCompanies.get(s) ?? 0), 0);
-      score += totalStudioWeight * 0.7; // Meaningful boost for favorite studios
+      score += totalStudioWeight * weights.studio; // Use weights.studio for consistency
       const topStudio = studioHits[0];
       const studioWeight = pref.productionCompanies.get(topStudio) ?? 1;
       const studioCountRounded = Math.round(studioWeight);
@@ -2196,7 +2202,9 @@ export async function suggestByOverlap(params: {
     }
 
     if (recentBoost > 0) {
-      score += recentBoost;
+      // Cap recent boost at 2.5 to prevent recency from over-dominating
+      const cappedRecentBoost = Math.min(recentBoost, 2.5);
+      score += cappedRecentBoost;
       reasons.push(`Based on recent watches: ${recentMatches.slice(0, 2).join('; ')}`);
     }
 
