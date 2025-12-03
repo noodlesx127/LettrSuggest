@@ -27,6 +27,7 @@ type MovieCardProps = {
   rotten_tomatoes?: string;
   metacritic?: string;
   awards?: string;
+  genres?: string[];
 };
 
 // Helper function to extract genres, directors, keywords, etc. from a reason string
@@ -241,7 +242,8 @@ export default function MovieCard({
   imdb_source,
   rotten_tomatoes,
   metacritic,
-  awards
+  awards,
+  genres
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -572,6 +574,26 @@ export default function MovieCard({
                       🎬 {collectionName}
                     </span>
                   </>
+                )}
+              </div>
+            )}
+
+            {/* Genre Tags */}
+            {genres && genres.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-2">
+                {genres.slice(0, 4).map((genre, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full"
+                    title={`Genre: ${genre}`}
+                  >
+                    {genre}
+                  </span>
+                ))}
+                {genres.length > 4 && (
+                  <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-500 rounded-full">
+                    +{genres.length - 4}
+                  </span>
                 )}
               </div>
             )}
