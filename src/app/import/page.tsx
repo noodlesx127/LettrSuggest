@@ -333,7 +333,7 @@ export default function ImportPage() {
       setAutoMappingActive(false);
       setMappingProgress(null);
     }
-  }, []);
+  }, [forceReenrich]);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     console.log('[Import] handleFiles start', { fileCount: Array.from(files).length });
@@ -620,7 +620,7 @@ export default function ImportPage() {
                 🔄 Reimport detected — enriching {newFilmsBreakdown.total} new film{newFilmsBreakdown.total !== 1 ? 's' : ''} only
               </p>
               <p className="text-xs text-green-600 mt-1">
-                Previously imported films are already mapped. Use "Force re-enrich" to update all.
+                Previously imported films are already mapped. Use &quot;Force re-enrich&quot; to update all.
               </p>
             </div>
           )}

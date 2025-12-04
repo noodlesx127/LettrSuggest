@@ -241,6 +241,7 @@ export default function StatsPage() {
     }
 
     loadTmdbDetails();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, filteredFilms]);
 
   // Calculate user statistics for enhanced weighting
@@ -842,6 +843,7 @@ export default function StatsPage() {
       watchlistTopActors,
       avoidanceOverrides,
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredFilms, tmdbDetails, films, filmMappings]);
 
   // Log taste profile build details for debugging
