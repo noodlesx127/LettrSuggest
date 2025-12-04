@@ -101,11 +101,20 @@ export async function aggregateRecommendations(params: {
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
 
+    // Log source distribution in top results
+    const sourceStats = {
+        trakt: scored.filter(r => r.sources.some(s => s.source === 'trakt')).length,
+        tastedive: scored.filter(r => r.sources.some(s => s.source === 'tastedive')).length,
+        tmdb: scored.filter(r => r.sources.some(s => s.source === 'tmdb')).length,
+        watchmode: scored.filter(r => r.sources.some(s => s.source === 'watchmode')).length,
+    };
+
     console.log('[Aggregator] Top recommendations by consensus:', {
         high: scored.filter((r) => r.consensusLevel === 'high').length,
         medium: scored.filter((r) => r.consensusLevel === 'medium').length,
         low: scored.filter((r) => r.consensusLevel === 'low').length,
     });
+    console.log('[Aggregator] Source representation in top results:', sourceStats);
 
     return scored;
 }
@@ -156,11 +165,11 @@ function mergeRecommendations(recs: SourceRecommendation[]): AggregatedRecommend
  */
 function calculateAggregateScore(rec: AggregatedRecommendation): number {
     const sourceWeights: Record<RecommendationSource, number> = {
-        tmdb: 1.0, // Baseline
-        tastedive: 1.2, // Cross-platform intelligence
-        trakt: 1.1, // Community-driven
-        tuimdb: 0.9, // Good for genres
-        watchmode: 0.7, // Trending supplement
+        tmdb: 0.9, // Baseline (slightly reduced - often mainstream)
+        tastedive: 1.35, // Cross-platform intelligence (boosted - finds non-obvious matches)
+        trakt: 1.4, // Community-driven (highest - best quality recs)
+        tuimdb: 0.85, // Good for genres
+        watchmode: 0.6, // Trending supplement (lowest - less personalized)
     };
 
     let totalScore = 0;
@@ -175,7 +184,13 @@ function calculateAggregateScore(rec: AggregatedRecommendation): number {
     // Bonus for consensus (multiple sources agreeing)
     const consensusBonus = Math.min(rec.sources.length / 5, 1.0) * 0.3;
 
-    return totalScore / totalWeight + consensusBonus;
+    // Extra bonus when high-quality sources (Trakt/TasteDive) are present
+    const sourceNames = rec.sources.map(s => s.source);
+    const hasTrakt = sourceNames.includes('trakt');
+    const hasTasteDive = sourceNames.includes('tastedive');
+    const qualitySourceBonus = (hasTrakt ? 0.15 : 0) + (hasTasteDive ? 0.12 : 0);
+
+    return totalScore / totalWeight + consensusBonus + qualitySourceBonus;
 }
 
 /**
@@ -198,12 +213,21 @@ async function fetchTMDBRecommendations(
 
     // Limit to top 5 seeds to avoid too many API calls
     const seeds = seedMovies.slice(0, 5);
+    
+    console.log('[Aggregator] Fetching TMDB recommendations', { 
+        seedCount: seeds.length, 
+        seeds: seeds.map(s => s.title) 
+    });
 
     for (const seed of seeds) {
         try {
             // Fetch from our TMDB movie endpoint which includes similar/recommendations
-            const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : (typeof self !== 'undefined' && self.location ? self.location.origin : 'http://localhost'));
+            const baseUrl = typeof window === 'undefined' 
+                ? (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000')
+                : (typeof self !== 'undefined' && self.location ? self.location.origin : 'http://localhost:3000');
+            const u = new URL('/api/tmdb/movie', baseUrl);
             u.searchParams.set('id', String(seed.tmdbId));
+            u.searchParams.set('append_to_response', 'similar,recommendations');
             
             const response = await fetch(u.toString());
             if (!response.ok) continue;
@@ -262,16 +286,20 @@ async function fetchTasteDiveRecommendations(
     const recommendations: SourceRecommendation[] = [];
 
     try {
-        // Use top 3 seed movies for TasteDive query
-        const seeds = seedMovies.slice(0, 3);
-        const query = seeds.map((s) => `movie:${s.title}`).join(', ');
+        // Use top 5 seed movies for TasteDive query (increased from 3)
+        const seeds = seedMovies.slice(0, 5);
+        // Don't use movie: prefix - just use clean titles with type=movie parameter
+        const query = seeds.map((s) => {
+            // Remove special characters that might cause API issues
+            return s.title.replace(/[&+#:]/g, ' ').replace(/\s+/g, ' ').trim();
+        }).join(', ');
 
-        console.log('[Aggregator] Fetching TasteDive recommendations', { query });
+        console.log('[Aggregator] Fetching TasteDive recommendations', { query, seedCount: seeds.length });
 
         const results = await getSimilarContent(query, {
-            type: 'movie',
+            type: 'movie', // Type is required by TasteDive API
             info: false,
-            limit: 20,
+            limit: 20, // TasteDive max is 20
         });
 
         for (const result of results) {
@@ -284,7 +312,7 @@ async function fetchTasteDiveRecommendations(
                     source: 'tastedive',
                     tmdbId,
                     title: result.Name,
-                    confidence: 0.8, // TasteDive has good cross-media intelligence
+                    confidence: 0.88, // TasteDive has excellent cross-media intelligence (boosted)
                     reason: 'Similar content via TasteDive',
                 });
             }
@@ -308,14 +336,17 @@ async function fetchTraktRecommendations(
     const recommendations: SourceRecommendation[] = [];
 
     try {
-        // Fetch related movies from Trakt for top 3 seeds
-        const seeds = seedMovies.slice(0, 3);
+        // Fetch related movies from Trakt for top 5 seeds (increased from 3)
+        const seeds = seedMovies.slice(0, 5);
         
         for (const seed of seeds) {
             try {
-                const u = new URL('/api/trakt/related', typeof window === 'undefined' ? 'http://localhost' : (typeof self !== 'undefined' && self.location ? self.location.origin : 'http://localhost'));
+                const baseUrl = typeof window === 'undefined' 
+                    ? (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000')
+                    : (typeof self !== 'undefined' && self.location ? self.location.origin : 'http://localhost:3000');
+                const u = new URL('/api/trakt/related', baseUrl);
                 u.searchParams.set('id', String(seed.tmdbId));
-                u.searchParams.set('limit', '10');
+                u.searchParams.set('limit', '15'); // Increased from 10
                 
                 const response = await fetch(u.toString());
                 if (!response.ok) continue;
@@ -331,7 +362,7 @@ async function fetchTraktRecommendations(
                             source: 'trakt' as const,
                             tmdbId,
                             title: '', // We don't have the title from Trakt API response
-                            confidence: 0.75, // Community-driven
+                            confidence: 0.9, // Community-driven (boosted - Trakt has best quality recs)
                             reason: `Related to "${seed.title}" (Trakt community)`,
                         });
                     }

@@ -9,6 +9,16 @@ import { usePostersSWR } from '@/lib/usePostersSWR';
 import { FixedSizeGrid as Grid } from 'react-window';
 import type { FilmEvent } from '@/lib/normalize';
 
+/**
+ * Helper to get the base URL for internal API calls
+ */
+function getBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+}
+
 type GridFilm = FilmEvent & { tmdbId?: number | null };
 
 function useUserId() {
@@ -349,7 +359,7 @@ function RefreshTmdbButton({ tmdbId }: { tmdbId: number }) {
     setLoading(true);
     setOk(null);
     try {
-      const u = new URL('/api/tmdb/refresh', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+      const u = new URL('/api/tmdb/refresh', getBaseUrl());
       u.searchParams.set('id', String(tmdbId));
       const r = await fetch(u.toString(), { cache: 'no-store' });
       const j = await r.json();

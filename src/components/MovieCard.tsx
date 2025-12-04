@@ -2,6 +2,44 @@
 import Image from 'next/image';
 import { useState } from 'react';
 
+// Poster image component with error handling
+function PosterImage({ posterPath, title }: { posterPath?: string | null; title: string }) {
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  if (!posterPath || error) {
+    return (
+      <div className="w-24 h-36 bg-gray-700 rounded overflow-hidden relative flex items-center justify-center text-gray-400 text-xs text-center p-2">
+        No poster
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-24 h-36 bg-gray-700 rounded overflow-hidden relative">
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-700">
+          <div className="w-6 h-6 border-2 border-gray-500 border-t-gray-300 rounded-full animate-spin" />
+        </div>
+      )}
+      <Image
+        src={`https://image.tmdb.org/t/p/w185${posterPath}`}
+        alt={title}
+        fill
+        sizes="96px"
+        className="object-cover"
+        unoptimized
+        onLoad={() => setLoading(false)}
+        onError={() => {
+          console.error('[PosterImage] Failed to load:', posterPath);
+          setError(true);
+          setLoading(false);
+        }}
+      />
+    </div>
+  );
+}
+
 type MovieCardProps = {
   id: number;
   title: string;
@@ -360,37 +398,7 @@ export default function MovieCard({
           {/* Poster Column */}
           <div className="flex-shrink-0 flex flex-col gap-2">
             {/* Poster */}
-            <div className="w-24 h-36 bg-gray-100 rounded overflow-hidden relative">
-              {posterPath ? (
-                <Image
-                  src={`https://image.tmdb.org/t/p/w185${posterPath}`}
-                  alt={title}
-                  fill
-                  sizes="96px"
-                  className="object-cover"
-                  unoptimized
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs text-center p-2">
-                  No poster
-                </div>
-              )}
-
-              {/* Trailer toggle button */}
-              {trailerKey && showTrailer && (
-                <button
-                  onClick={() => setShowVideo(true)}
-                  className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-60 transition-all flex items-center justify-center group"
-                  aria-label="Play trailer"
-                >
-                  <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
-                    <svg className="w-6 h-6 text-white ml-0.5" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
-                    </svg>
-                  </div>
-                </button>
-              )}
-            </div>
+            <PosterImage posterPath={posterPath} title={title} />
 
             {/* Badges under poster */}
             <div className="flex flex-col gap-1 w-32">

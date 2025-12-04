@@ -156,10 +156,14 @@ export default function StatsPage() {
         // Store mappings for preference calculation
         const mappingsMap = new Map<string, number>();
         const filteredUris = new Set(filteredFilms.map(f => f.uri));
+        
+        // Also include watchlist URIs so watchlist analysis works
+        const watchlistFilms = films?.filter(f => f.onWatchlist) ?? [];
+        watchlistFilms.forEach(f => filteredUris.add(f.uri));
 
-        // Filter to only mappings for currently filtered films
+        // Filter to only mappings for currently filtered films AND watchlist
         const relevantMappings = allMappings.filter(m => filteredUris.has(m.uri));
-        console.log('[Stats] Relevant mappings:', relevantMappings.length, 'of', filteredUris.size, 'films');
+        console.log('[Stats] Relevant mappings:', relevantMappings.length, 'of', filteredUris.size, 'films (including', watchlistFilms.length, 'watchlist)');
 
         // Track mapping coverage for UI feedback
         setMappingCoverage({ mapped: relevantMappings.length, total: filteredUris.size });
@@ -207,6 +211,21 @@ export default function StatsPage() {
             }
           }
         }
+
+        // Debug: check how many have the required fields
+        let withGenres = 0, withCredits = 0, withKeywords = 0;
+        for (const [, data] of detailsMap) {
+          if (data.genres?.length) withGenres++;
+          if (data.credits?.cast?.length || data.credits?.crew?.length) withCredits++;
+          if (data.keywords?.keywords?.length || data.keywords?.results?.length) withKeywords++;
+        }
+        console.log('[Stats] Details quality check:', { 
+          total: detailsMap.size, 
+          withGenres, 
+          withCredits, 
+          withKeywords,
+          note: 'If these are 0, enrichment may not have completed'
+        });
 
         console.log('[Stats] Total details loaded:', detailsMap.size);
         setTmdbDetails(detailsMap);

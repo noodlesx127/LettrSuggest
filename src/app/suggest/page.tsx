@@ -4,13 +4,23 @@ import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getFeedback } from '@/lib/enrich';
+import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, type FeedbackLearningInsights } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
 import { updateExplorationStats, getAdaptiveExplorationRate, getGenreTransitions, handleNegativeFeedback } from '@/lib/adaptiveLearning';
 import type { FilmEvent } from '@/lib/normalize';
+
+/**
+ * Helper to get the base URL for internal API calls
+ */
+function getBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+}
 
 type MovieItem = {
   id: number;
@@ -44,6 +54,7 @@ type MovieItem = {
 };
 
 type CategorizedSuggestions = {
+  watchlistPicks: MovieItem[]; // NEW: Picks from user's Letterboxd watchlist
   seasonalPicks: MovieItem[];
   seasonalConfig: any;
   perfectMatches: MovieItem[];
@@ -96,6 +107,20 @@ export default function SuggestPage() {
   const [savedMovieIds, setSavedMovieIds] = useState<Set<number>>(new Set());
   const [hasCheckedStorage, setHasCheckedStorage] = useState(false);
   const [mappingCoverage, setMappingCoverage] = useState<{ mapped: number; total: number } | null>(null);
+  const [watchlistPicks, setWatchlistPicks] = useState<MovieItem[]>([]); // Picks from user's Letterboxd watchlist
+  
+  // Hybrid feedback popup state - optional "tell us why" after feedback
+  const [feedbackPopup, setFeedbackPopup] = useState<{
+    tmdbId: number;
+    title: string;
+    insights: FeedbackLearningInsights;
+    leadActors: string[];
+    franchise?: string;
+    topKeywords: string[];
+    genres: string[];
+    feedbackType: 'positive' | 'negative'; // NEW: track which type of feedback
+    director?: string; // NEW: for positive feedback
+  } | null>(null);
 
   // Load from session storage on mount
   useEffect(() => {
@@ -126,8 +151,12 @@ export default function SuggestPage() {
     }
   }, [items]);
 
-  // Get posters for all suggested movies
-  const tmdbIds = useMemo(() => items?.map((it) => it.id) ?? [], [items]);
+  // Get posters for all suggested movies (including watchlist picks)
+  const tmdbIds = useMemo(() => {
+    const mainIds = items?.map((it) => it.id) ?? [];
+    const watchlistIds = watchlistPicks.map((it) => it.id);
+    return [...new Set([...mainIds, ...watchlistIds])]; // Dedupe
+  }, [items, watchlistPicks]);
   const { posters, mutate: refreshPosters } = usePostersSWR(tmdbIds);
 
   // Categorize suggestions into sections
@@ -407,6 +436,7 @@ export default function SuggestPage() {
     });
 
     return {
+      watchlistPicks: [], // Will be populated separately from watchlistPicks state
       seasonalPicks: sortByRating(seasonalPicks),
       seasonalConfig,
       perfectMatches: sortByRating(perfectMatches),
@@ -438,11 +468,16 @@ export default function SuggestPage() {
   // Update categories when items change
   useEffect(() => {
     if (items && items.length > 0) {
-      setCategorizedSuggestions(categorizeItems(items));
+      const categorized = categorizeItems(items);
+      if (categorized) {
+        // Merge watchlist picks into categorized suggestions
+        categorized.watchlistPicks = watchlistPicks;
+      }
+      setCategorizedSuggestions(categorized);
     } else {
       setCategorizedSuggestions(null);
     }
-  }, [items, categorizeItems]);
+  }, [items, categorizeItems, watchlistPicks]);
 
   // Section filter mapping for individual section refresh
   const getSectionFilter = useCallback((sectionName: string, seasonalConfig: any) => {
@@ -690,6 +725,22 @@ export default function SuggestPage() {
         console.error('[Suggest] Failed to fetch feedback', e);
       }
 
+      // Fetch feature-level feedback (learned from "Not Interested" / "More Like This" clicks)
+      // This identifies specific actors, keywords, franchises user has shown aversion/preference to
+      let featureFeedback = null;
+      try {
+        featureFeedback = await getAvoidedFeatures(uid);
+        console.log('[Suggest] Loaded feature feedback', {
+          avoidActors: featureFeedback.avoidActors.map(a => a.name).slice(0, 3),
+          avoidKeywords: featureFeedback.avoidKeywords.map(k => k.name).slice(0, 5),
+          avoidFranchises: featureFeedback.avoidFranchises.map(f => f.name),
+          preferActors: featureFeedback.preferActors.map(a => a.name).slice(0, 3),
+          preferKeywords: featureFeedback.preferKeywords.map(k => k.name).slice(0, 5)
+        });
+      } catch (e) {
+        console.error('[Suggest] Failed to fetch feature feedback', e);
+      }
+
       // Get watchlist films for intent signals
       const watchlistFilms = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
       console.log('[Suggest] Watchlist films for taste profile:', watchlistFilms.length);
@@ -702,6 +753,150 @@ export default function SuggestPage() {
         tmdbDetails: tmdbDetailsMap, // Pass pre-fetched details to analyze ALL movies, not just 100
         watchlistFilms // Pass watchlist for intent signals
       });
+
+      // === GENERATE WATCHLIST PICKS ===
+      // Get unwatched watchlist films (onWatchlist=true but not watched)
+      const unwatchedWatchlist = sourceFilms.filter(f => 
+        f.onWatchlist && 
+        (!f.watchCount || f.watchCount === 0) && 
+        mappings.has(f.uri)
+      );
+      console.log('[Suggest] Unwatched watchlist films:', unwatchedWatchlist.length);
+
+      // Get recent watches for similarity scoring (last 30 days)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const recentWatches = filteredFilms
+        .filter(f => f.lastDate && new Date(f.lastDate) >= thirtyDaysAgo && (f.rating ?? 0) >= 3)
+        .sort((a, b) => new Date(b.lastDate!).getTime() - new Date(a.lastDate!).getTime())
+        .slice(0, 20);
+      
+      // Get TMDB IDs and details for recent watches
+      const recentWatchDetails: Array<{ tmdbId: number; genres: number[]; keywords: number[] }> = [];
+      for (const film of recentWatches) {
+        const tmdbId = mappings.get(film.uri);
+        if (!tmdbId) continue;
+        const details = tmdbDetailsMap.get(tmdbId);
+        if (details) {
+          recentWatchDetails.push({
+            tmdbId,
+            genres: (details.genres || []).map((g: any) => g.id),
+            keywords: (details.keywords?.keywords || []).map((k: any) => k.id).slice(0, 10)
+          });
+        }
+      }
+
+      // Score watchlist films
+      const scoredWatchlist: Array<{ film: FilmEvent; tmdbId: number; score: number; reasons: string[] }> = [];
+      for (const film of unwatchedWatchlist) {
+        const tmdbId = mappings.get(film.uri);
+        if (!tmdbId) continue;
+        
+        const details = tmdbDetailsMap.get(tmdbId);
+        if (!details) continue;
+        
+        const filmGenres = new Set((details.genres || []).map((g: any) => g.id));
+        const filmKeywords = new Set((details.keywords?.keywords || []).map((k: any) => k.id));
+        
+        let similarityScore = 0;
+        let genreScore = 0;
+        const reasons: string[] = ['From your Letterboxd watchlist'];
+        
+        // 60%: Similarity to recent watches
+        for (const recent of recentWatchDetails) {
+          const genreOverlap = recent.genres.filter(g => filmGenres.has(g)).length;
+          const keywordOverlap = recent.keywords.filter(k => filmKeywords.has(k)).length;
+          similarityScore += (genreOverlap * 3 + keywordOverlap * 2);
+        }
+        if (recentWatchDetails.length > 0) {
+          similarityScore = (similarityScore / recentWatchDetails.length) * 0.6;
+          if (similarityScore > 0) {
+            reasons.push('Similar to your recent watches');
+          }
+        }
+        
+        // 20%: Match with top genres from taste profile
+        const topGenreIds = new Set(tasteProfile.topGenres.slice(0, 5).map(g => g.id));
+        for (const genreId of filmGenres) {
+          if (topGenreIds.has(genreId)) {
+            genreScore += 5;
+            const genreName = tasteProfile.topGenres.find(g => g.id === genreId)?.name;
+            if (genreName && !reasons.some(r => r.includes(genreName))) {
+              reasons.push(`Matches your love of ${genreName}`);
+            }
+          }
+        }
+        genreScore = genreScore * 0.2;
+        
+        // 20%: Random factor for variety
+        const randomScore = Math.random() * 10 * 0.2;
+        
+        const totalScore = similarityScore + genreScore + randomScore;
+        scoredWatchlist.push({ film, tmdbId, score: totalScore, reasons });
+      }
+
+      // Sort by score and take top 5 (keep it short and sweet)
+      scoredWatchlist.sort((a, b) => b.score - a.score);
+      const topWatchlistPicks = scoredWatchlist.slice(0, 5);
+      
+      console.log('[Suggest] Top watchlist picks:', topWatchlistPicks.length);
+
+      // Fetch full details for watchlist picks
+      const watchlistPicksWithDetails: MovieItem[] = [];
+      for (const pick of topWatchlistPicks) {
+        try {
+          const u = new URL('/api/tmdb/movie', getBaseUrl());
+          u.searchParams.set('id', String(pick.tmdbId));
+          u.searchParams.set('_t', String(freshCacheKey));
+          const r = await fetch(u.toString(), { cache: 'no-store' });
+          const j = await r.json();
+          
+          if (j.ok && j.movie) {
+            const movie = j.movie;
+            const videos = movie.videos?.results || [];
+            const trailer = videos.find((v: any) =>
+              v.site === 'YouTube' && v.type === 'Trailer' && v.official
+            ) || videos.find((v: any) =>
+              v.site === 'YouTube' && v.type === 'Trailer'
+            );
+            
+            watchlistPicksWithDetails.push({
+              id: pick.tmdbId,
+              title: movie.title || pick.film.title,
+              year: movie.release_date?.slice(0, 4) || String(pick.film.year || ''),
+              reasons: pick.reasons,
+              poster_path: movie.poster_path,
+              score: pick.score,
+              trailerKey: trailer?.key || null,
+              voteCategory: 'standard',
+              collectionName: movie.belongs_to_collection?.name,
+              genres: (movie.genres || []).map((g: any) => g.name),
+              vote_average: movie.vote_average,
+              vote_count: movie.vote_count,
+              overview: movie.overview,
+              runtime: movie.runtime,
+              original_language: movie.original_language
+            });
+          }
+        } catch (e) {
+          console.error(`[Suggest] Failed to fetch watchlist pick ${pick.tmdbId}`, e);
+        }
+      }
+      
+      // Set watchlist picks state
+      setWatchlistPicks(watchlistPicksWithDetails);
+      console.log('[Suggest] Watchlist picks ready:', watchlistPicksWithDetails.length);
+      
+      // Refresh poster cache for watchlist picks
+      if (watchlistPicksWithDetails.length > 0) {
+        try {
+          const watchlistIdsForCache = watchlistPicksWithDetails.map(p => p.id);
+          await refreshTmdbCacheForIds(watchlistIdsForCache);
+        } catch (e) {
+          console.error('[Suggest] Failed to refresh watchlist poster cache', e);
+        }
+      }
+      // === END WATCHLIST PICKS ===
 
       // Set top decade for UI
       if (tasteProfile.topDecades.length > 0) {
@@ -874,6 +1069,8 @@ export default function SuggestPage() {
         excludeWatchedIds: watchedIds,
         desiredResults: 300, // Increased to fill all 24 sections (24 × 12 = 288 potential items)
         sourceMetadata: smartCandidates.sourceMetadata, // Pass multi-source metadata for badge display
+        // Feature-level feedback from explicit user interactions
+        featureFeedback: featureFeedback || undefined,
         enhancedProfile: {
           topActors: tasteProfile.topActors,
           topStudios: tasteProfile.topStudios,
@@ -912,7 +1109,7 @@ export default function SuggestPage() {
 
           // Fetch from TMDB API
           // Note: TuiMDB integration requires UID mapping which we skip for now
-          const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+          const u = new URL('/api/tmdb/movie', getBaseUrl());
           u.searchParams.set('id', String(s.tmdbId));
           u.searchParams.set('_t', String(freshCacheKey)); // Cache buster
           const r = await fetch(u.toString(), { cache: 'no-store' });
@@ -1396,20 +1593,141 @@ export default function SuggestPage() {
     }
   }, [uid, sourceFilms, blockedIds, shownIds, items, getSectionFilter]);
 
+  // Handle explicit reason selection from feedback popup
+  const handleExplicitReason = async (reason: string) => {
+    if (!feedbackPopup || !uid) return;
+    
+    const isPositive = feedbackPopup.feedbackType === 'positive';
+    console.log('[FeedbackPopup] User selected explicit reason:', reason, 'for movie:', feedbackPopup.title, 'type:', feedbackPopup.feedbackType);
+    
+    // Close the popup first for responsiveness
+    setFeedbackPopup(null);
+    
+    // Show confirmation based on reason type and SAVE the explicit feedback
+    let confirmMessage = feedbackPopup.insights.learningSummary;
+    
+    // === NEGATIVE FEEDBACK REASONS ===
+    if (reason === 'already_seen') {
+      confirmMessage = "👍 Got it! We won't count this against the movie's features.";
+      // Note: We could potentially UNDO the automatic negative learning here in the future
+    } else if (reason === 'not_in_mood') {
+      confirmMessage = "👍 No problem! This won't affect your preferences.";
+      // Note: Temporary skip - no learning needed
+    } else if (reason === 'too_long') {
+      confirmMessage = "👎 Noted. We'll suggest more quick watches.";
+    } else if (reason === 'dislike_all') {
+      // NUCLEAR OPTION: User dislikes EVERYTHING about this movie
+      // Apply strong negative boost to ALL features
+      confirmMessage = "👎👎 Got it! We'll strongly avoid movies like this.";
+      
+      // Boost ALL actors
+      for (const actor of feedbackPopup.leadActors) {
+        await boostExplicitFeedback(uid, 'actor', actor, false, 3);
+      }
+      // Boost ALL genres
+      for (const genre of feedbackPopup.genres) {
+        await boostExplicitFeedback(uid, 'genre', genre, false, 3);
+      }
+      // Boost ALL keywords
+      for (const keyword of feedbackPopup.topKeywords || []) {
+        await boostExplicitFeedback(uid, 'keyword', keyword, false, 3);
+      }
+      // Boost franchise if exists
+      if (feedbackPopup.franchise) {
+        await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, false, 3);
+      }
+    
+    // === POSITIVE FEEDBACK REASONS ===
+    } else if (reason === 'great_pick') {
+      confirmMessage = "👍 Awesome! We'll learn from this to find more like it.";
+      // Already learned automatically, no extra boost needed for generic positive
+    } else if (reason === 'want_more_director' && feedbackPopup.director) {
+      confirmMessage = `👍 Great! More ${feedbackPopup.director} films coming your way.`;
+      // Note: Director learning could be added to boostExplicitFeedback in future
+    } else if (reason === 'love_all') {
+      // SUPER POSITIVE: User loves EVERYTHING about this movie
+      confirmMessage = "❤️❤️ Amazing! We'll find more movies just like this!";
+      
+      // Boost ALL actors
+      for (const actor of feedbackPopup.leadActors) {
+        await boostExplicitFeedback(uid, 'actor', actor, true, 3);
+      }
+      // Boost ALL genres
+      for (const genre of feedbackPopup.genres) {
+        await boostExplicitFeedback(uid, 'genre', genre, true, 3);
+      }
+      // Boost ALL keywords
+      for (const keyword of feedbackPopup.topKeywords || []) {
+        await boostExplicitFeedback(uid, 'keyword', keyword, true, 3);
+      }
+      // Boost franchise if exists
+      if (feedbackPopup.franchise) {
+        await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, true, 3);
+      }
+    
+    // === SHARED REASONS (work for both positive and negative) ===
+    } else if (reason.startsWith('actor:')) {
+      const actorName = reason.replace('actor:', '');
+      if (isPositive) {
+        confirmMessage = `👍 Love it! More ${actorName} movies coming up.`;
+        await boostExplicitFeedback(uid, 'actor', actorName, true, 2);
+      } else {
+        confirmMessage = `👎 Got it. ${actorName} movies will appear less often.`;
+        await boostExplicitFeedback(uid, 'actor', actorName, false, 2);
+      }
+    } else if (reason === 'franchise') {
+      if (isPositive) {
+        confirmMessage = `👍 Love the ${feedbackPopup.franchise}! Showing more from this series.`;
+        if (feedbackPopup.franchise) {
+          await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, true, 2);
+        }
+      } else {
+        confirmMessage = `👎 ${feedbackPopup.franchise} fatigue noted. Showing fewer from this series.`;
+        if (feedbackPopup.franchise) {
+          await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, false, 2);
+        }
+      }
+    } else if (reason.startsWith('genre:')) {
+      const genreName = reason.replace('genre:', '');
+      if (isPositive) {
+        confirmMessage = `👍 Great! More ${genreName} movies for you.`;
+        await boostExplicitFeedback(uid, 'genre', genreName, true, 2);
+      } else {
+        confirmMessage = `👎 Got it. Fewer ${genreName} movies coming up.`;
+        await boostExplicitFeedback(uid, 'genre', genreName, false, 2);
+      }
+    } else if (reason.startsWith('keyword:')) {
+      const keywordName = reason.replace('keyword:', '');
+      if (isPositive) {
+        confirmMessage = `👍 Noted! More "${keywordName}" themed movies coming up.`;
+        await boostExplicitFeedback(uid, 'keyword', keywordName, true, 2);
+      } else {
+        confirmMessage = `👎 Got it. Fewer "${keywordName}" themed movies coming up.`;
+        await boostExplicitFeedback(uid, 'keyword', keywordName, false, 2);
+      }
+    }
+    
+    setFeedbackMessage(confirmMessage);
+    setTimeout(() => setFeedbackMessage(null), 3500);
+  };
+
   // Handle feedback
   const handleFeedback = async (tmdbId: number, type: 'negative' | 'positive', reasons?: string[]) => {
     if (!uid) return;
+    
+    // Find the movie title for the popup
+    const movie = items?.find(i => i.id === tmdbId);
+    const movieTitle = movie?.title || 'this movie';
+    
     try {
       if (type === 'negative') {
-        // Block the suggestion in the background
-        await Promise.all([
+        // Block the suggestion in the background and get learning insights
+        const [insights, movieFeatures] = await Promise.all([
           addFeedback(uid, tmdbId, 'negative', reasons),
-          blockSuggestion(uid, tmdbId)
+          blockSuggestion(uid, tmdbId).then(() => getMovieFeaturesForPopup(tmdbId))
         ]);
 
         setBlockedIds(prev => new Set([...prev, tmdbId]));
-        setFeedbackMessage("Got it, we won't show this movie again.");
-        setTimeout(() => setFeedbackMessage(null), 3000);
 
         // Mark the item as dismissed in items (source of truth for storage)
         setItems(prev => {
@@ -1443,11 +1761,61 @@ export default function SuggestPage() {
 
           return next;
         });
+        
+        // Show the feedback popup with quick-tap reasons
+        // Only show if we have interesting features to ask about
+        const hasActors = movieFeatures.leadActors.length > 0;
+        const hasFranchise = !!movieFeatures.franchise;
+        const hasGenres = movieFeatures.genres.length > 0;
+        const hasKeywords = movieFeatures.topKeywords.length > 0;
+        
+        if (hasActors || hasFranchise || hasGenres || hasKeywords) {
+          setFeedbackPopup({
+            tmdbId,
+            title: movieTitle,
+            insights,
+            leadActors: movieFeatures.leadActors,
+            franchise: movieFeatures.franchise,
+            topKeywords: movieFeatures.topKeywords,
+            genres: movieFeatures.genres,
+            feedbackType: 'negative',
+            director: movieFeatures.director
+          });
+          // No auto-dismiss - let user take their time or close manually
+        } else {
+          // No interesting features to ask about, just show the learning message
+          setFeedbackMessage(insights.learningSummary);
+          setTimeout(() => setFeedbackMessage(null), 4000);
+        }
       } else {
-        // Positive feedback
-        await addFeedback(uid, tmdbId, 'positive', reasons);
-        setFeedbackMessage("Thanks! We'll show more movies like this.");
-        setTimeout(() => setFeedbackMessage(null), 3000);
+        // Positive feedback - get learning insights AND show popup for explicit learning
+        const [insights, movieFeatures] = await Promise.all([
+          addFeedback(uid, tmdbId, 'positive', reasons),
+          getMovieFeaturesForPopup(tmdbId)
+        ]);
+        
+        // Show popup for positive feedback too - let users tell us what they loved
+        const hasActors = movieFeatures.leadActors.length > 0;
+        const hasFranchise = !!movieFeatures.franchise;
+        const hasGenres = movieFeatures.genres.length > 0;
+        const hasKeywords = movieFeatures.topKeywords.length > 0;
+        
+        if (hasActors || hasFranchise || hasGenres || hasKeywords) {
+          setFeedbackPopup({
+            tmdbId,
+            title: movieTitle,
+            insights,
+            leadActors: movieFeatures.leadActors,
+            franchise: movieFeatures.franchise,
+            topKeywords: movieFeatures.topKeywords,
+            genres: movieFeatures.genres,
+            feedbackType: 'positive',
+            director: movieFeatures.director
+          });
+        } else {
+          setFeedbackMessage(insights.learningSummary);
+          setTimeout(() => setFeedbackMessage(null), 3000);
+        }
       }
     } catch (e) {
       console.error('Failed to submit feedback:', e);
@@ -1510,6 +1878,34 @@ export default function SuggestPage() {
 
     try {
       console.log(`[SectionRefresh] Refreshing section: ${sectionName}`);
+
+      // Special handling for watchlist picks - they come from a different source
+      if (sectionName === 'watchlistPicks') {
+        // Re-shuffle watchlist picks by regenerating scores with more randomness
+        const currentPicks = categorizedSuggestions.watchlistPicks;
+        if (currentPicks.length > 0) {
+          // Shuffle and re-score with higher random factor
+          const shuffled = [...currentPicks]
+            .map(item => ({
+              ...item,
+              score: item.score * 0.5 + Math.random() * 50 // Add more randomness
+            }))
+            .sort((a, b) => b.score - a.score);
+          
+          // Update via setCategorizedSuggestions
+          setCategorizedSuggestions(prev => prev ? {
+            ...prev,
+            watchlistPicks: shuffled
+          } : null);
+        }
+        
+        setRefreshingSections(prev => {
+          const next = new Set(prev);
+          next.delete(sectionName);
+          return next;
+        });
+        return;
+      }
 
       // Get the movie IDs currently in this section (excluding dismissed ones)
       const currentSectionMovies = (categorizedSuggestions as any)[sectionName] || [];
@@ -1574,6 +1970,268 @@ export default function SuggestPage() {
       {feedbackMessage && (
         <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded shadow-lg z-50 animate-fade-in-up">
           {feedbackMessage}
+        </div>
+      )}
+      
+      {/* Hybrid Feedback Popup - Optional "Tell us why" */}
+      {feedbackPopup && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center pb-4 sm:items-center sm:pb-0">
+          {/* Backdrop */}
+          <div 
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => setFeedbackPopup(null)}
+          />
+          
+          {/* Popup Card */}
+          <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-sm w-full mx-4 p-4 animate-slide-up">
+            {/* Header */}
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  {feedbackPopup.insights.learningSummary}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Want to tell us more? (optional)
+                </p>
+              </div>
+              <button
+                onClick={() => setFeedbackPopup(null)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+                aria-label="Close"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            {/* Quick-tap reason buttons - Different for positive vs negative feedback */}
+            <div className="space-y-3">
+              {feedbackPopup.feedbackType === 'negative' ? (
+                <>
+                  {/* === NEGATIVE FEEDBACK OPTIONS === */}
+                  
+                  {/* NUCLEAR OPTION - Dislike everything */}
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1.5">Strong dislike:</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => handleExplicitReason('dislike_all')}
+                        className="px-3 py-1.5 text-xs bg-red-200 text-red-800 hover:bg-red-300 rounded-full transition-colors font-medium border border-red-300"
+                      >
+                        🚫 I don&apos;t like this movie
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Non-negative reasons (won't learn avoidance) */}
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1.5">Not a problem with the movie:</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => handleExplicitReason('already_seen')}
+                        className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-full transition-colors"
+                      >
+                        ✓ Already seen it
+                      </button>
+                      <button
+                        onClick={() => handleExplicitReason('not_in_mood')}
+                        className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-full transition-colors"
+                      >
+                        😴 Not in the mood
+                      </button>
+                      <button
+                        onClick={() => handleExplicitReason('too_long')}
+                        className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-full transition-colors"
+                      >
+                        ⏱️ Too long right now
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Specific reasons section header */}
+                  <div className="border-t border-gray-200 pt-2">
+                    <p className="text-xs text-gray-500 mb-2">Or tell us specifically:</p>
+                  </div>
+                  
+                  {/* Actor-specific reasons - show ALL lead actors so user can pick specific ones */}
+                  {feedbackPopup.leadActors.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1.5">Not a fan of this actor:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {feedbackPopup.leadActors.map(actor => (
+                          <button
+                            key={actor}
+                            onClick={() => handleExplicitReason(`actor:${actor}`)}
+                            className="px-3 py-1.5 text-xs bg-red-100 text-red-700 hover:bg-red-200 rounded-full transition-colors"
+                          >
+                            👎 {actor}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Franchise fatigue */}
+                  {feedbackPopup.franchise && (
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1.5">Franchise fatigue:</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleExplicitReason('franchise')}
+                          className="px-3 py-1.5 text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-full transition-colors"
+                        >
+                          🔄 Done with {feedbackPopup.franchise.split(':')[0]}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Genre-specific reasons */}
+                  {feedbackPopup.genres.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1.5">Not into this genre:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {feedbackPopup.genres.slice(0, 3).map(genre => (
+                          <button
+                            key={genre}
+                            onClick={() => handleExplicitReason(`genre:${genre}`)}
+                            className="px-3 py-1.5 text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 rounded-full transition-colors"
+                          >
+                            👎 {genre}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Topic/Theme-specific reasons (keywords) */}
+                  {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1.5">Not interested in this topic:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {feedbackPopup.topKeywords.slice(0, 5).map(keyword => (
+                          <button
+                            key={keyword}
+                            onClick={() => handleExplicitReason(`keyword:${keyword}`)}
+                            className="px-3 py-1.5 text-xs bg-amber-100 text-amber-700 hover:bg-amber-200 rounded-full transition-colors"
+                          >
+                            🏷️ {keyword}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* === POSITIVE FEEDBACK OPTIONS === */}
+                  {/* Generic positive */}
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1.5">What made this a great pick?</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => handleExplicitReason('great_pick')}
+                        className="px-3 py-1.5 text-xs bg-green-100 text-green-700 hover:bg-green-200 rounded-full transition-colors"
+                      >
+                        ✨ Just a great pick!
+                      </button>
+                      <button
+                        onClick={() => handleExplicitReason('love_all')}
+                        className="px-3 py-1.5 text-xs bg-emerald-200 text-emerald-800 hover:bg-emerald-300 rounded-full transition-colors font-medium border border-emerald-300"
+                      >
+                        ❤️ I love everything about this!
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Specific reasons section header */}
+                  <div className="border-t border-gray-200 pt-2">
+                    <p className="text-xs text-gray-500 mb-2">Or tell us specifically:</p>
+                  </div>
+                  
+                  {/* Actor love */}
+                  {feedbackPopup.leadActors.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1.5">Love this actor:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {feedbackPopup.leadActors.map(actor => (
+                          <button
+                            key={actor}
+                            onClick={() => handleExplicitReason(`actor:${actor}`)}
+                            className="px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors"
+                          >
+                            ❤️ {actor}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Franchise love */}
+                  {feedbackPopup.franchise && (
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1.5">Love this franchise:</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleExplicitReason('franchise')}
+                          className="px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors"
+                        >
+                          🎬 More {feedbackPopup.franchise.split(':')[0]}!
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Genre love */}
+                  {feedbackPopup.genres.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1.5">Love this genre:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {feedbackPopup.genres.slice(0, 3).map(genre => (
+                          <button
+                            key={genre}
+                            onClick={() => handleExplicitReason(`genre:${genre}`)}
+                            className="px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors"
+                          >
+                            ❤️ {genre}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Topic/Theme love (keywords) */}
+                  {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1.5">Love this theme:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {feedbackPopup.topKeywords.slice(0, 5).map(keyword => (
+                          <button
+                            key={keyword}
+                            onClick={() => handleExplicitReason(`keyword:${keyword}`)}
+                            className="px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors"
+                          >
+                            ❤️ {keyword}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            
+            {/* Skip option */}
+            <div className="mt-3 text-center">
+              <button
+                onClick={() => setFeedbackPopup(null)}
+                className="text-xs text-gray-400 hover:text-gray-600"
+              >
+                Skip — we&apos;ll learn from patterns
+              </button>
+            </div>
+          </div>
         </div>
       )}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -1684,6 +2342,64 @@ export default function SuggestPage() {
           <div className="space-y-8">
             {sourceLabel && (
               <p className="text-xs text-gray-500 mb-4">Source: {sourceLabel}</p>
+            )}
+
+            {/* Picks From Your Letterboxd Watchlist - TOP PRIORITY */}
+            {categorizedSuggestions.watchlistPicks.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📋</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Picks From Your Letterboxd Watchlist</h2>
+                      <p className="text-xs text-gray-600">Movies you saved to watch, prioritized by what you&apos;ve been enjoying recently</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection('watchlistPicks')}
+                    disabled={refreshingSections.has('watchlistPicks')}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg className={`w-3 h-3 ${refreshingSections.has('watchlistPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {categorizedSuggestions.watchlistPicks.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={true}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                    />
+                  ))}
+                </div>
+              </section>
             )}
 
             {/* Seasonal/Holiday Recommendations Section */}
