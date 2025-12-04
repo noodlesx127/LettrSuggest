@@ -45,6 +45,7 @@ export default function ListsPage() {
         if (uid) {
             void loadMovies();
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [uid]);
 
     const handleRemove = async (tmdbId: number) => {
