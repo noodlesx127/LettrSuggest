@@ -6,6 +6,18 @@ import {
 } from './apiCache';
 
 /**
+ * Helper to get the base URL for internal API calls
+ * Works correctly in both browser (client) and server (Server Actions) contexts
+ */
+function getBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  // Server-side: use env var or default to localhost:3000
+  return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+}
+
+/**
  * Genre adjacency map for exploration vs exploitation
  * Maps each genre to related genres for gentle discovery expansion
  */
@@ -63,7 +75,7 @@ const ADJACENT_GENRES: Record<number, number[]> = {
 };
 
 export async function fetchTrendingIds(period: 'day' | 'week' = 'day', limit = 100): Promise<number[]> {
-  const u = new URL('/api/tmdb/trending', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+  const u = new URL('/api/tmdb/trending', getBaseUrl());
   u.searchParams.set('period', period);
   u.searchParams.set('limit', String(limit));
   u.searchParams.set('_t', String(Date.now())); // Cache buster
@@ -97,7 +109,7 @@ async function fetchTraktRelatedIds(seedId: number, limit = 10): Promise<number[
 
   // Cache miss - fetch from API
   try {
-    const u = new URL('/api/trakt/related', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+    const u = new URL('/api/trakt/related', getBaseUrl());
     u.searchParams.set('id', String(seedId));
     u.searchParams.set('limit', String(limit));
     u.searchParams.set('_t', String(Date.now())); // Cache buster
@@ -146,7 +158,7 @@ export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10)
           .forEach(id => allIds.add(id));
       } else {
         // Cache miss - fetch from API
-        const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+        const u = new URL('/api/tmdb/movie', getBaseUrl());
         u.searchParams.set('id', String(seedId));
         u.searchParams.set('_t', String(Date.now())); // Cache buster
 
@@ -223,7 +235,7 @@ export async function discoverMoviesByProfile(options: {
   };
 
   try {
-    const u = new URL('/api/tmdb/discover', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+    const u = new URL('/api/tmdb/discover', getBaseUrl());
 
     if (validGenres.length) {
       const separator = options.genreMode === 'OR' ? '|' : ',';
@@ -321,8 +333,9 @@ export async function generateSmartCandidates(profile: {
       // Import Server Action (safe for client use)
       const { getAggregatedRecommendations } = await import('@/app/actions/recommendations');
 
-      // Get top 10 highly-rated films as seeds WITH TITLES from cache
-      const seedMovies = profile.highlyRatedIds.slice(0, 10).map(tmdbId => {
+      // Get top 15 highly-rated films as seeds WITH TITLES from cache (increased from 10)
+      // More seeds = more diverse recommendations from Trakt & TasteDive
+      const seedMovies = profile.highlyRatedIds.slice(0, 15).map(tmdbId => {
         const details = profile.tmdbDetailsMap?.get(tmdbId);
         return {
           tmdbId,
@@ -332,14 +345,14 @@ export async function generateSmartCandidates(profile: {
       }).filter(s => s.title); // Only include seeds where we have a title (TasteDive needs it)
 
       console.log('[SmartCandidates] Seed movies with titles:', {
-        total: 10,
+        total: 15,
         withTitles: seedMovies.length,
-        sampleTitles: seedMovies.slice(0, 3).map(s => s.title)
+        sampleTitles: seedMovies.slice(0, 5).map(s => s.title)
       });
 
       const aggregated = await getAggregatedRecommendations({
         seedMovies,
-        limit: 50,
+        limit: 75, // Increased from 50 to surface more Trakt/TasteDive results
       });
 
       // Add high-scoring recommendations and track source metadata

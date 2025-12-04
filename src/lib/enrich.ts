@@ -13,6 +13,16 @@ import { getTuiMDBMovie, type TuiMDBMovie } from './tuimdb';
 import { mergeEnhancedGenres, getCurrentSeasonalGenres, boostSeasonalGenres } from './genreEnhancement';
 import { updateExplorationStats } from './adaptiveLearning';
 
+/**
+ * Helper to get the base URL for internal API calls
+ */
+function getBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+}
+
 export type TMDBMovie = {
   id: number;
   title: string;
@@ -269,23 +279,52 @@ function extractReasonTypes(reasons: string[]): string[] {
   return Array.from(types);
 }
 
+/**
+ * Learning insights returned from addFeedback
+ * Used to show Pandora-style "learning" messages to user
+ */
+export interface FeedbackLearningInsights {
+  /** Features that had their penalty increased (for negative feedback) */
+  strengthenedAvoidance: string[];
+  /** Features that are now being penalized for the first time */
+  newAvoidance: string[];
+  /** Features that had their preference increased (for positive feedback) */
+  strengthenedPreference: string[];
+  /** Primary feature that likely triggered this feedback */
+  likelyReason?: string;
+  /** Message summarizing what was learned */
+  learningSummary: string;
+}
+
 export async function addFeedback(
   userId: string, 
   tmdbId: number, 
   type: 'negative' | 'positive',
   reasons?: string[]
-) {
+): Promise<FeedbackLearningInsights> {
   if (!supabase) throw new Error('Supabase not initialized');
   
   // Extract reason types from the suggestion reasons
   const reasonTypes = reasons ? extractReasonTypes(reasons) : [];
   
-  // Insert feedback with reason types
+  // Fetch the movie's features for learning
+  let movieFeatures: MovieFeatures | null = null;
+  try {
+    movieFeatures = await extractMovieFeatures(tmdbId);
+  } catch (e) {
+    console.error('[FeatureFeedback] Failed to extract movie features', { tmdbId, error: e });
+  }
+  
+  // Get existing feature preferences to detect what's being strengthened vs new
+  const existingFeatures = await getExistingFeaturePreferences(userId, movieFeatures);
+  
+  // Insert feedback with reason types and movie features
   const { error } = await supabase.from('suggestion_feedback').insert({ 
     user_id: userId, 
     tmdb_id: tmdbId, 
     feedback_type: type,
-    reason_types: reasonTypes
+    reason_types: reasonTypes,
+    movie_features: movieFeatures || {}
   });
   
   if (error) {
@@ -296,6 +335,622 @@ export async function addFeedback(
   // Update reason type preferences based on feedback
   if (reasonTypes.length > 0) {
     await updateReasonPreferences(userId, reasonTypes, type === 'positive');
+  }
+  
+  // Update feature-level preferences (learn specific actors, keywords, etc.)
+  if (movieFeatures) {
+    await updateFeaturePreferences(userId, movieFeatures, type === 'positive');
+  }
+  
+  // Detect patterns in recent feedback (e.g., rejecting multiple superhero movies)
+  let patternInsights: string[] = [];
+  if (type === 'negative') {
+    patternInsights = await detectFeedbackPatterns(userId);
+  }
+  
+  // Build learning insights for UI feedback (Pandora-style)
+  const insights = buildLearningInsights(
+    movieFeatures, 
+    existingFeatures, 
+    type === 'positive', 
+    patternInsights
+  );
+  
+  console.log(`[FeedbackLearning] Processed ${type} feedback for movie ${tmdbId}`, {
+    reasonTypes,
+    features: movieFeatures ? {
+      actors: movieFeatures.actors?.slice(0, 3).map(a => a.name),
+      keywords: movieFeatures.keywords?.slice(0, 5).map(k => k.name),
+      collection: movieFeatures.collection?.name,
+      genres: movieFeatures.genres?.map(g => g.name)
+    } : 'none',
+    insights
+  });
+  
+  return insights;
+}
+
+/**
+ * Get existing feature preferences to determine what's new vs strengthened
+ */
+async function getExistingFeaturePreferences(
+  userId: string,
+  features: MovieFeatures | null
+): Promise<Map<string, { positive: number; negative: number }>> {
+  if (!supabase || !features) return new Map();
+  
+  const featureIds: number[] = [
+    ...features.actors.map(a => a.id),
+    ...features.keywords.map(k => k.id),
+    ...(features.collection ? [features.collection.id] : [])
+  ];
+  
+  if (featureIds.length === 0) return new Map();
+  
+  const { data } = await supabase
+    .from('user_feature_feedback')
+    .select('feature_type, feature_id, positive_count, negative_count')
+    .eq('user_id', userId)
+    .in('feature_id', featureIds);
+  
+  const map = new Map<string, { positive: number; negative: number }>();
+  for (const row of data || []) {
+    map.set(`${row.feature_type}:${row.feature_id}`, {
+      positive: row.positive_count,
+      negative: row.negative_count
+    });
+  }
+  return map;
+}
+
+/**
+ * Build learning insights for Pandora-style feedback messages
+ */
+function buildLearningInsights(
+  features: MovieFeatures | null,
+  existingPrefs: Map<string, { positive: number; negative: number }>,
+  isPositive: boolean,
+  patternInsights: string[]
+): FeedbackLearningInsights {
+  const strengthenedAvoidance: string[] = [];
+  const newAvoidance: string[] = [];
+  const strengthenedPreference: string[] = [];
+  
+  if (features) {
+    // Check actors (top 3 as they're the strongest signals)
+    for (const actor of features.actors.slice(0, 3)) {
+      const key = `actor:${actor.id}`;
+      const existing = existingPrefs.get(key);
+      
+      if (!isPositive) {
+        if (existing && existing.negative > 0) {
+          strengthenedAvoidance.push(actor.name);
+        } else {
+          newAvoidance.push(actor.name);
+        }
+      } else {
+        if (existing && existing.positive > 0) {
+          strengthenedPreference.push(actor.name);
+        }
+      }
+    }
+    
+    // Check collection/franchise
+    if (features.collection) {
+      const key = `collection:${features.collection.id}`;
+      const existing = existingPrefs.get(key);
+      
+      if (!isPositive) {
+        if (existing && existing.negative > 0) {
+          strengthenedAvoidance.push(features.collection.name);
+        } else {
+          newAvoidance.push(features.collection.name);
+        }
+      }
+    }
+    
+    // Check keywords (top 3)
+    for (const keyword of features.keywords.slice(0, 3)) {
+      const key = `keyword:${keyword.id}`;
+      const existing = existingPrefs.get(key);
+      
+      if (!isPositive) {
+        if (existing && existing.negative > 0) {
+          strengthenedAvoidance.push(keyword.name);
+        }
+        // Don't add new keywords to avoid message - too noisy
+      }
+    }
+  }
+  
+  // Build the learning summary message
+  let learningSummary: string;
+  let likelyReason: string | undefined;
+  
+  if (isPositive) {
+    if (strengthenedPreference.length > 0) {
+      likelyReason = strengthenedPreference[0];
+      learningSummary = `👍 Learning you love ${strengthenedPreference.slice(0, 2).join(' and ')}. We'll show more!`;
+    } else {
+      learningSummary = "👍 Thanks! We'll find more movies like this.";
+    }
+  } else {
+    // Negative feedback - prioritize patterns and strengthened avoidance
+    if (patternInsights.length > 0) {
+      learningSummary = patternInsights[0]; // Pattern detection messages are already formatted
+      likelyReason = strengthenedAvoidance[0] || newAvoidance[0];
+    } else if (strengthenedAvoidance.length > 0) {
+      likelyReason = strengthenedAvoidance[0];
+      const count = 2; // We know they've rejected at least 2 now
+      learningSummary = `👎 Got it. ${strengthenedAvoidance[0]} movies are now less likely to appear.`;
+    } else if (features?.collection) {
+      likelyReason = features.collection.name;
+      learningSummary = `👎 Noted. We'll show fewer ${features.collection.name} movies.`;
+    } else if (newAvoidance.length > 0) {
+      likelyReason = newAvoidance[0];
+      learningSummary = `👎 Got it. We'll remember you passed on this.`;
+    } else {
+      learningSummary = "👎 Got it, we won't show this movie again.";
+    }
+  }
+  
+  return {
+    strengthenedAvoidance,
+    newAvoidance,
+    strengthenedPreference,
+    likelyReason,
+    learningSummary
+  };
+}
+
+/**
+ * Movie features extracted for learning
+ */
+interface MovieFeatures {
+  actors: Array<{ id: number; name: string; order: number }>;
+  keywords: Array<{ id: number; name: string }>;
+  directors: Array<{ id: number; name: string }>;
+  genres: Array<{ id: number; name: string }>;
+  collection?: { id: number; name: string };
+  studios: Array<{ id: number; name: string }>;
+}
+
+/**
+ * Get movie features for the feedback popup (public export)
+ * Returns simplified data for quick-tap reason selection
+ */
+export async function getMovieFeaturesForPopup(tmdbId: number): Promise<{
+  leadActors: string[];
+  franchise?: string;
+  topKeywords: string[];
+  genres: string[];
+  director?: string;
+}> {
+  try {
+    const features = await extractMovieFeatures(tmdbId);
+    return {
+      leadActors: features.actors.slice(0, 3).map(a => a.name),
+      franchise: features.collection?.name,
+      topKeywords: features.keywords.slice(0, 5).map(k => k.name),
+      genres: features.genres.map(g => g.name),
+      director: features.directors[0]?.name
+    };
+  } catch (e) {
+    console.error('[FeedbackPopup] Failed to get movie features', e);
+    return { leadActors: [], topKeywords: [], genres: [] };
+  }
+}
+
+/**
+ * Boost a specific feature based on explicit user selection
+ * This adds EXTRA weight when user explicitly clicks a reason (vs automatic pattern detection)
+ * @param explicitBoost - How many extra negative counts to add (default 2 = 3x the signal of automatic)
+ */
+export async function boostExplicitFeedback(
+  userId: string,
+  featureType: 'actor' | 'keyword' | 'genre' | 'collection',
+  featureName: string,
+  isPositive: boolean,
+  explicitBoost: number = 2
+): Promise<void> {
+  if (!supabase) return;
+  
+  console.log('[ExplicitFeedback] Boosting', featureType, featureName, isPositive ? '+' : '-', 'by', explicitBoost);
+  
+  try {
+    // Get or create the feature record
+    // We need to find the feature_id - for simplicity, use name-based lookup or 0 for generic
+    const { data: existing } = await supabase
+      .from('user_feature_feedback')
+      .select('feature_id, positive_count, negative_count')
+      .eq('user_id', userId)
+      .eq('feature_type', featureType)
+      .eq('feature_name', featureName)
+      .maybeSingle();
+    
+    const featureId = existing?.feature_id || 0;
+    const currentPositive = existing?.positive_count || 0;
+    const currentNegative = existing?.negative_count || 0;
+    
+    // Add explicit boost
+    const newPositive = currentPositive + (isPositive ? explicitBoost : 0);
+    const newNegative = currentNegative + (isPositive ? 0 : explicitBoost);
+    const total = newPositive + newNegative;
+    const inferredPreference = total > 0 ? newPositive / total : 0.5;
+    
+    await supabase
+      .from('user_feature_feedback')
+      .upsert({
+        user_id: userId,
+        feature_type: featureType,
+        feature_id: featureId,
+        feature_name: featureName,
+        positive_count: newPositive,
+        negative_count: newNegative,
+        inferred_preference: inferredPreference,
+        last_updated: new Date().toISOString()
+      }, {
+        onConflict: 'user_id,feature_type,feature_id'
+      });
+      
+    console.log('[ExplicitFeedback] Updated', featureName, ':', { newPositive, newNegative, inferredPreference });
+  } catch (e) {
+    console.error('[ExplicitFeedback] Failed to boost', featureName, e);
+  }
+}
+
+/**
+ * Extract key features from a movie for learning
+ */
+async function extractMovieFeatures(tmdbId: number): Promise<MovieFeatures> {
+  const movie = await fetchTmdbMovieCached(tmdbId);
+  if (!movie) {
+    return { actors: [], keywords: [], directors: [], genres: [], studios: [] };
+  }
+  
+  const features = extractFeatures(movie);
+  
+  return {
+    actors: (movie.credits?.cast || []).slice(0, 5).map((a: any, idx: number) => ({
+      id: a.id,
+      name: a.name,
+      order: idx
+    })),
+    keywords: features.keywordIds.map((id, idx) => ({
+      id,
+      name: features.keywords[idx]
+    })),
+    directors: features.directorIds.map((id, idx) => ({
+      id,
+      name: features.directors[idx]
+    })),
+    genres: features.genreIds.map((id, idx) => ({
+      id,
+      name: features.genres[idx]
+    })),
+    collection: features.collection ? {
+      id: features.collection.id,
+      name: features.collection.name
+    } : undefined,
+    studios: features.productionCompanyIds.map((id, idx) => ({
+      id,
+      name: features.productionCompanies[idx]
+    }))
+  };
+}
+
+/**
+ * Update feature-level preferences based on feedback
+ * This learns WHICH SPECIFIC actors, keywords, etc. the user likes/dislikes
+ */
+async function updateFeaturePreferences(
+  userId: string, 
+  features: MovieFeatures, 
+  isPositive: boolean
+) {
+  if (!supabase) return;
+  
+  const updates: Array<{
+    feature_type: string;
+    feature_id: number;
+    feature_name: string;
+  }> = [];
+  
+  // Track lead actors (top 3 billed) - these are strong signals
+  features.actors.slice(0, 3).forEach(actor => {
+    updates.push({
+      feature_type: 'actor',
+      feature_id: actor.id,
+      feature_name: actor.name
+    });
+  });
+  
+  // Track keywords/themes (top 10) - these indicate content type
+  features.keywords.slice(0, 10).forEach(keyword => {
+    updates.push({
+      feature_type: 'keyword',
+      feature_id: keyword.id,
+      feature_name: keyword.name
+    });
+  });
+  
+  // Track collection/franchise - strong signal for franchise fatigue
+  if (features.collection) {
+    updates.push({
+      feature_type: 'collection',
+      feature_id: features.collection.id,
+      feature_name: features.collection.name
+    });
+  }
+  
+  // Update each feature's feedback counts
+  for (const update of updates) {
+    try {
+      // First, try to get existing record
+      const { data: existing } = await supabase
+        .from('user_feature_feedback')
+        .select('positive_count, negative_count')
+        .eq('user_id', userId)
+        .eq('feature_type', update.feature_type)
+        .eq('feature_id', update.feature_id)
+        .maybeSingle();
+      
+      const positiveCount = (existing?.positive_count || 0) + (isPositive ? 1 : 0);
+      const negativeCount = (existing?.negative_count || 0) + (isPositive ? 0 : 1);
+      const total = positiveCount + negativeCount;
+      // inferred_preference: 0 = strongly avoid, 0.5 = neutral, 1 = strongly prefer
+      const inferredPreference = total > 0 ? positiveCount / total : 0.5;
+      
+      await supabase
+        .from('user_feature_feedback')
+        .upsert({
+          user_id: userId,
+          feature_type: update.feature_type,
+          feature_id: update.feature_id,
+          feature_name: update.feature_name,
+          positive_count: positiveCount,
+          negative_count: negativeCount,
+          inferred_preference: inferredPreference,
+          last_updated: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,feature_type,feature_id'
+        });
+    } catch (e) {
+      console.error('[FeaturePreference] Error updating', { update, error: e });
+    }
+  }
+  
+  console.log('[FeaturePreference] Updated feature preferences', {
+    userId: userId.slice(0, 8),
+    isPositive,
+    featuresUpdated: updates.length
+  });
+}
+
+/**
+ * Detect patterns in recent negative feedback
+ * If user rejects multiple movies with same actor/franchise/keyword, learn to avoid
+ */
+async function detectFeedbackPatterns(userId: string): Promise<string[]> {
+  if (!supabase) return [];
+  
+  const insights: string[] = [];
+  
+  try {
+    // Get features that have been negatively rated multiple times
+    const { data: avoidedFeatures } = await supabase
+      .from('user_feature_feedback')
+      .select('feature_type, feature_id, feature_name, negative_count, positive_count, inferred_preference')
+      .eq('user_id', userId)
+      .gte('negative_count', 2) // At least 2 negative interactions
+      .lte('inferred_preference', 0.35) // More negatives than positives
+      .order('negative_count', { ascending: false })
+      .limit(20);
+    
+    if (!avoidedFeatures || avoidedFeatures.length === 0) return [];
+    
+    // Log detected patterns
+    const patterns = avoidedFeatures.map(f => ({
+      type: f.feature_type,
+      name: f.feature_name,
+      negatives: f.negative_count,
+      positives: f.positive_count,
+      preference: f.inferred_preference
+    }));
+    
+    console.log('[PatternDetection] Detected avoidance patterns:', patterns.slice(0, 5));
+    
+    // Actors with 3+ rejections and low preference are strongly avoided
+    const avoidedActors = avoidedFeatures.filter(
+      f => f.feature_type === 'actor' && f.negative_count >= 3 && f.inferred_preference <= 0.3
+    );
+    
+    // Franchises with 2+ rejections - user likely has franchise fatigue
+    const avoidedFranchises = avoidedFeatures.filter(
+      f => f.feature_type === 'collection' && f.negative_count >= 2
+    );
+    
+    // Keywords with 3+ rejections - indicates content aversion
+    const avoidedKeywords = avoidedFeatures.filter(
+      f => f.feature_type === 'keyword' && f.negative_count >= 3 && f.inferred_preference <= 0.25
+    );
+    
+    if (avoidedActors.length > 0) {
+      const actorName = avoidedActors[0].feature_name;
+      const count = avoidedActors[0].negative_count;
+      insights.push(`👎 Pattern detected: You've passed on ${count} movies with ${actorName}. They'll appear less often now.`);
+      console.log('[PatternDetection] Strong actor avoidance detected:', 
+        avoidedActors.map(a => `${a.feature_name}(${a.negative_count}👎/${a.positive_count}👍)`));
+    }
+    
+    if (avoidedFranchises.length > 0) {
+      const franchiseName = avoidedFranchises[0].feature_name;
+      insights.push(`👎 Franchise fatigue detected: Reducing ${franchiseName} suggestions.`);
+      console.log('[PatternDetection] Franchise fatigue detected:', 
+        avoidedFranchises.map(f => f.feature_name));
+    }
+    
+    if (avoidedKeywords.length > 0) {
+      const keywordName = avoidedKeywords[0].feature_name;
+      const count = avoidedKeywords[0].negative_count;
+      insights.push(`👎 Learning from ${count} rejections: Less "${keywordName}" themed content.`);
+      console.log('[PatternDetection] Content avoidance detected:',
+        avoidedKeywords.map(k => `${k.feature_name}(${k.negative_count}👎)`));
+    }
+    
+  } catch (e) {
+    console.error('[PatternDetection] Error detecting patterns', e);
+  }
+  
+  return insights;
+}
+
+/**
+ * Get user's avoided features for filtering/scoring
+ * PANDORA-STYLE: Graduated penalties that apply IMMEDIATELY
+ * - 1 rejection = small penalty (learning starts right away)
+ * - 2 rejections = medium penalty  
+ * - 3+ rejections = strong penalty
+ * This mirrors how Pandora learns from thumbs down immediately
+ */
+export async function getAvoidedFeatures(userId: string): Promise<{
+  avoidActors: Array<{ id: number; name: string; weight: number; count: number }>;
+  avoidKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
+  avoidFranchises: Array<{ id: number; name: string; weight: number; count: number }>;
+  preferActors: Array<{ id: number; name: string; weight: number; count: number }>;
+  preferKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
+}> {
+  if (!supabase) {
+    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], preferActors: [], preferKeywords: [] };
+  }
+  
+  try {
+    // Get ALL features with ANY feedback (Pandora learns from first interaction)
+    const { data } = await supabase
+      .from('user_feature_feedback')
+      .select('feature_type, feature_id, feature_name, negative_count, positive_count, inferred_preference, last_updated')
+      .eq('user_id', userId)
+      .or('negative_count.gte.1,positive_count.gte.1'); // Start learning from FIRST interaction
+    
+    if (!data) {
+      return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], preferActors: [], preferKeywords: [] };
+    }
+    
+    // PANDORA-STYLE graduated penalty calculation
+    // Penalty grows with each rejection, but even 1 rejection has an effect
+    const calcGraduatedPenalty = (neg: number, pos: number): number => {
+      // Net negative score (negatives minus positives)
+      const netNegative = neg - pos;
+      if (netNegative <= 0) return 0; // More positives than negatives = no penalty
+      
+      // Graduated penalty based on rejection count
+      // 1 rejection: 0.5 weight
+      // 2 rejections: 1.2 weight
+      // 3 rejections: 2.0 weight
+      // 4+ rejections: 2.5+ weight (capped at 3.0)
+      if (netNegative === 1) return 0.5;
+      if (netNegative === 2) return 1.2;
+      if (netNegative === 3) return 2.0;
+      return Math.min(2.5 + (netNegative - 4) * 0.25, 3.0);
+    };
+    
+    // PANDORA-STYLE graduated boost calculation
+    const calcGraduatedBoost = (neg: number, pos: number): number => {
+      const netPositive = pos - neg;
+      if (netPositive <= 0) return 0;
+      
+      // Graduated boost
+      // 1 thumbs up: 0.4 weight
+      // 2 thumbs up: 0.8 weight
+      // 3+ thumbs up: 1.2+ weight (capped at 2.0)
+      if (netPositive === 1) return 0.4;
+      if (netPositive === 2) return 0.8;
+      return Math.min(1.2 + (netPositive - 3) * 0.2, 2.0);
+    };
+    
+    // Apply recency boost - recent feedback matters more (like Pandora)
+    const applyRecencyBoost = (weight: number, lastUpdated: string): number => {
+      const daysSince = (Date.now() - new Date(lastUpdated).getTime()) / (1000 * 60 * 60 * 24);
+      // Recent feedback (< 7 days) gets 1.5x boost
+      // Older feedback (> 30 days) gets 0.7x reduction
+      if (daysSince < 7) return weight * 1.3;
+      if (daysSince < 30) return weight;
+      return weight * 0.8;
+    };
+    
+    // ACTORS: Start avoiding after just 1 net rejection
+    const avoidActors = data
+      .filter(f => f.feature_type === 'actor' && (f.negative_count - f.positive_count) >= 1)
+      .map(f => ({
+        id: f.feature_id,
+        name: f.feature_name,
+        weight: applyRecencyBoost(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
+        count: f.negative_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 15);
+    
+    // KEYWORDS: Start avoiding after 1 net rejection
+    const avoidKeywords = data
+      .filter(f => f.feature_type === 'keyword' && (f.negative_count - f.positive_count) >= 1)
+      .map(f => ({
+        id: f.feature_id,
+        name: f.feature_name,
+        weight: applyRecencyBoost(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
+        count: f.negative_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 20);
+    
+    // FRANCHISES: Immediate strong penalty (1 rejection = franchise fatigue likely)
+    const avoidFranchises = data
+      .filter(f => f.feature_type === 'collection' && f.negative_count >= 1)
+      .map(f => ({
+        id: f.feature_id,
+        name: f.feature_name,
+        // Franchises get stronger penalty faster (user rejected a movie FROM that franchise)
+        weight: f.negative_count === 1 ? 1.5 : Math.min(2.5 + f.negative_count * 0.5, 4.0),
+        count: f.negative_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 10);
+    
+    // PREFERRED ACTORS: Boost starts from 1 positive
+    const preferActors = data
+      .filter(f => f.feature_type === 'actor' && (f.positive_count - f.negative_count) >= 1)
+      .map(f => ({
+        id: f.feature_id,
+        name: f.feature_name,
+        weight: applyRecencyBoost(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
+        count: f.positive_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 15);
+    
+    // PREFERRED KEYWORDS: Boost starts from 1 positive
+    const preferKeywords = data
+      .filter(f => f.feature_type === 'keyword' && (f.positive_count - f.negative_count) >= 1)
+      .map(f => ({
+        id: f.feature_id,
+        name: f.feature_name,
+        weight: applyRecencyBoost(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
+        count: f.positive_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 20);
+    
+    console.log('[PandoraLearning] Loaded graduated preferences', {
+      avoidActors: avoidActors.map(a => `${a.name}(${a.count}👎, -${a.weight.toFixed(1)})`).slice(0, 3),
+      avoidKeywords: avoidKeywords.map(k => `${k.name}(${k.count}👎)`).slice(0, 5),
+      avoidFranchises: avoidFranchises.map(f => f.name),
+      preferActors: preferActors.map(a => `${a.name}(${a.count}👍)`).slice(0, 3),
+      preferKeywords: preferKeywords.map(k => `${k.name}(${k.count}👍)`).slice(0, 5)
+    });
+    
+    return { avoidActors, avoidKeywords, avoidFranchises, preferActors, preferKeywords };
+  } catch (e) {
+    console.error('[PandoraLearning] Error loading graduated features', e);
+    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], preferActors: [], preferKeywords: [] };
   }
 }
 
@@ -395,7 +1050,7 @@ export async function getFeedback(userId: string): Promise<Map<number, 'negative
 export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
   // Fetch from TMDB (primary source)
   console.log('[UnifiedAPI] fetch movie from TMDB', { id });
-  const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+  const u = new URL('/api/tmdb/movie', getBaseUrl());
   u.searchParams.set('id', String(id));
   u.searchParams.set('_t', String(Date.now())); // Cache buster
 
@@ -417,7 +1072,7 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
   // Try to get TuiMDB UID by searching for the movie
   try {
     console.log('[UnifiedAPI] searching TuiMDB for UID', { tmdbId: id, title: movie.title });
-    const tuiUrl = new URL('/api/tuimdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+    const tuiUrl = new URL('/api/tuimdb/search', getBaseUrl());
     const year = movie.release_date ? new Date(movie.release_date).getFullYear() : undefined;
     tuiUrl.searchParams.set('query', movie.title);
     if (year) tuiUrl.searchParams.set('year', String(year));
@@ -628,7 +1283,7 @@ export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null
 
   // Fetch from API route which handles both TMDB and OMDb enrichment server-side
   try {
-    const apiUrl = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+    const apiUrl = new URL('/api/tmdb/movie', getBaseUrl());
     apiUrl.searchParams.set('id', String(id));
     apiUrl.searchParams.set('_t', String(Date.now()));
 
@@ -1643,6 +2298,14 @@ export async function suggestByOverlap(params: {
   feedbackMap?: Map<number, 'negative' | 'positive'>;
   // Multi-source metadata for badge display
   sourceMetadata?: Map<number, { sources: string[]; consensusLevel: 'high' | 'medium' | 'low' }>;
+  // Feature-level feedback from "Not Interested" / "More Like This" clicks (Pandora-style)
+  featureFeedback?: {
+    avoidActors: Array<{ id: number; name: string; weight: number; count: number }>;
+    avoidKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
+    avoidFranchises: Array<{ id: number; name: string; weight: number; count: number }>;
+    preferActors: Array<{ id: number; name: string; weight: number; count: number }>;
+    preferKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
+  };
   enhancedProfile?: {
     topActors: Array<{ id: number; name: string; weight: number }>;
     topStudios: Array<{ id: number; name: string; weight: number }>;
@@ -2411,6 +3074,125 @@ export async function suggestByOverlap(params: {
         totalPenalty += directorPenalty;
         const avoidedDirector = params.enhancedProfile.avoidDirectors.find(d => d.id === matchedAvoidDirectors[0]);
         penaltyReasons.push(`Directed by ${avoidedDirector?.name || 'director'} whose films you don't enjoy`);
+      }
+    }
+
+    // PANDORA-STYLE FEATURE FEEDBACK: Apply graduated penalties/boosts
+    // Penalties grow with each rejection, starting from the FIRST interaction
+    if (params.featureFeedback) {
+      const ff = params.featureFeedback;
+      
+      // Penalty for actors user has rejected (graduated based on rejection count)
+      if (ff.avoidActors && ff.avoidActors.length > 0) {
+        const avoidedActorMap = new Map(ff.avoidActors.map(a => [a.id, a]));
+        const movieCastIds = (m.credits?.cast || []).slice(0, 5).map((c: any) => c.id);
+        const matchedAvoidActors = movieCastIds
+          .map((id: number) => avoidedActorMap.get(id))
+          .filter((a): a is { id: number; name: string; weight: number; count: number } => a !== undefined);
+        
+        if (matchedAvoidActors.length > 0) {
+          // Use the graduated weight from the feature, adjusted by position
+          const leadActor = matchedAvoidActors.find(a => movieCastIds.indexOf(a.id) < 2);
+          const supportingActors = matchedAvoidActors.filter(a => movieCastIds.indexOf(a.id) >= 2);
+          
+          let actorPenalty = 0;
+          if (leadActor) {
+            // Lead actor: full graduated weight
+            actorPenalty -= leadActor.weight;
+            const countLabel = leadActor.count === 1 ? 'once' : `${leadActor.count} times`;
+            penaltyReasons.push(`Stars ${leadActor.name} — you've skipped their films ${countLabel}`);
+          }
+          for (const actor of supportingActors.slice(0, 2)) {
+            // Supporting actors: 60% of graduated weight
+            actorPenalty -= actor.weight * 0.6;
+          }
+          
+          totalPenalty += actorPenalty;
+          console.log(`[PandoraLearning] Actor penalty for "${m.title}": ${matchedAvoidActors.map(a => `${a.name}(${a.count}👎)`).join(', ')} (${actorPenalty.toFixed(1)})`);
+        }
+      }
+      
+      // Penalty for keywords/themes user has rejected
+      if (ff.avoidKeywords && ff.avoidKeywords.length > 0) {
+        const avoidedKeywordMap = new Map(ff.avoidKeywords.map(k => [k.id, k]));
+        const matchedKeywords = feats.keywordIds
+          .map(id => avoidedKeywordMap.get(id))
+          .filter((k): k is { id: number; name: string; weight: number; count: number } => k !== undefined);
+        
+        if (matchedKeywords.length > 0) {
+          // Sum graduated weights, cap at 4.0 total
+          const keywordPenalty = -Math.min(
+            matchedKeywords.reduce((sum, k) => sum + k.weight * 0.5, 0),
+            4.0
+          );
+          totalPenalty += keywordPenalty;
+          
+          const topKeyword = matchedKeywords.sort((a, b) => b.weight - a.weight)[0];
+          const countLabel = topKeyword.count === 1 ? 'before' : `${topKeyword.count} times`;
+          penaltyReasons.push(`Contains "${topKeyword.name}" — you've skipped this ${countLabel}`);
+          console.log(`[PandoraLearning] Keyword penalty for "${m.title}": ${matchedKeywords.length} matches (${keywordPenalty.toFixed(1)})`);
+        }
+      }
+      
+      // Penalty for franchises (IMMEDIATE strong effect - even 1 rejection)
+      if (ff.avoidFranchises && ff.avoidFranchises.length > 0 && feats.collection) {
+        const avoidedFranchise = ff.avoidFranchises.find(f => f.id === feats.collection!.id);
+        if (avoidedFranchise) {
+          // Use the pre-calculated graduated weight for franchises
+          const franchisePenalty = -avoidedFranchise.weight;
+          totalPenalty += franchisePenalty;
+          const countLabel = avoidedFranchise.count === 1 ? '' : ` (${avoidedFranchise.count} skips)`;
+          penaltyReasons.push(`Part of ${avoidedFranchise.name}${countLabel} — you seem done with this`);
+          console.log(`[PandoraLearning] Franchise penalty for "${m.title}": ${avoidedFranchise.name} (${franchisePenalty.toFixed(1)})`);
+        }
+      }
+      
+      // BOOST for actors user has responded positively to (graduated)
+      if (ff.preferActors && ff.preferActors.length > 0) {
+        const preferredActorMap = new Map(ff.preferActors.map(a => [a.id, a]));
+        const movieCastIds = (m.credits?.cast || []).slice(0, 5).map((c: any) => c.id);
+        const matchedPreferActors = movieCastIds
+          .map((id: number) => preferredActorMap.get(id))
+          .filter((a): a is { id: number; name: string; weight: number; count: number } => a !== undefined);
+        
+        if (matchedPreferActors.length > 0) {
+          const leadActor = matchedPreferActors.find(a => movieCastIds.indexOf(a.id) < 2);
+          
+          let actorBoost = 0;
+          if (leadActor) {
+            actorBoost += leadActor.weight;
+            const countLabel = leadActor.count === 1 ? '' : ` (${leadActor.count}× thumbs up)`;
+            reasons.push(`Stars ${leadActor.name}${countLabel} — you love their work`);
+          } else {
+            const topActor = matchedPreferActors[0];
+            actorBoost += topActor.weight * 0.6;
+            reasons.push(`Features ${topActor.name} — you've enjoyed their films`);
+          }
+          
+          score += actorBoost;
+          console.log(`[PandoraLearning] Actor boost for "${m.title}": ${matchedPreferActors.map(a => a.name).join(', ')} (+${actorBoost.toFixed(1)})`);
+        }
+      }
+      
+      // BOOST for keywords/themes user responds positively to
+      if (ff.preferKeywords && ff.preferKeywords.length > 0) {
+        const preferredKeywordMap = new Map(ff.preferKeywords.map(k => [k.id, k]));
+        const matchedKeywords = feats.keywordIds
+          .map(id => preferredKeywordMap.get(id))
+          .filter((k): k is { id: number; name: string; weight: number; count: number } => k !== undefined);
+        
+        if (matchedKeywords.length > 0) {
+          // Sum graduated weights, cap at 3.0 total
+          const keywordBoost = Math.min(
+            matchedKeywords.reduce((sum, k) => sum + k.weight * 0.4, 0),
+            3.0
+          );
+          score += keywordBoost;
+          
+          const topKeyword = matchedKeywords.sort((a, b) => b.weight - a.weight)[0];
+          reasons.push(`Matches "${topKeyword.name}" — a theme you consistently enjoy`);
+          console.log(`[PandoraLearning] Keyword boost for "${m.title}": ${matchedKeywords.length} matches (+${keywordBoost.toFixed(1)})`);
+        }
       }
     }
 

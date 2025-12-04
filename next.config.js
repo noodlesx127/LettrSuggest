@@ -5,6 +5,8 @@ const nextConfig = {
   experimental: {
     typedRoutes: true
   },
+  // Suppress verbose fetch logging (GET /api/... 200 in Xms, cache info, etc.)
+  logging: false,
   images: {
     remotePatterns: [
       {

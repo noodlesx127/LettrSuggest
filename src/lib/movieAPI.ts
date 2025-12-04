@@ -6,6 +6,16 @@
 
 import { type TMDBMovie } from './enrich';
 
+/**
+ * Helper to get the base URL for internal API calls
+ */
+function getBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+}
+
 export type UnifiedMovie = TMDBMovie;
 
 export type MovieSearchOptions = {
@@ -30,7 +40,7 @@ export async function searchMovies(options: MovieSearchOptions): Promise<Unified
   if (preferTuiMDB) {
     try {
       console.log('[UnifiedAPI] Searching TuiMDB', { query, year });
-      const tuiUrl = new URL('/api/tuimdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+      const tuiUrl = new URL('/api/tuimdb/search', getBaseUrl());
       tuiUrl.searchParams.set('query', query);
       if (year) tuiUrl.searchParams.set('year', String(year));
       tuiUrl.searchParams.set('_t', String(Date.now()));
@@ -43,7 +53,7 @@ export async function searchMovies(options: MovieSearchOptions): Promise<Unified
         
         // Also search TMDB to get TMDB IDs and merge
         console.log('[UnifiedAPI] Also searching TMDB to get TMDB IDs');
-        const tmdbUrl = new URL('/api/tmdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+        const tmdbUrl = new URL('/api/tmdb/search', getBaseUrl());
         tmdbUrl.searchParams.set('query', query);
         if (year) tmdbUrl.searchParams.set('year', String(year));
         tmdbUrl.searchParams.set('_t', String(Date.now()));
@@ -97,7 +107,7 @@ export async function searchMovies(options: MovieSearchOptions): Promise<Unified
   
   // Fall back to TMDB
   console.log('[UnifiedAPI] Searching TMDB', { query, year });
-  const u = new URL('/api/tmdb/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+  const u = new URL('/api/tmdb/search', getBaseUrl());
   u.searchParams.set('query', query);
   if (year) u.searchParams.set('year', String(year));
   u.searchParams.set('_t', String(Date.now())); // Cache buster
@@ -124,7 +134,7 @@ export async function getMovieDetails(options: MovieDetailsOptions): Promise<Uni
   if (preferTuiMDB) {
     try {
       console.log('[UnifiedAPI] Fetching movie from TuiMDB', { id });
-      const u = new URL('/api/tuimdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+      const u = new URL('/api/tuimdb/movie', getBaseUrl());
       u.searchParams.set('id', String(id));
       u.searchParams.set('_t', String(Date.now())); // Cache buster
       
@@ -144,7 +154,7 @@ export async function getMovieDetails(options: MovieDetailsOptions): Promise<Uni
   
   // Fall back to TMDB
   console.log('[UnifiedAPI] Fetching movie from TMDB', { id });
-  const u = new URL('/api/tmdb/movie', typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+  const u = new URL('/api/tmdb/movie', getBaseUrl());
   u.searchParams.set('id', String(id));
   u.searchParams.set('_t', String(Date.now())); // Cache buster
   

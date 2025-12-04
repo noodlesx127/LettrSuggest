@@ -10,6 +10,7 @@
  */
 
 export interface TasteDiveResult {
+    // API returns lowercase, but we normalize to capitalized for consistency
     Name: string;
     Type: 'movie' | 'show' | 'book' | 'music' | 'game' | 'podcast';
     wTeaser?: string; // Wikipedia description
@@ -19,9 +20,14 @@ export interface TasteDiveResult {
 }
 
 export interface TasteDiveResponse {
-    Similar: {
-        Info: TasteDiveResult[]; // Info about the queried items
-        Results: TasteDiveResult[]; // Recommended similar items
+    // API can return either Similar or similar (case varies)
+    Similar?: {
+        Info: TasteDiveResult[];
+        Results: TasteDiveResult[];
+    };
+    similar?: {
+        info: TasteDiveResult[];
+        results: TasteDiveResult[];
     };
 }
 
@@ -48,32 +54,60 @@ export async function getSimilarContent(
         // Build query string (supports comma-separated multi-query)
         const queryString = Array.isArray(query) ? query.join(', ') : query;
 
-        const params = new URLSearchParams({
-            q: queryString,
-            k: apiKey,
-            type: options?.type || 'movie',
-            info: options?.info ? '1' : '0',
-            limit: String(options?.limit || 20),
+        // Build URL with proper encoding
+        const url = new URL('https://tastedive.com/api/similar');
+        url.searchParams.set('q', queryString);
+        url.searchParams.set('k', apiKey);
+        // Type is required by TasteDive API
+        url.searchParams.set('type', options?.type || 'movie');
+        url.searchParams.set('info', options?.info ? '1' : '0');
+        // TasteDive limit must be between 1 and 20
+        url.searchParams.set('limit', String(Math.min(options?.limit || 20, 20)));
+
+        console.log('[TasteDive] Fetching similar content', { 
+            query: queryString, 
+            type: options?.type,
+            url: url.toString().replace(apiKey, 'REDACTED')
         });
 
-        console.log('[TasteDive] Fetching similar content', { query: queryString, type: options?.type });
-
-        const response = await fetch(`https://tastedive.com/api/similar?${params}`);
+        const response = await fetch(url.toString());
 
         if (!response.ok) {
-            console.error('[TasteDive] HTTP error:', response.status);
+            const errorText = await response.text().catch(() => 'Unable to read error');
+            console.error('[TasteDive] HTTP error:', response.status, errorText);
             return [];
         }
 
-        const data: TasteDiveResponse = await response.json();
+        const data = await response.json();
+        
+        // Log raw response for debugging
+        console.log('[TasteDive] Raw response:', JSON.stringify(data).slice(0, 500));
 
-        if (!data.Similar || !data.Similar.Results) {
+        // TasteDive API uses lowercase field names
+        const similar = data.Similar || data.similar;
+        if (!similar) {
+            console.log('[TasteDive] No Similar object in response');
+            return [];
+        }
+        
+        const rawResults = similar.Results || similar.results || [];
+        if (rawResults.length === 0) {
             console.log('[TasteDive] No results found for query:', queryString);
             return [];
         }
 
-        console.log('[TasteDive] Found results', { count: data.Similar.Results.length });
-        return data.Similar.Results;
+        // Normalize results - API returns lowercase (name, type) but we use capitalized (Name, Type)
+        const results: TasteDiveResult[] = rawResults.map((r: Record<string, unknown>) => ({
+            Name: (r.Name || r.name || '') as string,
+            Type: (r.Type || r.type || 'movie') as TasteDiveResult['Type'],
+            wTeaser: (r.wTeaser || r.wteaser) as string | undefined,
+            wUrl: (r.wUrl || r.wurl) as string | undefined,
+            yUrl: (r.yUrl || r.yurl) as string | undefined,
+            yID: (r.yID || r.yid) as string | undefined,
+        }));
+
+        console.log('[TasteDive] Found results', { count: results.length, firstResult: results[0]?.Name });
+        return results;
     } catch (error) {
         console.error('[TasteDive] Request error:', error);
         return [];

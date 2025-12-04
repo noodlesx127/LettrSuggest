@@ -224,6 +224,13 @@ This document outlines the improvements to enhance suggestion quality in LettrSu
 | ✅ 13 | Genre Avoidance Logic Fix | Low | High | Complete |
 | ✅ 14 | Avoidance Profile Display | Low | High | Complete |
 | ✅ 15 | Watchlist Intent Analysis | Medium | High | Complete |
+| ✅ 16 | Feature-Level Feedback Learning | Medium | High | Complete |
+| 🔴 10 | Collection Completion | Medium | Medium | Not Started |
+| ✅ 11 | Weighting System Fixes | Low | Medium | Complete |
+| ✅ 12 | Expanded Suggestion Sections | Medium | High | Complete |
+| ✅ 13 | Genre Avoidance Logic Fix | Low | High | Complete |
+| ✅ 14 | Avoidance Profile Display | Low | High | Complete |
+| ✅ 15 | Watchlist Intent Analysis | Medium | High | Complete |
 
 ---
 
@@ -415,6 +422,93 @@ Only truly bad films (1.5 stars or below) should be treated as dislikes.
 
 ---
 
+### 16. Enhanced Feature-Level Feedback Learning (Pandora-Style + Hybrid Popup)
+**Status:** ✅ Completed  
+**Files:** `src/lib/enrich.ts`, `src/app/suggest/page.tsx`, `src/app/globals.css`  
+**Database:** `user_feature_feedback` table  
+**Effort:** Medium | **Impact:** High
+
+**Problem:** The "Not Interested" and "More Like This" buttons only learned generic reason types (e.g., "genre", "director") but not WHICH SPECIFIC features users liked/disliked.
+
+**Examples of what was missed:**
+- User rejects 5 Tom Cruise movies → System didn't learn to avoid Tom Cruise
+- User rejects 4 Marvel movies → System didn't detect franchise fatigue
+- User rejects 3 "superhero" keyword movies → System didn't learn keyword avoidance
+- User clicks "More Like This" on 3 A24 films → System didn't boost A24
+
+**Solution: Pandora-Style Graduated Learning + Hybrid Feedback Popup**
+
+The system now works like Pandora's thumbs up/down with an optional "tell us why" popup:
+- **Immediate effect:** Even 1 rejection has an effect (not waiting for 3+)
+- **Graduated penalties:** Penalties grow with each confirmation
+- **Multi-dimensional:** Learns actors, keywords, and franchises simultaneously
+- **Visual feedback:** Shows user what was learned
+- **Hybrid Popup:** Optional quick-tap reasons appear after "Not Interested" (auto-dismisses after 6s)
+
+**Why Hybrid Approach for Movies (vs Pure Pandora for Music)?**
+Movies have MORE dimensions than songs:
+- Songs: Artist + Genre + Mood
+- Movies: Actors (5+), Director, Genre, Franchise, Runtime, Tone, Violence, Language, Era, Studio...
+
+A quick-tap popup helps users specify the EXACT reason without adding friction (it's optional).
+
+**Feedback Popup Quick-Tap Options:**
+- ✓ **Already seen it** - Won't count against the movie's features
+- 😴 **Not in the mood** - Won't affect preferences (temporary skip)
+- 👎 **Not a fan of [Actor]** - Strengthens actor avoidance
+- 🔄 **Done with [Franchise]** - Strengthens franchise fatigue
+- 🎭 **Not my genre** - Strengthens genre avoidance
+- ⏱️ **Too long** - Boosts quick watches preference
+
+**Graduated Penalty Formula:**
+```
+penalty = baseWeight × (1 + log₂(rejectionCount))
+```
+
+| Rejections | Actor Penalty | Keyword Penalty | Franchise Penalty |
+|------------|---------------|-----------------|-------------------|
+| 1          | -0.50         | -0.30           | -1.00             |
+| 2          | -0.79         | -0.47           | -1.58             |
+| 3          | -1.00         | -0.60           | -2.00             |
+| 4          | -1.16         | -0.70           | -2.32             |
+| 5+         | -1.29+        | -0.78+          | -2.58+            |
+
+**Implementation:**
+- [x] New `user_feature_feedback` database table with RLS policies
+- [x] `extractMovieFeatures()` - Gets actors, keywords, collection, directors from movie
+- [x] `updateFeaturePreferences()` - Updates counts when user gives feedback
+- [x] `detectFeedbackPatterns()` - Returns learning insights for UI messages
+- [x] `getAvoidedFeatures()` - Returns features with graduated weights (Pandora-style)
+- [x] `buildLearningInsights()` - Creates user-facing feedback messages
+- [x] `getMovieFeaturesForPopup()` - Gets movie features for popup display
+- [x] Graduated scoring penalties in `suggestByOverlap()`:
+  - Uses `feature.weight` from graduated calculation
+  - Considers positive feedback to reduce penalties
+- [x] Pandora-style UI feedback messages showing what was learned
+- [x] **Hybrid Feedback Popup** with quick-tap reasons (optional, auto-dismiss)
+
+**User Feedback Messages (Examples):**
+- "👎 Got it. Tom Cruise movies are now less likely to appear."
+- "👎 Pattern detected: You've passed on 4 movies with superhero. They'll appear less often now."
+- "👎 Franchise fatigue detected: Reducing Marvel Cinematic Universe suggestions."
+- "👍 Learning you love Christopher Nolan and practical effects. We'll show more!"
+
+**How It Answers the Original Questions:**
+
+1. **"If user hits Not Interested on superhero movies, does the system take that into account?"**
+   - ✅ YES. From the FIRST rejection, superhero movies get penalized (-0.30). After 5 rejections, the penalty grows to -0.78+.
+
+2. **"If user rejects movies with the same actor, does the system learn?"**
+   - ✅ YES. Actors are tracked from the first rejection. The penalty starts at -0.50 for lead actors and grows logarithmically.
+
+3. **"How can the system figure out WHY the user is Not Interested?"**
+   - ✅ The system tracks ALL features and applies graduated penalties. The most-rejected features receive the strongest penalties, naturally surfacing the "why."
+
+4. **"It should work like Pandora's thumbs up/down"**
+   - ✅ EXACTLY. Immediate effect, graduated strengthening, and visual feedback showing what was learned.
+
+---
+
 ## Commits Made
 
 1. **`30affec`** - Fix TMDB API auth, taste profile analysis, and data flow issues
@@ -424,6 +518,7 @@ Only truly bad films (1.5 stars or below) should be treated as dislikes.
 5. **`788666c`** - Fix weighting system issues (studio double-counting, boost caps, discovery boosts)
 6. **`TBD`** - Add multi-source badge display to MovieCard
 7. **`TBD`** - Fix genre avoidance logic (don't penalize favorite genres)
+8. **`TBD`** - Enhanced feature-level feedback learning (actors, keywords, franchises)
 
 ---
 
