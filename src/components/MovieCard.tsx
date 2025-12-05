@@ -347,6 +347,22 @@ export default function MovieCard({
       : 'bg-slate-100 text-slate-700'
   } : null;
 
+  const strengthScore = (() => {
+    let s = 0;
+    if (reliabilityMultiplier) s += reliabilityMultiplier - 1; // +/- confidence
+    if (consensusLevel === 'high') s += 0.12;
+    else if (consensusLevel === 'medium') s += 0.05;
+    else if (consensusLevel === 'low') s -= 0.05;
+    return s;
+  })();
+
+  const strengthBadge = (() => {
+    if (!reliabilityMultiplier && !consensusLevel) return null;
+    if (strengthScore >= 0.12) return { label: 'High Match Strength', className: 'bg-lime-100 text-lime-800' };
+    if (strengthScore >= 0.02) return { label: 'Solid Match', className: 'bg-amber-50 text-amber-700' };
+    return { label: 'Exploratory', className: 'bg-gray-100 text-gray-600' };
+  })();
+
   const displayedReasons = expanded ? reasons : reasons?.slice(0, 3);
   const hasMoreReasons = reasons && reasons.length > 3;
 
@@ -469,6 +485,14 @@ export default function MovieCard({
                   title="Per-source reliability learned from your feedback"
                 >
                   📈 {reliabilityBadge.label}
+                </span>
+              )}
+              {strengthBadge && (
+                <span
+                  className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${strengthBadge.className}`}
+                  title="Overall match strength from consensus and reliability"
+                >
+                  💡 {strengthBadge.label}
                 </span>
               )}
               {/* Multi-Source Badge - shows when recommended by multiple sources */}
