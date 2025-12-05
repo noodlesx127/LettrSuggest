@@ -9,6 +9,9 @@
 
 ## Progress (today)
 - Implemented confidence scaling + caps for feature feedback (actors/keywords/franchises) and labeled hard vs soft avoid in `enrich.ts` (Pandora block).
+- Added source reliability multiplier using consensus + per-source priors and light reason text; capped to ±12%.
+- Added MMR rerank (λ=0.25, topK ~3x desired) before diversity filter to balance novelty vs relevance.
+- Surfaced consensus badge on movie cards to show confidence even when only one source is present.
 
 ## Near-Term (2–3 sprints)
 - Pairwise A/B feedback on close candidates; update feature weights with regularized steps.
