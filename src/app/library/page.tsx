@@ -122,9 +122,20 @@ export default function LibraryPage() {
   const gridFilms: GridFilm[] = useMemo(() => {
     if (!films) return [];
     // Only show watched films (not watchlist-only)
+    // Deduplicate by TMDB ID to avoid showing the same movie twice
+    // (can happen if user has different Letterboxd URIs for same movie)
+    const seenTmdbIds = new Set<number>();
     return films
       .filter(f => (f.watchCount ?? 0) > 0)
-      .map((f) => ({ ...f, tmdbId: mappings.get(f.uri) }));
+      .map((f) => ({ ...f, tmdbId: mappings.get(f.uri) }))
+      .filter(f => {
+        // Keep unmapped films (they need to be manually mapped)
+        if (!f.tmdbId) return true;
+        // Deduplicate mapped films by TMDB ID
+        if (seenTmdbIds.has(f.tmdbId)) return false;
+        seenTmdbIds.add(f.tmdbId);
+        return true;
+      });
   }, [films, mappings]);
 
   return (
