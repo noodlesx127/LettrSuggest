@@ -4,7 +4,7 @@ import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, type FeedbackLearningInsights } from '@/lib/enrich';
+import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, type FeedbackLearningInsights } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -1838,6 +1838,40 @@ export default function SuggestPage() {
     }
   };
 
+  const handleUndoDismiss = async (tmdbId: number) => {
+    if (!uid) return;
+    try {
+      await unblockSuggestion(uid, tmdbId);
+      setBlockedIds(prev => {
+        const next = new Set(prev);
+        next.delete(tmdbId);
+        return next;
+      });
+      setItems(prev => prev?.map(item => item.id === tmdbId ? { ...item, dismissed: false } : item) ?? prev);
+      setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
+        if (!prev) return prev;
+        const next = { ...prev } as CategorizedSuggestions;
+        for (const key in next) {
+          // @ts-ignore dynamic access
+          const section = next[key];
+          if (Array.isArray(section)) {
+            const idx = section.findIndex((m: MovieItem) => m.id === tmdbId);
+            if (idx !== -1) {
+              const copy = [...section];
+              copy[idx] = { ...copy[idx], dismissed: false };
+              // @ts-ignore dynamic assign
+              next[key] = copy;
+              break;
+            }
+          }
+        }
+        return next;
+      });
+    } catch (e) {
+      console.error('[Suggest] undo dismiss failed', e);
+    }
+  };
+
   // Handle saving a movie to the list
   const handleSave = async (tmdbId: number, title: string, year?: string, posterPath?: string | null) => {
     if (!uid) return;
@@ -2396,6 +2430,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2461,6 +2496,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2519,6 +2555,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2577,6 +2614,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2635,6 +2673,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2693,6 +2732,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2751,6 +2791,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2809,6 +2850,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2867,6 +2909,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2925,6 +2968,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -2983,6 +3027,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3041,6 +3086,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3099,6 +3145,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3157,6 +3204,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3215,6 +3263,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3273,6 +3322,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3331,6 +3381,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3389,6 +3440,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3447,6 +3499,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3505,6 +3558,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3563,6 +3617,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3621,6 +3676,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3679,6 +3735,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3737,6 +3794,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
                 </div>
@@ -3799,5 +3857,6 @@ export default function SuggestPage() {
     </AuthGate >
   );
 }
+
 
 
