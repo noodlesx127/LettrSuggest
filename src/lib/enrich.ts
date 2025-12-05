@@ -2898,6 +2898,12 @@ export async function suggestByOverlap(params: {
     if (!m) return null;
     const feats = extractFeatures(m);
 
+    // Source metadata for consensus-aware quality gating
+    const sourceMetaQuality = params.sourceMetadata?.get(cid);
+    const sourceCount = sourceMetaQuality?.sources?.length ?? 0;
+    const consensusLevel = sourceMetaQuality?.consensusLevel;
+    const strongConsensus = consensusLevel === 'high' || sourceCount >= 2;
+
     // Exclude by genres early if requested
     if (params.excludeGenres && feats.genres.some((g) => params.excludeGenres!.has(g.toLowerCase()))) {
       return null;
@@ -2964,6 +2970,45 @@ export async function suggestByOverlap(params: {
 
     let score = 0;
     const reasons: string[] = [];
+
+    // QUALITY GATES: downrank items with missing metadata unless strong consensus
+    const hasPoster = Boolean(m.poster_path || (m as any).omdb_poster);
+    const hasBackdrop = Boolean(m.backdrop_path);
+    const hasOverview = Boolean(m.overview && m.overview.trim().length > 0);
+    const hasTrailer = Boolean((m as any).videos?.results?.some((v: any) => v.site === 'YouTube' && v.type === 'Trailer'));
+
+    let qualityPenalty = 0;
+    const qualityNotes: string[] = [];
+
+    if (!hasPoster) {
+      qualityPenalty -= strongConsensus ? 0.2 : 0.6;
+      qualityNotes.push('poster missing');
+    }
+    if (!hasBackdrop) {
+      qualityPenalty -= strongConsensus ? 0.1 : 0.3;
+    }
+    if (!hasOverview) {
+      qualityPenalty -= strongConsensus ? 0.15 : 0.4;
+      qualityNotes.push('synopsis missing');
+    }
+    if (!hasTrailer) {
+      qualityPenalty -= strongConsensus ? 0.1 : 0.25;
+    }
+
+    if (qualityPenalty < 0) {
+      qualityPenalty = Math.max(qualityPenalty, -1.5);
+      score += qualityPenalty;
+      if (qualityNotes.length) {
+        const note = qualityNotes.join(', ');
+        if (strongConsensus) {
+          reasons.push(`Strong consensus despite limited metadata (${note})`);
+        } else {
+          reasons.push(`Limited metadata (${note}) — confidence slightly reduced`);
+        }
+      } else if (!strongConsensus) {
+        reasons.push('Limited metadata — confidence slightly reduced');
+      }
+    }
 
     // CROSS-GENRE BOOST: Check if candidate matches user's preferred genre combinations
     // E.g., boost "Action+Thriller with spy themes" if user loves that pattern
