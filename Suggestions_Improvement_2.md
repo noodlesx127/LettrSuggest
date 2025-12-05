@@ -26,6 +26,7 @@
 - Context-aware learning: time-of-day/device/mood toggle to bias tone/runtime/language.
 - Counter-evidence handling: store pos/neg counts per feature; use Bayesian win rate instead of netting signals.
 - Watchlist intent depth: shipped recency + repetition boosts with decay for stale items; next: surface intent reason text.
+- Stats alignment: reflect new signals (watchlist intent, reliability/strength) on the Stats page where applicable.
 - Quality gates: downrank items missing posters/trailers/metadata unless strong consensus.
 
 ## Medium-Term
