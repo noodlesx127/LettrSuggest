@@ -95,6 +95,7 @@ export default function SuggestPage() {
   const [excludeGenres, setExcludeGenres] = useState<string>('');
   const [yearMin, setYearMin] = useState<string>('');
   const [yearMax, setYearMax] = useState<string>('');
+  const [discoveryLevel, setDiscoveryLevel] = useState<number>(50); // 0 = safety, 100 = discovery
   const [refreshTick, setRefreshTick] = useState(0);
   const [mode, setMode] = useState<'quick' | 'deep'>('quick');
   const [noCandidatesReason, setNoCandidatesReason] = useState<string | null>(null);
@@ -1072,6 +1073,8 @@ export default function SuggestPage() {
         excludeWatchedIds: watchedIds,
         desiredResults: 300, // Increased to fill all 24 sections (24 × 12 = 288 potential items)
         sourceMetadata: smartCandidates.sourceMetadata, // Pass multi-source metadata for badge display
+        mmrLambda: 0.15 + (discoveryLevel / 100) * 0.35, // range ~0.15–0.5
+        mmrTopKFactor: 2.5 + (discoveryLevel / 100) * 1.5,
         // Feature-level feedback from explicit user interactions
         featureFeedback: featureFeedback || undefined,
         enhancedProfile: {
@@ -2406,7 +2409,19 @@ export default function SuggestPage() {
       {
         items && categorizedSuggestions && (
           <div className="space-y-8">
-            <div className="flex items-center justify-end gap-3 text-sm text-gray-700">
+            <div className="flex items-center justify-between gap-3 text-sm text-gray-700 flex-wrap">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-600">Discovery vs Safety</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={discoveryLevel}
+                  onChange={(e) => setDiscoveryLevel(Number(e.target.value))}
+                  className="w-40 accent-blue-600"
+                />
+                <span className="text-xs text-gray-500 w-12 text-right">{discoveryLevel}%</span>
+              </div>
               <button
                 onClick={handleUndoLastFeedback}
                 disabled={!lastFeedback}
