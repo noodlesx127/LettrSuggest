@@ -1522,7 +1522,7 @@ export async function buildTasteProfile(params: {
   topN?: number;
   negativeFeedbackIds?: number[]; // IDs of movies explicitly dismissed/disliked
   tmdbDetails?: Map<number, any>; // Pre-fetched details to avoid API calls
-  watchlistFilms?: Array<{ uri: string }>; // Watchlist films - show user INTENT
+  watchlistFilms?: Array<{ uri: string; watchlistAddedAt?: string }>; // Watchlist films - show user INTENT
 }): Promise<{
   topGenres: Array<{ id: number; name: string; weight: number }>;
   topKeywords: Array<{ id: number; name: string; weight: number }>;
@@ -1533,6 +1533,9 @@ export async function buildTasteProfile(params: {
   avoidGenres: Array<{ id: number; name: string; weight: number }>;
   avoidKeywords: Array<{ id: number; name: string; weight: number }>;
   avoidDirectors: Array<{ id: number; name: string; weight: number }>;
+  watchlistGenres: string[];
+  watchlistKeywords: string[];
+  watchlistDirectors: string[];
   userStats: {
     avgRating: number;
     stdDevRating: number;
@@ -1902,6 +1905,9 @@ export async function buildTasteProfile(params: {
   const watchlistGenreIds = new Set<number>();
   const watchlistKeywordIds = new Set<number>();
   const watchlistDirectorIds = new Set<number>();
+  const watchlistGenreNames = new Set<string>();
+  const watchlistKeywordNames = new Set<string>();
+  const watchlistDirectorNames = new Set<string>();
   
   if (params.watchlistFilms && params.watchlistFilms.length > 0) {
     console.log('[TasteProfile] Processing watchlist for intent signals:', {
@@ -1909,10 +1915,16 @@ export async function buildTasteProfile(params: {
     });
     
     // Get TMDB IDs for watchlist films
-    const watchlistIds = params.watchlistFilms
-      .map(f => params.mappings.get(f.uri))
-      .filter((id): id is number => id !== undefined)
+    const watchlistEntries = params.watchlistFilms
+      .map(f => {
+        const id = params.mappings.get(f.uri);
+        const addedAt = f.watchlistAddedAt ?? null;
+        return { id, addedAt };
+      })
+      .filter((row): row is { id: number; addedAt: string | null } => typeof row.id === 'number')
       .slice(0, 200); // Cap to avoid too many API calls
+
+    const watchlistIds = watchlistEntries.map(r => r.id);
     
     console.log('[TasteProfile] Watchlist TMDB IDs found:', watchlistIds.length);
     
@@ -1921,39 +1933,75 @@ export async function buildTasteProfile(params: {
       watchlistIds.map(id => fetchDetails(id))
     );
     
-    const WATCHLIST_WEIGHT = 0.5; // Moderate boost for watchlist items
+    const WATCHLIST_WEIGHT = 0.5; // Base boost for watchlist items
+
+    const recencyScore = (addedAt?: string | null) => {
+      if (!addedAt) return 0.0;
+      const days = Math.max(1, (Date.now() - new Date(addedAt).getTime()) / (1000 * 60 * 60 * 24));
+      // Recent additions (<30d) get up to +0.4, decays after
+      if (days <= 30) return 0.4;
+      if (days <= 90) return 0.25;
+      if (days <= 180) return 0.1;
+      return 0.0;
+    };
+
+    const freshnessMultiplier = (addedAt?: string | null) => {
+      if (!addedAt) return 0.25; // Unknown age: keep a small intent signal
+      const days = Math.max(1, (Date.now() - new Date(addedAt).getTime()) / (1000 * 60 * 60 * 24));
+      if (days <= 90) return 1.0;
+      if (days <= 180) return 0.7;
+      if (days <= 365) return 0.45;
+      return 0.2; // Stale watchlist entries still count but lightly
+    };
+
+    const repetitionBoost = (id: number) => {
+      // Multiple entries of same TMDB id on watchlist -> intent
+      const occurrences = watchlistIds.filter(x => x === id).length;
+      if (occurrences >= 3) return 0.3;
+      if (occurrences === 2) return 0.15;
+      return 0;
+    };
     
-    for (const movie of watchlistMovies) {
-      if (!movie) continue;
+    for (let i = 0; i < watchlistMovies.length; i++) {
+      const movie = watchlistMovies[i];
+      const entry = watchlistEntries[i];
+      if (!movie || !entry) continue;
       
       const feats = extractFeatures(movie);
+      const recBoost = recencyScore(entry.addedAt);
+      const repBoost = entry.id ? repetitionBoost(entry.id) : 0;
+      const ageMultiplier = freshnessMultiplier(entry.addedAt);
+      const totalBoost = WATCHLIST_WEIGHT * ageMultiplier + recBoost + repBoost;
       
       // Track genres user WANTS to see (for override logic)
       feats.genreIds.forEach((id, idx) => {
-        watchlistGenreIds.add(id);
-        // Also boost the positive weights slightly
+        // Boost with recency/repetition intent
         const name = feats.genres[idx];
+        watchlistGenreIds.add(id);
+        if (name) watchlistGenreNames.add(name);
         const current = genreWeights.get(id) || { name, weight: 0 };
-        genreWeights.set(id, { name, weight: current.weight + WATCHLIST_WEIGHT });
+        genreWeights.set(id, { name, weight: current.weight + totalBoost });
         // Count as "liked" for ratio calculation
         genreLikedCounts.set(id, (genreLikedCounts.get(id) || 0) + 1);
       });
       
       // Track keywords user WANTS to see
       feats.keywordIds.forEach((id, idx) => {
-        watchlistKeywordIds.add(id);
         const name = feats.keywords[idx];
+        watchlistKeywordIds.add(id);
+        if (name) watchlistKeywordNames.add(name);
         const current = keywordWeights.get(id) || { name, weight: 0 };
-        keywordWeights.set(id, { name, weight: current.weight + WATCHLIST_WEIGHT });
+        keywordWeights.set(id, { name, weight: current.weight + totalBoost });
         keywordLikedCounts.set(id, (keywordLikedCounts.get(id) || 0) + 1);
       });
       
       // Track directors user WANTS to see
       feats.directorIds.forEach((id, idx) => {
-        watchlistDirectorIds.add(id);
         const name = feats.directors[idx];
+        watchlistDirectorIds.add(id);
+        if (name) watchlistDirectorNames.add(name);
         const current = directorWeights.get(id) || { name, weight: 0 };
-        directorWeights.set(id, { name, weight: current.weight + WATCHLIST_WEIGHT });
+        directorWeights.set(id, { name, weight: current.weight + totalBoost });
         directorLikedCounts.set(id, (directorLikedCounts.get(id) || 0) + 1);
       });
     }
@@ -2136,6 +2184,9 @@ export async function buildTasteProfile(params: {
     avoidGenres,
     avoidKeywords,
     avoidDirectors,
+    watchlistGenres: Array.from(watchlistGenreNames),
+    watchlistKeywords: Array.from(watchlistKeywordNames),
+    watchlistDirectors: Array.from(watchlistDirectorNames),
     userStats
   };
 }
@@ -2401,6 +2452,9 @@ export async function suggestByOverlap(params: {
     adjacentGenres?: Map<string, Array<{ genre: string; weight: number }>>; // Adaptive learning transitions
     recentGenres?: string[]; // Recent genres to trigger transitions
     topDecades?: Array<{ decade: number; weight: number }>; // User's preferred eras
+    watchlistGenres?: string[];
+    watchlistKeywords?: string[];
+    watchlistDirectors?: string[];
   };
 }): Promise<Array<{
   tmdbId: number;
@@ -2586,6 +2640,9 @@ export async function suggestByOverlap(params: {
     recentCast: new Set<string>(),
     recentKeywords: new Set<string>(),
     recentStudios: new Set<string>(),
+    watchlistGenres: new Set<string>(),
+    watchlistKeywords: new Set<string>(),
+    watchlistDirectors: new Set<string>(),
   };
 
   // Build negative feature bags (things the user avoids)
@@ -2821,6 +2878,11 @@ export async function suggestByOverlap(params: {
     }
   }
 
+  // Watchlist intent feature sets (names) for reason text
+  const watchlistGenreSet = new Set(params.enhancedProfile?.watchlistGenres ?? []);
+  const watchlistKeywordSet = new Set(params.enhancedProfile?.watchlistKeywords ?? []);
+  const watchlistDirectorSet = new Set(params.enhancedProfile?.watchlistDirectors ?? []);
+
   const maxC = Math.min(params.maxCandidates ?? 120, validCandidates.length);
   const desired = Math.max(10, Math.min(500, params.desiredResults ?? 50)); // Increased max from 30 to 500 to support 24 sections
 
@@ -2970,6 +3032,12 @@ export async function suggestByOverlap(params: {
         const genreWeight = pref.genres.get(gHits[0]) ?? 1;
         const genreCountRounded = Math.round(genreWeight);
         reasons.push(`Matches your taste in ${gHits.slice(0, 3).join(', ')} (${genreCountRounded} similar ${genreCountRounded === 1 ? 'film' : 'films'})`);
+
+        // Watchlist intent reason if genre aligns with user's watchlist
+        const watchlistGenreHits = gHits.filter(g => watchlistGenreSet.has(g));
+        if (watchlistGenreHits.length > 0) {
+          reasons.push(`On your watchlist: ${watchlistGenreHits.slice(0, 2).join(', ')}`);
+        }
       }
     }
 
@@ -2981,6 +3049,10 @@ export async function suggestByOverlap(params: {
       const dirCountRounded = Math.round(dirWeight);
       const dirQuality = dirWeight >= 3.0 ? 'highly rated' : 'enjoyed';
       reasons.push(`Directed by ${dHits.slice(0, 2).join(', ')} — you've ${dirQuality} ${dirCountRounded} ${dirCountRounded === 1 ? 'film' : 'films'} by ${dHits.length === 1 ? 'this director' : 'these directors'}`);
+
+      if (dHits.some(d => watchlistDirectorSet.has(d))) {
+        reasons.push('On your watchlist: director interest');
+      }
     } else {
       // Check for similar directors (directors who work in the same subgenres/keywords)
       const similarDirectors: Array<{ director: string; likedDirector: string; sharedThemes: string[] }> = [];
@@ -3063,6 +3135,10 @@ export async function suggestByOverlap(params: {
       const strengthText = isStrongPattern ? 'especially love' : 'enjoy';
       const countRounded = Math.round(topKeywordWeight);
       reasons.push(`Matches specific themes you ${strengthText}: ${topKeywordNames.join(', ')} (${countRounded}+ highly-rated films)`);
+
+      if (kHits.some(k => watchlistKeywordSet.has(k))) {
+        reasons.push('On your watchlist: themes you saved');
+      }
     }
 
     // Studio/Production company matching

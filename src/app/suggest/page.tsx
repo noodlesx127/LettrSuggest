@@ -1085,7 +1085,10 @@ export default function SuggestPage() {
           avoidDirectors: tasteProfile.avoidDirectors,
           adjacentGenres,
           recentGenres: recentGenreNames,
-          topDecades: tasteProfile.topDecades
+          topDecades: tasteProfile.topDecades,
+          watchlistGenres: tasteProfile.watchlistGenres,
+          watchlistKeywords: tasteProfile.watchlistKeywords,
+          watchlistDirectors: tasteProfile.watchlistDirectors
         }
       });
       // Best-effort: ensure posters/backdrops exist for suggested ids.
@@ -1243,6 +1246,7 @@ export default function SuggestPage() {
             lastDate: r.last_date ?? undefined,
             liked: r.liked ?? undefined,
             onWatchlist: r.on_watchlist ?? undefined,
+            watchlistAddedAt: (r as any).watchlist_added_at ?? undefined,
           })) as FilmEvent[];
           setFallbackFilms(mapped);
         }
@@ -1367,7 +1371,10 @@ export default function SuggestPage() {
           avoidGenres: tasteProfile.avoidGenres,
           avoidKeywords: tasteProfile.avoidKeywords,
           avoidDirectors: tasteProfile.avoidDirectors,
-          topDecades: tasteProfile.topDecades
+          topDecades: tasteProfile.topDecades,
+          watchlistGenres: tasteProfile.watchlistGenres,
+          watchlistKeywords: tasteProfile.watchlistKeywords,
+          watchlistDirectors: tasteProfile.watchlistDirectors
         }
       });
 
@@ -1528,7 +1535,10 @@ export default function SuggestPage() {
           avoidGenres: tasteProfile.avoidGenres,
           avoidKeywords: tasteProfile.avoidKeywords,
           avoidDirectors: tasteProfile.avoidDirectors,
-          topDecades: tasteProfile.topDecades
+          topDecades: tasteProfile.topDecades,
+          watchlistGenres: tasteProfile.watchlistGenres,
+          watchlistKeywords: tasteProfile.watchlistKeywords,
+          watchlistDirectors: tasteProfile.watchlistDirectors
         }
       });
 

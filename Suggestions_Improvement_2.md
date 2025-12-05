@@ -19,12 +19,13 @@
 - Added persistent "Undo last feedback" control to restore most recent dismissed/blocked item.
 - Added match strength badge (High/Solid/Exploratory) derived from consensus + reliability.
 - Added session slider (Discovery vs Safety) wiring into MMR λ/topK for on-demand exploration tuning.
+- Watchlist intent depth: ingest Letterboxd watchlist added dates, apply recency + repetition boosts, and decay stale entries in taste profile intent signals.
 
 ## Near-Term (2–3 sprints)
 - Pairwise A/B feedback on close candidates; update feature weights with regularized steps.
 - Context-aware learning: time-of-day/device/mood toggle to bias tone/runtime/language.
 - Counter-evidence handling: store pos/neg counts per feature; use Bayesian win rate instead of netting signals.
-- Watchlist intent depth: recency- and repetition-weighted boosts; decay stale watchlist items.
+- Watchlist intent depth: shipped recency + repetition boosts with decay for stale items; next: surface intent reason text.
 - Quality gates: downrank items missing posters/trailers/metadata unless strong consensus.
 
 ## Medium-Term
