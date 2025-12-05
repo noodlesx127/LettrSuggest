@@ -3081,6 +3081,15 @@ export async function suggestByOverlap(params: {
     // Penalties grow with each rejection, starting from the FIRST interaction
     if (params.featureFeedback) {
       const ff = params.featureFeedback;
+      const confidenceFromCount = (count: number) => {
+        // Smoothly approaches 1.0; count 1 => ~0.5, count 3 => ~0.8, count 6+ => ~1.0
+        return Math.min(1, Math.log1p(count) / Math.log(7));
+      };
+
+      const applySoftCap = (value: number, cap: number) => {
+        if (value > 0) return Math.min(value, cap);
+        return Math.max(value, -cap);
+      };
       
       // Penalty for actors user has rejected (graduated based on rejection count)
       if (ff.avoidActors && ff.avoidActors.length > 0) {
@@ -3091,20 +3100,27 @@ export async function suggestByOverlap(params: {
           .filter((a): a is { id: number; name: string; weight: number; count: number } => a !== undefined);
         
         if (matchedAvoidActors.length > 0) {
-          // Use the graduated weight from the feature, adjusted by position
+          // Use the graduated weight from the feature, adjusted by position and confidence
           const leadActor = matchedAvoidActors.find(a => movieCastIds.indexOf(a.id) < 2);
           const supportingActors = matchedAvoidActors.filter(a => movieCastIds.indexOf(a.id) >= 2);
           
           let actorPenalty = 0;
           if (leadActor) {
-            // Lead actor: full graduated weight
-            actorPenalty -= leadActor.weight;
+            const confidence = confidenceFromCount(leadActor.count);
+            const effectiveWeight = leadActor.weight * confidence;
+            // Lead actor: full weight, confidence scaled; bump if repeated skips (hard avoid)
+            const hardnessMultiplier = leadActor.count >= 3 ? 1.25 : 1;
+            const leadPenalty = -applySoftCap(effectiveWeight * hardnessMultiplier, 4);
+            actorPenalty += leadPenalty;
             const countLabel = leadActor.count === 1 ? 'once' : `${leadActor.count} times`;
-            penaltyReasons.push(`Stars ${leadActor.name} — you've skipped their films ${countLabel}`);
+            const hardnessLabel = leadActor.count >= 3 ? 'hard avoid' : 'soft avoid';
+            penaltyReasons.push(`Stars ${leadActor.name} — ${hardnessLabel}; you've skipped their films ${countLabel}`);
           }
           for (const actor of supportingActors.slice(0, 2)) {
-            // Supporting actors: 60% of graduated weight
-            actorPenalty -= actor.weight * 0.6;
+            const confidence = confidenceFromCount(actor.count);
+            const effectiveWeight = actor.weight * confidence;
+            // Supporting actors: 60% of graduated weight, confidence scaled
+            actorPenalty -= applySoftCap(effectiveWeight * 0.6, 2.5);
           }
           
           totalPenalty += actorPenalty;
@@ -3120,16 +3136,20 @@ export async function suggestByOverlap(params: {
           .filter((k): k is { id: number; name: string; weight: number; count: number } => k !== undefined);
         
         if (matchedKeywords.length > 0) {
-          // Sum graduated weights, cap at 4.0 total
-          const keywordPenalty = -Math.min(
-            matchedKeywords.reduce((sum, k) => sum + k.weight * 0.5, 0),
+          // Sum graduated weights with confidence scaling, cap to avoid over-penalizing
+          const keywordPenalty = -applySoftCap(
+            matchedKeywords.reduce((sum, k) => {
+              const confidence = confidenceFromCount(k.count);
+              return sum + (k.weight * confidence * 0.5);
+            }, 0),
             4.0
           );
           totalPenalty += keywordPenalty;
           
           const topKeyword = matchedKeywords.sort((a, b) => b.weight - a.weight)[0];
           const countLabel = topKeyword.count === 1 ? 'before' : `${topKeyword.count} times`;
-          penaltyReasons.push(`Contains "${topKeyword.name}" — you've skipped this ${countLabel}`);
+          const hardnessLabel = topKeyword.count >= 3 ? 'hard avoid' : 'soft avoid';
+          penaltyReasons.push(`Contains "${topKeyword.name}" — ${hardnessLabel}; you've skipped this ${countLabel}`);
           console.log(`[PandoraLearning] Keyword penalty for "${m.title}": ${matchedKeywords.length} matches (${keywordPenalty.toFixed(1)})`);
         }
       }
@@ -3138,8 +3158,9 @@ export async function suggestByOverlap(params: {
       if (ff.avoidFranchises && ff.avoidFranchises.length > 0 && feats.collection) {
         const avoidedFranchise = ff.avoidFranchises.find(f => f.id === feats.collection!.id);
         if (avoidedFranchise) {
-          // Use the pre-calculated graduated weight for franchises
-          const franchisePenalty = -avoidedFranchise.weight;
+          // Use the pre-calculated graduated weight for franchises (hard avoid from first skip)
+          const confidence = confidenceFromCount(avoidedFranchise.count);
+          const franchisePenalty = -applySoftCap(avoidedFranchise.weight * confidence * 1.2, 6);
           totalPenalty += franchisePenalty;
           const countLabel = avoidedFranchise.count === 1 ? '' : ` (${avoidedFranchise.count} skips)`;
           penaltyReasons.push(`Part of ${avoidedFranchise.name}${countLabel} — you seem done with this`);
@@ -3160,12 +3181,14 @@ export async function suggestByOverlap(params: {
           
           let actorBoost = 0;
           if (leadActor) {
-            actorBoost += leadActor.weight;
+            const confidence = confidenceFromCount(leadActor.count);
+            actorBoost += applySoftCap(leadActor.weight * confidence, 3.5);
             const countLabel = leadActor.count === 1 ? '' : ` (${leadActor.count}× thumbs up)`;
             reasons.push(`Stars ${leadActor.name}${countLabel} — you love their work`);
           } else {
             const topActor = matchedPreferActors[0];
-            actorBoost += topActor.weight * 0.6;
+            const confidence = confidenceFromCount(topActor.count);
+            actorBoost += applySoftCap(topActor.weight * confidence * 0.6, 2.0);
             reasons.push(`Features ${topActor.name} — you've enjoyed their films`);
           }
           
@@ -3182,9 +3205,12 @@ export async function suggestByOverlap(params: {
           .filter((k): k is { id: number; name: string; weight: number; count: number } => k !== undefined);
         
         if (matchedKeywords.length > 0) {
-          // Sum graduated weights, cap at 3.0 total
-          const keywordBoost = Math.min(
-            matchedKeywords.reduce((sum, k) => sum + k.weight * 0.4, 0),
+          // Sum graduated weights with confidence scaling, cap at 3.0 total
+          const keywordBoost = applySoftCap(
+            matchedKeywords.reduce((sum, k) => {
+              const confidence = confidenceFromCount(k.count);
+              return sum + (k.weight * confidence * 0.4);
+            }, 0),
             3.0
           );
           score += keywordBoost;
