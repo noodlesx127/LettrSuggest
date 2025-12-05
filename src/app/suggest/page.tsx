@@ -105,6 +105,7 @@ export default function SuggestPage() {
   const [progress, setProgress] = useState({ current: 0, total: 6, stage: '' });
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [undoToast, setUndoToast] = useState<{ id: number; title: string } | null>(null);
+  const [lastFeedback, setLastFeedback] = useState<{ id: number; title: string } | null>(null);
   const [topDecade, setTopDecade] = useState<number | null>(null);
   const [savedMovieIds, setSavedMovieIds] = useState<Set<number>>(new Set());
   const [hasCheckedStorage, setHasCheckedStorage] = useState(false);
@@ -1733,6 +1734,9 @@ export default function SuggestPage() {
 
         setBlockedIds(prev => new Set([...prev, tmdbId]));
 
+        // Store for persistent undo control
+        setLastFeedback({ id: tmdbId, title: movieTitle });
+
         // Offer quick undo toast
         setUndoToast({ id: tmdbId, title: movieTitle });
         setTimeout(() => setUndoToast((curr) => curr && curr.id === tmdbId ? null : curr), 5000);
@@ -1851,6 +1855,7 @@ export default function SuggestPage() {
     try {
       await unblockSuggestion(uid, tmdbId);
       setUndoToast(null);
+      setLastFeedback((curr) => (curr && curr.id === tmdbId ? null : curr));
       setBlockedIds(prev => {
         const next = new Set(prev);
         next.delete(tmdbId);
@@ -1879,6 +1884,11 @@ export default function SuggestPage() {
     } catch (e) {
       console.error('[Suggest] undo dismiss failed', e);
     }
+  };
+
+  const handleUndoLastFeedback = async () => {
+    if (!lastFeedback) return;
+    await handleUndoDismiss(lastFeedback.id);
   };
 
   // Handle saving a movie to the list
@@ -2396,6 +2406,16 @@ export default function SuggestPage() {
       {
         items && categorizedSuggestions && (
           <div className="space-y-8">
+            <div className="flex items-center justify-end gap-3 text-sm text-gray-700">
+              <button
+                onClick={handleUndoLastFeedback}
+                disabled={!lastFeedback}
+                className={`px-3 py-1.5 rounded border text-sm font-medium transition-colors ${lastFeedback ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed'}`}
+                title={lastFeedback ? `Restore "${lastFeedback.title}" and unblock it` : 'No feedback to undo yet'}
+              >
+                ↩️ Undo last feedback
+              </button>
+            </div>
             {sourceLabel && (
               <p className="text-xs text-gray-500 mb-4">Source: {sourceLabel}</p>
             )}
