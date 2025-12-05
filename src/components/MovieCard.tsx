@@ -325,6 +325,15 @@ export default function MovieCard({
     'cult-classic': { label: '🎭 Cult Classic', className: 'bg-orange-100 text-orange-800' }
   }[voteCategory] : null;
 
+  const consensusBadge = consensusLevel ? {
+    label: consensusLevel === 'high' ? 'High Consensus' : consensusLevel === 'medium' ? 'Consensus' : 'Low Consensus',
+    className: consensusLevel === 'high'
+      ? 'bg-emerald-100 text-emerald-800'
+      : consensusLevel === 'medium'
+        ? 'bg-amber-100 text-amber-800'
+        : 'bg-blue-100 text-blue-800'
+  } : null;
+
   const displayedReasons = expanded ? reasons : reasons?.slice(0, 3);
   const hasMoreReasons = reasons && reasons.length > 3;
 
@@ -418,6 +427,15 @@ export default function MovieCard({
               {voteCategoryBadge && (
                 <span className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${voteCategoryBadge.className}`}>
                   {voteCategoryBadge.label}
+                </span>
+              )}
+              {/* Consensus badge shows confidence even if single source */}
+              {consensusBadge && (
+                <span
+                  className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${consensusBadge.className}`}
+                  title={sources && sources.length ? `Recommended by ${sources.map(s => SOURCE_LABELS[s] || s).join(', ')}` : 'Based on reliable sources'}
+                >
+                  🎯 {consensusBadge.label}
                 </span>
               )}
               {/* Multi-Source Badge - shows when recommended by multiple sources */}
