@@ -45,6 +45,9 @@ export default function StatsPage() {
     success_rate: number;
     rating_count: number;
   }>>([]);
+  const [feedbackSummary, setFeedbackSummary] = useState<{ total: number; positive: number; negative: number; hitRate: number } | null>(null);
+  const [sourceReliability, setSourceReliability] = useState<Array<{ source: string; total: number; positive: number; hitRate: number }>>([]);
+  const [sourceConsensus, setSourceConsensus] = useState<Array<{ source: string; high: { pos: number; total: number }; medium: { pos: number; total: number }; low: { pos: number; total: number } }>>([]);
 
   useEffect(() => {
     async function getUid() {
@@ -87,6 +90,81 @@ export default function StatsPage() {
     }
 
     fetchExplorationStats();
+  }, [uid]);
+
+  // Fetch suggestion feedback to derive overall hit-rate and per-source reliability (now that sources are stored)
+  useEffect(() => {
+    async function fetchFeedbackSummary() {
+      if (!supabase || !uid) return;
+      try {
+        const { data, error } = await supabase
+          .from('suggestion_feedback')
+          .select('feedback_type, recommendation_sources, consensus_level')
+          .eq('user_id', uid);
+        if (error) {
+          console.error('[Stats] Error fetching feedback summary:', error);
+          return;
+        }
+        const total = data?.length ?? 0;
+        const positive = data?.filter(r => r.feedback_type === 'positive').length ?? 0;
+        const negative = data?.filter(r => r.feedback_type === 'negative').length ?? 0;
+        const hitRate = total > 0 ? positive / total : 0;
+        setFeedbackSummary({ total, positive, negative, hitRate });
+
+        // Aggregate per-source hit rates
+        const bySource = new Map<string, { pos: number; total: number }>();
+        data?.forEach(row => {
+          const sources: string[] = Array.isArray((row as any).recommendation_sources) ? (row as any).recommendation_sources : [];
+          const isPos = row.feedback_type === 'positive';
+          sources.forEach(src => {
+            const key = (src || '').toLowerCase();
+            if (!key) return;
+            const curr = bySource.get(key) ?? { pos: 0, total: 0 };
+            if (isPos) curr.pos += 1;
+            curr.total += 1;
+            bySource.set(key, curr);
+          });
+        });
+
+        const entries = Array.from(bySource.entries())
+          .map(([source, stats]) => ({
+            source,
+            total: stats.total,
+            positive: stats.pos,
+            hitRate: stats.total > 0 ? stats.pos / stats.total : 0,
+          }))
+          .filter(e => e.total >= 3) // require a few samples to show
+          .sort((a, b) => b.total - a.total);
+        setSourceReliability(entries);
+
+        // Consensus-level split per source
+        const bySourceConsensus = new Map<string, { high: { pos: number; total: number }; medium: { pos: number; total: number }; low: { pos: number; total: number } }>();
+        data?.forEach(row => {
+          const sources: string[] = Array.isArray((row as any).recommendation_sources) ? (row as any).recommendation_sources : [];
+          const level = (row as any).consensus_level as ('high' | 'medium' | 'low' | null);
+          const bucket = level === 'high' ? 'high' : level === 'medium' ? 'medium' : 'low';
+          const isPos = row.feedback_type === 'positive';
+          sources.forEach(src => {
+            const key = (src || '').toLowerCase();
+            if (!key) return;
+            const curr = bySourceConsensus.get(key) ?? { high: { pos: 0, total: 0 }, medium: { pos: 0, total: 0 }, low: { pos: 0, total: 0 } };
+            const target = curr[bucket];
+            if (isPos) target.pos += 1;
+            target.total += 1;
+            bySourceConsensus.set(key, curr);
+          });
+        });
+
+        const consensusEntries = Array.from(bySourceConsensus.entries())
+          .map(([source, buckets]) => ({ source, ...buckets }))
+          .filter(e => (e.high.total + e.medium.total + e.low.total) >= 5) // need some signal
+          .sort((a, b) => (b.high.total + b.medium.total + b.low.total) - (a.high.total + a.medium.total + a.low.total));
+        setSourceConsensus(consensusEntries);
+      } catch (e) {
+        console.error('[Stats] Exception fetching feedback summary', e);
+      }
+    }
+    fetchFeedbackSummary();
   }, [uid]);
 
 
@@ -359,6 +437,89 @@ export default function StatsPage() {
     const highlyRated = filteredFilms.filter(f => (f.rating ?? 0) >= 4);
     const likedFilms = filteredFilms.filter(f => f.liked);
     const lowRatedButLiked = filteredFilms.filter(f => (f.rating ?? 0) < 3 && (f.rating ?? 0) > 0 && f.liked);
+
+    // Metadata coverage (align with quality gates: posters/backdrops/overviews/trailers & vote counts)
+    const relevantFilms = [...filteredFilms, ...watchlist];
+    const relevantDetails = relevantFilms
+      .map(f => {
+        const tmdbId = filmMappings.get(f.uri);
+        return tmdbId ? tmdbDetails.get(tmdbId) : undefined;
+      })
+      .filter(Boolean) as TMDBDetails[];
+
+    const metadataCoverage = relevantDetails.reduce((acc, d) => {
+      const hasPoster = Boolean(d.poster_path || (d as any).omdb_poster);
+      const hasBackdrop = Boolean(d.backdrop_path);
+      const hasOverview = Boolean(d.overview && d.overview.trim().length > 0);
+      const hasTrailer = Boolean((d as any).videos?.results?.some((v: any) => v.site === 'YouTube' && v.type === 'Trailer'));
+      const hasVotes = typeof d.vote_count === 'number' && d.vote_count >= 50;
+      const hasRating = typeof d.vote_average === 'number' && d.vote_average >= 6.0;
+
+      acc.total += 1;
+      if (hasPoster) acc.withPoster += 1;
+      if (hasBackdrop) acc.withBackdrop += 1;
+      if (hasOverview) acc.withOverview += 1;
+      if (hasTrailer) acc.withTrailer += 1;
+      if (hasVotes) acc.withVotes += 1;
+      if (hasRating) acc.withRating += 1;
+      return acc;
+    }, {
+      total: 0,
+      withPoster: 0,
+      withBackdrop: 0,
+      withOverview: 0,
+      withTrailer: 0,
+      withVotes: 0,
+      withRating: 0,
+    });
+
+    // Consensus strength: how confident scores are (using vote counts)
+    const consensus = relevantDetails.reduce((acc, d) => {
+      const votes = typeof d.vote_count === 'number' ? d.vote_count : 0;
+      acc.total += 1;
+      acc.totalVotes += votes;
+      if (votes >= 200) acc.strong += 1;
+      else if (votes >= 50) acc.moderate += 1;
+      else if (votes > 0) acc.weak += 1;
+      else acc.missing += 1;
+      return acc;
+    }, {
+      total: 0,
+      strong: 0,
+      moderate: 0,
+      weak: 0,
+      missing: 0,
+      totalVotes: 0,
+    });
+
+    // Watchlist recency/intent strength
+    const nowTs = Date.now();
+    const watchlistWithDates = watchlist
+      .map(f => ({
+        added: f.watchlistAddedAt ? new Date(f.watchlistAddedAt).getTime() : null,
+      }))
+      .filter(entry => entry.added && !Number.isNaN(entry.added));
+
+    const watchlistRecencyDays = watchlistWithDates.map(w => (nowTs - (w.added as number)) / (1000 * 60 * 60 * 24));
+    watchlistRecencyDays.sort((a, b) => a - b);
+
+    const medianWatchlistAge = watchlistRecencyDays.length
+      ? (watchlistRecencyDays.length % 2 === 1
+        ? watchlistRecencyDays[Math.floor(watchlistRecencyDays.length / 2)]
+        : (watchlistRecencyDays[watchlistRecencyDays.length / 2 - 1] + watchlistRecencyDays[watchlistRecencyDays.length / 2]) / 2)
+      : null;
+
+    const avgWatchlistAge = watchlistRecencyDays.length
+      ? watchlistRecencyDays.reduce((sum, d) => sum + d, 0) / watchlistRecencyDays.length
+      : null;
+
+    const watchlistRecencyBuckets = watchlistRecencyDays.reduce((acc, days) => {
+      if (days <= 90) acc.fresh += 1;
+      else if (days <= 180) acc.warm += 1;
+      else if (days <= 365) acc.cool += 1;
+      else acc.stale += 1;
+      return acc;
+    }, { fresh: 0, warm: 0, cool: 0, stale: 0 });
 
     for (const film of filteredFilms) {
       const weight = getEnhancedWeight(film);
@@ -842,6 +1003,13 @@ export default function StatsPage() {
       watchlistTopDirectors,
       watchlistTopActors,
       avoidanceOverrides,
+      metadataCoverage,
+      consensus,
+      watchlistRecencyBuckets,
+      watchlistRecencyDays,
+      medianWatchlistAge,
+      avgWatchlistAge,
+      watchlistWithDatesCount: watchlistWithDates.length,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredFilms, tmdbDetails, films, filmMappings]);
@@ -1030,6 +1198,45 @@ export default function StatsPage() {
           <p className="text-2xl font-bold text-gray-900">{stats.watchlistCount}</p>
         </div>
       </div>
+
+      {/* Metadata Quality Coverage (mirrors quality gates) */}
+      {stats.metadataCoverage && stats.metadataCoverage.total > 0 && (
+        <div className="bg-white border rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-medium text-gray-900 text-sm">Metadata Coverage</h3>
+            <span className="text-xs text-gray-600">{stats.metadataCoverage.total} titles checked (watch history + watchlist)</span>
+          </div>
+          <p className="text-xs text-gray-600 mb-3">Quality gates downrank missing metadata; higher coverage = higher-confidence picks.</p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs text-gray-700">
+            <div className="flex items-center gap-1"><span className="w-24 text-gray-500">Posters</span><strong>{Math.round(stats.metadataCoverage.withPoster / stats.metadataCoverage.total * 100)}%</strong></div>
+            <div className="flex items-center gap-1"><span className="w-24 text-gray-500">Backdrops</span><strong>{Math.round(stats.metadataCoverage.withBackdrop / stats.metadataCoverage.total * 100)}%</strong></div>
+            <div className="flex items-center gap-1"><span className="w-24 text-gray-500">Overviews</span><strong>{Math.round(stats.metadataCoverage.withOverview / stats.metadataCoverage.total * 100)}%</strong></div>
+            <div className="flex items-center gap-1"><span className="w-24 text-gray-500">Trailers</span><strong>{Math.round(stats.metadataCoverage.withTrailer / stats.metadataCoverage.total * 100)}%</strong></div>
+            <div className="flex items-center gap-1"><span className="w-24 text-gray-500">Votes ≥50</span><strong>{Math.round(stats.metadataCoverage.withVotes / stats.metadataCoverage.total * 100)}%</strong></div>
+            <div className="flex items-center gap-1"><span className="w-24 text-gray-500">Rating ≥6.0</span><strong>{Math.round(stats.metadataCoverage.withRating / stats.metadataCoverage.total * 100)}%</strong></div>
+          </div>
+        </div>
+      )}
+
+      {/* Consensus Strength (score confidence) */}
+      {stats.consensus && stats.consensus.total > 0 && (
+        <div className="bg-white border rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-medium text-gray-900 text-sm">Consensus Strength</h3>
+            <span className="text-xs text-gray-600">{stats.consensus.total} titles (watch history + watchlist)</span>
+          </div>
+          <p className="text-xs text-gray-600 mb-3">Higher vote counts = steadier ratings; we soften quality penalties when consensus is strong.</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-700">
+            <div className="flex items-center gap-1"><span className="w-28 text-gray-500">Strong (200+ votes)</span><strong>{Math.round(stats.consensus.strong / stats.consensus.total * 100)}%</strong></div>
+            <div className="flex items-center gap-1"><span className="w-28 text-gray-500">Moderate (50-199)</span><strong>{Math.round(stats.consensus.moderate / stats.consensus.total * 100)}%</strong></div>
+            <div className="flex items-center gap-1"><span className="w-28 text-gray-500">Weak (&lt;50)</span><strong>{Math.round(stats.consensus.weak / stats.consensus.total * 100)}%</strong></div>
+            <div className="flex items-center gap-1"><span className="w-28 text-gray-500">Missing</span><strong>{Math.round(stats.consensus.missing / stats.consensus.total * 100)}%</strong></div>
+          </div>
+          {stats.consensus.totalVotes > 0 && (
+            <div className="text-xs text-gray-600 mt-2">Avg vote count: {Math.round(stats.consensus.totalVotes / stats.consensus.total)} </div>
+          )}
+        </div>
+      )}
 
       {/* Enrichment Warning - show if less than 50% of films are mapped */}
       {mappingCoverage && mappingCoverage.mapped < mappingCoverage.total * 0.5 && (
@@ -1438,7 +1645,67 @@ export default function StatsPage() {
                 Liked films receive 1.5-2.0x weight in taste profile
               </div>
             </div>
+
+            {feedbackSummary && feedbackSummary.total > 0 && (
+              <div className="bg-blue-50 rounded p-3">
+                <div className="text-sm text-gray-600">Suggestion Hit Rate</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {(feedbackSummary.hitRate * 100).toFixed(0)}%
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {feedbackSummary.positive} 👍 vs {feedbackSummary.negative} 👎 ({feedbackSummary.total} feedback)
+                  <br />Per-source reliability below once enough samples exist.
+                </div>
+              </div>
+            )}
           </div>
+
+          {sourceReliability.length > 0 && (
+            <div className="bg-white border rounded p-3 mt-3">
+              <div className="text-sm font-medium text-gray-900 mb-2">Per-Source Reliability (min 3 samples)</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs text-gray-700">
+                {sourceReliability.map(entry => (
+                  <div key={entry.source} className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
+                    <span className="font-medium text-gray-800">{entry.source}</span>
+                    <span className="text-gray-600">{(entry.hitRate * 100).toFixed(0)}% ({entry.positive}/{entry.total})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {sourceConsensus.length > 0 && (
+            <div className="bg-white border rounded p-3 mt-3">
+              <div className="text-sm font-medium text-gray-900 mb-2">Per-Source by Consensus</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs text-gray-700">
+                {sourceConsensus.map(entry => {
+                  const highRate = entry.high.total > 0 ? entry.high.pos / entry.high.total : null;
+                  const medRate = entry.medium.total > 0 ? entry.medium.pos / entry.medium.total : null;
+                  const lowRate = entry.low.total > 0 ? entry.low.pos / entry.low.total : null;
+                  return (
+                    <div key={entry.source} className="bg-gray-50 px-2 py-2 rounded space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-gray-800">{entry.source}</span>
+                        <span className="text-gray-500">{entry.high.total + entry.medium.total + entry.low.total} fb</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">High</span>
+                        <span className="text-gray-800">{highRate != null ? `${(highRate * 100).toFixed(0)}% (${entry.high.pos}/${entry.high.total})` : '—'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Medium</span>
+                        <span className="text-gray-800">{medRate != null ? `${(medRate * 100).toFixed(0)}% (${entry.medium.pos}/${entry.medium.total})` : '—'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Low</span>
+                        <span className="text-gray-800">{lowRate != null ? `${(lowRate * 100).toFixed(0)}% (${entry.low.pos}/${entry.low.total})` : '—'}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1510,6 +1777,31 @@ export default function StatsPage() {
           )}
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Watchlist recency/intent strength */}
+            {stats.watchlistWithDatesCount > 0 && (
+              <div className="bg-white rounded-lg p-4 border border-cyan-100">
+                <h3 className="font-medium text-gray-900 mb-2 text-sm">Watchlist Momentum</h3>
+                <p className="text-xs text-gray-600 mb-3">Recency-weighted intent (newer entries boost suggestions more)</p>
+                <div className="flex flex-wrap gap-1 mb-2">
+                  <span className="px-2 py-1 rounded text-xs bg-emerald-100 text-emerald-700">Fresh ≤90d: {stats.watchlistRecencyBuckets.fresh}</span>
+                  <span className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700">Warm 91-180d: {stats.watchlistRecencyBuckets.warm}</span>
+                  <span className="px-2 py-1 rounded text-xs bg-indigo-100 text-indigo-700">Cooling 181-365d: {stats.watchlistRecencyBuckets.cool}</span>
+                  <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">Stale 366d+: {stats.watchlistRecencyBuckets.stale}</span>
+                </div>
+                {(stats.medianWatchlistAge != null || stats.avgWatchlistAge != null) && (
+                  <div className="text-xs text-gray-700 space-y-1">
+                    {stats.medianWatchlistAge != null && (
+                      <div>Median age: {Math.round(stats.medianWatchlistAge)} days</div>
+                    )}
+                    {stats.avgWatchlistAge != null && (
+                      <div>Average age: {Math.round(stats.avgWatchlistAge)} days</div>
+                    )}
+                    <div className="text-gray-500">{stats.watchlistWithDatesCount} with saved add dates</div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Watchlist Genres */}
             {stats.watchlistTopGenres && stats.watchlistTopGenres.length > 0 && (
               <div className="bg-white rounded-lg p-4 border border-cyan-100">

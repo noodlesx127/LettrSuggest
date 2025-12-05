@@ -4,7 +4,7 @@ import MovieCard from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, type FeedbackLearningInsights } from '@/lib/enrich';
+import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, type FeedbackLearningInsights } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -112,6 +112,10 @@ export default function SuggestPage() {
   const [hasCheckedStorage, setHasCheckedStorage] = useState(false);
   const [mappingCoverage, setMappingCoverage] = useState<{ mapped: number; total: number } | null>(null);
   const [watchlistPicks, setWatchlistPicks] = useState<MovieItem[]>([]); // Picks from user's Letterboxd watchlist
+  const [pairHistory, setPairHistory] = useState<Set<string>>(new Set());
+  const [pairwisePair, setPairwisePair] = useState<{ a: MovieItem; b: MovieItem } | null>(null);
+  const [pairwiseCount, setPairwiseCount] = useState<number>(0);
+  const PAIRWISE_SESSION_LIMIT = 3;
   
   // Hybrid feedback popup state - optional "tell us why" after feedback
   const [feedbackPopup, setFeedbackPopup] = useState<{
@@ -144,6 +148,33 @@ export default function SuggestPage() {
     }
   }, []);
 
+  // Load pairwise history (to avoid repeating the same comparison)
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('lettrsuggest_pair_history');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setPairHistory(new Set(parsed));
+        }
+      }
+    } catch (e) {
+      console.error('[Suggest] Failed to restore pair history', e);
+    }
+  }, []);
+
+  // Track how many pairwise prompts have been shown this session
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('lettrsuggest_pairwise_count');
+      if (stored != null) {
+        setPairwiseCount(Number(stored) || 0);
+      }
+    } catch (e) {
+      console.error('[Suggest] Failed to restore pairwise count', e);
+    }
+  }, []);
+
   // Save to session storage when items change
   useEffect(() => {
     if (items && items.length > 0) {
@@ -154,6 +185,22 @@ export default function SuggestPage() {
       }
     }
   }, [items]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('lettrsuggest_pair_history', JSON.stringify(Array.from(pairHistory)));
+    } catch (e) {
+      console.error('[Suggest] Failed to persist pair history', e);
+    }
+  }, [pairHistory]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('lettrsuggest_pairwise_count', String(pairwiseCount));
+    } catch (e) {
+      console.error('[Suggest] Failed to persist pairwise count', e);
+    }
+  }, [pairwiseCount]);
 
   // Get posters for all suggested movies (including watchlist picks)
   const tmdbIds = useMemo(() => {
@@ -614,6 +661,51 @@ export default function SuggestPage() {
     return filters[sectionName] || (() => true);
   }, [topDecade]);
 
+  const makePairId = useCallback((a: number, b: number) => [a, b].sort((x, y) => x - y).join('-'), []);
+
+  const reasonTypeTags = useCallback((reasons: string[]) => {
+    const tags = new Set<string>();
+    for (const r of reasons) {
+      const lower = r.toLowerCase();
+      if (lower.includes('director')) tags.add('director');
+      if (lower.includes('star') || lower.includes('cast')) tags.add('actor');
+      if (lower.includes('genre') || lower.includes('taste in')) tags.add('genre');
+      if (lower.includes('theme') || lower.includes('keyword')) tags.add('theme');
+      if (lower.includes('recent')) tags.add('recent');
+      if (lower.includes('watchlist')) tags.add('watchlist');
+    }
+    return tags;
+  }, []);
+
+  const findPairwiseCandidate = useCallback(
+    (list: MovieItem[], history: Set<string>): { a: MovieItem; b: MovieItem } | null => {
+      if (!list || list.length < 2) return null;
+      const sorted = [...list].sort((a, b) => b.score - a.score);
+      const maxPairsToConsider = Math.min(sorted.length - 1, 12);
+
+      for (let i = 0; i < maxPairsToConsider; i++) {
+        const first = sorted[i];
+        const second = sorted[i + 1];
+        const pairKey = makePairId(first.id, second.id);
+        if (history.has(pairKey)) continue;
+
+        const delta = Math.abs(first.score - second.score);
+        if (delta > 0.6) continue; // Only prompt on near-ties
+
+        const tagsA = reasonTypeTags(first.reasons);
+        const tagsB = reasonTypeTags(second.reasons);
+        const shared = Array.from(tagsA).some((t) => tagsB.has(t));
+        if (!shared) continue; // Only when reasons overlap (reduces noise)
+
+        return { a: first, b: second };
+      }
+
+      // Fallback: none found
+      return null;
+    },
+    [makePairId, reasonTypeTags]
+  );
+
   useEffect(() => {
     const init = async () => {
       if (!supabase) return;
@@ -747,6 +839,10 @@ export default function SuggestPage() {
 
       // Get watchlist films for intent signals
       const watchlistFilms = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
+      const watchlistEntries = watchlistFilms.map(f => ({
+        tmdbId: mappings.get(f.uri)!,
+        addedAt: f.watchlistAddedAt ?? null,
+      }));
       console.log('[Suggest] Watchlist films for taste profile:', watchlistFilms.length);
 
       const tasteProfile = await buildTasteProfile({
@@ -1038,6 +1134,9 @@ export default function SuggestPage() {
       const adjacentGenres = await getGenreTransitions(uid);
       console.log('[Suggest] Loaded genre transitions', { count: adjacentGenres.size });
 
+      // Fetch per-source reliability multipliers from past feedback
+      const userSourceReliability = await fetchSourceReliability(uid);
+
       // Get recent genres from taste profile (already calculated in buildTasteProfile but not returned explicitly as list)
       // We can extract them from topGenres or we might need to look at recent films again.
       // `tasteProfile` has `topGenres` but those are overall.
@@ -1073,10 +1172,12 @@ export default function SuggestPage() {
         excludeWatchedIds: watchedIds,
         desiredResults: 300, // Increased to fill all 24 sections (24 × 12 = 288 potential items)
         sourceMetadata: smartCandidates.sourceMetadata, // Pass multi-source metadata for badge display
+        sourceReliability: userSourceReliability,
         mmrLambda: 0.15 + (discoveryLevel / 100) * 0.35, // range ~0.15–0.5
         mmrTopKFactor: 2.5 + (discoveryLevel / 100) * 1.5,
         // Feature-level feedback from explicit user interactions
         featureFeedback: featureFeedback || undefined,
+        watchlistEntries,
         enhancedProfile: {
           topActors: tasteProfile.topActors,
           topStudios: tasteProfile.topStudios,
@@ -1267,6 +1368,20 @@ export default function SuggestPage() {
     void runSuggest();
   }, [uid, sourceFilms.length, loading, items, runSuggest, hasCheckedStorage]);
 
+  // Build a pairwise comparison candidate whenever items change
+  useEffect(() => {
+    if (!items || items.length < 2) {
+      setPairwisePair(null);
+      return;
+    }
+    if (pairwiseCount >= PAIRWISE_SESSION_LIMIT) {
+      setPairwisePair(null);
+      return;
+    }
+    const candidate = findPairwiseCandidate(items.filter((i) => !i.dismissed), pairHistory);
+    setPairwisePair(candidate);
+  }, [items, pairHistory, findPairwiseCandidate, pairwiseCount, PAIRWISE_SESSION_LIMIT]);
+
   // Recompute when mapping updates are emitted
   useEffect(() => {
     const handler = () => {
@@ -1320,6 +1435,10 @@ export default function SuggestPage() {
 
       // Get watchlist films for intent signals
       const watchlistFilmsForMore = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
+      const watchlistEntriesForMore = watchlistFilmsForMore.map(f => ({
+        tmdbId: mappings.get(f.uri)!,
+        addedAt: f.watchlistAddedAt ?? null,
+      }));
 
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
@@ -1365,6 +1484,7 @@ export default function SuggestPage() {
         concurrency: 1,
         excludeWatchedIds: watchedIds,
         desiredResults: 1,
+        watchlistEntries: watchlistEntriesForMore,
         enhancedProfile: {
           topActors: tasteProfile.topActors,
           topStudios: tasteProfile.topStudios,
@@ -1480,6 +1600,10 @@ export default function SuggestPage() {
 
       // Get watchlist films for intent signals
       const watchlistFilmsForRefresh = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
+      const watchlistEntriesForRefresh = watchlistFilmsForRefresh.map(f => ({
+        tmdbId: mappings.get(f.uri)!,
+        addedAt: f.watchlistAddedAt ?? null,
+      }));
 
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
@@ -1529,6 +1653,7 @@ export default function SuggestPage() {
         concurrency: 3,
         excludeWatchedIds: watchedIds,
         desiredResults: count * 3, // Request more than needed to ensure enough after filtering
+        watchlistEntries: watchlistEntriesForRefresh,
         enhancedProfile: {
           topActors: tasteProfile.topActors,
           topStudios: tasteProfile.topStudios,
@@ -1736,12 +1861,16 @@ export default function SuggestPage() {
     // Find the movie title for the popup
     const movie = items?.find(i => i.id === tmdbId);
     const movieTitle = movie?.title || 'this movie';
+    const feedbackMeta = {
+      sources: movie?.sources,
+      consensusLevel: movie?.consensusLevel as ('high' | 'medium' | 'low' | undefined),
+    };
     
     try {
       if (type === 'negative') {
         // Block the suggestion in the background and get learning insights
         const [insights, movieFeatures] = await Promise.all([
-          addFeedback(uid, tmdbId, 'negative', reasons),
+          addFeedback(uid, tmdbId, 'negative', reasons, feedbackMeta),
           blockSuggestion(uid, tmdbId).then(() => getMovieFeaturesForPopup(tmdbId))
         ]);
 
@@ -1815,7 +1944,7 @@ export default function SuggestPage() {
       } else {
         // Positive feedback - get learning insights AND show popup for explicit learning
         const [insights, movieFeatures] = await Promise.all([
-          addFeedback(uid, tmdbId, 'positive', reasons),
+          addFeedback(uid, tmdbId, 'positive', reasons, feedbackMeta),
           getMovieFeaturesForPopup(tmdbId)
         ]);
         
@@ -1861,6 +1990,67 @@ export default function SuggestPage() {
         });
       }
     }
+  };
+
+  const handlePairwiseVote = async (winnerId: number, loserId: number) => {
+    if (!uid) return;
+    const nextCount = pairwiseCount + 1;
+    const nextHistory = new Set(pairHistory);
+    nextHistory.add(makePairId(winnerId, loserId));
+    setPairHistory(nextHistory);
+    setPairwisePair(null);
+    setPairwiseCount(nextCount);
+
+    try {
+      const winner = items?.find((i) => i.id === winnerId);
+      const loser = items?.find((i) => i.id === loserId);
+
+      const sharedTags = (() => {
+        const tagsA = winner ? reasonTypeTags(winner.reasons) : new Set<string>();
+        const tagsB = loser ? reasonTypeTags(loser.reasons) : new Set<string>();
+        return Array.from(tagsA).filter((t) => tagsB.has(t));
+      })();
+
+      await Promise.all([
+        addFeedback(uid, winnerId, 'positive', winner?.reasons, {
+          sources: winner?.sources,
+          consensusLevel: winner?.consensusLevel as 'high' | 'medium' | 'low' | undefined,
+        }),
+        addFeedback(uid, loserId, 'negative', loser?.reasons, {
+          sources: loser?.sources,
+          consensusLevel: loser?.consensusLevel as 'high' | 'medium' | 'low' | undefined,
+        }),
+        recordPairwiseEvent(uid, {
+          winnerId,
+          loserId,
+          sharedReasonTags: sharedTags,
+          winnerSources: winner?.sources,
+          loserSources: loser?.sources,
+          winnerConsensus: winner?.consensusLevel as 'high' | 'medium' | 'low' | undefined,
+          loserConsensus: loser?.consensusLevel as 'high' | 'medium' | 'low' | undefined,
+        }),
+      ]);
+
+      await applyPairwiseFeatureLearning(uid, winnerId, loserId);
+
+      setFeedbackMessage('Got it — we will favor your pick.');
+      setTimeout(() => setFeedbackMessage(null), 2200);
+    } catch (e) {
+      console.error('[Pairwise] Failed to record preference', e);
+    } finally {
+      const next = nextCount >= PAIRWISE_SESSION_LIMIT ? null : findPairwiseCandidate(items ?? [], nextHistory);
+      setPairwisePair(next);
+    }
+  };
+
+  const handlePairwiseSkip = (aId: number, bId: number) => {
+    const nextCount = pairwiseCount + 1;
+    const nextHistory = new Set(pairHistory);
+    nextHistory.add(makePairId(aId, bId));
+    setPairHistory(nextHistory);
+    setPairwiseCount(nextCount);
+    const next = nextCount >= PAIRWISE_SESSION_LIMIT ? null : findPairwiseCandidate(items ?? [], nextHistory);
+    setPairwisePair(next);
   };
 
   const handleUndoDismiss = async (tmdbId: number) => {
@@ -2313,6 +2503,55 @@ export default function SuggestPage() {
           </div>
         </div>
       )}
+      {pairwisePair && (
+        <div className="mb-5 rounded-xl border border-gray-200 bg-white shadow-sm p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Which fits you better right now?</p>
+              <p className="text-xs text-gray-500">These two were neck-and-neck; your pick will tune future rankings.</p>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-gray-500">
+              <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">Pairwise learning</span>
+              <span>{pairwiseCount}/{PAIRWISE_SESSION_LIMIT} this session</span>
+              <button
+                className="text-xs text-gray-500 hover:text-gray-700"
+                onClick={() => handlePairwiseSkip(pairwisePair.a.id, pairwisePair.b.id)}
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {[pairwisePair.a, pairwisePair.b].map((item, idx) => {
+              const other = idx === 0 ? pairwisePair.b : pairwisePair.a;
+              return (
+                <div key={item.id} className="rounded-lg border border-gray-100 bg-gray-50 p-3 flex flex-col gap-2">
+                  <div className="text-xs uppercase text-gray-500">Option {idx === 0 ? 'A' : 'B'}</div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    {item.title}{item.year ? ` (${item.year})` : ''}
+                  </div>
+                  <div className="text-xs text-gray-600">{item.reasons.slice(0, 2).join(' • ')}</div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                    {item.consensusLevel && (
+                      <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">Consensus: {item.consensusLevel}</span>
+                    )}
+                    {item.sources?.length ? (
+                      <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">{item.sources.length} source{item.sources.length === 1 ? '' : 's'}</span>
+                    ) : null}
+                  </div>
+                  <button
+                    className="mt-1 inline-flex items-center justify-center rounded-md bg-blue-600 text-white text-sm font-medium px-3 py-2 hover:bg-blue-700"
+                    onClick={() => handlePairwiseVote(item.id, other.id)}
+                  >
+                    Choose this one
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Suggestions</h1>

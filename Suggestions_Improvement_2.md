@@ -2,7 +2,7 @@
 
 ## Quick Wins (ship next)
 - Confidence-aware weighting: per-feature priors, decay old signals, cap total impact; expose strength badges (High/Med/Low).
-- Hard vs soft avoid: separate flags and scoring caps; add one-tap "undo avoid".
+- Hard vs soft avoid: soft avoids now downrank dismissed titles instead of blocking outright; hard blocks remain via explicit block list (undo available).
 - Source reliability by user: weight TMDB/TasteDive/Trakt/etc. by each user’s historical hit-rate; still honor multi-source consensus.
 - Diversity rerank (MMR): small λ to trade score vs novelty (genres/decades/directors) after base scoring.
 - Session sliders: “Freshness vs familiarity” and “Discovery vs safety” tweak overlap weights and exploration rate.
@@ -19,14 +19,19 @@
 - Added persistent "Undo last feedback" control to restore most recent dismissed/blocked item.
 - Added match strength badge (High/Solid/Exploratory) derived from consensus + reliability.
 - Added session slider (Discovery vs Safety) wiring into MMR λ/topK for on-demand exploration tuning.
-- Watchlist intent depth: ingest Letterboxd watchlist added dates, apply recency + repetition boosts, and decay stale entries in taste profile intent signals.
+- Watchlist intent depth: ingest Letterboxd watchlist added dates, apply recency + repetition boosts, decay stale entries in taste profile intent signals, and surface recency-tagged watchlist intent reasons when a saved title appears.
+- Pairwise A/B prompt: surfaces near-tie suggestions and records winner/loser feedback to steer rankings faster.
+- Reason strength labels wired into core reasons (genres, combos, directors, cast, keywords) using High/Solid/Light text.
+- Stats page: added Watchlist Momentum (recency buckets, median/avg age) and Metadata Coverage + Consensus Strength cards to mirror quality gates and confidence.
+- Per-source reliability: feedback now stores contributing sources/consensus level; scoring pulls consensus-weighted per-source hit-rate multipliers (cached 5m) and Stats shows per-source hit rates.
+- Per-source consensus split: Stats now breaks out hit-rate by consensus level per source (high/medium/low) when sufficient samples exist.
 
 ## Near-Term (2–3 sprints)
-- Pairwise A/B feedback on close candidates; update feature weights with regularized steps.
+- Pairwise A/B feedback on close candidates; first pass shipped (near-tie prompt + winner/loser logging); next: regularized feature-level updates.
 - Context-aware learning: time-of-day/device/mood toggle to bias tone/runtime/language.
 - Counter-evidence handling: store pos/neg counts per feature; use Bayesian win rate instead of netting signals.
-- Watchlist intent depth: shipped recency + repetition boosts with decay for stale items; next: surface intent reason text.
-- Stats alignment: reflect new signals (watchlist intent, reliability/strength) on the Stats page where applicable.
+- Watchlist intent depth: shipped recency + repetition boosts with decay for stale items; now surfacing recency-tagged watchlist intent reasons when a saved title shows up.
+- Stats alignment: reflect new signals (watchlist intent, reliability/strength) on the Stats page where applicable. → Done for intent recency + quality/consensus + overall hit-rate + per-source reliability (with sample threshold). Remaining: consensus-level split per source if useful.
 - Quality gates: downrank items missing posters/trailers/metadata unless strong consensus.
 
 ## Medium-Term
