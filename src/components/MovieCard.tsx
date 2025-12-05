@@ -69,6 +69,7 @@ type MovieCardProps = {
   // Multi-source recommendation data
   sources?: string[];
   consensusLevel?: 'high' | 'medium' | 'low';
+  reliabilityMultiplier?: number;
   onUndoDismiss?: (id: number) => void;
 };
 
@@ -297,6 +298,7 @@ export default function MovieCard({
   genres,
   sources,
   consensusLevel,
+  reliabilityMultiplier,
   onUndoDismiss
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
@@ -334,6 +336,15 @@ export default function MovieCard({
       : consensusLevel === 'medium'
         ? 'bg-amber-100 text-amber-800'
         : 'bg-blue-100 text-blue-800'
+  } : null;
+
+  const reliabilityBadge = reliabilityMultiplier ? {
+    label: reliabilityMultiplier > 1
+      ? `Reliability +${Math.round((reliabilityMultiplier - 1) * 100)}%`
+      : `Reliability ${Math.round((reliabilityMultiplier - 1) * 100)}%`,
+    className: reliabilityMultiplier >= 1
+      ? 'bg-sky-100 text-sky-800'
+      : 'bg-slate-100 text-slate-700'
   } : null;
 
   const displayedReasons = expanded ? reasons : reasons?.slice(0, 3);
@@ -450,6 +461,14 @@ export default function MovieCard({
                   title={sources && sources.length ? `Recommended by ${sources.map(s => SOURCE_LABELS[s] || s).join(', ')}` : 'Based on reliable sources'}
                 >
                   🎯 {consensusBadge.label}
+                </span>
+              )}
+              {reliabilityBadge && (
+                <span
+                  className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${reliabilityBadge.className}`}
+                  title="Per-source reliability learned from your feedback"
+                >
+                  📈 {reliabilityBadge.label}
                 </span>
               )}
               {/* Multi-Source Badge - shows when recommended by multiple sources */}
