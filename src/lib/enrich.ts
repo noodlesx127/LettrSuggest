@@ -2381,6 +2381,9 @@ export async function suggestByOverlap(params: {
   sourceMetadata?: Map<number, { sources: string[]; consensusLevel: 'high' | 'medium' | 'low' }>;
   // Optional per-user reliability weights by source (1.0 = neutral)
   sourceReliability?: Map<string, number>;
+  // Optional MMR tuning
+  mmrLambda?: number;
+  mmrTopKFactor?: number;
   // Feature-level feedback from "Not Interested" / "More Like This" clicks (Pandora-style)
   featureFeedback?: {
     avoidActors: Array<{ id: number; name: string; weight: number; count: number }>;
@@ -3584,8 +3587,11 @@ export async function suggestByOverlap(params: {
 
   // Phase 3: Rerank with MMR for better novelty vs relevance
   const mmrReranked = applyMMRRerank(results, {
-    lambda: 0.25,
-    topK: Math.min(results.length, Math.max(desired * 3, desired + 12))
+    lambda: params.mmrLambda ?? 0.25,
+    topK: Math.min(
+      results.length,
+      Math.max(desired * (params.mmrTopKFactor ?? 3), desired + 12)
+    )
   });
 
   // Phase 3b: Apply diversity filtering (limits increased for 24-section UI)

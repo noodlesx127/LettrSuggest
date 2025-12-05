@@ -18,6 +18,7 @@
 - UI: Reliability badge (per-user) shown alongside consensus/multi-source badges.
 - Added persistent "Undo last feedback" control to restore most recent dismissed/blocked item.
 - Added match strength badge (High/Solid/Exploratory) derived from consensus + reliability.
+- Added session slider (Discovery vs Safety) wiring into MMR λ/topK for on-demand exploration tuning.
 
 ## Near-Term (2–3 sprints)
 - Pairwise A/B feedback on close candidates; update feature weights with regularized steps.
