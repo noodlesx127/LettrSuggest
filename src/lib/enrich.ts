@@ -23,6 +23,13 @@ function getBaseUrl(): string {
   return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 }
 
+// Normalize a numeric signal into a user-facing strength label
+function reasonStrengthLabel(strength: number): string {
+  if (strength >= 3.5) return 'High';
+  if (strength >= 2.0) return 'Solid';
+  return 'Light';
+}
+
 export type TMDBMovie = {
   id: number;
   title: string;
@@ -300,7 +307,8 @@ export async function addFeedback(
   userId: string, 
   tmdbId: number, 
   type: 'negative' | 'positive',
-  reasons?: string[]
+  reasons?: string[],
+  opts?: { sources?: string[]; consensusLevel?: 'high' | 'medium' | 'low' }
 ): Promise<FeedbackLearningInsights> {
   if (!supabase) throw new Error('Supabase not initialized');
   
@@ -324,7 +332,9 @@ export async function addFeedback(
     tmdb_id: tmdbId, 
     feedback_type: type,
     reason_types: reasonTypes,
-    movie_features: movieFeatures || {}
+    movie_features: movieFeatures || {},
+    recommendation_sources: opts?.sources ?? [],
+    consensus_level: opts?.consensusLevel ?? null
   });
   
   if (error) {
@@ -368,6 +378,212 @@ export async function addFeedback(
   });
   
   return insights;
+}
+
+type PairwiseConsensus = 'high' | 'medium' | 'low' | undefined;
+
+export async function recordPairwiseEvent(
+  userId: string,
+  payload: {
+    winnerId: number;
+    loserId: number;
+    sharedReasonTags?: string[];
+    winnerSources?: string[];
+    loserSources?: string[];
+    winnerConsensus?: PairwiseConsensus;
+    loserConsensus?: PairwiseConsensus;
+  }
+): Promise<void> {
+  if (!supabase) return;
+
+  try {
+    const { error } = await supabase.from('pairwise_events').insert({
+      user_id: userId,
+      winner_tmdb_id: payload.winnerId,
+      loser_tmdb_id: payload.loserId,
+      shared_reason_tags: payload.sharedReasonTags ?? [],
+      winner_sources: payload.winnerSources ?? [],
+      loser_sources: payload.loserSources ?? [],
+      winner_consensus: payload.winnerConsensus ?? null,
+      loser_consensus: payload.loserConsensus ?? null,
+    });
+
+    if (error) {
+      console.error('[PairwiseEvent] Failed to insert', error);
+    }
+  } catch (e) {
+    console.error('[PairwiseEvent] Exception inserting event', e);
+  }
+}
+
+type FeatureDelta = {
+  feature_type: 'actor' | 'keyword' | 'collection' | 'director' | 'genre';
+  feature_id: number;
+  feature_name: string;
+  deltaPositive: number;
+  deltaNegative: number;
+};
+
+function selectPairwiseFeatureSlice(features: MovieFeatures): FeatureDelta[] {
+  const rows: FeatureDelta[] = [];
+  features.actors.slice(0, 3).forEach((actor) =>
+    rows.push({ feature_type: 'actor', feature_id: actor.id, feature_name: actor.name, deltaPositive: 0, deltaNegative: 0 })
+  );
+  features.keywords.slice(0, 8).forEach((keyword) =>
+    rows.push({ feature_type: 'keyword', feature_id: keyword.id, feature_name: keyword.name, deltaPositive: 0, deltaNegative: 0 })
+  );
+  if (features.collection) {
+    rows.push({ feature_type: 'collection', feature_id: features.collection.id, feature_name: features.collection.name, deltaPositive: 0, deltaNegative: 0 });
+  }
+  features.directors.slice(0, 1).forEach((director) =>
+    rows.push({ feature_type: 'director', feature_id: director.id, feature_name: director.name, deltaPositive: 0, deltaNegative: 0 })
+  );
+  features.genres.slice(0, 3).forEach((genre) =>
+    rows.push({ feature_type: 'genre', feature_id: genre.id, feature_name: genre.name, deltaPositive: 0, deltaNegative: 0 })
+  );
+  return rows;
+}
+
+async function applyFeatureDelta(
+  userId: string,
+  update: FeatureDelta
+): Promise<void> {
+  if (!supabase) return;
+
+  try {
+    const { data: existing } = await supabase
+      .from('user_feature_feedback')
+      .select('positive_count, negative_count, feature_name')
+      .eq('user_id', userId)
+      .eq('feature_type', update.feature_type)
+      .eq('feature_id', update.feature_id)
+      .maybeSingle();
+
+    const positiveCount = (existing?.positive_count || 0) + update.deltaPositive;
+    const negativeCount = (existing?.negative_count || 0) + update.deltaNegative;
+    const total = positiveCount + negativeCount;
+    const inferredPreference = total > 0 ? positiveCount / total : 0.5;
+
+    await supabase
+      .from('user_feature_feedback')
+      .upsert(
+        {
+          user_id: userId,
+          feature_type: update.feature_type,
+          feature_id: update.feature_id,
+          feature_name: update.feature_name || existing?.feature_name || '',
+          positive_count: positiveCount,
+          negative_count: negativeCount,
+          inferred_preference: inferredPreference,
+          last_updated: new Date().toISOString(),
+        },
+        {
+          onConflict: 'user_id,feature_type,feature_id',
+        }
+      );
+  } catch (e) {
+    console.error('[PairwiseLearning] Failed to apply feature delta', { update, error: e });
+  }
+}
+
+export async function applyPairwiseFeatureLearning(userId: string, winnerTmdbId: number, loserTmdbId: number): Promise<void> {
+  if (!supabase) return;
+
+  try {
+    const [winnerFeatures, loserFeatures] = await Promise.all([
+      extractMovieFeatures(winnerTmdbId),
+      extractMovieFeatures(loserTmdbId),
+    ]);
+
+    const winnerSlice = selectPairwiseFeatureSlice(winnerFeatures);
+    const loserSlice = selectPairwiseFeatureSlice(loserFeatures);
+
+    const winnerKeys = new Set(winnerSlice.map((f) => `${f.feature_type}:${f.feature_id}`));
+    const loserKeys = new Set(loserSlice.map((f) => `${f.feature_type}:${f.feature_id}`));
+
+    const updates = new Map<string, FeatureDelta>();
+
+    // Features that only the winner has get a small positive nudge
+    for (const feat of winnerSlice) {
+      const key = `${feat.feature_type}:${feat.feature_id}`;
+      if (loserKeys.has(key)) continue;
+      updates.set(key, { ...feat, deltaPositive: 1, deltaNegative: 0 });
+    }
+
+    // Features that only the loser has get a small negative nudge
+    for (const feat of loserSlice) {
+      const key = `${feat.feature_type}:${feat.feature_id}`;
+      if (winnerKeys.has(key)) continue;
+      if (updates.has(key)) continue;
+      updates.set(key, { ...feat, deltaPositive: 0, deltaNegative: 1 });
+    }
+
+    for (const update of updates.values()) {
+      await applyFeatureDelta(userId, update);
+    }
+
+    if (updates.size > 0) {
+      console.log('[PairwiseLearning] Applied feature deltas', { userId: userId.slice(0, 8), updates: updates.size });
+    }
+  } catch (e) {
+    console.error('[PairwiseLearning] Failed to apply pairwise learning', e);
+  }
+}
+
+/**
+ * Derive per-source reliability multipliers from suggestion_feedback (Laplace-smoothed hit rate mapped to ~0.9–1.12)
+ */
+const sourceReliabilityCache = new Map<string, { at: number; data: Map<string, number> }>();
+const SOURCE_RELIABILITY_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export async function fetchSourceReliability(userId: string): Promise<Map<string, number>> {
+  const reliability = new Map<string, number>();
+  if (!supabase) return reliability;
+
+  const cached = sourceReliabilityCache.get(userId);
+  if (cached && Date.now() - cached.at < SOURCE_RELIABILITY_TTL_MS) {
+    return cached.data;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('suggestion_feedback')
+      .select('feedback_type, recommendation_sources, consensus_level')
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('[SourceReliability] Error fetching feedback', error);
+      return reliability;
+    }
+
+    const stats = new Map<string, { pos: number; total: number }>();
+    data?.forEach((row: any) => {
+      const sources: string[] = Array.isArray(row.recommendation_sources) ? row.recommendation_sources : [];
+      const isPos = row.feedback_type === 'positive';
+      const level = (row.consensus_level as 'high' | 'medium' | 'low' | null) ?? 'low';
+      const weight = level === 'high' ? 1.0 : level === 'medium' ? 0.7 : 0.4; // down-weight low-consensus signals
+      sources.forEach((s) => {
+        const key = (s || '').toLowerCase();
+        if (!key) return;
+        const curr = stats.get(key) ?? { pos: 0, total: 0 };
+        if (isPos) curr.pos += weight;
+        curr.total += weight;
+        stats.set(key, curr);
+      });
+    });
+
+    for (const [src, { pos, total }] of stats.entries()) {
+      const rate = (pos + 1) / (total + 2); // Laplace smoothing with weighted totals
+      const multiplier = Math.min(1.12, Math.max(0.9, 1 + (rate - 0.5) * 0.4));
+      reliability.set(src, multiplier);
+    }
+
+    sourceReliabilityCache.set(userId, { at: Date.now(), data: reliability });
+    return reliability;
+  } catch (e) {
+    console.error('[SourceReliability] Exception', e);
+    return reliability;
+  }
 }
 
 /**
@@ -2024,6 +2240,9 @@ export async function buildTasteProfile(params: {
     .slice(0, topN)
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
+  // Source reliability is calculated later when enriching suggestions; placeholder here for parity
+  const sourceReliability: Array<{ source: string; reliability: number }> = [];
+
   const topDirectors = Array.from(directorWeights.entries())
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, topN)
@@ -2435,6 +2654,8 @@ export async function suggestByOverlap(params: {
   // Optional MMR tuning
   mmrLambda?: number;
   mmrTopKFactor?: number;
+  // Watchlist entries with recency for intent reasons
+  watchlistEntries?: Array<{ tmdbId: number; addedAt?: string | null }>;
   // Feature-level feedback from "Not Interested" / "More Like This" clicks (Pandora-style)
   featureFeedback?: {
     avoidActors: Array<{ id: number; name: string; weight: number; count: number }>;
@@ -2569,12 +2790,42 @@ export async function suggestByOverlap(params: {
   // But wait, suggestByOverlap uses params.candidates later?
   // Let's check the rest of the file.
   // Actually, we should probably filter it right here.
-  const validCandidates = params.candidates.filter(id => !negativeFeedbackIds.has(id));
+  // Soft-avoid: keep negatively-rated candidates but apply a strong penalty later.
+  // Hard blocks are handled upstream via blocked_suggestions.
+  const validCandidates = params.candidates.slice();
 
   // Use validCandidates instead of params.candidates in the rest of the function
   // We need to make sure we replace usages of params.candidates with validCandidates
   // Or we can just reassign params.candidates if it wasn't const (it is in the function signature object)
   // So we'll define a new variable and use it.
+
+  // Precompute watchlist intent metadata for quick lookup during scoring
+  const watchlistIntentMap = new Map<number, { boost: number; label: string; ageText: string }>();
+  if (params.watchlistEntries && params.watchlistEntries.length > 0) {
+    const now = Date.now();
+
+    const computeRecency = (addedAt?: string | null) => {
+      if (!addedAt) {
+        return { boost: 0.6, label: 'saved in your watchlist', ageText: 'saved previously' };
+      }
+
+      const days = Math.max(1, Math.round((now - new Date(addedAt).getTime()) / (1000 * 60 * 60 * 24)));
+
+      if (days <= 30) return { boost: 1.2, label: 'recently added', ageText: `${days}d ago` };
+      if (days <= 90) return { boost: 1.0, label: 'added this quarter', ageText: `${days}d ago` };
+      if (days <= 180) return { boost: 0.8, label: 'added this year', ageText: `${days}d ago` };
+      return { boost: 0.55, label: 'long-term watch', ageText: `${days}d ago` };
+    };
+
+    for (const entry of params.watchlistEntries) {
+      const recency = computeRecency(entry.addedAt);
+      const existing = watchlistIntentMap.get(entry.tmdbId);
+      // Keep the strongest intent boost if duplicates occur
+      if (!existing || recency.boost > existing.boost) {
+        watchlistIntentMap.set(entry.tmdbId, recency);
+      }
+    }
+  }
 
   const likedCap = 800;
   const dislikedCap = 400;
@@ -2971,6 +3222,12 @@ export async function suggestByOverlap(params: {
     let score = 0;
     const reasons: string[] = [];
 
+    // Soft avoid: previously dismissed items get a strong penalty but are not fully removed
+    if (negativeFeedbackIds.has(cid)) {
+      score -= 4.0;
+      reasons.push('Previously dismissed — softened (undo via unblock if needed)');
+    }
+
     // QUALITY GATES: downrank items with missing metadata unless strong consensus
     const hasPoster = Boolean(m.poster_path || (m as any).omdb_poster);
     const hasBackdrop = Boolean(m.backdrop_path);
@@ -3008,6 +3265,14 @@ export async function suggestByOverlap(params: {
       } else if (!strongConsensus) {
         reasons.push('Limited metadata — confidence slightly reduced');
       }
+    }
+
+    // WATCHLIST INTENT: prioritize movies the user explicitly saved (recency-weighted)
+    const watchlistIntent = watchlistIntentMap.get(cid);
+    if (watchlistIntent) {
+      score += watchlistIntent.boost;
+      const when = watchlistIntent.ageText ? `, added ${watchlistIntent.ageText}` : '';
+      reasons.push(`On your Letterboxd watchlist (${watchlistIntent.label}${when}) — honoring your intent`);
     }
 
     // CROSS-GENRE BOOST: Check if candidate matches user's preferred genre combinations
@@ -3067,7 +3332,8 @@ export async function suggestByOverlap(params: {
       const comboWeight = pref.genreCombos.get(feats.genreCombo) ?? 1;
       score += comboWeight * weights.genreCombo;
       const comboCountRounded = Math.round(comboWeight);
-      reasons.push(`Matches your specific taste in ${feats.genres.join(' + ')} films (${comboCountRounded} highly-rated similar ${comboCountRounded === 1 ? 'film' : 'films'})`);
+      const strength = reasonStrengthLabel(comboWeight);
+      reasons.push(`Matches your specific taste in ${feats.genres.join(' + ')} films (${comboCountRounded} highly-rated similar ${comboCountRounded === 1 ? 'film' : 'films'}) — ${strength} signal`);
     } else {
       // Fallback to individual genre matching if combo doesn't match
       const gHits = feats.genres.filter((g) => pref.genres.has(g));
@@ -3076,7 +3342,8 @@ export async function suggestByOverlap(params: {
         score += totalGenreWeight * weights.genre;
         const genreWeight = pref.genres.get(gHits[0]) ?? 1;
         const genreCountRounded = Math.round(genreWeight);
-        reasons.push(`Matches your taste in ${gHits.slice(0, 3).join(', ')} (${genreCountRounded} similar ${genreCountRounded === 1 ? 'film' : 'films'})`);
+        const strength = reasonStrengthLabel(genreWeight);
+        reasons.push(`Matches your taste in ${gHits.slice(0, 3).join(', ')} (${genreCountRounded} similar ${genreCountRounded === 1 ? 'film' : 'films'}) — ${strength} signal`);
 
         // Watchlist intent reason if genre aligns with user's watchlist
         const watchlistGenreHits = gHits.filter(g => watchlistGenreSet.has(g));
@@ -3093,7 +3360,8 @@ export async function suggestByOverlap(params: {
       const dirWeight = pref.directors.get(dHits[0]) ?? 1;
       const dirCountRounded = Math.round(dirWeight);
       const dirQuality = dirWeight >= 3.0 ? 'highly rated' : 'enjoyed';
-      reasons.push(`Directed by ${dHits.slice(0, 2).join(', ')} — you've ${dirQuality} ${dirCountRounded} ${dirCountRounded === 1 ? 'film' : 'films'} by ${dHits.length === 1 ? 'this director' : 'these directors'}`);
+      const strength = reasonStrengthLabel(dirWeight);
+      reasons.push(`Directed by ${dHits.slice(0, 2).join(', ')} — you've ${dirQuality} ${dirCountRounded} ${dirCountRounded === 1 ? 'film' : 'films'} by ${dHits.length === 1 ? 'this director' : 'these directors'} — ${strength} signal`);
 
       if (dHits.some(d => watchlistDirectorSet.has(d))) {
         reasons.push('On your watchlist: director interest');
@@ -3132,7 +3400,8 @@ export async function suggestByOverlap(params: {
       score += totalCastWeight * weights.cast;
       const topCastWeight = Math.max(...cHits.map(c => pref.cast.get(c) ?? 0));
       const castCountRounded = Math.round(topCastWeight);
-      reasons.push(`Stars ${cHits.slice(0, 3).join(', ')} — ${cHits.length} cast ${cHits.length === 1 ? 'member' : 'members'} you've liked before`);
+      const strength = reasonStrengthLabel(topCastWeight);
+      reasons.push(`Stars ${cHits.slice(0, 3).join(', ')} — ${cHits.length} cast ${cHits.length === 1 ? 'member' : 'members'} you've liked before — ${strength} signal`);
     } else {
       // Check for similar actors (actors who work in the same subgenres)
       const similarCast: Array<{ actor: string; likedActor: string; sharedThemes: string[] }> = [];
@@ -3179,7 +3448,8 @@ export async function suggestByOverlap(params: {
       const isStrongPattern = topKeywordWeight >= 3.0;
       const strengthText = isStrongPattern ? 'especially love' : 'enjoy';
       const countRounded = Math.round(topKeywordWeight);
-      reasons.push(`Matches specific themes you ${strengthText}: ${topKeywordNames.join(', ')} (${countRounded}+ highly-rated films)`);
+      const strengthLabel = reasonStrengthLabel(topKeywordWeight);
+      reasons.push(`Matches specific themes you ${strengthText}: ${topKeywordNames.join(', ')} (${countRounded}+ highly-rated films) — ${strengthLabel} signal`);
 
       if (kHits.some(k => watchlistKeywordSet.has(k))) {
         reasons.push('On your watchlist: themes you saved');

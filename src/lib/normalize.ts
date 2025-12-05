@@ -8,6 +8,7 @@ export type FilmEvent = {
   liked?: boolean;
   onWatchlist?: boolean;
   watchCount?: number;
+  watchlistAddedAt?: string;
 };
 
 export function toNumber(n?: string) {
@@ -117,7 +118,15 @@ export function normalizeData(raw: {
   for (const r of raw.watchlist ?? []) {
     const uri = r['Letterboxd URI'];
     if (!uri) continue;
-    upd(uri, { onWatchlist: true }, { title: r['Name'], year: r['Year'] });
+    const addedAt = r['Date'] || r['Added'] || r['Added At'] || r['AddedAt'] || r['Added Date'];
+    upd(
+      uri,
+      {
+        onWatchlist: true,
+        watchlistAddedAt: addedAt ?? byURI.get(uri)?.watchlistAddedAt
+      },
+      { title: r['Name'], year: r['Year'] }
+    );
   }
 
   // Process likes
