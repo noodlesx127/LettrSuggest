@@ -17,6 +17,7 @@
 - Source hit-rate weighting: per-user reliability from feedback + source metadata (Laplace-smoothed) feeds scoring multiplier.
 - UI: Reliability badge (per-user) shown alongside consensus/multi-source badges.
 - Added persistent "Undo last feedback" control to restore most recent dismissed/blocked item.
+- Added match strength badge (High/Solid/Exploratory) derived from consensus + reliability.
 
 ## Near-Term (2–3 sprints)
 - Pairwise A/B feedback on close candidates; update feature weights with regularized steps.
