@@ -13,6 +13,7 @@
 - Added MMR rerank (λ=0.25, topK ~3x desired) before diversity filter to balance novelty vs relevance.
 - Surfaced consensus badge on movie cards to show confidence even when only one source is present.
 - Added inline undo for dismissed suggestions (unblocks and keeps card in view).
+- Added dismiss undo toast (bottom-left) for quick recovery after “Not Interested”.
 
 ## Near-Term (2–3 sprints)
 - Pairwise A/B feedback on close candidates; update feature weights with regularized steps.

@@ -103,6 +103,7 @@ export default function SuggestPage() {
   const [cacheKey, setCacheKey] = useState<number>(Date.now());
   const [progress, setProgress] = useState({ current: 0, total: 6, stage: '' });
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [undoToast, setUndoToast] = useState<{ id: number; title: string } | null>(null);
   const [topDecade, setTopDecade] = useState<number | null>(null);
   const [savedMovieIds, setSavedMovieIds] = useState<Set<number>>(new Set());
   const [hasCheckedStorage, setHasCheckedStorage] = useState(false);
@@ -1729,6 +1730,10 @@ export default function SuggestPage() {
 
         setBlockedIds(prev => new Set([...prev, tmdbId]));
 
+        // Offer quick undo toast
+        setUndoToast({ id: tmdbId, title: movieTitle });
+        setTimeout(() => setUndoToast((curr) => curr && curr.id === tmdbId ? null : curr), 5000);
+
         // Mark the item as dismissed in items (source of truth for storage)
         setItems(prev => {
           if (!prev) return prev;
@@ -1842,6 +1847,7 @@ export default function SuggestPage() {
     if (!uid) return;
     try {
       await unblockSuggestion(uid, tmdbId);
+      setUndoToast(null);
       setBlockedIds(prev => {
         const next = new Set(prev);
         next.delete(tmdbId);
@@ -2004,6 +2010,19 @@ export default function SuggestPage() {
       {feedbackMessage && (
         <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded shadow-lg z-50 animate-fade-in-up">
           {feedbackMessage}
+        </div>
+      )}
+
+      {/* Undo Toast for dismissed suggestions */}
+      {undoToast && (
+        <div className="fixed bottom-4 left-4 bg-white text-gray-900 px-4 py-3 rounded shadow-lg border border-gray-200 z-50 flex items-center gap-3 animate-fade-in-up">
+          <div className="text-sm">Removed “{undoToast.title}”.</div>
+          <button
+            className="text-sm font-semibold text-blue-700 hover:text-blue-900"
+            onClick={() => handleUndoDismiss(undoToast.id)}
+          >
+            Undo
+          </button>
         </div>
       )}
       
