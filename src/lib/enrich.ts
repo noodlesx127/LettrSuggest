@@ -3505,6 +3505,7 @@ export async function suggestByOverlap(params: {
 
     // Get source metadata if available (for multi-source badge)
     const sourceMeta = params.sourceMetadata?.get(cid);
+    let reliabilityMultiplier: number | undefined;
 
     // Adjust score by source reliability and consensus, capped to avoid dominating
     if (sourceMeta) {
@@ -3524,7 +3525,7 @@ export async function suggestByOverlap(params: {
 
       const consensusBoost = sourceMeta.consensusLevel === 'high' ? 1.05 : sourceMeta.consensusLevel === 'low' ? 0.97 : 1.0;
       const multiSourceBoost = sources.length > 1 ? 1 + Math.min((sources.length - 1) * 0.02, 0.06) : 1;
-      const reliabilityMultiplier = Math.min(1.12, Math.max(0.9, avgReliability * consensusBoost * multiSourceBoost));
+      reliabilityMultiplier = Math.min(1.12, Math.max(0.9, avgReliability * consensusBoost * multiSourceBoost));
 
       if (Math.abs(reliabilityMultiplier - 1) >= 0.02) {
         const oldScore = score;
@@ -3553,7 +3554,8 @@ export async function suggestByOverlap(params: {
       actors: feats.cast.slice(0, 3), // Top 3 billed actors
       // Multi-source recommendation data
       sources: sourceMeta?.sources,
-      consensusLevel: sourceMeta?.consensusLevel
+      consensusLevel: sourceMeta?.consensusLevel,
+      reliabilityMultiplier
     };
     resultsAcc.push(r);
     // Early return the result; caller will slice after sorting
@@ -3576,6 +3578,7 @@ export async function suggestByOverlap(params: {
     directors?: string[];
     studios?: string[];
     actors?: string[];
+    reliabilityMultiplier?: number;
   }>;
   results.sort((a, b) => b.score - a.score);
 

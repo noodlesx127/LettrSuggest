@@ -15,6 +15,7 @@
 - Added inline undo for dismissed suggestions (unblocks and keeps card in view).
 - Added dismiss undo toast (bottom-left) for quick recovery after “Not Interested”.
 - Source hit-rate weighting: per-user reliability from feedback + source metadata (Laplace-smoothed) feeds scoring multiplier.
+- UI: Reliability badge (per-user) shown alongside consensus/multi-source badges.
 
 ## Near-Term (2–3 sprints)
 - Pairwise A/B feedback on close candidates; update feature weights with regularized steps.

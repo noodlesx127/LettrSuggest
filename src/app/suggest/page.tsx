@@ -46,6 +46,7 @@ type MovieItem = {
   // Multi-source recommendation data
   sources?: string[];
   consensusLevel?: 'high' | 'medium' | 'low';
+  reliabilityMultiplier?: number;
   // Additional metadata for new sections
   runtime?: number; // in minutes
   original_language?: string;
@@ -1163,6 +1164,7 @@ export default function SuggestPage() {
               contributingFilms: s.contributingFilms,
               sources: s.sources,
               consensusLevel: s.consensusLevel,
+              reliabilityMultiplier: s.reliabilityMultiplier,
               runtime,
               original_language,
               spoken_languages,
@@ -1187,6 +1189,7 @@ export default function SuggestPage() {
           genres: [],
           sources: s.sources,
           consensusLevel: s.consensusLevel,
+          reliabilityMultiplier: s.reliabilityMultiplier,
           runtime: undefined,
           original_language: undefined,
           spoken_languages: undefined,
@@ -2449,6 +2452,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -2515,6 +2519,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -2574,6 +2579,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -2633,6 +2639,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -2692,6 +2699,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -2751,6 +2759,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -2810,6 +2819,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -2869,6 +2879,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -2928,6 +2939,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -2987,6 +2999,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3046,6 +3059,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3105,6 +3119,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3164,6 +3179,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3223,6 +3239,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3282,6 +3299,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3341,6 +3359,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3400,6 +3419,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3459,6 +3479,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3518,6 +3539,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3577,6 +3599,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3636,6 +3659,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3695,6 +3719,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3754,6 +3779,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3813,6 +3839,7 @@ export default function SuggestPage() {
                       genres={item.genres}
                       sources={item.sources}
                       consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
                       onUndoDismiss={handleUndoDismiss}
                     />
                   ))}
@@ -3876,6 +3903,7 @@ export default function SuggestPage() {
     </AuthGate >
   );
 }
+
 
 
 
