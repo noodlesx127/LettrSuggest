@@ -69,6 +69,7 @@ type MovieCardProps = {
   // Multi-source recommendation data
   sources?: string[];
   consensusLevel?: 'high' | 'medium' | 'low';
+  onUndoDismiss?: (id: number) => void;
 };
 
 // Source display labels
@@ -295,7 +296,8 @@ export default function MovieCard({
   awards,
   genres,
   sources,
-  consensusLevel
+  consensusLevel,
+  onUndoDismiss
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -400,6 +402,18 @@ export default function MovieCard({
             <div className="bg-white px-4 py-2 rounded-lg shadow-lg">
               <p className="text-sm font-medium text-gray-900">Dismissed</p>
               <p className="text-xs text-gray-600">Will be removed on refresh</p>
+              {onUndoDismiss && (
+                <button
+                  className="mt-2 w-full text-xs font-semibold text-blue-700 hover:text-blue-900 hover:underline"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onUndoDismiss(id);
+                  }}
+                >
+                  Undo
+                </button>
+              )}
             </div>
           </div>
         )}
