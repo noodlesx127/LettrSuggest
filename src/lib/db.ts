@@ -15,6 +15,10 @@ class LettrDB extends Dexie {
     this.version(2).stores({
       films: '&uri, title, year, rating, rewatch, lastDate, liked, onWatchlist, watchCount'
     });
+    // Add watchlistAddedAt for intent recency in version 3
+    this.version(3).stores({
+      films: '&uri, title, year, rating, rewatch, lastDate, liked, onWatchlist, watchCount, watchlistAddedAt'
+    });
   }
 }
 
