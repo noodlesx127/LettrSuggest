@@ -2285,6 +2285,87 @@ function applyDiversityFilter<T extends {
   return filtered;
 }
 
+// Maximal Marginal Relevance (MMR) reranking to balance relevance and diversity
+function applyMMRRerank<T extends {
+  score: number;
+  genres?: string[];
+  directors?: string[];
+  studios?: string[];
+  actors?: string[];
+  release_date?: string;
+}>(
+  suggestions: T[],
+  options?: {
+    lambda?: number; // relevance weight (0..1). Higher = more relevance, lower = more diversity
+    topK?: number;   // how many items to rerank with MMR before appending the rest
+  }
+): T[] {
+  if (suggestions.length <= 1) return suggestions;
+
+  const lambda = options?.lambda ?? 0.25;
+  const topK = Math.min(options?.topK ?? suggestions.length, suggestions.length);
+  const pool = [...suggestions];
+  const selected: T[] = [];
+  const topScore = pool[0].score || 1;
+
+  const toSet = (arr?: string[]) => new Set((arr || []).filter(Boolean));
+  const decadeFromDate = (date?: string) => {
+    if (!date || date.length < 4) return null;
+    const year = parseInt(date.slice(0, 4), 10);
+    if (Number.isNaN(year)) return null;
+    return Math.floor(year / 10) * 10;
+  };
+
+  const jaccard = (a: Set<string>, b: Set<string>) => {
+    if (!a.size && !b.size) return 0;
+    const intersection = [...a].filter((x) => b.has(x)).length;
+    const union = a.size + b.size - intersection;
+    return union === 0 ? 0 : intersection / union;
+  };
+
+  const similarity = (a: T, b: T) => {
+    const genreSim = jaccard(toSet(a.genres), toSet(b.genres));
+    const directorSim = jaccard(toSet(a.directors), toSet(b.directors));
+    const studioSim = jaccard(toSet(a.studios), toSet(b.studios));
+    const actorSim = jaccard(toSet(a.actors), toSet(b.actors));
+
+    const da = decadeFromDate(a.release_date);
+    const db = decadeFromDate(b.release_date);
+    const decadeSim = da !== null && db !== null && da === db ? 1 : 0;
+
+    // Weighted blend, capped at 1.0
+    const blended = (genreSim * 0.4) + (directorSim * 0.25) + (actorSim * 0.2) + (studioSim * 0.1) + (decadeSim * 0.05);
+    return Math.min(1, blended);
+  };
+
+  while (selected.length < topK && pool.length > 0) {
+    let bestIdx = 0;
+    let bestMMR = -Infinity;
+
+    for (let i = 0; i < pool.length; i++) {
+      const cand = pool[i];
+      const relevance = cand.score / topScore;
+      let diversityPenalty = 0;
+
+      if (selected.length > 0) {
+        diversityPenalty = Math.max(...selected.map((s) => similarity(s, cand)));
+      }
+
+      const mmrScore = (lambda * relevance) - ((1 - lambda) * diversityPenalty);
+      if (mmrScore > bestMMR) {
+        bestMMR = mmrScore;
+        bestIdx = i;
+      }
+    }
+
+    selected.push(pool[bestIdx]);
+    pool.splice(bestIdx, 1);
+  }
+
+  // Append any remaining items in their original relative order
+  return [...selected, ...pool];
+}
+
 export async function suggestByOverlap(params: {
   userId: string;
   films: FilmEventLite[];
@@ -2298,6 +2379,8 @@ export async function suggestByOverlap(params: {
   feedbackMap?: Map<number, 'negative' | 'positive'>;
   // Multi-source metadata for badge display
   sourceMetadata?: Map<number, { sources: string[]; consensusLevel: 'high' | 'medium' | 'low' }>;
+  // Optional per-user reliability weights by source (1.0 = neutral)
+  sourceReliability?: Map<string, number>;
   // Feature-level feedback from "Not Interested" / "More Like This" clicks (Pandora-style)
   featureFeedback?: {
     avoidActors: Array<{ id: number; name: string; weight: number; count: number }>;
@@ -2380,6 +2463,40 @@ export async function suggestByOverlap(params: {
 
   // Add positive feedback IDs to liked list to boost their features
   likedIdsAll.push(...Array.from(positiveFeedbackIds));
+
+  // Build per-source reliability from user feedback (Laplace-smoothed hit rate)
+  const buildSourceReliability = () => {
+    if (!params.sourceMetadata || params.sourceMetadata.size === 0) return null;
+
+    const stats = new Map<string, { pos: number; neg: number }>();
+
+    for (const [tmdbId, type] of feedbackMap.entries()) {
+      const meta = params.sourceMetadata.get(tmdbId);
+      if (!meta) continue;
+      const keyType = type === 'positive' ? 'pos' : type === 'negative' ? 'neg' : null;
+      if (!keyType) continue;
+      for (const src of meta.sources || []) {
+        const key = src.toLowerCase();
+        const curr = stats.get(key) ?? { pos: 0, neg: 0 };
+        curr[keyType] += 1;
+        stats.set(key, curr);
+      }
+    }
+
+    if (stats.size === 0) return null;
+
+    const reliability = new Map<string, number>();
+    for (const [src, { pos, neg }] of stats.entries()) {
+      const rate = (pos + 1) / (pos + neg + 2); // Laplace smoothing
+      // Map rate to multiplier in ~0.9–1.12 range (centered at 1.0)
+      const multiplier = Math.min(1.12, Math.max(0.9, 1 + (rate - 0.5) * 0.4));
+      reliability.set(src, multiplier);
+    }
+
+    return reliability;
+  };
+
+  const userSourceReliability = params.sourceReliability ?? buildSourceReliability();
 
   // Fetch user's reason type preferences for adaptive weighting
   // This learns which recommendation reasons (genre, director, actor, etc.) lead to positive feedback
@@ -3389,6 +3506,35 @@ export async function suggestByOverlap(params: {
     // Get source metadata if available (for multi-source badge)
     const sourceMeta = params.sourceMetadata?.get(cid);
 
+    // Adjust score by source reliability and consensus, capped to avoid dominating
+    if (sourceMeta) {
+      const defaultReliability = new Map<string, number>([
+        ['tmdb', 1.0],
+        ['trakt', 1.02],
+        ['tastedive', 0.98],
+        ['watchmode', 0.99],
+        ['tuimdb', 0.98]
+      ]);
+
+      const reliabilityMap = userSourceReliability ?? defaultReliability;
+      const sources = sourceMeta.sources || [];
+      const avgReliability = sources.length
+        ? sources.reduce((sum, s) => sum + (reliabilityMap.get(s.toLowerCase()) ?? 1), 0) / sources.length
+        : 1;
+
+      const consensusBoost = sourceMeta.consensusLevel === 'high' ? 1.05 : sourceMeta.consensusLevel === 'low' ? 0.97 : 1.0;
+      const multiSourceBoost = sources.length > 1 ? 1 + Math.min((sources.length - 1) * 0.02, 0.06) : 1;
+      const reliabilityMultiplier = Math.min(1.12, Math.max(0.9, avgReliability * consensusBoost * multiSourceBoost));
+
+      if (Math.abs(reliabilityMultiplier - 1) >= 0.02) {
+        const oldScore = score;
+        score = score * reliabilityMultiplier;
+        const sourceLabel = sources.length ? `${sources.length} sources` : 'source consensus';
+        reasons.push(`Backed by ${sourceMeta.consensusLevel || 'multi'} consensus across ${sourceLabel}`);
+        console.log(`[SourceReliability] Adjusted "${m.title}" score: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${reliabilityMultiplier.toFixed(2)}x)`);
+      }
+    }
+
     const r = {
       tmdbId: cid,
       score,
@@ -3433,8 +3579,14 @@ export async function suggestByOverlap(params: {
   }>;
   results.sort((a, b) => b.score - a.score);
 
-  // Phase 3: Apply diversity filtering (limits increased for 24-section UI)
-  const diversified = applyDiversityFilter(results, {
+  // Phase 3: Rerank with MMR for better novelty vs relevance
+  const mmrReranked = applyMMRRerank(results, {
+    lambda: 0.25,
+    topK: Math.min(results.length, Math.max(desired * 3, desired + 12))
+  });
+
+  // Phase 3b: Apply diversity filtering (limits increased for 24-section UI)
+  const diversified = applyDiversityFilter(mmrReranked, {
     maxSameDirector: 4,
     maxSameGenre: 15,
     maxSameDecade: 10,
