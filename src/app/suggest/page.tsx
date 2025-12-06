@@ -116,7 +116,9 @@ export default function SuggestPage() {
   const [pairwisePair, setPairwisePair] = useState<{ a: MovieItem; b: MovieItem } | null>(null);
   const [pairwiseCount, setPairwiseCount] = useState<number>(0);
   const PAIRWISE_SESSION_LIMIT = 3;
-  
+  const [contextMode, setContextMode] = useState<'auto' | 'weeknight' | 'short' | 'immersive' | 'family' | 'background'>('auto');
+  const [localHour, setLocalHour] = useState<number | null>(null);
+
   // Hybrid feedback popup state - optional "tell us why" after feedback
   const [feedbackPopup, setFeedbackPopup] = useState<{
     tmdbId: number;
@@ -201,6 +203,12 @@ export default function SuggestPage() {
       console.error('[Suggest] Failed to persist pairwise count', e);
     }
   }, [pairwiseCount]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const now = new Date();
+    setLocalHour(now.getHours());
+  }, []);
 
   // Get posters for all suggested movies (including watchlist picks)
   const tmdbIds = useMemo(() => {
@@ -706,6 +714,16 @@ export default function SuggestPage() {
     [makePairId, reasonTypeTags]
   );
 
+  const computeContext = useCallback(() => {
+    const hour = localHour ?? new Date().getHours();
+    if (contextMode !== 'auto') return { mode: contextMode, localHour: hour } as const;
+
+    if (hour >= 22 || hour <= 6) return { mode: 'short', localHour: hour } as const;
+    if (hour >= 17 && hour <= 21) return { mode: 'weeknight', localHour: hour } as const;
+    if (hour >= 7 && hour <= 9) return { mode: 'short', localHour: hour } as const;
+    return { mode: 'background', localHour: hour } as const;
+  }, [contextMode, localHour]);
+
   useEffect(() => {
     const init = async () => {
       if (!supabase) return;
@@ -772,7 +790,7 @@ export default function SuggestPage() {
       setProgress({ current: 1, total: 6, stage: 'Loading your library...' });
       const mappings = await getFilmMappings(uid, uris);
       console.log('[Suggest] mappings loaded', { mappingCount: mappings.size, totalFilms: uris.length });
-      
+
       // Track mapping coverage for UI feedback
       setMappingCoverage({ mapped: mappings.size, total: uris.length });
 
@@ -799,8 +817,8 @@ export default function SuggestPage() {
       setProgress({ current: 2, total: 6, stage: 'Loading movie details from cache...' });
       const allMappedIds = Array.from(mappings.values());
       const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
-      console.log('[Suggest] TMDB details loaded from cache', { 
-        requested: allMappedIds.length, 
+      console.log('[Suggest] TMDB details loaded from cache', {
+        requested: allMappedIds.length,
         found: tmdbDetailsMap.size,
         coverage: `${((tmdbDetailsMap.size / allMappedIds.length) * 100).toFixed(1)}%`
       });
@@ -856,9 +874,9 @@ export default function SuggestPage() {
 
       // === GENERATE WATCHLIST PICKS ===
       // Get unwatched watchlist films (onWatchlist=true but not watched)
-      const unwatchedWatchlist = sourceFilms.filter(f => 
-        f.onWatchlist && 
-        (!f.watchCount || f.watchCount === 0) && 
+      const unwatchedWatchlist = sourceFilms.filter(f =>
+        f.onWatchlist &&
+        (!f.watchCount || f.watchCount === 0) &&
         mappings.has(f.uri)
       );
       console.log('[Suggest] Unwatched watchlist films:', unwatchedWatchlist.length);
@@ -870,7 +888,7 @@ export default function SuggestPage() {
         .filter(f => f.lastDate && new Date(f.lastDate) >= thirtyDaysAgo && (f.rating ?? 0) >= 3)
         .sort((a, b) => new Date(b.lastDate!).getTime() - new Date(a.lastDate!).getTime())
         .slice(0, 20);
-      
+
       // Get TMDB IDs and details for recent watches
       const recentWatchDetails: Array<{ tmdbId: number; genres: number[]; keywords: number[] }> = [];
       for (const film of recentWatches) {
@@ -891,17 +909,17 @@ export default function SuggestPage() {
       for (const film of unwatchedWatchlist) {
         const tmdbId = mappings.get(film.uri);
         if (!tmdbId) continue;
-        
+
         const details = tmdbDetailsMap.get(tmdbId);
         if (!details) continue;
-        
+
         const filmGenres = new Set((details.genres || []).map((g: any) => g.id));
         const filmKeywords = new Set((details.keywords?.keywords || []).map((k: any) => k.id));
-        
+
         let similarityScore = 0;
         let genreScore = 0;
         const reasons: string[] = ['From your Letterboxd watchlist'];
-        
+
         // 60%: Similarity to recent watches
         for (const recent of recentWatchDetails) {
           const genreOverlap = recent.genres.filter(g => filmGenres.has(g)).length;
@@ -914,7 +932,7 @@ export default function SuggestPage() {
             reasons.push('Similar to your recent watches');
           }
         }
-        
+
         // 20%: Match with top genres from taste profile
         const topGenreIds = new Set(tasteProfile.topGenres.slice(0, 5).map(g => g.id));
         for (const genreId of filmGenres) {
@@ -927,10 +945,10 @@ export default function SuggestPage() {
           }
         }
         genreScore = genreScore * 0.2;
-        
+
         // 20%: Random factor for variety
         const randomScore = Math.random() * 10 * 0.2;
-        
+
         const totalScore = similarityScore + genreScore + randomScore;
         scoredWatchlist.push({ film, tmdbId, score: totalScore, reasons });
       }
@@ -938,7 +956,7 @@ export default function SuggestPage() {
       // Sort by score and take top 5 (keep it short and sweet)
       scoredWatchlist.sort((a, b) => b.score - a.score);
       const topWatchlistPicks = scoredWatchlist.slice(0, 5);
-      
+
       console.log('[Suggest] Top watchlist picks:', topWatchlistPicks.length);
 
       // Fetch full details for watchlist picks
@@ -950,7 +968,7 @@ export default function SuggestPage() {
           u.searchParams.set('_t', String(freshCacheKey));
           const r = await fetch(u.toString(), { cache: 'no-store' });
           const j = await r.json();
-          
+
           if (j.ok && j.movie) {
             const movie = j.movie;
             const videos = movie.videos?.results || [];
@@ -959,7 +977,7 @@ export default function SuggestPage() {
             ) || videos.find((v: any) =>
               v.site === 'YouTube' && v.type === 'Trailer'
             );
-            
+
             watchlistPicksWithDetails.push({
               id: pick.tmdbId,
               title: movie.title || pick.film.title,
@@ -982,11 +1000,11 @@ export default function SuggestPage() {
           console.error(`[Suggest] Failed to fetch watchlist pick ${pick.tmdbId}`, e);
         }
       }
-      
+
       // Set watchlist picks state
       setWatchlistPicks(watchlistPicksWithDetails);
       console.log('[Suggest] Watchlist picks ready:', watchlistPicksWithDetails.length);
-      
+
       // Refresh poster cache for watchlist picks
       if (watchlistPicksWithDetails.length > 0) {
         try {
@@ -1157,6 +1175,7 @@ export default function SuggestPage() {
       // So passing top genres as "recent" is a decent approximation of "current state".
       const recentGenreNames = tasteProfile.topGenres.slice(0, 5).map(g => g.name);
 
+      const context = computeContext();
       setSourceLabel('Based on your watched & liked films + trending releases');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length, candidatesCount: candidates.length });
@@ -1178,6 +1197,7 @@ export default function SuggestPage() {
         // Feature-level feedback from explicit user interactions
         featureFeedback: featureFeedback || undefined,
         watchlistEntries,
+        context,
         enhancedProfile: {
           topActors: tasteProfile.topActors,
           topStudios: tasteProfile.topStudios,
@@ -1323,7 +1343,7 @@ export default function SuggestPage() {
       console.log('[Suggest] runSuggest end');
       setLoading(false);
     }
-  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters, blockedIds, shownIds]);
+  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters, blockedIds, shownIds, computeContext]);
 
   // Fallback: if no local films, load from Supabase once
   useEffect(() => {
@@ -1484,6 +1504,7 @@ export default function SuggestPage() {
         concurrency: 1,
         excludeWatchedIds: watchedIds,
         desiredResults: 1,
+        context: computeContext(),
         watchlistEntries: watchlistEntriesForMore,
         enhancedProfile: {
           topActors: tasteProfile.topActors,
@@ -1558,7 +1579,7 @@ export default function SuggestPage() {
       console.error('[Suggest] Failed to fetch replacement:', e);
       return null;
     }
-  }, [uid, sourceFilms, blockedIds, shownIds, items]);
+  }, [uid, sourceFilms, blockedIds, shownIds, items, computeContext]);
 
   // Fetch replacement suggestions for a specific section
   const fetchSectionReplacements = useCallback(async (sectionName: string, count: number = 12): Promise<MovieItem[]> => {
@@ -1653,6 +1674,7 @@ export default function SuggestPage() {
         concurrency: 3,
         excludeWatchedIds: watchedIds,
         desiredResults: count * 3, // Request more than needed to ensure enough after filtering
+        context: computeContext(),
         watchlistEntries: watchlistEntriesForRefresh,
         enhancedProfile: {
           topActors: tasteProfile.topActors,
@@ -1734,21 +1756,21 @@ export default function SuggestPage() {
       console.error(`[SectionRefresh] Failed to fetch replacements for ${sectionName}:`, e);
       return [];
     }
-  }, [uid, sourceFilms, blockedIds, shownIds, items, getSectionFilter]);
+  }, [uid, sourceFilms, blockedIds, shownIds, items, getSectionFilter, computeContext]);
 
   // Handle explicit reason selection from feedback popup
   const handleExplicitReason = async (reason: string) => {
     if (!feedbackPopup || !uid) return;
-    
+
     const isPositive = feedbackPopup.feedbackType === 'positive';
     console.log('[FeedbackPopup] User selected explicit reason:', reason, 'for movie:', feedbackPopup.title, 'type:', feedbackPopup.feedbackType);
-    
+
     // Close the popup first for responsiveness
     setFeedbackPopup(null);
-    
+
     // Show confirmation based on reason type and SAVE the explicit feedback
     let confirmMessage = feedbackPopup.insights.learningSummary;
-    
+
     // === NEGATIVE FEEDBACK REASONS ===
     if (reason === 'already_seen') {
       confirmMessage = "👍 Got it! We won't count this against the movie's features.";
@@ -1762,7 +1784,7 @@ export default function SuggestPage() {
       // NUCLEAR OPTION: User dislikes EVERYTHING about this movie
       // Apply strong negative boost to ALL features
       confirmMessage = "👎👎 Got it! We'll strongly avoid movies like this.";
-      
+
       // Boost ALL actors
       for (const actor of feedbackPopup.leadActors) {
         await boostExplicitFeedback(uid, 'actor', actor, false, 3);
@@ -1779,8 +1801,8 @@ export default function SuggestPage() {
       if (feedbackPopup.franchise) {
         await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, false, 3);
       }
-    
-    // === POSITIVE FEEDBACK REASONS ===
+
+      // === POSITIVE FEEDBACK REASONS ===
     } else if (reason === 'great_pick') {
       confirmMessage = "👍 Awesome! We'll learn from this to find more like it.";
       // Already learned automatically, no extra boost needed for generic positive
@@ -1790,7 +1812,7 @@ export default function SuggestPage() {
     } else if (reason === 'love_all') {
       // SUPER POSITIVE: User loves EVERYTHING about this movie
       confirmMessage = "❤️❤️ Amazing! We'll find more movies just like this!";
-      
+
       // Boost ALL actors
       for (const actor of feedbackPopup.leadActors) {
         await boostExplicitFeedback(uid, 'actor', actor, true, 3);
@@ -1807,8 +1829,8 @@ export default function SuggestPage() {
       if (feedbackPopup.franchise) {
         await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, true, 3);
       }
-    
-    // === SHARED REASONS (work for both positive and negative) ===
+
+      // === SHARED REASONS (work for both positive and negative) ===
     } else if (reason.startsWith('actor:')) {
       const actorName = reason.replace('actor:', '');
       if (isPositive) {
@@ -1849,7 +1871,7 @@ export default function SuggestPage() {
         await boostExplicitFeedback(uid, 'keyword', keywordName, false, 2);
       }
     }
-    
+
     setFeedbackMessage(confirmMessage);
     setTimeout(() => setFeedbackMessage(null), 3500);
   };
@@ -1857,7 +1879,7 @@ export default function SuggestPage() {
   // Handle feedback
   const handleFeedback = async (tmdbId: number, type: 'negative' | 'positive', reasons?: string[]) => {
     if (!uid) return;
-    
+
     // Find the movie title for the popup
     const movie = items?.find(i => i.id === tmdbId);
     const movieTitle = movie?.title || 'this movie';
@@ -1865,7 +1887,7 @@ export default function SuggestPage() {
       sources: movie?.sources,
       consensusLevel: movie?.consensusLevel as ('high' | 'medium' | 'low' | undefined),
     };
-    
+
     try {
       if (type === 'negative') {
         // Block the suggestion in the background and get learning insights
@@ -1915,14 +1937,14 @@ export default function SuggestPage() {
 
           return next;
         });
-        
+
         // Show the feedback popup with quick-tap reasons
         // Only show if we have interesting features to ask about
         const hasActors = movieFeatures.leadActors.length > 0;
         const hasFranchise = !!movieFeatures.franchise;
         const hasGenres = movieFeatures.genres.length > 0;
         const hasKeywords = movieFeatures.topKeywords.length > 0;
-        
+
         if (hasActors || hasFranchise || hasGenres || hasKeywords) {
           setFeedbackPopup({
             tmdbId,
@@ -1947,13 +1969,13 @@ export default function SuggestPage() {
           addFeedback(uid, tmdbId, 'positive', reasons, feedbackMeta),
           getMovieFeaturesForPopup(tmdbId)
         ]);
-        
+
         // Show popup for positive feedback too - let users tell us what they loved
         const hasActors = movieFeatures.leadActors.length > 0;
         const hasFranchise = !!movieFeatures.franchise;
         const hasGenres = movieFeatures.genres.length > 0;
         const hasKeywords = movieFeatures.topKeywords.length > 0;
-        
+
         if (hasActors || hasFranchise || hasGenres || hasKeywords) {
           setFeedbackPopup({
             tmdbId,
@@ -2147,14 +2169,14 @@ export default function SuggestPage() {
               score: item.score * 0.5 + Math.random() * 50 // Add more randomness
             }))
             .sort((a, b) => b.score - a.score);
-          
+
           // Update via setCategorizedSuggestions
           setCategorizedSuggestions(prev => prev ? {
             ...prev,
             watchlistPicks: shuffled
           } : null);
         }
-        
+
         setRefreshingSections(prev => {
           const next = new Set(prev);
           next.delete(sectionName);
@@ -2241,16 +2263,16 @@ export default function SuggestPage() {
           </button>
         </div>
       )}
-      
+
       {/* Hybrid Feedback Popup - Optional "Tell us why" */}
       {feedbackPopup && (
         <div className="fixed inset-0 z-50 flex items-end justify-center pb-4 sm:items-center sm:pb-0">
           {/* Backdrop */}
-          <div 
+          <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setFeedbackPopup(null)}
           />
-          
+
           {/* Popup Card */}
           <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-sm w-full mx-4 p-4 animate-slide-up">
             {/* Header */}
@@ -2273,13 +2295,13 @@ export default function SuggestPage() {
                 </svg>
               </button>
             </div>
-            
+
             {/* Quick-tap reason buttons - Different for positive vs negative feedback */}
             <div className="space-y-3">
               {feedbackPopup.feedbackType === 'negative' ? (
                 <>
                   {/* === NEGATIVE FEEDBACK OPTIONS === */}
-                  
+
                   {/* NUCLEAR OPTION - Dislike everything */}
                   <div>
                     <p className="text-xs text-gray-400 mb-1.5">Strong dislike:</p>
@@ -2292,7 +2314,7 @@ export default function SuggestPage() {
                       </button>
                     </div>
                   </div>
-                  
+
                   {/* Non-negative reasons (won't learn avoidance) */}
                   <div>
                     <p className="text-xs text-gray-400 mb-1.5">Not a problem with the movie:</p>
@@ -2317,12 +2339,12 @@ export default function SuggestPage() {
                       </button>
                     </div>
                   </div>
-                  
+
                   {/* Specific reasons section header */}
                   <div className="border-t border-gray-200 pt-2">
                     <p className="text-xs text-gray-500 mb-2">Or tell us specifically:</p>
                   </div>
-                  
+
                   {/* Actor-specific reasons - show ALL lead actors so user can pick specific ones */}
                   {feedbackPopup.leadActors.length > 0 && (
                     <div>
@@ -2340,7 +2362,7 @@ export default function SuggestPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   {/* Franchise fatigue */}
                   {feedbackPopup.franchise && (
                     <div>
@@ -2355,7 +2377,7 @@ export default function SuggestPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   {/* Genre-specific reasons */}
                   {feedbackPopup.genres.length > 0 && (
                     <div>
@@ -2373,7 +2395,7 @@ export default function SuggestPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   {/* Topic/Theme-specific reasons (keywords) */}
                   {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
                     <div>
@@ -2413,12 +2435,12 @@ export default function SuggestPage() {
                       </button>
                     </div>
                   </div>
-                  
+
                   {/* Specific reasons section header */}
                   <div className="border-t border-gray-200 pt-2">
                     <p className="text-xs text-gray-500 mb-2">Or tell us specifically:</p>
                   </div>
-                  
+
                   {/* Actor love */}
                   {feedbackPopup.leadActors.length > 0 && (
                     <div>
@@ -2436,7 +2458,7 @@ export default function SuggestPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   {/* Franchise love */}
                   {feedbackPopup.franchise && (
                     <div>
@@ -2451,7 +2473,7 @@ export default function SuggestPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   {/* Genre love */}
                   {feedbackPopup.genres.length > 0 && (
                     <div>
@@ -2469,7 +2491,7 @@ export default function SuggestPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   {/* Topic/Theme love (keywords) */}
                   {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
                     <div>
@@ -2490,7 +2512,7 @@ export default function SuggestPage() {
                 </>
               )}
             </div>
-            
+
             {/* Skip option */}
             <div className="mt-3 text-center">
               <button
@@ -2618,7 +2640,7 @@ export default function SuggestPage() {
             <div>
               <h3 className="font-medium text-amber-800">Limited Film Data</h3>
               <p className="text-sm text-amber-700 mt-1">
-                Only {mappingCoverage.mapped} of {mappingCoverage.total} films ({Math.round(mappingCoverage.mapped / mappingCoverage.total * 100)}%) 
+                Only {mappingCoverage.mapped} of {mappingCoverage.total} films ({Math.round(mappingCoverage.mapped / mappingCoverage.total * 100)}%)
                 have enriched data. Suggestions are based on partial watch history.
               </p>
               <p className="text-sm text-amber-700 mt-1">
@@ -2660,16 +2682,60 @@ export default function SuggestPage() {
           <div className="space-y-8">
             <div className="flex items-center justify-between gap-3 text-sm text-gray-700 flex-wrap">
               <div className="flex items-center gap-2">
-                <label className="text-xs text-gray-600">Discovery vs Safety</label>
+                <label className="text-xs text-gray-600" title="Lower = safer, familiar picks. Higher = more exploratory, diverse picks.">Discovery vs Safety</label>
                 <input
                   type="range"
                   min={0}
                   max={100}
                   value={discoveryLevel}
-                  onChange={(e) => setDiscoveryLevel(Number(e.target.value))}
+                  onChange={(e) => {
+                    const newValue = Number(e.target.value);
+                    setDiscoveryLevel(newValue);
+                    // Debounced auto-refresh when slider changes
+                    if ((window as any).__discoverySliderTimeout) {
+                      clearTimeout((window as any).__discoverySliderTimeout);
+                    }
+                    (window as any).__discoverySliderTimeout = setTimeout(() => {
+                      setItems(null);
+                      setShownIds(new Set());
+                      setRefreshTick((x) => x + 1);
+                      void runSuggest();
+                    }, 800);
+                  }}
                   className="w-40 accent-blue-600"
+                  title="Drag to adjust. Changes apply automatically after a brief pause."
                 />
-                <span className="text-xs text-gray-500 w-12 text-right">{discoveryLevel}%</span>
+                <span className="text-xs text-gray-500 w-8 text-right">{discoveryLevel}%</span>
+                {discoveryLevel !== 50 && (
+                  <button
+                    onClick={() => {
+                      setDiscoveryLevel(50);
+                      setItems(null);
+                      setShownIds(new Set());
+                      setRefreshTick((x) => x + 1);
+                      void runSuggest();
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline whitespace-nowrap"
+                    title="Reset to default (50%)"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-600">Context</label>
+                <select
+                  value={contextMode}
+                  onChange={(e) => setContextMode(e.target.value as typeof contextMode)}
+                  className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-800"
+                >
+                  <option value="auto">Auto (time-based)</option>
+                  <option value="weeknight">Weeknight wind-down</option>
+                  <option value="short">Short session</option>
+                  <option value="immersive">Immersive/long-form</option>
+                  <option value="family">Family/group friendly</option>
+                  <option value="background">Easy-background</option>
+                </select>
               </div>
               <button
                 onClick={handleUndoLastFeedback}

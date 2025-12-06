@@ -234,7 +234,7 @@ export default function StatsPage() {
         // Store mappings for preference calculation
         const mappingsMap = new Map<string, number>();
         const filteredUris = new Set(filteredFilms.map(f => f.uri));
-        
+
         // Also include watchlist URIs so watchlist analysis works
         const watchlistFilms = films?.filter(f => f.onWatchlist) ?? [];
         watchlistFilms.forEach(f => filteredUris.add(f.uri));
@@ -297,10 +297,10 @@ export default function StatsPage() {
           if (data.credits?.cast?.length || data.credits?.crew?.length) withCredits++;
           if (data.keywords?.keywords?.length || data.keywords?.results?.length) withKeywords++;
         }
-        console.log('[Stats] Details quality check:', { 
-          total: detailsMap.size, 
-          withGenres, 
-          withCredits, 
+        console.log('[Stats] Details quality check:', {
+          total: detailsMap.size,
+          withGenres,
+          withCredits,
           withKeywords,
           note: 'If these are 0, enrichment may not have completed'
         });
@@ -319,7 +319,7 @@ export default function StatsPage() {
     }
 
     loadTmdbDetails();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, filteredFilms]);
 
   // Calculate user statistics for enhanced weighting
@@ -450,10 +450,10 @@ export default function StatsPage() {
     const metadataCoverage = relevantDetails.reduce((acc, d) => {
       const hasPoster = Boolean(d.poster_path || (d as any).omdb_poster);
       const hasBackdrop = Boolean(d.backdrop_path);
-      const hasOverview = Boolean(d.overview && d.overview.trim().length > 0);
+      const hasOverview = Boolean((d as any).overview && (d as any).overview.trim().length > 0);
       const hasTrailer = Boolean((d as any).videos?.results?.some((v: any) => v.site === 'YouTube' && v.type === 'Trailer'));
-      const hasVotes = typeof d.vote_count === 'number' && d.vote_count >= 50;
-      const hasRating = typeof d.vote_average === 'number' && d.vote_average >= 6.0;
+      const hasVotes = typeof (d as any).vote_count === 'number' && (d as any).vote_count >= 50;
+      const hasRating = typeof (d as any).vote_average === 'number' && (d as any).vote_average >= 6.0;
 
       acc.total += 1;
       if (hasPoster) acc.withPoster += 1;
@@ -475,7 +475,7 @@ export default function StatsPage() {
 
     // Consensus strength: how confident scores are (using vote counts)
     const consensus = relevantDetails.reduce((acc, d) => {
-      const votes = typeof d.vote_count === 'number' ? d.vote_count : 0;
+      const votes = typeof (d as any).vote_count === 'number' ? (d as any).vote_count : 0;
       acc.total += 1;
       acc.totalVotes += votes;
       if (votes >= 200) acc.strong += 1;
@@ -607,7 +607,7 @@ export default function StatsPage() {
     // === AVOIDANCE TRACKING ===
     // Track genres, keywords, and directors - comparing LIKED vs DISLIKED
     // Only avoid something if user dislikes it MORE than they like it
-    
+
     // Track both positive and negative signals
     const genreLikedCount = new Map<string, number>();
     const genreDislikedCount = new Map<string, number>();
@@ -635,28 +635,28 @@ export default function StatsPage() {
     //   1. Just logged without rating or like - we don't know user's opinion!
     //   2. Rated 2-2.5 stars - ambiguous "meh" zone, not a strong signal
     //   3. Rating is 0 - this means "no rating" in Letterboxd exports
-    
+
     const DISLIKE_THRESHOLD = 1.5; // Only 0.5-1.5 stars counts as "disliked"
-    
+
     // Helper to check if rating is a real rating (not null/0 which means "no rating")
     const hasRealRating = (rating: number | null | undefined): boolean => {
       return rating != null && rating > 0;
     };
-    
+
     // Films that are liked (explicit like OR positive rating >= 3)
-    const likedFilmsForAvoidance = filteredFilms.filter(f => 
+    const likedFilmsForAvoidance = filteredFilms.filter(f =>
       f.liked || (hasRealRating(f.rating) && f.rating! >= 3)
     );
 
     // Films that are disliked (very low rating 0.5-1.5 AND not liked)
     // CRITICAL: rating must be > 0 (real rating) AND <= 1.5
     // rating = 0 means "no rating" not "0 stars"!
-    const dislikedFilms = filteredFilms.filter(f => 
+    const dislikedFilms = filteredFilms.filter(f =>
       hasRealRating(f.rating) && f.rating! <= DISLIKE_THRESHOLD && !f.liked
     );
 
     // Films that are neutral (logged without strong signal)
-    const neutralFilms = filteredFilms.filter(f => 
+    const neutralFilms = filteredFilms.filter(f =>
       (!hasRealRating(f.rating) && !f.liked) || // Unrated (null or 0) and not liked
       (hasRealRating(f.rating) && f.rating! > DISLIKE_THRESHOLD && f.rating! < 3 && !f.liked) // 2-2.5 star zone
     );
@@ -802,7 +802,7 @@ export default function StatsPage() {
     const watchlistKeywordCounts = new Map<string, number>();
     const watchlistDirectorCounts = new Map<string, number>();
     const watchlistActorCounts = new Map<string, number>();
-    
+
     for (const film of watchlist) {
       const tmdbId = filmMappings.get(film.uri);
       const details = tmdbId ? tmdbDetails.get(tmdbId) : undefined;
@@ -1011,13 +1011,13 @@ export default function StatsPage() {
       avgWatchlistAge,
       watchlistWithDatesCount: watchlistWithDates.length,
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredFilms, tmdbDetails, films, filmMappings]);
 
   // Log taste profile build details for debugging
   useEffect(() => {
     if (!stats) return;
-    
+
     console.log('=== TASTE PROFILE BUILD DEBUG ===');
     console.log('[TasteProfile] Input data:', {
       filteredFilmsCount: filteredFilms.length,
@@ -1025,35 +1025,35 @@ export default function StatsPage() {
       filmMappingsCount: filmMappings.size,
       mappingCoverage: mappingCoverage,
     });
-    
+
     console.log('[TasteProfile] Genre Analysis:', {
       topGenresByWeight: stats.topGenresByWeight,
       topGenresRaw: stats.topGenres,
     });
-    
+
     console.log('[TasteProfile] Directors:', {
       topDirectorsByWeight: stats.topDirectorsByWeight,
       topDirectorsRaw: stats.topDirectors,
     });
-    
+
     console.log('[TasteProfile] Actors:', {
       topActorsByWeight: stats.topActorsByWeight,
       topActorsRaw: stats.topActors,
     });
-    
+
     console.log('[TasteProfile] Keywords/Themes:', {
       topKeywords: stats.topKeywords,
     });
-    
+
     console.log('[TasteProfile] Studios:', {
       topStudios: stats.topStudios,
       studioPreference: stats.studioPreference,
     });
-    
+
     console.log('[TasteProfile] Era/Decade Preferences:', {
       topDecades: stats.topDecades,
     });
-    
+
     console.log('[TasteProfile] Other Stats:', {
       avgRating: stats.avgRating,
       rewatchedCount: stats.rewatchedCount,
@@ -1061,7 +1061,7 @@ export default function StatsPage() {
       absoluteFavorites: stats.absoluteFavorites,
       runtimeStats: stats.runtimeStats,
     });
-    
+
     // Check if taste profile will show
     const willShowTasteProfile = stats.topGenresByWeight.length > 0;
     console.log('[TasteProfile] Will show Taste Profile section:', willShowTasteProfile);
@@ -1246,7 +1246,7 @@ export default function StatsPage() {
             <div>
               <h3 className="font-medium text-amber-800">Incomplete Film Enrichment</h3>
               <p className="text-sm text-amber-700 mt-1">
-                Only {mappingCoverage.mapped} of {mappingCoverage.total} films ({Math.round(mappingCoverage.mapped / mappingCoverage.total * 100)}%) 
+                Only {mappingCoverage.mapped} of {mappingCoverage.total} films ({Math.round(mappingCoverage.mapped / mappingCoverage.total * 100)}%)
                 have TMDB data. This affects Taste Profile, Suggestions, and detailed stats.
               </p>
               <p className="text-sm text-amber-700 mt-1">
@@ -1729,7 +1729,7 @@ export default function StatsPage() {
               <p className="text-xs text-green-700 mb-3">
                 These would be avoided based on ratings, but your watchlist shows interest — they won&apos;t be filtered out:
               </p>
-              
+
               {stats.avoidanceOverrides.genres.length > 0 && (
                 <div className="mb-2">
                   <span className="text-xs font-medium text-green-800">Genres: </span>
@@ -1742,7 +1742,7 @@ export default function StatsPage() {
                   </div>
                 </div>
               )}
-              
+
               {stats.avoidanceOverrides.directors.length > 0 && (
                 <div className="mb-2">
                   <span className="text-xs font-medium text-green-800">Directors: </span>
@@ -1755,7 +1755,7 @@ export default function StatsPage() {
                   </div>
                 </div>
               )}
-              
+
               {stats.avoidanceOverrides.keywords.length > 0 && (
                 <div>
                   <span className="text-xs font-medium text-green-800">Themes: </span>
@@ -1882,65 +1882,65 @@ export default function StatsPage() {
           </p>
 
           {/* Mixed Feelings Section - Things user has mixed feelings about */}
-          {((stats.mixedGenres && stats.mixedGenres.length > 0) || 
-            (stats.mixedDirectors && stats.mixedDirectors.length > 0) || 
+          {((stats.mixedGenres && stats.mixedGenres.length > 0) ||
+            (stats.mixedDirectors && stats.mixedDirectors.length > 0) ||
             (stats.mixedKeywords && stats.mixedKeywords.length > 0)) && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
-              <h3 className="font-medium text-green-900 mb-2 text-sm flex items-center gap-2">
-                ✓ Mixed Feelings (Not Avoided)
-              </h3>
-              <p className="text-xs text-green-700 mb-3">
-                You&apos;ve disliked some films with these, but you&apos;ve liked MORE — so they&apos;re not avoided:
-              </p>
-              
-              {/* Mixed Genres */}
-              {stats.mixedGenres && stats.mixedGenres.length > 0 && (
-                <div className="mb-2">
-                  <span className="text-xs font-medium text-green-800">Genres: </span>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {stats.mixedGenres.map(({ name, likedCount, dislikedCount }) => (
-                      <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-green-200 text-green-800">
-                        {name} <span className="text-green-600">({likedCount}👍 vs {dislikedCount}👎)</span>
-                      </span>
-                    ))}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
+                <h3 className="font-medium text-green-900 mb-2 text-sm flex items-center gap-2">
+                  ✓ Mixed Feelings (Not Avoided)
+                </h3>
+                <p className="text-xs text-green-700 mb-3">
+                  You&apos;ve disliked some films with these, but you&apos;ve liked MORE — so they&apos;re not avoided:
+                </p>
+
+                {/* Mixed Genres */}
+                {stats.mixedGenres && stats.mixedGenres.length > 0 && (
+                  <div className="mb-2">
+                    <span className="text-xs font-medium text-green-800">Genres: </span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {stats.mixedGenres.map(({ name, likedCount, dislikedCount }) => (
+                        <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-green-200 text-green-800">
+                          {name} <span className="text-green-600">({likedCount}👍 vs {dislikedCount}👎)</span>
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-              
-              {/* Mixed Directors */}
-              {stats.mixedDirectors && stats.mixedDirectors.length > 0 && (
-                <div className="mb-2">
-                  <span className="text-xs font-medium text-green-800">Directors: </span>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {stats.mixedDirectors.map(({ name, likedCount, dislikedCount }) => (
-                      <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-blue-200 text-blue-800">
-                        {name} <span className="text-blue-600">({likedCount}👍 vs {dislikedCount}👎)</span>
-                      </span>
-                    ))}
+                )}
+
+                {/* Mixed Directors */}
+                {stats.mixedDirectors && stats.mixedDirectors.length > 0 && (
+                  <div className="mb-2">
+                    <span className="text-xs font-medium text-green-800">Directors: </span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {stats.mixedDirectors.map(({ name, likedCount, dislikedCount }) => (
+                        <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-blue-200 text-blue-800">
+                          {name} <span className="text-blue-600">({likedCount}👍 vs {dislikedCount}👎)</span>
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-              
-              {/* Mixed Keywords */}
-              {stats.mixedKeywords && stats.mixedKeywords.length > 0 && (
-                <div>
-                  <span className="text-xs font-medium text-green-800">Themes: </span>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {stats.mixedKeywords.slice(0, 10).map(({ name, likedCount, dislikedCount }) => (
-                      <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-emerald-200 text-emerald-800">
-                        {name} ({likedCount}👍 vs {dislikedCount}👎)
-                      </span>
-                    ))}
-                    {stats.mixedKeywords.length > 10 && (
-                      <span className="px-2 py-0.5 rounded-full text-xs bg-gray-200 text-gray-600">
-                        +{stats.mixedKeywords.length - 10} more
-                      </span>
-                    )}
+                )}
+
+                {/* Mixed Keywords */}
+                {stats.mixedKeywords && stats.mixedKeywords.length > 0 && (
+                  <div>
+                    <span className="text-xs font-medium text-green-800">Themes: </span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {stats.mixedKeywords.slice(0, 10).map(({ name, likedCount, dislikedCount }) => (
+                        <span key={name} className="px-2 py-0.5 rounded-full text-xs bg-emerald-200 text-emerald-800">
+                          {name} ({likedCount}👍 vs {dislikedCount}👎)
+                        </span>
+                      ))}
+                      {stats.mixedKeywords.length > 10 && (
+                        <span className="px-2 py-0.5 rounded-full text-xs bg-gray-200 text-gray-600">
+                          +{stats.mixedKeywords.length - 10} more
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
 
           <div className="grid md:grid-cols-3 gap-4">
             {/* Avoided Genres */}
