@@ -238,51 +238,51 @@ export async function getBlockedSuggestions(userId: string): Promise<Set<number>
  */
 function extractReasonTypes(reasons: string[]): string[] {
   const types = new Set<string>();
-  
+
   for (const reason of reasons) {
     const lower = reason.toLowerCase();
-    
+
     // Director matches
     if (lower.includes('directed by') || lower.includes('director')) {
       types.add('director');
     }
-    
+
     // Genre matches
     if (lower.includes('matches your taste in') || lower.includes('genre')) {
       types.add('genre');
     }
-    
+
     // Actor/cast matches
     if (lower.includes('stars ') || lower.includes('starring') || lower.includes('cast member') || lower.includes('actor')) {
       types.add('actor');
     }
-    
+
     // Keyword/theme matches
     if (lower.includes('theme') || lower.includes('keyword')) {
       types.add('keyword');
     }
-    
+
     // Studio matches
     if (lower.includes('from ') && (lower.includes('studio') || lower.includes('a24') || lower.includes('neon') || lower.includes('ghibli'))) {
       types.add('studio');
     }
-    
+
     // Collection matches
     if (lower.includes('collection') || lower.includes('franchise') || lower.includes('sequel') || lower.includes('prequel')) {
       types.add('collection');
     }
-    
+
     // Decade matches
     if (lower.includes('decade') || lower.includes("'s films") || /\d{4}s/.test(reason)) {
       types.add('decade');
     }
-    
+
     // Recent watch matches
     if (lower.includes('recent') && (lower.includes('watch') || lower.includes('favorite'))) {
       types.add('recent');
     }
   }
-  
+
   return Array.from(types);
 }
 
@@ -304,17 +304,17 @@ export interface FeedbackLearningInsights {
 }
 
 export async function addFeedback(
-  userId: string, 
-  tmdbId: number, 
+  userId: string,
+  tmdbId: number,
   type: 'negative' | 'positive',
   reasons?: string[],
   opts?: { sources?: string[]; consensusLevel?: 'high' | 'medium' | 'low' }
 ): Promise<FeedbackLearningInsights> {
   if (!supabase) throw new Error('Supabase not initialized');
-  
+
   // Extract reason types from the suggestion reasons
   const reasonTypes = reasons ? extractReasonTypes(reasons) : [];
-  
+
   // Fetch the movie's features for learning
   let movieFeatures: MovieFeatures | null = null;
   try {
@@ -322,50 +322,50 @@ export async function addFeedback(
   } catch (e) {
     console.error('[FeatureFeedback] Failed to extract movie features', { tmdbId, error: e });
   }
-  
+
   // Get existing feature preferences to detect what's being strengthened vs new
   const existingFeatures = await getExistingFeaturePreferences(userId, movieFeatures);
-  
+
   // Insert feedback with reason types and movie features
-  const { error } = await supabase.from('suggestion_feedback').insert({ 
-    user_id: userId, 
-    tmdb_id: tmdbId, 
+  const { error } = await supabase.from('suggestion_feedback').insert({
+    user_id: userId,
+    tmdb_id: tmdbId,
     feedback_type: type,
     reason_types: reasonTypes,
     movie_features: movieFeatures || {},
     recommendation_sources: opts?.sources ?? [],
     consensus_level: opts?.consensusLevel ?? null
   });
-  
+
   if (error) {
     console.error('[Supabase] addFeedback error', { userId, tmdbId, type, error });
     throw error;
   }
-  
+
   // Update reason type preferences based on feedback
   if (reasonTypes.length > 0) {
     await updateReasonPreferences(userId, reasonTypes, type === 'positive');
   }
-  
+
   // Update feature-level preferences (learn specific actors, keywords, etc.)
   if (movieFeatures) {
     await updateFeaturePreferences(userId, movieFeatures, type === 'positive');
   }
-  
+
   // Detect patterns in recent feedback (e.g., rejecting multiple superhero movies)
   let patternInsights: string[] = [];
   if (type === 'negative') {
     patternInsights = await detectFeedbackPatterns(userId);
   }
-  
+
   // Build learning insights for UI feedback (Pandora-style)
   const insights = buildLearningInsights(
-    movieFeatures, 
-    existingFeatures, 
-    type === 'positive', 
+    movieFeatures,
+    existingFeatures,
+    type === 'positive',
     patternInsights
   );
-  
+
   console.log(`[FeedbackLearning] Processed ${type} feedback for movie ${tmdbId}`, {
     reasonTypes,
     features: movieFeatures ? {
@@ -376,11 +376,14 @@ export async function addFeedback(
     } : 'none',
     insights
   });
-  
+
   return insights;
 }
 
 type PairwiseConsensus = 'high' | 'medium' | 'low' | undefined;
+
+type SuggestContextMode = 'auto' | 'weeknight' | 'short' | 'immersive' | 'family' | 'background';
+type SuggestContext = { mode: SuggestContextMode; localHour?: number | null };
 
 export async function recordPairwiseEvent(
   userId: string,
@@ -414,6 +417,20 @@ export async function recordPairwiseEvent(
   } catch (e) {
     console.error('[PairwiseEvent] Exception inserting event', e);
   }
+}
+
+function deriveContextMode(context?: SuggestContext): { mode: Exclude<SuggestContextMode, 'auto'>; hour: number | null } {
+  const hour = context?.localHour ?? new Date().getHours();
+  const fallback = { mode: 'background' as const, hour };
+
+  if (!context) return fallback;
+  if (context.mode && context.mode !== 'auto') return { mode: context.mode, hour };
+
+  if (hour >= 22 || hour <= 6) return { mode: 'short', hour };
+  if (hour >= 17 && hour <= 21) return { mode: 'weeknight', hour };
+  if (hour >= 7 && hour <= 9) return { mode: 'short', hour };
+
+  return fallback;
 }
 
 type FeatureDelta = {
@@ -594,21 +611,21 @@ async function getExistingFeaturePreferences(
   features: MovieFeatures | null
 ): Promise<Map<string, { positive: number; negative: number }>> {
   if (!supabase || !features) return new Map();
-  
+
   const featureIds: number[] = [
     ...features.actors.map(a => a.id),
     ...features.keywords.map(k => k.id),
     ...(features.collection ? [features.collection.id] : [])
   ];
-  
+
   if (featureIds.length === 0) return new Map();
-  
+
   const { data } = await supabase
     .from('user_feature_feedback')
     .select('feature_type, feature_id, positive_count, negative_count')
     .eq('user_id', userId)
     .in('feature_id', featureIds);
-  
+
   const map = new Map<string, { positive: number; negative: number }>();
   for (const row of data || []) {
     map.set(`${row.feature_type}:${row.feature_id}`, {
@@ -631,13 +648,13 @@ function buildLearningInsights(
   const strengthenedAvoidance: string[] = [];
   const newAvoidance: string[] = [];
   const strengthenedPreference: string[] = [];
-  
+
   if (features) {
     // Check actors (top 3 as they're the strongest signals)
     for (const actor of features.actors.slice(0, 3)) {
       const key = `actor:${actor.id}`;
       const existing = existingPrefs.get(key);
-      
+
       if (!isPositive) {
         if (existing && existing.negative > 0) {
           strengthenedAvoidance.push(actor.name);
@@ -650,12 +667,12 @@ function buildLearningInsights(
         }
       }
     }
-    
+
     // Check collection/franchise
     if (features.collection) {
       const key = `collection:${features.collection.id}`;
       const existing = existingPrefs.get(key);
-      
+
       if (!isPositive) {
         if (existing && existing.negative > 0) {
           strengthenedAvoidance.push(features.collection.name);
@@ -664,12 +681,12 @@ function buildLearningInsights(
         }
       }
     }
-    
+
     // Check keywords (top 3)
     for (const keyword of features.keywords.slice(0, 3)) {
       const key = `keyword:${keyword.id}`;
       const existing = existingPrefs.get(key);
-      
+
       if (!isPositive) {
         if (existing && existing.negative > 0) {
           strengthenedAvoidance.push(keyword.name);
@@ -678,11 +695,11 @@ function buildLearningInsights(
       }
     }
   }
-  
+
   // Build the learning summary message
   let learningSummary: string;
   let likelyReason: string | undefined;
-  
+
   if (isPositive) {
     if (strengthenedPreference.length > 0) {
       likelyReason = strengthenedPreference[0];
@@ -709,7 +726,7 @@ function buildLearningInsights(
       learningSummary = "👎 Got it, we won't show this movie again.";
     }
   }
-  
+
   return {
     strengthenedAvoidance,
     newAvoidance,
@@ -770,9 +787,9 @@ export async function boostExplicitFeedback(
   explicitBoost: number = 2
 ): Promise<void> {
   if (!supabase) return;
-  
+
   console.log('[ExplicitFeedback] Boosting', featureType, featureName, isPositive ? '+' : '-', 'by', explicitBoost);
-  
+
   try {
     // Get or create the feature record
     // We need to find the feature_id - for simplicity, use name-based lookup or 0 for generic
@@ -783,17 +800,17 @@ export async function boostExplicitFeedback(
       .eq('feature_type', featureType)
       .eq('feature_name', featureName)
       .maybeSingle();
-    
+
     const featureId = existing?.feature_id || 0;
     const currentPositive = existing?.positive_count || 0;
     const currentNegative = existing?.negative_count || 0;
-    
+
     // Add explicit boost
     const newPositive = currentPositive + (isPositive ? explicitBoost : 0);
     const newNegative = currentNegative + (isPositive ? 0 : explicitBoost);
     const total = newPositive + newNegative;
     const inferredPreference = total > 0 ? newPositive / total : 0.5;
-    
+
     await supabase
       .from('user_feature_feedback')
       .upsert({
@@ -808,7 +825,7 @@ export async function boostExplicitFeedback(
       }, {
         onConflict: 'user_id,feature_type,feature_id'
       });
-      
+
     console.log('[ExplicitFeedback] Updated', featureName, ':', { newPositive, newNegative, inferredPreference });
   } catch (e) {
     console.error('[ExplicitFeedback] Failed to boost', featureName, e);
@@ -823,9 +840,9 @@ async function extractMovieFeatures(tmdbId: number): Promise<MovieFeatures> {
   if (!movie) {
     return { actors: [], keywords: [], directors: [], genres: [], studios: [] };
   }
-  
+
   const features = extractFeatures(movie);
-  
+
   return {
     actors: (movie.credits?.cast || []).slice(0, 5).map((a: any, idx: number) => ({
       id: a.id,
@@ -860,18 +877,18 @@ async function extractMovieFeatures(tmdbId: number): Promise<MovieFeatures> {
  * This learns WHICH SPECIFIC actors, keywords, etc. the user likes/dislikes
  */
 async function updateFeaturePreferences(
-  userId: string, 
-  features: MovieFeatures, 
+  userId: string,
+  features: MovieFeatures,
   isPositive: boolean
 ) {
   if (!supabase) return;
-  
+
   const updates: Array<{
     feature_type: string;
     feature_id: number;
     feature_name: string;
   }> = [];
-  
+
   // Track lead actors (top 3 billed) - these are strong signals
   features.actors.slice(0, 3).forEach(actor => {
     updates.push({
@@ -880,7 +897,7 @@ async function updateFeaturePreferences(
       feature_name: actor.name
     });
   });
-  
+
   // Track keywords/themes (top 10) - these indicate content type
   features.keywords.slice(0, 10).forEach(keyword => {
     updates.push({
@@ -889,7 +906,7 @@ async function updateFeaturePreferences(
       feature_name: keyword.name
     });
   });
-  
+
   // Track collection/franchise - strong signal for franchise fatigue
   if (features.collection) {
     updates.push({
@@ -898,7 +915,7 @@ async function updateFeaturePreferences(
       feature_name: features.collection.name
     });
   }
-  
+
   // Update each feature's feedback counts
   for (const update of updates) {
     try {
@@ -910,13 +927,13 @@ async function updateFeaturePreferences(
         .eq('feature_type', update.feature_type)
         .eq('feature_id', update.feature_id)
         .maybeSingle();
-      
+
       const positiveCount = (existing?.positive_count || 0) + (isPositive ? 1 : 0);
       const negativeCount = (existing?.negative_count || 0) + (isPositive ? 0 : 1);
       const total = positiveCount + negativeCount;
       // inferred_preference: 0 = strongly avoid, 0.5 = neutral, 1 = strongly prefer
       const inferredPreference = total > 0 ? positiveCount / total : 0.5;
-      
+
       await supabase
         .from('user_feature_feedback')
         .upsert({
@@ -935,7 +952,7 @@ async function updateFeaturePreferences(
       console.error('[FeaturePreference] Error updating', { update, error: e });
     }
   }
-  
+
   console.log('[FeaturePreference] Updated feature preferences', {
     userId: userId.slice(0, 8),
     isPositive,
@@ -949,9 +966,9 @@ async function updateFeaturePreferences(
  */
 async function detectFeedbackPatterns(userId: string): Promise<string[]> {
   if (!supabase) return [];
-  
+
   const insights: string[] = [];
-  
+
   try {
     // Get features that have been negatively rated multiple times
     const { data: avoidedFeatures } = await supabase
@@ -962,9 +979,9 @@ async function detectFeedbackPatterns(userId: string): Promise<string[]> {
       .lte('inferred_preference', 0.35) // More negatives than positives
       .order('negative_count', { ascending: false })
       .limit(20);
-    
+
     if (!avoidedFeatures || avoidedFeatures.length === 0) return [];
-    
+
     // Log detected patterns
     const patterns = avoidedFeatures.map(f => ({
       type: f.feature_type,
@@ -973,39 +990,39 @@ async function detectFeedbackPatterns(userId: string): Promise<string[]> {
       positives: f.positive_count,
       preference: f.inferred_preference
     }));
-    
+
     console.log('[PatternDetection] Detected avoidance patterns:', patterns.slice(0, 5));
-    
+
     // Actors with 3+ rejections and low preference are strongly avoided
     const avoidedActors = avoidedFeatures.filter(
       f => f.feature_type === 'actor' && f.negative_count >= 3 && f.inferred_preference <= 0.3
     );
-    
+
     // Franchises with 2+ rejections - user likely has franchise fatigue
     const avoidedFranchises = avoidedFeatures.filter(
       f => f.feature_type === 'collection' && f.negative_count >= 2
     );
-    
+
     // Keywords with 3+ rejections - indicates content aversion
     const avoidedKeywords = avoidedFeatures.filter(
       f => f.feature_type === 'keyword' && f.negative_count >= 3 && f.inferred_preference <= 0.25
     );
-    
+
     if (avoidedActors.length > 0) {
       const actorName = avoidedActors[0].feature_name;
       const count = avoidedActors[0].negative_count;
       insights.push(`👎 Pattern detected: You've passed on ${count} movies with ${actorName}. They'll appear less often now.`);
-      console.log('[PatternDetection] Strong actor avoidance detected:', 
+      console.log('[PatternDetection] Strong actor avoidance detected:',
         avoidedActors.map(a => `${a.feature_name}(${a.negative_count}👎/${a.positive_count}👍)`));
     }
-    
+
     if (avoidedFranchises.length > 0) {
       const franchiseName = avoidedFranchises[0].feature_name;
       insights.push(`👎 Franchise fatigue detected: Reducing ${franchiseName} suggestions.`);
-      console.log('[PatternDetection] Franchise fatigue detected:', 
+      console.log('[PatternDetection] Franchise fatigue detected:',
         avoidedFranchises.map(f => f.feature_name));
     }
-    
+
     if (avoidedKeywords.length > 0) {
       const keywordName = avoidedKeywords[0].feature_name;
       const count = avoidedKeywords[0].negative_count;
@@ -1013,11 +1030,11 @@ async function detectFeedbackPatterns(userId: string): Promise<string[]> {
       console.log('[PatternDetection] Content avoidance detected:',
         avoidedKeywords.map(k => `${k.feature_name}(${k.negative_count}👎)`));
     }
-    
+
   } catch (e) {
     console.error('[PatternDetection] Error detecting patterns', e);
   }
-  
+
   return insights;
 }
 
@@ -1039,7 +1056,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
   if (!supabase) {
     return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], preferActors: [], preferKeywords: [] };
   }
-  
+
   try {
     // Get ALL features with ANY feedback (Pandora learns from first interaction)
     const { data } = await supabase
@@ -1047,18 +1064,18 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .select('feature_type, feature_id, feature_name, negative_count, positive_count, inferred_preference, last_updated')
       .eq('user_id', userId)
       .or('negative_count.gte.1,positive_count.gte.1'); // Start learning from FIRST interaction
-    
+
     if (!data) {
       return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], preferActors: [], preferKeywords: [] };
     }
-    
+
     // PANDORA-STYLE graduated penalty calculation
     // Penalty grows with each rejection, but even 1 rejection has an effect
     const calcGraduatedPenalty = (neg: number, pos: number): number => {
       // Net negative score (negatives minus positives)
       const netNegative = neg - pos;
       if (netNegative <= 0) return 0; // More positives than negatives = no penalty
-      
+
       // Graduated penalty based on rejection count
       // 1 rejection: 0.5 weight
       // 2 rejections: 1.2 weight
@@ -1069,12 +1086,12 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       if (netNegative === 3) return 2.0;
       return Math.min(2.5 + (netNegative - 4) * 0.25, 3.0);
     };
-    
+
     // PANDORA-STYLE graduated boost calculation
     const calcGraduatedBoost = (neg: number, pos: number): number => {
       const netPositive = pos - neg;
       if (netPositive <= 0) return 0;
-      
+
       // Graduated boost
       // 1 thumbs up: 0.4 weight
       // 2 thumbs up: 0.8 weight
@@ -1083,7 +1100,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       if (netPositive === 2) return 0.8;
       return Math.min(1.2 + (netPositive - 3) * 0.2, 2.0);
     };
-    
+
     // Apply recency boost - recent feedback matters more (like Pandora)
     const applyRecencyBoost = (weight: number, lastUpdated: string): number => {
       const daysSince = (Date.now() - new Date(lastUpdated).getTime()) / (1000 * 60 * 60 * 24);
@@ -1093,7 +1110,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       if (daysSince < 30) return weight;
       return weight * 0.8;
     };
-    
+
     // ACTORS: Start avoiding after just 1 net rejection
     const avoidActors = data
       .filter(f => f.feature_type === 'actor' && (f.negative_count - f.positive_count) >= 1)
@@ -1105,7 +1122,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       }))
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 15);
-    
+
     // KEYWORDS: Start avoiding after 1 net rejection
     const avoidKeywords = data
       .filter(f => f.feature_type === 'keyword' && (f.negative_count - f.positive_count) >= 1)
@@ -1117,7 +1134,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       }))
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 20);
-    
+
     // FRANCHISES: Immediate strong penalty (1 rejection = franchise fatigue likely)
     const avoidFranchises = data
       .filter(f => f.feature_type === 'collection' && f.negative_count >= 1)
@@ -1130,7 +1147,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       }))
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 10);
-    
+
     // PREFERRED ACTORS: Boost starts from 1 positive
     const preferActors = data
       .filter(f => f.feature_type === 'actor' && (f.positive_count - f.negative_count) >= 1)
@@ -1142,7 +1159,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       }))
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 15);
-    
+
     // PREFERRED KEYWORDS: Boost starts from 1 positive
     const preferKeywords = data
       .filter(f => f.feature_type === 'keyword' && (f.positive_count - f.negative_count) >= 1)
@@ -1154,7 +1171,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       }))
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 20);
-    
+
     console.log('[PandoraLearning] Loaded graduated preferences', {
       avoidActors: avoidActors.map(a => `${a.name}(${a.count}👎, -${a.weight.toFixed(1)})`).slice(0, 3),
       avoidKeywords: avoidKeywords.map(k => `${k.name}(${k.count}👎)`).slice(0, 5),
@@ -1162,7 +1179,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       preferActors: preferActors.map(a => `${a.name}(${a.count}👍)`).slice(0, 3),
       preferKeywords: preferKeywords.map(k => `${k.name}(${k.count}👍)`).slice(0, 5)
     });
-    
+
     return { avoidActors, avoidKeywords, avoidFranchises, preferActors, preferKeywords };
   } catch (e) {
     console.error('[PandoraLearning] Error loading graduated features', e);
@@ -1175,7 +1192,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
  */
 async function updateReasonPreferences(userId: string, reasonTypes: string[], isPositive: boolean) {
   if (!supabase) return;
-  
+
   try {
     for (const reasonType of reasonTypes) {
       // Upsert the preference record
@@ -1185,11 +1202,11 @@ async function updateReasonPreferences(userId: string, reasonTypes: string[], is
         .eq('user_id', userId)
         .eq('reason_type', reasonType)
         .maybeSingle();
-      
+
       const successCount = (existing?.success_count || 0) + (isPositive ? 1 : 0);
       const totalCount = (existing?.total_count || 0) + 1;
       const successRate = totalCount > 0 ? successCount / totalCount : 0.5;
-      
+
       const { error } = await supabase
         .from('user_reason_preferences')
         .upsert({
@@ -1202,12 +1219,12 @@ async function updateReasonPreferences(userId: string, reasonTypes: string[], is
         }, {
           onConflict: 'user_id,reason_type'
         });
-      
+
       if (error) {
         console.error('[AdaptiveLearning] Error updating reason preference', { reasonType, error });
       }
     }
-    
+
     console.log('[AdaptiveLearning] Updated reason preferences', { userId, reasonTypes, isPositive });
   } catch (e) {
     console.error('[AdaptiveLearning] Error in updateReasonPreferences', e);
@@ -1219,24 +1236,24 @@ async function updateReasonPreferences(userId: string, reasonTypes: string[], is
  */
 export async function getReasonPreferences(userId: string): Promise<Map<string, number>> {
   if (!supabase) return new Map();
-  
+
   try {
     const { data, error } = await supabase
       .from('user_reason_preferences')
       .select('reason_type, success_rate, total_count')
       .eq('user_id', userId)
       .gte('total_count', 3); // Minimum sample size
-    
+
     if (error) {
       console.error('[AdaptiveLearning] Error fetching reason preferences', error);
       return new Map();
     }
-    
+
     const prefs = new Map<string, number>();
     data?.forEach((row: any) => {
       prefs.set(row.reason_type, row.success_rate);
     });
-    
+
     return prefs;
   } catch (e) {
     console.error('[AdaptiveLearning] Error in getReasonPreferences', e);
@@ -1768,7 +1785,7 @@ export async function buildTasteProfile(params: {
     tmdbDetailsCount: params.tmdbDetails?.size ?? 0,
     watchlistCount: params.watchlistFilms?.length ?? 0,
   });
-  
+
   const topN = params.topN ?? 10;
 
   // Calculate user statistics
@@ -1832,9 +1849,9 @@ export async function buildTasteProfile(params: {
   // A film is NEUTRAL (ignored) if:
   //   1. Just logged without rating or like (rating = null or 0)
   //   2. Rated 2-2.5 stars - "meh" not strong signal
-  
+
   const DISLIKE_THRESHOLD = 1.5;
-  
+
   // Helper to check if rating is a real rating (not null/0 which means "no rating")
   const hasRealRating = (rating: number | null | undefined): boolean => {
     return rating != null && rating > 0;
@@ -2039,7 +2056,7 @@ export async function buildTasteProfile(params: {
   // Accumulate negative signals from disliked films
   // NOTE: Only avoid if user dislikes MORE than they like (ratio-based)
   // Only films rated <= 1.5 stars are considered "disliked"
-  
+
   for (let i = 0; i < dislikedMovies.length; i++) {
     const movie = dislikedMovies[i];
     if (!movie) continue;
@@ -2117,19 +2134,19 @@ export async function buildTasteProfile(params: {
   // This is a positive signal that should:
   // 1. Boost preferences for genres/keywords/directors on watchlist
   // 2. Override avoidance signals (if user has X on watchlist, don't avoid X)
-  
+
   const watchlistGenreIds = new Set<number>();
   const watchlistKeywordIds = new Set<number>();
   const watchlistDirectorIds = new Set<number>();
   const watchlistGenreNames = new Set<string>();
   const watchlistKeywordNames = new Set<string>();
   const watchlistDirectorNames = new Set<string>();
-  
+
   if (params.watchlistFilms && params.watchlistFilms.length > 0) {
     console.log('[TasteProfile] Processing watchlist for intent signals:', {
       watchlistCount: params.watchlistFilms.length
     });
-    
+
     // Get TMDB IDs for watchlist films
     const watchlistEntries = params.watchlistFilms
       .map(f => {
@@ -2141,14 +2158,14 @@ export async function buildTasteProfile(params: {
       .slice(0, 200); // Cap to avoid too many API calls
 
     const watchlistIds = watchlistEntries.map(r => r.id);
-    
+
     console.log('[TasteProfile] Watchlist TMDB IDs found:', watchlistIds.length);
-    
+
     // Fetch details for watchlist films
     const watchlistMovies = await Promise.all(
       watchlistIds.map(id => fetchDetails(id))
     );
-    
+
     const WATCHLIST_WEIGHT = 0.5; // Base boost for watchlist items
 
     const recencyScore = (addedAt?: string | null) => {
@@ -2177,18 +2194,18 @@ export async function buildTasteProfile(params: {
       if (occurrences === 2) return 0.15;
       return 0;
     };
-    
+
     for (let i = 0; i < watchlistMovies.length; i++) {
       const movie = watchlistMovies[i];
       const entry = watchlistEntries[i];
       if (!movie || !entry) continue;
-      
+
       const feats = extractFeatures(movie);
       const recBoost = recencyScore(entry.addedAt);
       const repBoost = entry.id ? repetitionBoost(entry.id) : 0;
       const ageMultiplier = freshnessMultiplier(entry.addedAt);
       const totalBoost = WATCHLIST_WEIGHT * ageMultiplier + recBoost + repBoost;
-      
+
       // Track genres user WANTS to see (for override logic)
       feats.genreIds.forEach((id, idx) => {
         // Boost with recency/repetition intent
@@ -2200,7 +2217,7 @@ export async function buildTasteProfile(params: {
         // Count as "liked" for ratio calculation
         genreLikedCounts.set(id, (genreLikedCounts.get(id) || 0) + 1);
       });
-      
+
       // Track keywords user WANTS to see
       feats.keywordIds.forEach((id, idx) => {
         const name = feats.keywords[idx];
@@ -2210,7 +2227,7 @@ export async function buildTasteProfile(params: {
         keywordWeights.set(id, { name, weight: current.weight + totalBoost });
         keywordLikedCounts.set(id, (keywordLikedCounts.get(id) || 0) + 1);
       });
-      
+
       // Track directors user WANTS to see
       feats.directorIds.forEach((id, idx) => {
         const name = feats.directors[idx];
@@ -2221,7 +2238,7 @@ export async function buildTasteProfile(params: {
         directorLikedCounts.set(id, (directorLikedCounts.get(id) || 0) + 1);
       });
     }
-    
+
     console.log('[TasteProfile] Watchlist signals extracted:', {
       genresOnWatchlist: watchlistGenreIds.size,
       keywordsOnWatchlist: watchlistKeywordIds.size,
@@ -2267,10 +2284,10 @@ export async function buildTasteProfile(params: {
   // Only avoid something if user dislikes MORE than they like (>60% dislike ratio)
   // AND it's not on the user's watchlist (watchlist = explicit interest override)
   // This prevents the system from avoiding things the user actually enjoys
-  
+
   const MIN_DISLIKED_FOR_AVOIDANCE = 3;
   const MIN_DISLIKE_RATIO = 0.6; // Must dislike 60%+ of films with this attribute
-  
+
   // Helper to check if item should be avoided based on ratio
   const shouldAvoid = (likedCount: number, dislikedCount: number, minDisliked: number): boolean => {
     if (dislikedCount < minDisliked) return false;
@@ -2278,11 +2295,11 @@ export async function buildTasteProfile(params: {
     const dislikeRatio = dislikedCount / total;
     return dislikeRatio >= MIN_DISLIKE_RATIO;
   };
-  
+
   // Log items that WON'T be avoided because user likes them more than dislikes
   const protectedByRatio: string[] = [];
   const protectedByWatchlist: string[] = [];
-  
+
   // Filter genres by ratio - only avoid if dislike ratio >= 60% AND not on watchlist
   const avoidGenres = Array.from(avoidGenreWeights.entries())
     .filter(([id, { name }]) => {
@@ -2302,14 +2319,14 @@ export async function buildTasteProfile(params: {
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, 5)
     .map(([id, { name, weight }]) => ({ id, name, weight }));
-  
+
   if (protectedByRatio.length > 0) {
     console.log('[TasteProfile] Genres NOT avoided because user likes them more:', protectedByRatio);
   }
   if (protectedByWatchlist.length > 0) {
     console.log('[TasteProfile] Items NOT avoided due to watchlist interest:', protectedByWatchlist);
   }
-  
+
   console.log('[TasteProfile] Genre avoidance analysis:', {
     genresWithBothLikedAndDisliked: Array.from(genreDislikedCounts.entries())
       .filter(([id]) => (genreLikedCounts.get(id) || 0) > 0)
@@ -2343,7 +2360,7 @@ export async function buildTasteProfile(params: {
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
   if (protectedKeywordsByRatio.length > 0) {
-    console.log('[TasteProfile] Keywords NOT avoided because user likes them more:', 
+    console.log('[TasteProfile] Keywords NOT avoided because user likes them more:',
       protectedKeywordsByRatio.slice(0, 10));
   }
 
@@ -2369,7 +2386,7 @@ export async function buildTasteProfile(params: {
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
   if (protectedDirectorsByRatio.length > 0) {
-    console.log('[TasteProfile] Directors NOT avoided because user likes them more:', 
+    console.log('[TasteProfile] Directors NOT avoided because user likes them more:',
       protectedDirectorsByRatio);
   }
 
@@ -2646,6 +2663,7 @@ export async function suggestByOverlap(params: {
   concurrency?: number;
   excludeWatchedIds?: Set<number>;
   desiredResults?: number;
+  context?: SuggestContext;
   feedbackMap?: Map<number, 'negative' | 'positive'>;
   // Multi-source metadata for badge display
   sourceMetadata?: Map<number, { sources: string[]; consensusLevel: 'high' | 'medium' | 'low' }>;
@@ -2696,6 +2714,7 @@ export async function suggestByOverlap(params: {
   // Multi-source recommendation data
   sources?: string[];
   consensusLevel?: 'high' | 'medium' | 'low';
+  reliabilityMultiplier?: number;
 }>> {
   // Build user profile from liked/highly-rated mapped films.
   // Use as much history as possible, but cap TMDB fetches to avoid huge fan-out
@@ -2708,6 +2727,143 @@ export async function suggestByOverlap(params: {
   const feedbackMap = params.feedbackMap ?? await getFeedback(params.userId);
   const negativeFeedbackIds = new Set<number>();
   const positiveFeedbackIds = new Set<number>();
+
+  const context = deriveContextMode(params.context);
+
+  const applyContextBias = (
+    feats: ReturnType<typeof extractFeatures>,
+    movie: TMDBMovie
+  ): { delta: number; reasons: string[]; filtered?: boolean } => {
+    let delta = 0;
+    const reasons: string[] = [];
+    const runtime = feats.runtime ?? (movie as any).runtime as number | undefined;
+    const rating = (movie as any).rated as string | undefined;
+    const genresLower = feats.genres.map((g) => g.toLowerCase());
+    const hasGenre = (needle: string) => genresLower.some((g) => g.includes(needle));
+    const isHorror = hasGenre('horror');
+    const isThriller = hasGenre('thriller');
+    const isCrime = hasGenre('crime');
+
+    switch (context.mode) {
+      case 'family': {
+        // Hard filter: avoid horror/thriller/crime and R/NC-17 ratings in family mode
+        const ratingUpper = rating?.toUpperCase() || '';
+        if (isHorror || isThriller || isCrime) return { delta: 0, reasons, filtered: true };
+        if (ratingUpper.startsWith('R') || ratingUpper.includes('NC-17')) return { delta: 0, reasons, filtered: true };
+
+        if (hasGenre('family') || hasGenre('animation')) {
+          delta += 1.1;
+          reasons.push('Family/animation friendly pick for this session');
+        } else if (hasGenre('adventure') || hasGenre('comedy')) {
+          delta += 0.6;
+          reasons.push('Light adventure/comedy that works for family time');
+        }
+
+        if (runtime && runtime >= 85 && runtime <= 125) {
+          delta += 0.35;
+          reasons.push(`Runtime fits a family window (~${runtime}m)`);
+        }
+        break;
+      }
+
+      case 'short': {
+        if (runtime) {
+          if (runtime <= 105) {
+            delta += 0.9;
+            reasons.push(`Tight runtime for a quick watch (~${runtime}m)`);
+          } else if (runtime <= 125) {
+            delta += 0.35;
+            reasons.push(`Weeknight-friendly length (~${runtime}m)`);
+          } else if (runtime >= 145) {
+            delta -= 0.9;
+            reasons.push('Long for a short-session pick');
+          }
+        }
+
+        if (hasGenre('comedy') || hasGenre('romance') || hasGenre('animation')) {
+          delta += 0.35;
+          reasons.push('Lighter tone suited to a short session');
+        }
+
+        if (feats.voteCategory === 'crowd-pleaser') {
+          delta += 0.25;
+          reasons.push('Crowd-pleaser fits quick-watch mood');
+        }
+        break;
+      }
+
+      case 'weeknight': {
+        if (runtime) {
+          if (runtime <= 130) {
+            delta += 0.6;
+            reasons.push(`Weeknight-friendly runtime (~${runtime}m)`);
+          } else if (runtime >= 150) {
+            delta -= 0.7;
+            reasons.push('Probably too long for a weeknight');
+          }
+        }
+
+        if (feats.voteAverage >= 7.0) {
+          delta += 0.2;
+          reasons.push('Reliable pick for a school-night watch');
+        }
+
+        if (hasGenre('comedy') || hasGenre('thriller') || hasGenre('romance')) {
+          delta += 0.25;
+          reasons.push('Easy-to-watch tone for a weekday');
+        }
+        break;
+      }
+
+      case 'immersive': {
+        if (runtime && runtime >= 130) {
+          delta += 0.9;
+          reasons.push(`Longer runtime suits an immersive session (~${runtime}m)`);
+        }
+
+        if (feats.voteAverage >= 7.5) {
+          delta += 0.5;
+          reasons.push('High-rated pick for a deeper watch');
+        }
+
+        if (hasGenre('drama') || hasGenre('mystery') || hasGenre('science fiction')) {
+          delta += 0.35;
+          reasons.push('Narrative-forward fit for immersive mode');
+        }
+        break;
+      }
+
+      case 'background': {
+        if (runtime) {
+          if (runtime >= 80 && runtime <= 115) {
+            delta += 0.5;
+            reasons.push(`Manageable runtime for background viewing (~${runtime}m)`);
+          } else if (runtime >= 145) {
+            delta -= 0.8;
+            reasons.push('Too long for background viewing');
+          }
+        }
+
+        if (feats.voteCategory === 'crowd-pleaser') {
+          delta += 0.35;
+          reasons.push('Crowd-pleaser works well while multitasking');
+        }
+
+        if ((movie as any).original_language === 'en') {
+          delta += 0.2;
+          reasons.push('English-language makes for easy background play');
+        }
+
+        if (isHorror || isCrime) {
+          delta -= 0.4;
+          reasons.push('Heavier tone than ideal for background viewing');
+        }
+        break;
+      }
+    }
+
+    return { delta, reasons };
+  };
 
   for (const [id, type] of feedbackMap.entries()) {
     if (type === 'negative') negativeFeedbackIds.add(id);
@@ -2779,7 +2935,7 @@ export async function suggestByOverlap(params: {
   // Fetch user's reason type preferences for adaptive weighting
   // This learns which recommendation reasons (genre, director, actor, etc.) lead to positive feedback
   const reasonPreferences = await getReasonPreferences(params.userId);
-  console.log('[AdaptiveLearning] Loaded reason preferences', { 
+  console.log('[AdaptiveLearning] Loaded reason preferences', {
     count: reasonPreferences.size,
     preferences: Array.from(reasonPreferences.entries()).map(([k, v]) => `${k}:${(v * 100).toFixed(0)}%`)
   });
@@ -3267,6 +3423,16 @@ export async function suggestByOverlap(params: {
       }
     }
 
+    // Context-aware biases: adjust score and occasionally filter based on session mode
+    const contextBias = applyContextBias(feats, m);
+    if (contextBias.filtered) return null;
+    if (contextBias.delta !== 0) {
+      score += contextBias.delta;
+    }
+    if (contextBias.reasons.length) {
+      reasons.push(...contextBias.reasons);
+    }
+
     // WATCHLIST INTENT: prioritize movies the user explicitly saved (recency-weighted)
     const watchlistIntent = watchlistIntentMap.get(cid);
     if (watchlistIntent) {
@@ -3461,7 +3627,7 @@ export async function suggestByOverlap(params: {
     // This prevents double-counting studios (legacy + enhanced profile)
     const studioHits = feats.productionCompanies.filter(s => pref.productionCompanies.has(s));
     const hasEnhancedStudioData = params.enhancedProfile?.topStudios && params.enhancedProfile.topStudios.length > 0;
-    
+
     if (studioHits.length && !hasEnhancedStudioData) {
       const totalStudioWeight = studioHits.reduce((sum, s) => sum + (pref.productionCompanies.get(s) ?? 0), 0);
       score += totalStudioWeight * weights.studio; // Use weights.studio for consistency
@@ -3530,18 +3696,18 @@ export async function suggestByOverlap(params: {
       const year = parseInt(m.release_date.substring(0, 4));
       if (!isNaN(year)) {
         const movieDecade = Math.floor(year / 10) * 10;
-        
+
         // Check if this decade matches user's preferred eras
         const matchedDecade = params.enhancedProfile.topDecades.find(d => d.decade === movieDecade);
         if (matchedDecade) {
           // Calculate boost based on decade preference weight (scaled down)
           const decadeBoost = Math.min(matchedDecade.weight * 0.3, 2.0); // Cap at 2.0
           score += decadeBoost;
-          
+
           // Calculate what percentage of their collection is from this era
           const totalDecadeWeight = params.enhancedProfile.topDecades.reduce((sum, d) => sum + d.weight, 0);
           const decadePercent = Math.round((matchedDecade.weight / totalDecadeWeight) * 100);
-          
+
           reasons.push(`From the ${movieDecade}s — matches your preference for this era (${decadePercent}% of your favorites)`);
           console.log(`[DecadeBoost] Boosted "${m.title}" (${year}) by ${decadeBoost.toFixed(2)} for ${movieDecade}s era preference`);
         }
@@ -3601,7 +3767,7 @@ export async function suggestByOverlap(params: {
         if (value > 0) return Math.min(value, cap);
         return Math.max(value, -cap);
       };
-      
+
       // Penalty for actors user has rejected (graduated based on rejection count)
       if (ff.avoidActors && ff.avoidActors.length > 0) {
         const avoidedActorMap = new Map(ff.avoidActors.map(a => [a.id, a]));
@@ -3609,12 +3775,12 @@ export async function suggestByOverlap(params: {
         const matchedAvoidActors = movieCastIds
           .map((id: number) => avoidedActorMap.get(id))
           .filter((a): a is { id: number; name: string; weight: number; count: number } => a !== undefined);
-        
+
         if (matchedAvoidActors.length > 0) {
           // Use the graduated weight from the feature, adjusted by position and confidence
           const leadActor = matchedAvoidActors.find(a => movieCastIds.indexOf(a.id) < 2);
           const supportingActors = matchedAvoidActors.filter(a => movieCastIds.indexOf(a.id) >= 2);
-          
+
           let actorPenalty = 0;
           if (leadActor) {
             const confidence = confidenceFromCount(leadActor.count);
@@ -3633,19 +3799,19 @@ export async function suggestByOverlap(params: {
             // Supporting actors: 60% of graduated weight, confidence scaled
             actorPenalty -= applySoftCap(effectiveWeight * 0.6, 2.5);
           }
-          
+
           totalPenalty += actorPenalty;
           console.log(`[PandoraLearning] Actor penalty for "${m.title}": ${matchedAvoidActors.map(a => `${a.name}(${a.count}👎)`).join(', ')} (${actorPenalty.toFixed(1)})`);
         }
       }
-      
+
       // Penalty for keywords/themes user has rejected
       if (ff.avoidKeywords && ff.avoidKeywords.length > 0) {
         const avoidedKeywordMap = new Map(ff.avoidKeywords.map(k => [k.id, k]));
         const matchedKeywords = feats.keywordIds
           .map(id => avoidedKeywordMap.get(id))
           .filter((k): k is { id: number; name: string; weight: number; count: number } => k !== undefined);
-        
+
         if (matchedKeywords.length > 0) {
           // Sum graduated weights with confidence scaling, cap to avoid over-penalizing
           const keywordPenalty = -applySoftCap(
@@ -3656,7 +3822,7 @@ export async function suggestByOverlap(params: {
             4.0
           );
           totalPenalty += keywordPenalty;
-          
+
           const topKeyword = matchedKeywords.sort((a, b) => b.weight - a.weight)[0];
           const countLabel = topKeyword.count === 1 ? 'before' : `${topKeyword.count} times`;
           const hardnessLabel = topKeyword.count >= 3 ? 'hard avoid' : 'soft avoid';
@@ -3664,7 +3830,7 @@ export async function suggestByOverlap(params: {
           console.log(`[PandoraLearning] Keyword penalty for "${m.title}": ${matchedKeywords.length} matches (${keywordPenalty.toFixed(1)})`);
         }
       }
-      
+
       // Penalty for franchises (IMMEDIATE strong effect - even 1 rejection)
       if (ff.avoidFranchises && ff.avoidFranchises.length > 0 && feats.collection) {
         const avoidedFranchise = ff.avoidFranchises.find(f => f.id === feats.collection!.id);
@@ -3678,7 +3844,7 @@ export async function suggestByOverlap(params: {
           console.log(`[PandoraLearning] Franchise penalty for "${m.title}": ${avoidedFranchise.name} (${franchisePenalty.toFixed(1)})`);
         }
       }
-      
+
       // BOOST for actors user has responded positively to (graduated)
       if (ff.preferActors && ff.preferActors.length > 0) {
         const preferredActorMap = new Map(ff.preferActors.map(a => [a.id, a]));
@@ -3686,10 +3852,10 @@ export async function suggestByOverlap(params: {
         const matchedPreferActors = movieCastIds
           .map((id: number) => preferredActorMap.get(id))
           .filter((a): a is { id: number; name: string; weight: number; count: number } => a !== undefined);
-        
+
         if (matchedPreferActors.length > 0) {
           const leadActor = matchedPreferActors.find(a => movieCastIds.indexOf(a.id) < 2);
-          
+
           let actorBoost = 0;
           if (leadActor) {
             const confidence = confidenceFromCount(leadActor.count);
@@ -3702,19 +3868,19 @@ export async function suggestByOverlap(params: {
             actorBoost += applySoftCap(topActor.weight * confidence * 0.6, 2.0);
             reasons.push(`Features ${topActor.name} — you've enjoyed their films`);
           }
-          
+
           score += actorBoost;
           console.log(`[PandoraLearning] Actor boost for "${m.title}": ${matchedPreferActors.map(a => a.name).join(', ')} (+${actorBoost.toFixed(1)})`);
         }
       }
-      
+
       // BOOST for keywords/themes user responds positively to
       if (ff.preferKeywords && ff.preferKeywords.length > 0) {
         const preferredKeywordMap = new Map(ff.preferKeywords.map(k => [k.id, k]));
         const matchedKeywords = feats.keywordIds
           .map(id => preferredKeywordMap.get(id))
           .filter((k): k is { id: number; name: string; weight: number; count: number } => k !== undefined);
-        
+
         if (matchedKeywords.length > 0) {
           // Sum graduated weights with confidence scaling, cap at 3.0 total
           const keywordBoost = applySoftCap(
@@ -3725,7 +3891,7 @@ export async function suggestByOverlap(params: {
             3.0
           );
           score += keywordBoost;
-          
+
           const topKeyword = matchedKeywords.sort((a, b) => b.weight - a.weight)[0];
           reasons.push(`Matches "${topKeyword.name}" — a theme you consistently enjoy`);
           console.log(`[PandoraLearning] Keyword boost for "${m.title}": ${matchedKeywords.length} matches (+${keywordBoost.toFixed(1)})`);
@@ -3799,12 +3965,12 @@ export async function suggestByOverlap(params: {
     if (reasonPreferences.size > 0) {
       // Extract which reason types contributed to this recommendation
       const reasonTypes = extractReasonTypes(reasons);
-      
+
       if (reasonTypes.length > 0) {
         // Calculate average success rate for the reason types in this recommendation
         let totalWeight = 0;
         let weightedSuccessRate = 0;
-        
+
         for (const rt of reasonTypes) {
           const successRate = reasonPreferences.get(rt);
           if (successRate !== undefined) {
@@ -3815,14 +3981,14 @@ export async function suggestByOverlap(params: {
             weightedSuccessRate += modifier;
           }
         }
-        
+
         if (totalWeight > 0) {
           const avgModifier = weightedSuccessRate / totalWeight;
           // Apply as a mild multiplier (0.7 to 1.3 range) to avoid dramatic changes
           const multiplier = 1 + (avgModifier * 0.3);
           const oldScore = score;
           score = score * multiplier;
-          
+
           if (Math.abs(multiplier - 1) > 0.05) {
             console.log(`[ReasonPreference] Adjusted "${m.title}" score: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${multiplier.toFixed(2)}x) based on ${reasonTypes.join(', ')} preferences`);
           }
