@@ -118,45 +118,31 @@ export async function getFilmMappings(userId: string, uris: string[]) {
   const map = new Map<string, number>();
 
   try {
-    // IMPORTANT: Supabase/PostgREST commonly defaults to a max of 1000 rows per request.
-    // Page through all rows so users with >1000 films get complete mappings.
-    const uriSet = new Set(uris);
-    const pageSize = 1000;
-    let from = 0;
-    let totalRows = 0;
+    // Increase timeout to 15 seconds for large datasets
+    const queryPromise = supabase
+      .from('film_tmdb_map')
+      .select('uri, tmdb_id')
+      .eq('user_id', userId);
 
-    while (true) {
-      const queryPromise = supabase
-        .from('film_tmdb_map')
-        .select('uri, tmdb_id')
-        .eq('user_id', userId)
-        .order('uri', { ascending: true })
-        .range(from, from + pageSize - 1);
+    const { data, error } = await withTimeout(
+      queryPromise as unknown as Promise<{ data: Array<{ uri: string; tmdb_id: number }>; error: any }>,
+      15000
+    );
 
-      const { data, error } = await withTimeout(
-        queryPromise as unknown as Promise<{ data: Array<{ uri: string; tmdb_id: number }>; error: any }>,
-        15000
-      );
-
-      if (error) {
-        console.error('[Mappings] error fetching mappings', { error, code: error.code, message: error.message, details: error.details, from, pageSize });
-        return map;
-      }
-
-      const rows = data ?? [];
-      totalRows += rows.length;
-
-      for (const row of rows) {
-        if (row?.uri != null && row?.tmdb_id != null && uriSet.has(row.uri)) {
-          map.set(row.uri, Number(row.tmdb_id));
-        }
-      }
-
-      if (rows.length < pageSize) break;
-      from += pageSize;
+    if (error) {
+      console.error('[Mappings] error fetching mappings', { error, code: error.code, message: error.message, details: error.details });
+      return map;
     }
 
-    console.log('[Mappings] all mappings loaded', { totalRows });
+    console.log('[Mappings] all mappings loaded', { totalRows: (data ?? []).length });
+
+    // Filter to only the URIs we care about
+    const uriSet = new Set(uris);
+    for (const row of data ?? []) {
+      if (row.uri != null && row.tmdb_id != null && uriSet.has(row.uri)) {
+        map.set(row.uri, Number(row.tmdb_id));
+      }
+    }
 
   } catch (e: any) {
     console.error('[Mappings] timeout or exception', {
@@ -183,72 +169,29 @@ export async function getBulkTmdbDetails(tmdbIds: number[]): Promise<Map<number,
 
   console.log('[BulkTmdb] Fetching cached details', { count: tmdbIds.length });
 
-  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-  const withTimeoutLocal = async <T>(p: Promise<T>, ms: number): Promise<T> => {
-    return await Promise.race([
-      p,
-      new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
-    ]);
-  };
-
   try {
-    // NOTE: Supabase REST can 500 on very large `in.(...)` filters. Keep chunks small.
-    const distinctIds = Array.from(new Set(tmdbIds.filter((n) => Number.isFinite(n) && n > 0)));
-    const chunkSize = distinctIds.length > 400 ? 100 : 150;
-    const maxAttempts = 3;
+    // Fetch in chunks of 500 to avoid query limits
+    const chunkSize = 500;
+    for (let i = 0; i < tmdbIds.length; i += chunkSize) {
+      const chunk = tmdbIds.slice(i, i + chunkSize);
+      const { data, error } = await supabase
+        .from('tmdb_movies')
+        .select('tmdb_id, data')
+        .in('tmdb_id', chunk);
 
-    for (let i = 0; i < distinctIds.length; i += chunkSize) {
-      const chunk = distinctIds.slice(i, i + chunkSize);
-
-      let data: any[] | null = null;
-      let lastError: any = null;
-
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          const res = await withTimeoutLocal(
-            supabase
-              .from('tmdb_movies')
-              .select('tmdb_id, data')
-              .in('tmdb_id', chunk) as unknown as Promise<{ data: any[] | null; error: any }>,
-            12000
-          );
-
-          if (res.error) {
-            lastError = res.error;
-            // Retry on transient server/network errors; otherwise, give up.
-            const status = (res.error as any)?.status;
-            const code = (res.error as any)?.code;
-            const message = String((res.error as any)?.message ?? '');
-            const looksTransient = status === 500 || status === 502 || status === 503 || status === 504 || code === 'ECONNRESET' || message.toLowerCase().includes('timeout');
-            if (!looksTransient || attempt === maxAttempts) break;
-          } else {
-            data = res.data;
-            lastError = null;
-            break;
-          }
-        } catch (e) {
-          lastError = e;
-          if (attempt === maxAttempts) break;
-        }
-
-        // Exponential backoff with small jitter
-        const delay = Math.min(2000, 250 * Math.pow(2, attempt - 1)) + Math.floor(Math.random() * 150);
-        await sleep(delay);
-      }
-
-      if (lastError) {
-        console.error('[BulkTmdb] Error fetching chunk', { error: lastError, chunkStart: i, chunkSize: chunk.length });
+      if (error) {
+        console.error('[BulkTmdb] Error fetching chunk', { error, chunkStart: i });
         continue;
       }
 
       for (const row of data ?? []) {
-        if (row?.tmdb_id && row?.data) {
-          detailsMap.set(Number(row.tmdb_id), row.data as TMDBMovie);
+        if (row.tmdb_id && row.data) {
+          detailsMap.set(row.tmdb_id, row.data as TMDBMovie);
         }
       }
     }
 
-    console.log('[BulkTmdb] Fetched details', { requested: tmdbIds.length, distinct: distinctIds.length, found: detailsMap.size, chunkSize });
+    console.log('[BulkTmdb] Fetched details', { requested: tmdbIds.length, found: detailsMap.size });
   } catch (e) {
     console.error('[BulkTmdb] Exception', e);
   }
@@ -1980,21 +1923,10 @@ export async function buildTasteProfile(params: {
     return fetchTmdbMovieCached(id);
   };
 
-  const safeFetchDetails = async (id: number) => {
-    try {
-      return await fetchDetails(id);
-    } catch (e) {
-      console.warn('[TasteProfile] Failed to fetch TMDB details', { id, error: e });
-      return null;
-    }
-  };
-
-  // Avoid triggering upstream rate limits/timeouts with massive parallelism.
-  const detailsConcurrency = 6;
   const [likedMovies, dislikedMovies, negativeFeedbackMovies] = await Promise.all([
-    mapLimit(likedIds, detailsConcurrency, async (id) => safeFetchDetails(id)),
-    mapLimit(dislikedIds, detailsConcurrency, async (id) => safeFetchDetails(id)),
-    mapLimit((params.negativeFeedbackIds || []), detailsConcurrency, async (id) => safeFetchDetails(id))
+    Promise.all(likedIds.map(id => fetchDetails(id))),
+    Promise.all(dislikedIds.map(id => fetchDetails(id))),
+    Promise.all((params.negativeFeedbackIds || []).map(id => fetchDetails(id)))
   ]);
 
   // Log details fetch results

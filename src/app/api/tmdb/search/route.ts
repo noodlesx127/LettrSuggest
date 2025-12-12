@@ -63,20 +63,13 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'TMDB_API_KEY not configured' }, { status: 500 });
     }
 
-    // Support TMDB v3 api_key or v4 Bearer tokens
-    const looksLikeJwt = typeof apiKey === 'string' && apiKey.includes('.') && apiKey.trim().startsWith('eyJ');
     const tmdbUrl = new URL('https://api.themoviedb.org/3/search/movie');
-    if (!looksLikeJwt) {
-      tmdbUrl.searchParams.set('api_key', apiKey);
-    }
+    tmdbUrl.searchParams.set('api_key', apiKey);
     tmdbUrl.searchParams.set('query', query);
     if (year) tmdbUrl.searchParams.set('year', year);
 
-    const headers: Record<string, string> = { Accept: 'application/json' };
-    if (looksLikeJwt) headers['Authorization'] = `Bearer ${apiKey}`;
-
     const r = await fetchWithRetry(tmdbUrl.toString(), {
-      headers,
+      headers: { Accept: 'application/json' },
       cache: 'no-store',
     }, { timeoutMs: 9000, maxAttempts: 3 });
 
