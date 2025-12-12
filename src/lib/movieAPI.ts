@@ -114,12 +114,13 @@ export async function searchMovies(options: MovieSearchOptions): Promise<Unified
   
   const r = await fetch(u.toString());
   const j = await r.json();
-  
   if (!r.ok || !j.ok) {
     console.error('[UnifiedAPI] TMDB search error', { status: r.status, body: j });
-    throw new Error(j.error || 'Movie search failed');
+    // Treat TMDB search failures as an empty result set instead of throwing so
+    // callers (like import enrichment) can continue without hard-failing.
+    return [] as TMDBMovie[];
   }
-  
+
   return j.results as TMDBMovie[];
 }
 
