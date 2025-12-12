@@ -67,14 +67,22 @@ export async function GET(req: Request) {
     const appendParts = new Set([...defaultAppend.split(','), ...clientAppend.split(',')].filter(Boolean));
     const appendToResponse = Array.from(appendParts).join(',');
 
-    // 1. Fetch from TMDB (using api_key for v3 auth)
-    const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?api_key=${apiKey}&append_to_response=${appendToResponse}`;
+    // 1. Fetch from TMDB. Support both v3 API key (query param) and v4 Bearer token (JWT).
+    let tmdbUrl: string;
+    const headers: Record<string, string> = { Accept: 'application/json' };
+
+    const looksLikeJwt = typeof apiKey === 'string' && apiKey.includes('.') && apiKey.trim().startsWith('eyJ');
+    if (looksLikeJwt) {
+      tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?append_to_response=${appendToResponse}`;
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    } else {
+      tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?api_key=${apiKey}&append_to_response=${appendToResponse}`;
+    }
+
     const r = await fetchWithRetry(
       tmdbUrl,
       {
-        headers: {
-          Accept: 'application/json',
-        },
+        headers,
         cache: 'no-store',
       },
       { timeoutMs: 9000, maxAttempts: 3 }
