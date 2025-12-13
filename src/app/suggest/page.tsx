@@ -1,10 +1,10 @@
 'use client';
 import AuthGate from '@/components/AuthGate';
-import MovieCard from '@/components/MovieCard';
+import MovieCard, { FeatureEvidenceContext } from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, type FeedbackLearningInsights } from '@/lib/enrich';
+import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, getFeatureEvidenceSummary, neutralizeFeedback, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -118,6 +118,9 @@ export default function SuggestPage() {
   const PAIRWISE_SESSION_LIMIT = 3;
   const [contextMode, setContextMode] = useState<'auto' | 'weeknight' | 'short' | 'immersive' | 'family' | 'background'>('auto');
   const [localHour, setLocalHour] = useState<number | null>(null);
+  const [featureEvidence, setFeatureEvidence] = useState<Record<string, FeatureEvidenceSummary>>({});
+  const [microSurveyCount, setMicroSurveyCount] = useState<number>(0);
+  const [pairwiseVideoId, setPairwiseVideoId] = useState<number | null>(null); // Track which pairwise option is showing video
 
   // Hybrid feedback popup state - optional "tell us why" after feedback
   const [feedbackPopup, setFeedbackPopup] = useState<{
@@ -130,7 +133,9 @@ export default function SuggestPage() {
     genres: string[];
     feedbackType: 'positive' | 'negative'; // NEW: track which type of feedback
     director?: string; // NEW: for positive feedback
+    showMicroSurvey?: boolean;
   } | null>(null);
+  const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
 
   // Load from session storage on mount
   useEffect(() => {
@@ -209,6 +214,13 @@ export default function SuggestPage() {
     const now = new Date();
     setLocalHour(now.getHours());
   }, []);
+
+  // Clear selected reasons when popup closes
+  useEffect(() => {
+    if (!feedbackPopup) {
+      setSelectedReasons([]);
+    }
+  }, [feedbackPopup]);
 
   // Get posters for all suggested movies (including watchlist picks)
   const tmdbIds = useMemo(() => {
@@ -684,6 +696,77 @@ export default function SuggestPage() {
     }
     return tags;
   }, []);
+
+  const extractFeaturesFromReason = useCallback((reason: string): Array<{ type: FeatureType; name: string }> => {
+    const features: Array<{ type: FeatureType; name: string }> = [];
+
+    const genreMatch = reason.match(/Matches your (?:specific )?taste in ([^(]+)/i);
+    if (genreMatch) {
+      const names = genreMatch[1].split(/,| \+ /).map((s) => s.trim()).filter(Boolean);
+      names.forEach((name) => features.push({ type: 'genre', name }));
+    }
+
+    const directorMatch = reason.match(/Directed by ([^—]+)/i);
+    if (directorMatch) {
+      directorMatch[1].split(',').map((s) => s.trim()).filter(Boolean).forEach((name) => features.push({ type: 'director', name }));
+    }
+
+    const keywordMatch = reason.match(/(?:Matches specific themes|explores) (?:you )?(?:especially love|enjoy)[^:]*: ([^(]+)/i);
+    if (keywordMatch) {
+      keywordMatch[1].split(',').map((s) => s.trim()).filter(Boolean).forEach((name) => features.push({ type: 'keyword', name }));
+    }
+
+    const studioMatch = reason.match(/From ([^—]+)/i);
+    if (studioMatch) {
+      studioMatch[1].split(',').map((s) => s.trim()).filter(Boolean).forEach((name) => features.push({ type: 'collection', name }));
+    }
+
+    const castMatch = reason.match(/Stars ([^—]+)/i);
+    if (castMatch) {
+      castMatch[1].split(',').map((s) => s.trim()).filter(Boolean).forEach((name) => features.push({ type: 'actor', name }));
+    }
+
+    return features;
+  }, []);
+
+  const collectFeatureRequests = useCallback((movies: MovieItem[]): Array<{ type: FeatureType; name: string }> => {
+    const seen = new Set<string>();
+    const requests: Array<{ type: FeatureType; name: string }> = [];
+
+    movies.forEach((item) => {
+      item.reasons?.forEach((reason) => {
+        const feats = extractFeaturesFromReason(reason);
+        feats.forEach((f) => {
+          const key = `${f.type}:${f.name.toLowerCase()}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          requests.push(f);
+        });
+      });
+    });
+
+    return requests;
+  }, [extractFeaturesFromReason]);
+
+  const mergeFeatureEvidence = useCallback((map: Map<string, FeatureEvidenceSummary>) => {
+    setFeatureEvidence((prev) => {
+      const next = { ...prev } as Record<string, FeatureEvidenceSummary>;
+      map.forEach((value, key) => {
+        next[key] = value;
+      });
+      return next;
+    });
+  }, []);
+
+  const fetchEvidenceForFeatures = useCallback(async (featureList: Array<{ type: FeatureType; name: string }>) => {
+    if (!uid || featureList.length === 0) return;
+    try {
+      const map = await getFeatureEvidenceSummary(uid, featureList);
+      mergeFeatureEvidence(map);
+    } catch (e) {
+      console.error('[FeatureEvidence] Failed to fetch evidence', e);
+    }
+  }, [uid, mergeFeatureEvidence]);
 
   const findPairwiseCandidate = useCallback(
     (list: MovieItem[], history: Set<string>): { a: MovieItem; b: MovieItem } | null => {
@@ -1343,7 +1426,7 @@ export default function SuggestPage() {
       console.log('[Suggest] runSuggest end');
       setLoading(false);
     }
-  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters, blockedIds, shownIds, computeContext]);
+  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters, blockedIds, shownIds, computeContext, discoveryLevel]);
 
   // Fallback: if no local films, load from Supabase once
   useEffect(() => {
@@ -1401,6 +1484,16 @@ export default function SuggestPage() {
     const candidate = findPairwiseCandidate(items.filter((i) => !i.dismissed), pairHistory);
     setPairwisePair(candidate);
   }, [items, pairHistory, findPairwiseCandidate, pairwiseCount, PAIRWISE_SESSION_LIMIT]);
+
+  useEffect(() => {
+    const loadEvidence = async () => {
+      if (!uid || !items || items.length === 0) return;
+      const requests = collectFeatureRequests(items);
+      if (requests.length === 0) return;
+      await fetchEvidenceForFeatures(requests);
+    };
+    void loadEvidence();
+  }, [uid, items, collectFeatureRequests, fetchEvidenceForFeatures]);
 
   // Recompute when mapping updates are emitted
   useEffect(() => {
@@ -1758,76 +1851,52 @@ export default function SuggestPage() {
     }
   }, [uid, sourceFilms, blockedIds, shownIds, items, getSectionFilter, computeContext]);
 
-  // Handle explicit reason selection from feedback popup
-  const handleExplicitReason = async (reason: string) => {
-    if (!feedbackPopup || !uid) return;
-
-    const isPositive = feedbackPopup.feedbackType === 'positive';
-    console.log('[FeedbackPopup] User selected explicit reason:', reason, 'for movie:', feedbackPopup.title, 'type:', feedbackPopup.feedbackType);
-
-    // Close the popup first for responsiveness
-    setFeedbackPopup(null);
-
-    // Show confirmation based on reason type and SAVE the explicit feedback
-    let confirmMessage = feedbackPopup.insights.learningSummary;
+  // Apply a single explicit reason (shared helper so multi-select can submit all)
+  const applyExplicitReason = async (reason: string, popup: NonNullable<typeof feedbackPopup>) => {
+    if (!uid) return popup.insights.learningSummary;
+    const isPositive = popup.feedbackType === 'positive';
+    let confirmMessage = popup.insights.learningSummary;
 
     // === NEGATIVE FEEDBACK REASONS ===
     if (reason === 'already_seen') {
       confirmMessage = "👍 Got it! We won't count this against the movie's features.";
-      // Note: We could potentially UNDO the automatic negative learning here in the future
     } else if (reason === 'not_in_mood') {
       confirmMessage = "👍 No problem! This won't affect your preferences.";
-      // Note: Temporary skip - no learning needed
     } else if (reason === 'too_long') {
       confirmMessage = "👎 Noted. We'll suggest more quick watches.";
     } else if (reason === 'dislike_all') {
-      // NUCLEAR OPTION: User dislikes EVERYTHING about this movie
-      // Apply strong negative boost to ALL features
       confirmMessage = "👎👎 Got it! We'll strongly avoid movies like this.";
-
-      // Boost ALL actors
-      for (const actor of feedbackPopup.leadActors) {
+      for (const actor of popup.leadActors) {
         await boostExplicitFeedback(uid, 'actor', actor, false, 3);
       }
-      // Boost ALL genres
-      for (const genre of feedbackPopup.genres) {
+      for (const genre of popup.genres) {
         await boostExplicitFeedback(uid, 'genre', genre, false, 3);
       }
-      // Boost ALL keywords
-      for (const keyword of feedbackPopup.topKeywords || []) {
+      for (const keyword of popup.topKeywords || []) {
         await boostExplicitFeedback(uid, 'keyword', keyword, false, 3);
       }
-      // Boost franchise if exists
-      if (feedbackPopup.franchise) {
-        await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, false, 3);
+      if (popup.franchise) {
+        await boostExplicitFeedback(uid, 'collection', popup.franchise, false, 3);
       }
 
       // === POSITIVE FEEDBACK REASONS ===
     } else if (reason === 'great_pick') {
       confirmMessage = "👍 Awesome! We'll learn from this to find more like it.";
-      // Already learned automatically, no extra boost needed for generic positive
-    } else if (reason === 'want_more_director' && feedbackPopup.director) {
-      confirmMessage = `👍 Great! More ${feedbackPopup.director} films coming your way.`;
-      // Note: Director learning could be added to boostExplicitFeedback in future
+    } else if (reason === 'want_more_director' && popup.director) {
+      confirmMessage = `👍 Great! More ${popup.director} films coming your way.`;
     } else if (reason === 'love_all') {
-      // SUPER POSITIVE: User loves EVERYTHING about this movie
       confirmMessage = "❤️❤️ Amazing! We'll find more movies just like this!";
-
-      // Boost ALL actors
-      for (const actor of feedbackPopup.leadActors) {
+      for (const actor of popup.leadActors) {
         await boostExplicitFeedback(uid, 'actor', actor, true, 3);
       }
-      // Boost ALL genres
-      for (const genre of feedbackPopup.genres) {
+      for (const genre of popup.genres) {
         await boostExplicitFeedback(uid, 'genre', genre, true, 3);
       }
-      // Boost ALL keywords
-      for (const keyword of feedbackPopup.topKeywords || []) {
+      for (const keyword of popup.topKeywords || []) {
         await boostExplicitFeedback(uid, 'keyword', keyword, true, 3);
       }
-      // Boost franchise if exists
-      if (feedbackPopup.franchise) {
-        await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, true, 3);
+      if (popup.franchise) {
+        await boostExplicitFeedback(uid, 'collection', popup.franchise, true, 3);
       }
 
       // === SHARED REASONS (work for both positive and negative) ===
@@ -1842,14 +1911,14 @@ export default function SuggestPage() {
       }
     } else if (reason === 'franchise') {
       if (isPositive) {
-        confirmMessage = `👍 Love the ${feedbackPopup.franchise}! Showing more from this series.`;
-        if (feedbackPopup.franchise) {
-          await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, true, 2);
+        confirmMessage = `👍 Love the ${popup.franchise}! Showing more from this series.`;
+        if (popup.franchise) {
+          await boostExplicitFeedback(uid, 'collection', popup.franchise, true, 2);
         }
       } else {
-        confirmMessage = `👎 ${feedbackPopup.franchise} fatigue noted. Showing fewer from this series.`;
-        if (feedbackPopup.franchise) {
-          await boostExplicitFeedback(uid, 'collection', feedbackPopup.franchise, false, 2);
+        confirmMessage = `👎 ${popup.franchise} fatigue noted. Showing fewer from this series.`;
+        if (popup.franchise) {
+          await boostExplicitFeedback(uid, 'collection', popup.franchise, false, 2);
         }
       }
     } else if (reason.startsWith('genre:')) {
@@ -1872,8 +1941,93 @@ export default function SuggestPage() {
       }
     }
 
+    return confirmMessage;
+  };
+
+  // Quick single-reason submit (still supported)
+  const handleExplicitReason = async (reason: string) => {
+    if (!feedbackPopup) return;
+    const popupData = feedbackPopup;
+    console.log('[FeedbackPopup] User selected explicit reason:', reason, 'for movie:', popupData.title, 'type:', popupData.feedbackType);
+    const confirmMessage = await applyExplicitReason(reason, popupData);
+    setFeedbackPopup(null);
+    setSelectedReasons([]);
     setFeedbackMessage(confirmMessage);
     setTimeout(() => setFeedbackMessage(null), 3500);
+  };
+
+  const toggleReasonSelection = (reason: string) => {
+    setSelectedReasons((prev) => prev.includes(reason)
+      ? prev.filter((r) => r !== reason)
+      : [...prev, reason]);
+  };
+
+  const getReasonButtonClasses = (baseClasses: string, selected: boolean) => selected
+    ? `${baseClasses} ring-2 ring-offset-1 ring-blue-500 ring-offset-white dark:ring-offset-gray-800`
+    : baseClasses;
+
+
+  const getFeatureEvidenceBadge = (type: FeatureType, name: string) => {
+    const key = `${type}:${name.toLowerCase()}`;
+    const data = featureEvidence[key];
+    if (!data) return null;
+    const effective = data.totalCount * data.decayMultiplier;
+    const label = effective >= 6 ? 'Strong' : effective >= 3 ? 'Solid' : 'Light';
+    const days = data.lastUpdated ? Math.max(0, Math.round((Date.now() - new Date(data.lastUpdated).getTime()) / (1000 * 60 * 60 * 24))) : null;
+    const recency = days === null ? 'stale' : days === 0 ? '<1d' : `${days}d`;
+    return {
+      text: `${label} • ${data.totalCount} signals • ${recency}`,
+      title: `${label} evidence for ${name}${days === null ? '' : ` • last updated ${recency}`}`
+    };
+  };
+  const handleSubmitSelectedReasons = async () => {
+    if (!feedbackPopup || selectedReasons.length === 0) {
+      setFeedbackPopup(null);
+      setSelectedReasons([]);
+      return;
+    }
+    const popupData = feedbackPopup;
+    let lastMessage = popupData.insights.learningSummary;
+    for (const reason of selectedReasons) {
+      lastMessage = await applyExplicitReason(reason, popupData);
+    }
+    setFeedbackPopup(null);
+    setSelectedReasons([]);
+    setFeedbackMessage(lastMessage);
+    setTimeout(() => setFeedbackMessage(null), 3500);
+  };
+
+  const handleFastNeutralize = async () => {
+    if (!feedbackPopup || !uid) return;
+    try {
+      await neutralizeFeedback(uid, feedbackPopup.tmdbId);
+      await handleUndoDismiss(feedbackPopup.tmdbId);
+      setFeedbackMessage('Marked as neutral. We will stop penalizing this pick.');
+      setTimeout(() => setFeedbackMessage(null), 3500);
+    } catch (e) {
+      console.error('[FeedbackPopup] Fast neutralize failed', e);
+      setFeedbackMessage('Could not reset feedback right now.');
+      setTimeout(() => setFeedbackMessage(null), 3500);
+    } finally {
+      setFeedbackPopup(null);
+    }
+  };
+
+  const handleMicroSurveyChoice = async (choice: 'cast' | 'tone' | 'runtime') => {
+    if (!feedbackPopup) return;
+    if (choice === 'runtime') {
+      await handleExplicitReason('too_long');
+      return;
+    }
+    if (choice === 'cast' && feedbackPopup.leadActors.length > 0) {
+      await handleExplicitReason(`actor:${feedbackPopup.leadActors[0]}`);
+      return;
+    }
+    if (choice === 'tone' && feedbackPopup.topKeywords.length > 0) {
+      await handleExplicitReason(`keyword:${feedbackPopup.topKeywords[0]}`);
+      return;
+    }
+    await handleExplicitReason('not_in_mood');
   };
 
   // Handle feedback
@@ -1894,6 +2048,14 @@ export default function SuggestPage() {
         const [insights, movieFeatures] = await Promise.all([
           addFeedback(uid, tmdbId, 'negative', reasons, feedbackMeta),
           blockSuggestion(uid, tmdbId).then(() => getMovieFeaturesForPopup(tmdbId))
+        ]);
+
+        await fetchEvidenceForFeatures([
+          ...movieFeatures.leadActors.map((name) => ({ type: 'actor' as FeatureType, name })),
+          ...movieFeatures.genres.map((name) => ({ type: 'genre' as FeatureType, name })),
+          ...movieFeatures.topKeywords.map((name) => ({ type: 'keyword' as FeatureType, name })),
+          ...(movieFeatures.franchise ? [{ type: 'collection' as FeatureType, name: movieFeatures.franchise }] : []),
+          ...(movieFeatures.director ? [{ type: 'director' as FeatureType, name: movieFeatures.director }] : [])
         ]);
 
         setBlockedIds(prev => new Set([...prev, tmdbId]));
@@ -1944,6 +2106,10 @@ export default function SuggestPage() {
         const hasFranchise = !!movieFeatures.franchise;
         const hasGenres = movieFeatures.genres.length > 0;
         const hasKeywords = movieFeatures.topKeywords.length > 0;
+        const shouldShowMicroSurvey = type === 'negative'
+          && microSurveyCount < 2
+          && (insights.strengthenedAvoidance.length > 0 || insights.newAvoidance.length > 0)
+          && Math.random() < 0.35;
 
         if (hasActors || hasFranchise || hasGenres || hasKeywords) {
           setFeedbackPopup({
@@ -1955,8 +2121,12 @@ export default function SuggestPage() {
             topKeywords: movieFeatures.topKeywords,
             genres: movieFeatures.genres,
             feedbackType: 'negative',
-            director: movieFeatures.director
+            director: movieFeatures.director,
+            showMicroSurvey: shouldShowMicroSurvey
           });
+          if (shouldShowMicroSurvey) {
+            setMicroSurveyCount((c) => c + 1);
+          }
           // No auto-dismiss - let user take their time or close manually
         } else {
           // No interesting features to ask about, just show the learning message
@@ -1968,6 +2138,14 @@ export default function SuggestPage() {
         const [insights, movieFeatures] = await Promise.all([
           addFeedback(uid, tmdbId, 'positive', reasons, feedbackMeta),
           getMovieFeaturesForPopup(tmdbId)
+        ]);
+
+        await fetchEvidenceForFeatures([
+          ...movieFeatures.leadActors.map((name) => ({ type: 'actor' as FeatureType, name })),
+          ...movieFeatures.genres.map((name) => ({ type: 'genre' as FeatureType, name })),
+          ...movieFeatures.topKeywords.map((name) => ({ type: 'keyword' as FeatureType, name })),
+          ...(movieFeatures.franchise ? [{ type: 'collection' as FeatureType, name: movieFeatures.franchise }] : []),
+          ...(movieFeatures.director ? [{ type: 'director' as FeatureType, name: movieFeatures.director }] : [])
         ]);
 
         // Show popup for positive feedback too - let users tell us what they loved
@@ -2020,8 +2198,13 @@ export default function SuggestPage() {
     const nextHistory = new Set(pairHistory);
     nextHistory.add(makePairId(winnerId, loserId));
     setPairHistory(nextHistory);
-    setPairwisePair(null);
     setPairwiseCount(nextCount);
+
+    // Hide both movies from the suggestions grid (winner goes to watchlist, loser is dismissed)
+    const nextBlockedIds = new Set(blockedIds);
+    nextBlockedIds.add(winnerId);
+    nextBlockedIds.add(loserId);
+    setBlockedIds(nextBlockedIds);
 
     try {
       const winner = items?.find((i) => i.id === winnerId);
@@ -2060,8 +2243,14 @@ export default function SuggestPage() {
     } catch (e) {
       console.error('[Pairwise] Failed to record preference', e);
     } finally {
-      const next = nextCount >= PAIRWISE_SESSION_LIMIT ? null : findPairwiseCandidate(items ?? [], nextHistory);
-      setPairwisePair(next);
+      // Find next pair from items that aren't blocked, or close modal if limit reached
+      if (nextCount >= PAIRWISE_SESSION_LIMIT) {
+        setPairwisePair(null);
+      } else {
+        const availableItems = (items ?? []).filter((i) => !nextBlockedIds.has(i.id) && !i.dismissed);
+        const next = findPairwiseCandidate(availableItems, nextHistory);
+        setPairwisePair(next);
+      }
     }
   };
 
@@ -2071,6 +2260,8 @@ export default function SuggestPage() {
     nextHistory.add(makePairId(aId, bId));
     setPairHistory(nextHistory);
     setPairwiseCount(nextCount);
+    
+    // Find next pair, or close modal if limit reached
     const next = nextCount >= PAIRWISE_SESSION_LIMIT ? null : findPairwiseCandidate(items ?? [], nextHistory);
     setPairwisePair(next);
   };
@@ -2244,6 +2435,7 @@ export default function SuggestPage() {
 
   return (
     <AuthGate>
+      <FeatureEvidenceContext.Provider value={featureEvidence}>
       {/* Feedback Toast */}
       {feedbackMessage && (
         <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded shadow-lg z-50 animate-fade-in-up">
@@ -2253,7 +2445,7 @@ export default function SuggestPage() {
 
       {/* Undo Toast for dismissed suggestions */}
       {undoToast && (
-        <div className="fixed bottom-4 left-4 bg-white text-gray-900 px-4 py-3 rounded shadow-lg border border-gray-200 z-50 flex items-center gap-3 animate-fade-in-up">
+        <div className="fixed bottom-4 left-4 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-4 py-3 rounded shadow-lg border border-gray-200 dark:border-gray-700 z-50 flex items-center gap-3 animate-fade-in-up">
           <div className="text-sm">Removed “{undoToast.title}”.</div>
           <button
             className="text-sm font-semibold text-blue-700 hover:text-blue-900"
@@ -2308,7 +2500,7 @@ export default function SuggestPage() {
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => handleExplicitReason('dislike_all')}
-                        className="px-3 py-1.5 text-xs bg-red-200 text-red-800 hover:bg-red-300 rounded-full transition-colors font-medium border border-red-300"
+                        className="px-3 py-1.5 text-xs bg-red-200 dark:bg-red-900/60 text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-900/80 rounded-full transition-colors font-medium border border-red-300 dark:border-red-800"
                       >
                         🚫 I don&apos;t like this movie
                       </button>
@@ -2319,26 +2511,50 @@ export default function SuggestPage() {
                   <div>
                     <p className="text-xs text-gray-400 mb-1.5">Not a problem with the movie:</p>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => handleExplicitReason('already_seen')}
-                        className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-full transition-colors"
-                      >
-                        ✓ Already seen it
-                      </button>
-                      <button
-                        onClick={() => handleExplicitReason('not_in_mood')}
-                        className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-full transition-colors"
-                      >
-                        😴 Not in the mood
-                      </button>
-                      <button
-                        onClick={() => handleExplicitReason('too_long')}
-                        className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-full transition-colors"
-                      >
-                        ⏱️ Too long right now
-                      </button>
+                      {[
+                        { key: 'already_seen', label: '✓ Already seen it', color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-900/60' },
+                        { key: 'not_in_mood', label: '😴 Not in the mood', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600' },
+                        { key: 'too_long', label: '⏱️ Too long right now', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600' },
+                      ].map(({ key, label, color }) => {
+                        const isSelected = selectedReasons.includes(key);
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => toggleReasonSelection(key)}
+                            className={getReasonButtonClasses(`px-3 py-1.5 text-xs rounded-full transition-colors ${color}`, isSelected)}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
+
+                  {feedbackPopup.showMicroSurvey && (
+                    <div className="mt-2 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg p-2 bg-gray-50 dark:bg-gray-900">
+                      <p className="text-[11px] text-gray-600 dark:text-gray-400 mb-1">Quick check: what missed?</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleMicroSurveyChoice('cast')}
+                          className="px-3 py-1 text-[11px] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          🎭 Cast/tone off
+                        </button>
+                        <button
+                          onClick={() => handleMicroSurveyChoice('tone')}
+                          className="px-3 py-1 text-[11px] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          🎨 Theme mismatch
+                        </button>
+                        <button
+                          onClick={() => handleMicroSurveyChoice('runtime')}
+                          className="px-3 py-1 text-[11px] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          ⏱️ Too long/slow
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Specific reasons section header */}
                   <div className="border-t border-gray-200 pt-2">
@@ -2350,15 +2566,25 @@ export default function SuggestPage() {
                     <div>
                       <p className="text-xs text-gray-400 mb-1.5">Not a fan of this actor:</p>
                       <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.leadActors.map(actor => (
-                          <button
-                            key={actor}
-                            onClick={() => handleExplicitReason(`actor:${actor}`)}
-                            className="px-3 py-1.5 text-xs bg-red-100 text-red-700 hover:bg-red-200 rounded-full transition-colors"
-                          >
-                            👎 {actor}
-                          </button>
-                        ))}
+                        {feedbackPopup.leadActors.map(actor => {
+                          const reason = `actor:${actor}`;
+                          const isSelected = selectedReasons.includes(reason);
+                          const badge = getFeatureEvidenceBadge('actor', actor);
+                          return (
+                            <button
+                              key={actor}
+                              onClick={() => toggleReasonSelection(reason)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-full transition-colors', isSelected)}
+                            >
+                              👎 {actor}
+                              {badge && (
+                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                  {badge.text}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -2368,12 +2594,24 @@ export default function SuggestPage() {
                     <div>
                       <p className="text-xs text-gray-400 mb-1.5">Franchise fatigue:</p>
                       <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => handleExplicitReason('franchise')}
-                          className="px-3 py-1.5 text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-full transition-colors"
-                        >
-                          🔄 Done with {feedbackPopup.franchise.split(':')[0]}
-                        </button>
+                        {(() => {
+                          const reason = 'franchise';
+                          const isSelected = selectedReasons.includes(reason);
+                          const badge = getFeatureEvidenceBadge('collection', feedbackPopup.franchise);
+                          return (
+                            <button
+                              onClick={() => toggleReasonSelection(reason)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-full transition-colors', isSelected)}
+                            >
+                              🔄 Done with {feedbackPopup.franchise.split(':')[0]}
+                              {badge && (
+                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                  {badge.text}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                   )}
@@ -2383,15 +2621,25 @@ export default function SuggestPage() {
                     <div>
                       <p className="text-xs text-gray-400 mb-1.5">Not into this genre:</p>
                       <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.genres.slice(0, 3).map(genre => (
-                          <button
-                            key={genre}
-                            onClick={() => handleExplicitReason(`genre:${genre}`)}
-                            className="px-3 py-1.5 text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 rounded-full transition-colors"
-                          >
-                            👎 {genre}
-                          </button>
-                        ))}
+                        {feedbackPopup.genres.slice(0, 3).map(genre => {
+                          const reason = `genre:${genre}`;
+                          const isSelected = selectedReasons.includes(reason);
+                          const badge = getFeatureEvidenceBadge('genre', genre);
+                          return (
+                            <button
+                              key={genre}
+                              onClick={() => toggleReasonSelection(reason)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-200 hover:bg-purple-200 dark:hover:bg-purple-900/60 rounded-full transition-colors', isSelected)}
+                            >
+                              👎 {genre}
+                              {badge && (
+                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                  {badge.text}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -2401,18 +2649,37 @@ export default function SuggestPage() {
                     <div>
                       <p className="text-xs text-gray-400 mb-1.5">Not interested in this topic:</p>
                       <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.topKeywords.slice(0, 5).map(keyword => (
-                          <button
-                            key={keyword}
-                            onClick={() => handleExplicitReason(`keyword:${keyword}`)}
-                            className="px-3 py-1.5 text-xs bg-amber-100 text-amber-700 hover:bg-amber-200 rounded-full transition-colors"
-                          >
-                            🏷️ {keyword}
-                          </button>
-                        ))}
+                        {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
+                          const reason = `keyword:${keyword}`;
+                          const isSelected = selectedReasons.includes(reason);
+                          const badge = getFeatureEvidenceBadge('keyword', keyword);
+                          return (
+                            <button
+                              key={keyword}
+                              onClick={() => toggleReasonSelection(reason)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 rounded-full transition-colors', isSelected)}
+                            >
+                              🏷️ {keyword}
+                              {badge && (
+                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                  {badge.text}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleFastNeutralize}
+                      className="text-[11px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dashed"
+                    >
+                      👍 This is fine (reset)
+                    </button>
+                  </div>
                 </>
               ) : (
                 <>
@@ -2421,24 +2688,27 @@ export default function SuggestPage() {
                   <div>
                     <p className="text-xs text-gray-400 mb-1.5">What made this a great pick?</p>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => handleExplicitReason('great_pick')}
-                        className="px-3 py-1.5 text-xs bg-green-100 text-green-700 hover:bg-green-200 rounded-full transition-colors"
-                      >
-                        ✨ Just a great pick!
-                      </button>
-                      <button
-                        onClick={() => handleExplicitReason('love_all')}
-                        className="px-3 py-1.5 text-xs bg-emerald-200 text-emerald-800 hover:bg-emerald-300 rounded-full transition-colors font-medium border border-emerald-300"
-                      >
-                        ❤️ I love everything about this!
-                      </button>
+                      {[
+                        { key: 'great_pick', label: '✨ Just a great pick!', color: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-900/60' },
+                        { key: 'love_all', label: '❤️ I love everything about this!', color: 'bg-emerald-200 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-300 dark:hover:bg-emerald-900/80 border border-emerald-300 dark:border-emerald-800 font-medium' },
+                      ].map(({ key, label, color }) => {
+                        const isSelected = selectedReasons.includes(key);
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => toggleReasonSelection(key)}
+                            className={getReasonButtonClasses(`px-3 py-1.5 text-xs rounded-full transition-colors ${color}`, isSelected)}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
                   {/* Specific reasons section header */}
-                  <div className="border-t border-gray-200 pt-2">
-                    <p className="text-xs text-gray-500 mb-2">Or tell us specifically:</p>
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Or tell us specifically:</p>
                   </div>
 
                   {/* Actor love */}
@@ -2446,15 +2716,25 @@ export default function SuggestPage() {
                     <div>
                       <p className="text-xs text-gray-400 mb-1.5">Love this actor:</p>
                       <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.leadActors.map(actor => (
-                          <button
-                            key={actor}
-                            onClick={() => handleExplicitReason(`actor:${actor}`)}
-                            className="px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors"
-                          >
-                            ❤️ {actor}
-                          </button>
-                        ))}
+                        {feedbackPopup.leadActors.map(actor => {
+                          const reason = `actor:${actor}`;
+                          const isSelected = selectedReasons.includes(reason);
+                          const badge = getFeatureEvidenceBadge('actor', actor);
+                          return (
+                            <button
+                              key={actor}
+                              onClick={() => toggleReasonSelection(reason)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors', isSelected)}
+                            >
+                              ❤️ {actor}
+                              {badge && (
+                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                  {badge.text}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -2464,12 +2744,24 @@ export default function SuggestPage() {
                     <div>
                       <p className="text-xs text-gray-400 mb-1.5">Love this franchise:</p>
                       <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => handleExplicitReason('franchise')}
-                          className="px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors"
-                        >
-                          🎬 More {feedbackPopup.franchise.split(':')[0]}!
-                        </button>
+                        {(() => {
+                          const reason = 'franchise';
+                          const isSelected = selectedReasons.includes(reason);
+                          const badge = getFeatureEvidenceBadge('collection', feedbackPopup.franchise);
+                          return (
+                            <button
+                              onClick={() => toggleReasonSelection(reason)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors', isSelected)}
+                            >
+                              🎬 More {feedbackPopup.franchise.split(':')[0]}!
+                              {badge && (
+                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                  {badge.text}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                   )}
@@ -2479,15 +2771,25 @@ export default function SuggestPage() {
                     <div>
                       <p className="text-xs text-gray-400 mb-1.5">Love this genre:</p>
                       <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.genres.slice(0, 3).map(genre => (
-                          <button
-                            key={genre}
-                            onClick={() => handleExplicitReason(`genre:${genre}`)}
-                            className="px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors"
-                          >
-                            ❤️ {genre}
-                          </button>
-                        ))}
+                        {feedbackPopup.genres.slice(0, 3).map(genre => {
+                          const reason = `genre:${genre}`;
+                          const isSelected = selectedReasons.includes(reason);
+                          const badge = getFeatureEvidenceBadge('genre', genre);
+                          return (
+                            <button
+                              key={genre}
+                              onClick={() => toggleReasonSelection(reason)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors', isSelected)}
+                            >
+                              ❤️ {genre}
+                              {badge && (
+                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                  {badge.text}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -2497,15 +2799,23 @@ export default function SuggestPage() {
                     <div>
                       <p className="text-xs text-gray-400 mb-1.5">Love this theme:</p>
                       <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.topKeywords.slice(0, 5).map(keyword => (
-                          <button
-                            key={keyword}
-                            onClick={() => handleExplicitReason(`keyword:${keyword}`)}
-                            className="px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors"
-                          >
-                            ❤️ {keyword}
-                          </button>
-                        ))}
+                        {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
+                          const badge = getFeatureEvidenceBadge('keyword', keyword);
+                          return (
+                            <button
+                              key={keyword}
+                              onClick={() => handleExplicitReason(`keyword:${keyword}`)}
+                              className="px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors"
+                            >
+                              ❤️ {keyword}
+                              {badge && (
+                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                  {badge.text}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -2513,85 +2823,233 @@ export default function SuggestPage() {
               )}
             </div>
 
-            {/* Skip option */}
-            <div className="mt-3 text-center">
-              <button
-                onClick={() => setFeedbackPopup(null)}
-                className="text-xs text-gray-400 hover:text-gray-600"
-              >
-                Skip — we&apos;ll learn from patterns
-              </button>
+            <div className="mt-3 flex flex-col items-center gap-2">
+              <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                {selectedReasons.length > 0
+                  ? `${selectedReasons.length} reason${selectedReasons.length === 1 ? '' : 's'} selected`
+                  : 'Pick one or more reasons, then submit'}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSubmitSelectedReasons}
+                  disabled={selectedReasons.length === 0}
+                  className={`px-3 py-2 rounded-md text-xs font-semibold ${selectedReasons.length === 0 ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed' : 'bg-blue-600 dark:bg-blue-700 text-white hover:bg-blue-700 dark:hover:bg-blue-600'}`}
+                >
+                  Submit selected
+                </button>
+                <button
+                  onClick={() => setFeedbackPopup(null)}
+                  className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  Skip — we&apos;ll learn from patterns
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
       {pairwisePair && (
-        <div className="mb-5 rounded-xl border border-gray-200 bg-white shadow-sm p-4">
+        <>
+          {/* Fullscreen Trailer Modal for Pairwise */}
+          {pairwiseVideoId !== null && (
+            <div
+              className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4"
+              onClick={() => setPairwiseVideoId(null)}
+            >
+              <div
+                className="relative w-full max-w-4xl aspect-video"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {(() => {
+                  const videoItem = pairwiseVideoId === pairwisePair.a.id ? pairwisePair.a : pairwisePair.b;
+                  return videoItem.trailerKey ? (
+                    <iframe
+                      src={`https://www.youtube.com/embed/${videoItem.trailerKey}?autoplay=1`}
+                      title={`${videoItem.title} trailer`}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      className="absolute inset-0 w-full h-full rounded-lg"
+                    />
+                  ) : null;
+                })()}
+                <button
+                  onClick={() => setPairwiseVideoId(null)}
+                  className="absolute -top-10 right-0 w-8 h-8 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full flex items-center justify-center text-white text-lg transition-all"
+                  aria-label="Close trailer"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+          
+        <div className="mb-5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-gray-900">Which fits you better right now?</p>
-              <p className="text-xs text-gray-500">These two were neck-and-neck; your pick will tune future rankings.</p>
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Which fits you better right now?</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">These two were neck-and-neck; your pick will tune future rankings.</p>
             </div>
             <div className="flex items-center gap-2 text-[11px] text-gray-500">
-              <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">Pairwise learning</span>
-              <span>{pairwiseCount}/{PAIRWISE_SESSION_LIMIT} this session</span>
+              <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200">Pairwise learning</span>
+              <span>{pairwiseCount + 1}/{PAIRWISE_SESSION_LIMIT} this session</span>
               <button
-                className="text-xs text-gray-500 hover:text-gray-700"
+                className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                 onClick={() => handlePairwiseSkip(pairwisePair.a.id, pairwisePair.b.id)}
               >
                 Skip
               </button>
             </div>
           </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="mt-3 grid gap-4 md:grid-cols-2">
             {[pairwisePair.a, pairwisePair.b].map((item, idx) => {
               const other = idx === 0 ? pairwisePair.b : pairwisePair.a;
               return (
-                <div key={item.id} className="rounded-lg border border-gray-100 bg-gray-50 p-3 flex flex-col gap-2">
-                  <div className="text-xs uppercase text-gray-500">Option {idx === 0 ? 'A' : 'B'}</div>
-                  <div className="text-sm font-semibold text-gray-900">
-                    {item.title}{item.year ? ` (${item.year})` : ''}
+                <div key={item.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col">
+                  {/* Header badge */}
+                  <div className="px-3 py-2 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                    <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Option {idx === 0 ? 'A' : 'B'}</div>
                   </div>
-                  <div className="text-xs text-gray-600">{item.reasons.slice(0, 2).join(' • ')}</div>
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
-                    {item.consensusLevel && (
-                      <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">Consensus: {item.consensusLevel}</span>
+                  
+                  {/* Movie content */}
+                  <div className="flex gap-3 p-3">
+                    {/* Poster */}
+                    {item.poster_path ? (
+                      <div className="w-20 h-28 flex-shrink-0 bg-gray-700 rounded overflow-hidden">
+                        <img 
+                          src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-20 h-28 flex-shrink-0 bg-gray-700 dark:bg-gray-600 rounded flex items-center justify-center text-gray-400 dark:text-gray-500 text-xs text-center p-1">
+                        No poster
+                      </div>
                     )}
-                    {item.sources?.length ? (
-                      <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">{item.sources.length} source{item.sources.length === 1 ? '' : 's'}</span>
-                    ) : null}
+                    
+                    {/* Info */}
+                    <div className="flex-1 min-w-0 flex flex-col">
+                      <div className="font-semibold text-base text-gray-900 dark:text-gray-100 mb-1">
+                        {item.title}
+                      </div>
+                      {item.year && (
+                        <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">{item.year}</div>
+                      )}
+                      
+                      {/* Genres */}
+                      {item.genres && item.genres.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {item.genres.slice(0, 3).map((genre, i) => (
+                            <span key={i} className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full">
+                              {genre}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {/* Rating */}
+                      {item.vote_average && (
+                        <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                          <span className="text-yellow-500">⭐</span>
+                          <span className="font-medium">{item.vote_average.toFixed(1)}</span>
+                          <span className="text-gray-400 dark:text-gray-500 text-xs">/10</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <button
-                    className="mt-1 inline-flex items-center justify-center rounded-md bg-blue-600 text-white text-sm font-medium px-3 py-2 hover:bg-blue-700"
-                    onClick={() => handlePairwiseVote(item.id, other.id)}
-                  >
-                    Choose this one
-                  </button>
+                  
+                  {/* Description */}
+                  {item.overview && (
+                    <div className="px-3 pb-3">
+                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-3 leading-relaxed">
+                        {item.overview}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Trailer button */}
+                  {item.trailerKey && (
+                    <div className="px-3 pb-2">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setPairwiseVideoId(item.id);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-100 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-md transition-colors font-medium"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" />
+                        </svg>
+                        Watch Trailer
+                      </button>
+                    </div>
+                  )}
+                  
+                  {/* Reasons */}
+                  <div className="px-3 pb-3 border-t border-gray-100 dark:border-gray-700 pt-3">
+                    <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Why this matches you:</div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
+                      {item.reasons.slice(0, 2).map((reason, i) => (
+                        <div key={i} className="flex items-start gap-1.5">
+                          <span className="text-blue-500 mt-0.5">•</span>
+                          <span>{reason}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  {/* Badges */}
+                  <div className="px-3 pb-3">
+                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                      {item.consensusLevel && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800">
+                          Consensus: {item.consensusLevel}
+                        </span>
+                      )}
+                      {item.sources?.length ? (
+                        <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-800">
+                          {item.sources.length} source{item.sources.length === 1 ? '' : 's'}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  
+                  {/* Action button */}
+                  <div className="px-3 pb-3 mt-auto">
+                    <button
+                      className="w-full inline-flex items-center justify-center rounded-md bg-blue-600 dark:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
+                      onClick={() => handlePairwiseVote(item.id, other.id)}
+                    >
+                      Choose this one
+                    </button>
+                  </div>
                 </div>
               );
             })}
           </div>
         </div>
+        </>
       )}
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Suggestions</h1>
-          <p className="text-xs text-gray-600 mt-1">Based on your liked and highly rated films.</p>
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Suggestions</h1>
+          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Based on your liked and highly rated films.</p>
         </div>
         <div className="flex flex-col items-end gap-1 text-xs">
           <div className="flex items-center gap-2">
-            <span className="text-gray-600">Mode:</span>
+            <span className="text-gray-600 dark:text-gray-400">Mode:</span>
             <button
               type="button"
-              className={`px-2 py-1 rounded border text-xs ${mode === 'quick' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+              className={`px-2 py-1 rounded border text-xs ${mode === 'quick' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
               onClick={() => { setMode('quick'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
             >
               Quick
             </button>
             <button
               type="button"
-              className={`px-2 py-1 rounded border text-xs ${mode === 'deep' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+              className={`px-2 py-1 rounded border text-xs ${mode === 'deep' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
               onClick={() => { setMode('deep'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
             >
               Deep dive
@@ -2634,41 +3092,26 @@ export default function SuggestPage() {
 
       {/* Enrichment Warning - show if less than 50% of films are mapped */}
       {mappingCoverage && mappingCoverage.mapped < mappingCoverage.total * 0.5 && !loading && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-          <div className="flex items-start gap-3">
-            <span className="text-xl">⚠️</span>
-            <div>
-              <h3 className="font-medium text-amber-800">Limited Film Data</h3>
-              <p className="text-sm text-amber-700 mt-1">
-                Only {mappingCoverage.mapped} of {mappingCoverage.total} films ({Math.round(mappingCoverage.mapped / mappingCoverage.total * 100)}%)
-                have enriched data. Suggestions are based on partial watch history.
-              </p>
-              <p className="text-sm text-amber-700 mt-1">
-                <a href="/import" className="underline font-medium">Re-import your data</a> to get better recommendations.
-              </p>
-            </div>
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 flex gap-3">
+          <span className="text-lg">⚠️</span>
+          <div className="text-sm text-amber-900">
+            <p>Only {mappingCoverage.mapped} of {mappingCoverage.total} films are mapped to TMDB. Recommendations may miss items.</p>
+            <p className="text-xs text-amber-800 mt-1">Import more data or refresh mappings to improve coverage.</p>
           </div>
         </div>
       )}
 
-      {loadingFilms && <p className="text-sm text-gray-600">Loading your library from database…</p>}
-      {
-        loading && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm text-gray-600">
-              <span>Computing your recommendations…</span>
-              <span className="text-xs">{Math.round((progress.current / progress.total) * 100)}%</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-              <div
-                className="h-full bg-blue-600 transition-all duration-500 ease-out"
-                style={{ width: `${(progress.current / progress.total) * 100}%` }}
-              />
-            </div>
-            <p className="text-xs text-gray-500">{progress.stage}</p>
+      {loading && (
+        <div className="mb-4">
+          <div className="h-2 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-500 ease-out"
+              style={{ width: `${progress.total ? (progress.current / progress.total) * 100 : 0}%` }}
+            />
           </div>
-        )
-      }
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{progress.stage}</p>
+        </div>
+      )}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {
         !loading && !error && noCandidatesReason && (
@@ -4250,7 +4693,8 @@ export default function SuggestPage() {
           <p className="text-gray-700">Your personalized recommendations will appear here.</p>
         )
       }
-    </AuthGate >
+      </FeatureEvidenceContext.Provider>
+    </AuthGate>
   );
 }
 

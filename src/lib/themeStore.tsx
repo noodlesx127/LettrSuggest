@@ -21,6 +21,20 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
+const DARKNESS_LEVELS: DarknessLevel[] = ['soft', 'moderate', 'deep', 'pitch'];
+
+const readInitialMode = (): ThemeMode => {
+  if (typeof window === 'undefined') return 'system';
+  const stored = window.localStorage.getItem('theme_mode');
+  return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+};
+
+const readInitialDarkness = (): DarknessLevel => {
+  if (typeof window === 'undefined') return 'moderate';
+  const stored = window.localStorage.getItem('darkness_level');
+  return DARKNESS_LEVELS.includes(stored as DarknessLevel) ? (stored as DarknessLevel) : 'moderate';
+};
+
 export function useTheme() {
   const context = useContext(ThemeContext);
   if (!context) {
@@ -30,8 +44,8 @@ export function useTheme() {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>('system');
-  const [darknessLevel, setDarknessLevelState] = useState<DarknessLevel>('moderate');
+  const [mode, setModeState] = useState<ThemeMode>(() => readInitialMode());
+  const [darknessLevel, setDarknessLevelState] = useState<DarknessLevel>(() => readInitialDarkness());
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('light');
   const [isLoading, setIsLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
@@ -77,8 +91,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
             .single();
 
           if (data && !error) {
-            setModeState((data.theme_mode as ThemeMode) || 'system');
-            setDarknessLevelState((data.darkness_level as DarknessLevel) || 'moderate');
+            const nextMode = (data.theme_mode as ThemeMode) || 'system';
+            const nextDarkness = (data.darkness_level as DarknessLevel) || 'moderate';
+            setModeState(nextMode);
+            setDarknessLevelState(nextDarkness);
+            window.localStorage.setItem('theme_mode', nextMode);
+            window.localStorage.setItem('darkness_level', nextDarkness);
           }
         }
       } catch (error) {
@@ -111,11 +129,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setMode = (newMode: ThemeMode) => {
     setModeState(newMode);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('theme_mode', newMode);
+    }
     void saveSettings({ mode: newMode });
   };
 
   const setDarknessLevel = (newLevel: DarknessLevel) => {
     setDarknessLevelState(newLevel);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('darkness_level', newLevel);
+    }
     void saveSettings({ darknessLevel: newLevel });
   };
 

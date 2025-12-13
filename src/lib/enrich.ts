@@ -217,6 +217,59 @@ export async function unblockSuggestion(userId: string, tmdbId: number) {
   }
 }
 
+export async function neutralizeFeedback(userId: string, tmdbId: number): Promise<void> {
+  if (!supabase) throw new Error('Supabase not initialized');
+
+  try {
+    const features = await extractMovieFeatures(tmdbId);
+    const updates: Array<{ type: FeatureType; id: number; name: string }> = [];
+
+    features.actors.slice(0, 3).forEach((actor) => updates.push({ type: 'actor', id: actor.id, name: actor.name }));
+    features.keywords.slice(0, 8).forEach((keyword) => updates.push({ type: 'keyword', id: keyword.id, name: keyword.name }));
+    features.directors.slice(0, 1).forEach((director) => updates.push({ type: 'director', id: director.id, name: director.name }));
+    features.genres.slice(0, 3).forEach((genre) => updates.push({ type: 'genre', id: genre.id, name: genre.name }));
+    if (features.collection) {
+      updates.push({ type: 'collection', id: features.collection.id, name: features.collection.name });
+    }
+
+    for (const update of updates) {
+      const { data: existing } = await supabase
+        .from('user_feature_feedback')
+        .select('positive_count, negative_count')
+        .eq('user_id', userId)
+        .eq('feature_type', update.type)
+        .eq('feature_id', update.id)
+        .maybeSingle();
+
+      const positive = existing?.positive_count ?? 0;
+      const negative = Math.max(0, (existing?.negative_count ?? 0) - 1);
+      const total = positive + negative;
+      const inferredPreference = total > 0 ? positive / total : 0.5;
+
+      await supabase
+        .from('user_feature_feedback')
+        .upsert({
+          user_id: userId,
+          feature_type: update.type,
+          feature_id: update.id,
+          feature_name: update.name,
+          positive_count: positive,
+          negative_count: negative,
+          inferred_preference: inferredPreference,
+          last_updated: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id,feature_type,feature_id'
+        });
+    }
+
+    await supabase.from('suggestion_feedback').delete().eq('user_id', userId).eq('tmdb_id', tmdbId);
+    await unblockSuggestion(userId, tmdbId).catch((e) => console.warn('[Neutralize] unblock failed', e));
+    console.log('[Neutralize] Cleared negative feedback', { userId: userId.slice(0, 8), tmdbId, featuresUpdated: updates.length });
+  } catch (e) {
+    console.error('[Neutralize] Failed to neutralize feedback', { tmdbId, error: e });
+  }
+}
+
 export async function getBlockedSuggestions(userId: string): Promise<Set<number>> {
   if (!supabase) throw new Error('Supabase not initialized');
   const { data, error } = await supabase
@@ -303,6 +356,16 @@ export interface FeedbackLearningInsights {
   learningSummary: string;
 }
 
+export type FeatureType = 'actor' | 'keyword' | 'genre' | 'collection' | 'director';
+
+export type FeatureEvidenceSummary = {
+  positiveCount: number;
+  negativeCount: number;
+  totalCount: number;
+  lastUpdated: string | null;
+  decayMultiplier: number;
+};
+
 export async function addFeedback(
   userId: string,
   tmdbId: number,
@@ -326,8 +389,9 @@ export async function addFeedback(
   // Get existing feature preferences to detect what's being strengthened vs new
   const existingFeatures = await getExistingFeaturePreferences(userId, movieFeatures);
 
-  // Insert feedback with reason types and movie features
-  const { error } = await supabase.from('suggestion_feedback').insert({
+  // Upsert feedback (replaces any existing feedback for this user+movie pair)
+  // This prevents duplicates when user undos and re-dismisses
+  const { error } = await supabase.from('suggestion_feedback').upsert({
     user_id: userId,
     tmdb_id: tmdbId,
     feedback_type: type,
@@ -335,7 +399,7 @@ export async function addFeedback(
     movie_features: movieFeatures || {},
     recommendation_sources: opts?.sources ?? [],
     consensus_level: opts?.consensusLevel ?? null
-  });
+  }, { onConflict: 'user_id,tmdb_id' });
 
   if (error) {
     console.error('[Supabase] addFeedback error', { userId, tmdbId, type, error });
@@ -479,7 +543,8 @@ async function applyFeatureDelta(
     const positiveCount = (existing?.positive_count || 0) + update.deltaPositive;
     const negativeCount = (existing?.negative_count || 0) + update.deltaNegative;
     const total = positiveCount + negativeCount;
-    const inferredPreference = total > 0 ? positiveCount / total : 0.5;
+    // Bayesian win rate with neutral prior (Laplace smoothing) to regularize pairwise-driven updates
+    const inferredPreference = (positiveCount + 1) / (total + 2);
 
     await supabase
       .from('user_feature_feedback')
@@ -775,6 +840,71 @@ export async function getMovieFeaturesForPopup(tmdbId: number): Promise<{
 }
 
 /**
+ * Fetch evidence (sample counts + recency) for specific feature names.
+ * Used by UI to show strength/recency badges next to reasons and feedback chips.
+ */
+export async function getFeatureEvidenceSummary(
+  userId: string,
+  featureRequests: Array<{ type: FeatureType; name: string }>
+): Promise<Map<string, FeatureEvidenceSummary>> {
+  const evidence = new Map<string, FeatureEvidenceSummary>();
+  if (!supabase || featureRequests.length === 0) return evidence;
+
+  const grouped = new Map<FeatureType, string[]>();
+  for (const req of featureRequests) {
+    const trimmed = (req.name || '').trim();
+    if (!trimmed) continue;
+    grouped.set(req.type, [...(grouped.get(req.type) ?? []), trimmed]);
+  }
+
+  const computeDecayMultiplier = (lastUpdated?: string | null) => {
+    if (!lastUpdated) return 1;
+    const daysSince = (Date.now() - new Date(lastUpdated).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSince < 7) return 1.3;
+    if (daysSince < 30) return 1;
+    return 0.8;
+  };
+
+  for (const [type, names] of grouped.entries()) {
+    const unique = Array.from(new Set(names));
+    if (unique.length === 0) continue;
+
+    try {
+      const { data, error } = await supabase
+        .from('user_feature_feedback')
+        .select('feature_name, positive_count, negative_count, last_updated')
+        .eq('user_id', userId)
+        .eq('feature_type', type)
+        .in('feature_name', unique);
+
+      if (error) {
+        console.error('[FeatureEvidence] Failed to fetch evidence', { type, error });
+        continue;
+      }
+
+      data?.forEach((row: any) => {
+        const positive = row?.positive_count ?? 0;
+        const negative = row?.negative_count ?? 0;
+        const totalCount = positive + negative;
+        const lastUpdated = row?.last_updated ?? null;
+        const key = `${type}:${(row?.feature_name || '').toLowerCase()}`;
+        evidence.set(key, {
+          positiveCount: positive,
+          negativeCount: negative,
+          totalCount,
+          lastUpdated,
+          decayMultiplier: computeDecayMultiplier(lastUpdated)
+        });
+      });
+    } catch (e) {
+      console.error('[FeatureEvidence] Exception while fetching evidence', { type, error: e });
+    }
+  }
+
+  return evidence;
+}
+
+/**
  * Boost a specific feature based on explicit user selection
  * This adds EXTRA weight when user explicitly clicks a reason (vs automatic pattern detection)
  * @param explicitBoost - How many extra negative counts to add (default 2 = 3x the signal of automatic)
@@ -907,6 +1037,24 @@ async function updateFeaturePreferences(
     });
   });
 
+  // Track top directors (strong stylistic signal)
+  features.directors.slice(0, 2).forEach(director => {
+    updates.push({
+      feature_type: 'director',
+      feature_id: director.id,
+      feature_name: director.name
+    });
+  });
+
+  // Track genres (capture tone/content preferences)
+  features.genres.slice(0, 5).forEach(genre => {
+    updates.push({
+      feature_type: 'genre',
+      feature_id: genre.id,
+      feature_name: genre.name
+    });
+  });
+
   // Track collection/franchise - strong signal for franchise fatigue
   if (features.collection) {
     updates.push({
@@ -931,8 +1079,9 @@ async function updateFeaturePreferences(
       const positiveCount = (existing?.positive_count || 0) + (isPositive ? 1 : 0);
       const negativeCount = (existing?.negative_count || 0) + (isPositive ? 0 : 1);
       const total = positiveCount + negativeCount;
-      // inferred_preference: 0 = strongly avoid, 0.5 = neutral, 1 = strongly prefer
-      const inferredPreference = total > 0 ? positiveCount / total : 0.5;
+      // Bayesian win rate with a neutral prior (Laplace smoothing) to avoid overreacting to low counts
+      const winRate = (positiveCount + 1) / (total + 2); // 0.5 at zero data, trends to observed rate
+      const inferredPreference = winRate;
 
       await supabase
         .from('user_feature_feedback')
@@ -1050,11 +1199,15 @@ export async function getAvoidedFeatures(userId: string): Promise<{
   avoidActors: Array<{ id: number; name: string; weight: number; count: number }>;
   avoidKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
   avoidFranchises: Array<{ id: number; name: string; weight: number; count: number }>;
+  avoidDirectors: Array<{ id: number; name: string; weight: number; count: number }>;
+  avoidGenres: Array<{ id: number; name: string; weight: number; count: number }>;
   preferActors: Array<{ id: number; name: string; weight: number; count: number }>;
   preferKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
+  preferDirectors: Array<{ id: number; name: string; weight: number; count: number }>;
+  preferGenres: Array<{ id: number; name: string; weight: number; count: number }>;
 }> {
   if (!supabase) {
-    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], preferActors: [], preferKeywords: [] };
+    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], avoidDirectors: [], avoidGenres: [], preferActors: [], preferKeywords: [], preferDirectors: [], preferGenres: [] };
   }
 
   try {
@@ -1172,18 +1325,68 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 20);
 
+    // DIRECTORS: Start avoiding/preferring after 1 net rejection/approval (from pairwise learning)
+    const avoidDirectors = data
+      .filter(f => f.feature_type === 'director' && (f.negative_count - f.positive_count) >= 1)
+      .map(f => ({
+        id: f.feature_id,
+        name: f.feature_name,
+        weight: applyRecencyBoost(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
+        count: f.negative_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 10);
+
+    const preferDirectors = data
+      .filter(f => f.feature_type === 'director' && (f.positive_count - f.negative_count) >= 1)
+      .map(f => ({
+        id: f.feature_id,
+        name: f.feature_name,
+        weight: applyRecencyBoost(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
+        count: f.positive_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 10);
+
+    // GENRES: Start avoiding/preferring after 2 net rejections/approvals (higher threshold for broad categories)
+    const avoidGenres = data
+      .filter(f => f.feature_type === 'genre' && (f.negative_count - f.positive_count) >= 2)
+      .map(f => ({
+        id: f.feature_id,
+        name: f.feature_name,
+        weight: applyRecencyBoost(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
+        count: f.negative_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 5);
+
+    const preferGenres = data
+      .filter(f => f.feature_type === 'genre' && (f.positive_count - f.negative_count) >= 2)
+      .map(f => ({
+        id: f.feature_id,
+        name: f.feature_name,
+        weight: applyRecencyBoost(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
+        count: f.positive_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 5);
+
     console.log('[PandoraLearning] Loaded graduated preferences', {
       avoidActors: avoidActors.map(a => `${a.name}(${a.count}👎, -${a.weight.toFixed(1)})`).slice(0, 3),
       avoidKeywords: avoidKeywords.map(k => `${k.name}(${k.count}👎)`).slice(0, 5),
       avoidFranchises: avoidFranchises.map(f => f.name),
+      avoidDirectors: avoidDirectors.map(d => `${d.name}(${d.count}👎)`).slice(0, 3),
+      avoidGenres: avoidGenres.map(g => `${g.name}(${g.count}👎)`).slice(0, 3),
       preferActors: preferActors.map(a => `${a.name}(${a.count}👍)`).slice(0, 3),
-      preferKeywords: preferKeywords.map(k => `${k.name}(${k.count}👍)`).slice(0, 5)
+      preferKeywords: preferKeywords.map(k => `${k.name}(${k.count}👍)`).slice(0, 5),
+      preferDirectors: preferDirectors.map(d => `${d.name}(${d.count}👍)`).slice(0, 3),
+      preferGenres: preferGenres.map(g => `${g.name}(${g.count}👍)`).slice(0, 3)
     });
 
-    return { avoidActors, avoidKeywords, avoidFranchises, preferActors, preferKeywords };
+    return { avoidActors, avoidKeywords, avoidFranchises, avoidDirectors, avoidGenres, preferActors, preferKeywords, preferDirectors, preferGenres };
   } catch (e) {
     console.error('[PandoraLearning] Error loading graduated features', e);
-    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], preferActors: [], preferKeywords: [] };
+    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], avoidDirectors: [], avoidGenres: [], preferActors: [], preferKeywords: [], preferDirectors: [], preferGenres: [] };
   }
 }
 
@@ -2679,8 +2882,12 @@ export async function suggestByOverlap(params: {
     avoidActors: Array<{ id: number; name: string; weight: number; count: number }>;
     avoidKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
     avoidFranchises: Array<{ id: number; name: string; weight: number; count: number }>;
+    avoidDirectors: Array<{ id: number; name: string; weight: number; count: number }>;
+    avoidGenres: Array<{ id: number; name: string; weight: number; count: number }>;
     preferActors: Array<{ id: number; name: string; weight: number; count: number }>;
     preferKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
+    preferDirectors: Array<{ id: number; name: string; weight: number; count: number }>;
+    preferGenres: Array<{ id: number; name: string; weight: number; count: number }>;
   };
   enhancedProfile?: {
     topActors: Array<{ id: number; name: string; weight: number }>;
@@ -3554,9 +3761,16 @@ export async function suggestByOverlap(params: {
       }
 
       if (similarDirectors.length) {
-        score += 1.2 * weights.director; // Meaningful boost for similar directors (increased from 0.8)
         const firstMatch = similarDirectors[0];
-        reasons.push(`Similar to ${firstMatch.likedDirector} you love — shares themes like ${firstMatch.sharedThemes.slice(0, 2).join(', ')}`);
+        const likedWeight = pref.directors.get(firstMatch.likedDirector) ?? 0.8;
+        const similarity = Math.min(1, firstMatch.sharedThemes.length / 4); // cap similarity
+        let borrow = likedWeight * 0.25 * similarity; // borrow a fraction of strong signal
+        borrow = Math.min(0.6, borrow); // hard cap to keep gentle
+        // Light decay so borrowed signals fade if not reinforced elsewhere
+        borrow *= 0.9;
+
+        score += borrow * weights.director;
+        reasons.push(`Similar to ${firstMatch.likedDirector} you love — shares themes like ${firstMatch.sharedThemes.slice(0, 2).join(', ')} (borrowed confidence)`);
       }
     }
 
@@ -3590,9 +3804,15 @@ export async function suggestByOverlap(params: {
       }
 
       if (similarCast.length) {
-        score += 0.5 * weights.cast; // Modest boost for similar actors (increased from 0.3)
         const firstMatch = similarCast[0];
-        reasons.push(`Similar to ${firstMatch.likedActor} you enjoy — works in ${firstMatch.sharedThemes.slice(0, 2).join(', ')} themes`);
+        const likedWeight = pref.cast.get(firstMatch.likedActor) ?? 0.6;
+        const similarity = Math.min(1, firstMatch.sharedThemes.length / 4);
+        let borrow = likedWeight * 0.2 * similarity; // gentle borrow
+        borrow = Math.min(0.4, borrow);
+        borrow *= 0.9; // decay borrowed signal so it needs reinforcement
+
+        score += borrow * weights.cast;
+        reasons.push(`Similar to ${firstMatch.likedActor} you enjoy — works in ${firstMatch.sharedThemes.slice(0, 2).join(', ')} themes (borrowed confidence)`);
       }
     }
 
@@ -3895,6 +4115,88 @@ export async function suggestByOverlap(params: {
           const topKeyword = matchedKeywords.sort((a, b) => b.weight - a.weight)[0];
           reasons.push(`Matches "${topKeyword.name}" — a theme you consistently enjoy`);
           console.log(`[PandoraLearning] Keyword boost for "${m.title}": ${matchedKeywords.length} matches (+${keywordBoost.toFixed(1)})`);
+        }
+      }
+
+      // PENALTY for directors user has rejected (from pairwise learning)
+      if (ff.avoidDirectors && ff.avoidDirectors.length > 0) {
+        const avoidedDirectorMap = new Map(ff.avoidDirectors.map(d => [d.id, d]));
+        const matchedAvoidDirectors = feats.directorIds
+          .map(id => avoidedDirectorMap.get(id))
+          .filter((d): d is { id: number; name: string; weight: number; count: number } => d !== undefined);
+
+        if (matchedAvoidDirectors.length > 0) {
+          const director = matchedAvoidDirectors[0];
+          const confidence = confidenceFromCount(director.count);
+          const directorPenalty = -applySoftCap(director.weight * confidence * 1.5, 4.0);
+          totalPenalty += directorPenalty;
+          const countLabel = director.count === 1 ? 'once' : `${director.count} times`;
+          penaltyReasons.push(`Directed by ${director.name} — you've passed on their films ${countLabel}`);
+          console.log(`[PandoraLearning] Director penalty for "${m.title}": ${director.name} (${directorPenalty.toFixed(1)})`);
+        }
+      }
+
+      // BOOST for directors user prefers (from pairwise learning)
+      if (ff.preferDirectors && ff.preferDirectors.length > 0) {
+        const preferredDirectorMap = new Map(ff.preferDirectors.map(d => [d.id, d]));
+        const matchedPreferDirectors = feats.directorIds
+          .map(id => preferredDirectorMap.get(id))
+          .filter((d): d is { id: number; name: string; weight: number; count: number } => d !== undefined);
+
+        if (matchedPreferDirectors.length > 0) {
+          const director = matchedPreferDirectors[0];
+          const confidence = confidenceFromCount(director.count);
+          const directorBoost = applySoftCap(director.weight * confidence * 1.5, 4.0);
+          score += directorBoost;
+          const countLabel = director.count === 1 ? '' : ` (${director.count}× chosen)`;
+          reasons.push(`By ${director.name}${countLabel} — a director you consistently pick`);
+          console.log(`[PandoraLearning] Director boost for "${m.title}": ${director.name} (+${directorBoost.toFixed(1)})`);
+        }
+      }
+
+      // PENALTY for genres user has repeatedly rejected (from pairwise learning, requires 2+ net rejections)
+      if (ff.avoidGenres && ff.avoidGenres.length > 0) {
+        const avoidedGenreMap = new Map(ff.avoidGenres.map(g => [g.id, g]));
+        const matchedAvoidGenres = feats.genreIds
+          .map(id => avoidedGenreMap.get(id))
+          .filter((g): g is { id: number; name: string; weight: number; count: number } => g !== undefined);
+
+        if (matchedAvoidGenres.length > 0) {
+          // Sum penalties but cap to avoid over-penalizing multi-genre films
+          const genrePenalty = -applySoftCap(
+            matchedAvoidGenres.reduce((sum, g) => {
+              const confidence = confidenceFromCount(g.count);
+              return sum + (g.weight * confidence * 0.5);
+            }, 0),
+            3.0
+          );
+          totalPenalty += genrePenalty;
+          const topGenre = matchedAvoidGenres.sort((a, b) => b.weight - a.weight)[0];
+          penaltyReasons.push(`Contains ${topGenre.name} — a genre you've been skipping`);
+          console.log(`[PandoraLearning] Genre penalty for "${m.title}": ${matchedAvoidGenres.map(g => g.name).join(', ')} (${genrePenalty.toFixed(1)})`);
+        }
+      }
+
+      // BOOST for genres user prefers (from pairwise learning, requires 2+ net approvals)
+      if (ff.preferGenres && ff.preferGenres.length > 0) {
+        const preferredGenreMap = new Map(ff.preferGenres.map(g => [g.id, g]));
+        const matchedPreferGenres = feats.genreIds
+          .map(id => preferredGenreMap.get(id))
+          .filter((g): g is { id: number; name: string; weight: number; count: number } => g !== undefined);
+
+        if (matchedPreferGenres.length > 0) {
+          // Sum boosts but cap to prevent genre from dominating
+          const genreBoost = applySoftCap(
+            matchedPreferGenres.reduce((sum, g) => {
+              const confidence = confidenceFromCount(g.count);
+              return sum + (g.weight * confidence * 0.4);
+            }, 0),
+            2.5
+          );
+          score += genreBoost;
+          const topGenre = matchedPreferGenres.sort((a, b) => b.weight - a.weight)[0];
+          reasons.push(`Features ${topGenre.name} — a genre you consistently enjoy`);
+          console.log(`[PandoraLearning] Genre boost for "${m.title}": ${matchedPreferGenres.map(g => g.name).join(', ')} (+${genreBoost.toFixed(1)})`);
         }
       }
     }

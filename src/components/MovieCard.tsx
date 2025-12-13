@@ -1,6 +1,7 @@
 'use client';
 import Image from 'next/image';
-import { useState } from 'react';
+import { createContext, useContext, useMemo, useState } from 'react';
+import type { FeatureEvidenceSummary, FeatureType } from '@/lib/enrich';
 
 // Poster image component with error handling
 function PosterImage({ posterPath, title }: { posterPath?: string | null; title: string }) {
@@ -71,6 +72,7 @@ type MovieCardProps = {
   consensusLevel?: 'high' | 'medium' | 'low';
   reliabilityMultiplier?: number;
   onUndoDismiss?: (id: number) => void;
+  featureEvidence?: Record<string, FeatureEvidenceSummary>;
 };
 
 // Source display labels
@@ -81,6 +83,8 @@ const SOURCE_LABELS: Record<string, string> = {
   tuimdb: 'TuiMDB',
   watchmode: 'Watchmode'
 };
+
+export const FeatureEvidenceContext = createContext<Record<string, FeatureEvidenceSummary> | undefined>(undefined);
 
 // Helper function to extract genres, directors, keywords, etc. from a reason string
 function extractFeatureInfo(reason: string): { type: 'genre' | 'director' | 'keyword' | 'cast' | 'studio' | null; names: string[] } {
@@ -164,19 +168,19 @@ function FilmListPopover({ films, count, isOpen, onClose, position }: {
 
       {/* Popover */}
       <div
-        className="fixed z-50 bg-white rounded-lg shadow-2xl border border-gray-200 p-3 max-w-xs"
+        className="fixed z-50 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 p-3 max-w-xs"
         style={{
           left: `${position.x}px`,
           top: `${position.y}px`,
           transform: 'translate(-50%, -100%) translateY(-8px)'
         }}
       >
-        <div className="text-xs font-semibold text-gray-700 mb-2">
+        <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
           Based on {films.length} film{films.length !== 1 ? 's' : ''} you rated highly:
         </div>
         <div className="max-h-64 overflow-y-auto space-y-1">
           {films.slice(0, 20).map((film, idx) => (
-            <div key={film.id} className="text-xs text-gray-600 flex items-start gap-1.5">
+            <div key={film.id} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-1.5">
               <span className="text-blue-500 flex-shrink-0">•</span>
               <span className="flex-1">{film.title}</span>
             </div>
@@ -299,7 +303,8 @@ export default function MovieCard({
   sources,
   consensusLevel,
   reliabilityMultiplier,
-  onUndoDismiss
+  onUndoDismiss,
+  featureEvidence
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -313,6 +318,57 @@ export default function MovieCard({
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>(
     isSaved ? 'saved' : 'idle'
   );
+  const evidenceFromContext = useContext(FeatureEvidenceContext);
+  const evidenceLookup = featureEvidence ?? evidenceFromContext;
+  const reasonEvidenceLookup = useMemo<Record<string, FeatureEvidenceSummary>>(
+    () => (evidenceLookup as Record<string, FeatureEvidenceSummary> | undefined) ?? {},
+    [evidenceLookup]
+  );
+
+  const getReasonEvidence = (reason: string) => {
+    const info = extractFeatureInfo(reason);
+    if (!info.type || info.names.length === 0) return null;
+    const matches: FeatureEvidenceSummary[] = [];
+    info.names.forEach((name) => {
+      const key = `${info.type}:${name.toLowerCase()}`;
+      const data = reasonEvidenceLookup[key];
+      if (data) matches.push(data);
+    });
+    if (matches.length === 0) return null;
+
+    const strongest = matches.reduce((best, curr) => {
+      const bestScore = best.totalCount * best.decayMultiplier;
+      const currScore = curr.totalCount * curr.decayMultiplier;
+      return currScore > bestScore ? curr : best;
+    });
+
+    const latestTs = matches.reduce((max, curr) => {
+      if (!curr.lastUpdated) return max;
+      const ts = new Date(curr.lastUpdated).getTime();
+      return Math.max(max, ts);
+    }, -Infinity);
+
+    const daysAgo = Number.isFinite(latestTs)
+      ? Math.max(0, Math.round((Date.now() - latestTs) / (1000 * 60 * 60 * 24)))
+      : null;
+
+    const label = (() => {
+      const effective = strongest.totalCount * strongest.decayMultiplier;
+      if (effective >= 6) return 'Strong';
+      if (effective >= 3) return 'Solid';
+      return 'Light';
+    })();
+
+    const recencyLabel = daysAgo === null ? 'stale' : daysAgo === 0 ? '<1d' : `${daysAgo}d`;
+    const names = info.names.join(', ');
+
+    return {
+      label,
+      count: strongest.totalCount,
+      recencyLabel,
+      title: `${label} evidence from ${strongest.totalCount} signals for ${names}${daysAgo === null ? '' : ` • last updated ${recencyLabel} ago`}`
+    };
+  };
 
   // Helper to get rating source label
   const getRatingSourceLabel = (source?: 'omdb' | 'tmdb' | 'watchmode' | 'tuimdb'): string => {
@@ -343,8 +399,8 @@ export default function MovieCard({
       ? `Reliability +${Math.round((reliabilityMultiplier - 1) * 100)}%`
       : `Reliability ${Math.round((reliabilityMultiplier - 1) * 100)}%`,
     className: reliabilityMultiplier >= 1
-      ? 'bg-sky-100 text-sky-800'
-      : 'bg-slate-100 text-slate-700'
+      ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-200'
+      : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
   } : null;
 
   const strengthScore = (() => {
@@ -358,9 +414,9 @@ export default function MovieCard({
 
   const strengthBadge = (() => {
     if (!reliabilityMultiplier && !consensusLevel) return null;
-    if (strengthScore >= 0.12) return { label: 'High Match Strength', className: 'bg-lime-100 text-lime-800' };
-    if (strengthScore >= 0.02) return { label: 'Solid Match', className: 'bg-amber-50 text-amber-700' };
-    return { label: 'Exploratory', className: 'bg-gray-100 text-gray-600' };
+    if (strengthScore >= 0.12) return { label: 'High Match Strength', className: 'bg-lime-100 dark:bg-lime-900/40 text-lime-800 dark:text-lime-200' };
+    if (strengthScore >= 0.02) return { label: 'Solid Match', className: 'bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200' };
+    return { label: 'Exploratory', className: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300' };
   })();
 
   const displayedReasons = expanded ? reasons : reasons?.slice(0, 3);
@@ -422,16 +478,16 @@ export default function MovieCard({
         />
       )}
 
-      <div className={`border bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'} relative`}>
+      <div className={`border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'} relative`}>
         {/* Gray overlay when dismissed */}
         {dismissed && (
           <div className="absolute inset-0 bg-gray-900 bg-opacity-60 z-10 flex items-center justify-center rounded-lg">
-            <div className="bg-white px-4 py-2 rounded-lg shadow-lg">
-              <p className="text-sm font-medium text-gray-900">Dismissed</p>
-              <p className="text-xs text-gray-600">Will be removed on refresh</p>
+            <div className="bg-white dark:bg-gray-900 px-4 py-2 rounded-lg shadow-lg">
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Dismissed</p>
+              <p className="text-xs text-gray-600 dark:text-gray-400">Will be removed on refresh</p>
               {onUndoDismiss && (
                 <button
-                  className="mt-2 w-full text-xs font-semibold text-blue-700 hover:text-blue-900 hover:underline"
+                  className="mt-2 w-full text-xs font-semibold text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-200 hover:underline"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -454,7 +510,9 @@ export default function MovieCard({
             <div className="flex flex-col gap-1 w-32">
               {trailerKey && (
                 <button
-                  className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded hover:bg-red-200 transition-colors text-center whitespace-nowrap"
+                  className="px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap transition-colors
+                    bg-red-100 text-red-800 hover:bg-red-200
+                    dark:bg-red-900/40 dark:text-red-100 dark:hover:bg-red-900/60"
                   onClick={() => setShowVideo(true)}
                   title="Watch trailer">
                   ▶️ Trailer
@@ -628,7 +686,7 @@ export default function MovieCard({
             </div>
 
             {(year || vote_average || collectionName) && (
-              <div className="text-sm text-gray-600 mb-3 flex flex-wrap items-center gap-2">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-3 flex flex-wrap items-center gap-2">
                 {year && <span>{year}</span>}
                 {vote_average && (
                   <>
@@ -696,14 +754,14 @@ export default function MovieCard({
                 {genres.slice(0, 4).map((genre, idx) => (
                   <span
                     key={idx}
-                    className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full"
+                    className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
                     title={`Genre: ${genre}`}
                   >
                     {genre}
                   </span>
                 ))}
                 {genres.length > 4 && (
-                  <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-500 rounded-full">
+                  <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full">
                     +{genres.length - 4}
                   </span>
                 )}
@@ -715,16 +773,37 @@ export default function MovieCard({
               <div>
                 <ul className="space-y-1.5 overflow-hidden">
                   {displayedReasons?.map((r, i) => (
-                    <li key={i} className="text-xs text-gray-700 flex items-start gap-2 leading-snug">
+                    <li key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-start gap-2 leading-snug">
                       <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
-                      {enhanceReasonText(r, i, contributingFilms, handleCountClick)}
+                      <div className="flex-1 flex flex-col gap-0.5">
+                        <div className="flex items-start gap-2 flex-wrap">
+                          {enhanceReasonText(r, i, contributingFilms, handleCountClick)}
+                          {(() => {
+                            const ev = getReasonEvidence(r);
+                            if (!ev) return null;
+                            const badgeClass = ev.label === 'Strong'
+                              ? 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 border border-emerald-100 dark:border-emerald-800'
+                              : ev.label === 'Solid'
+                                ? 'bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200 border border-amber-100 dark:border-amber-800'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600';
+                            return (
+                              <span
+                                className={`px-2 py-0.5 text-[10px] font-semibold rounded-full whitespace-nowrap ${badgeClass}`}
+                                title={ev.title}
+                              >
+                                {`${ev.label} • ${ev.count} signals • ${ev.recencyLabel}`}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      </div>
                     </li>
                   ))}
                 </ul>
                 {hasMoreReasons && (
                   <button
                     onClick={() => setExpanded(!expanded)}
-                    className="mt-2 text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
+                    className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium flex items-center gap-1 transition-colors"
                   >
                     {expanded ? (
                       <>
@@ -748,14 +827,14 @@ export default function MovieCard({
 
             {/* Movie Description */}
             {overview && (
-              <div className="mt-3 pt-3 border-t border-gray-100">
-                <p className={`text-xs text-gray-600 leading-relaxed ${descriptionExpanded ? '' : 'line-clamp-3'}`}>
+              <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                <p className={`text-xs text-gray-600 dark:text-gray-400 leading-relaxed ${descriptionExpanded ? '' : 'line-clamp-3'}`}>
                   {overview}
                 </p>
                 {overview.length > 100 && (
                   <button
                     onClick={() => setDescriptionExpanded(!descriptionExpanded)}
-                    className="mt-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+                    className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium transition-colors"
                   >
                     {descriptionExpanded ? 'Read less' : 'Read more'}
                   </button>
