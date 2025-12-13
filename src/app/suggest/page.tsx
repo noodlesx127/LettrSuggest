@@ -1,6 +1,7 @@
 'use client';
 import AuthGate from '@/components/AuthGate';
 import MovieCard, { FeatureEvidenceContext } from '@/components/MovieCard';
+import ProgressIndicator from '@/components/ProgressIndicator';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
@@ -83,6 +84,17 @@ type CategorizedSuggestions = {
   moreRecommendations: MovieItem[];
 };
 
+// Progress stage definitions
+const PROGRESS_STAGES = [
+  { key: 'init', label: 'Initialize', description: 'Setting up recommendation engine' },
+  { key: 'library', label: 'Library', description: 'Loading your watch history' },
+  { key: 'cache', label: 'Cache', description: 'Fetching movie metadata' },
+  { key: 'taste', label: 'Analyze', description: 'Building your taste profile' },
+  { key: 'discover', label: 'Discover', description: 'Finding candidates from multiple sources' },
+  { key: 'score', label: 'Score', description: 'Ranking suggestions' },
+  { key: 'details', label: 'Details', description: 'Loading full movie information' }
+];
+
 export default function SuggestPage() {
   const { films, loading: loadingFilms } = useImportData();
   const [uid, setUid] = useState<string | null>(null);
@@ -103,7 +115,12 @@ export default function SuggestPage() {
   const [refreshingSections, setRefreshingSections] = useState<Set<string>>(new Set());
   const [shownIds, setShownIds] = useState<Set<number>>(new Set());
   const [cacheKey, setCacheKey] = useState<number>(Date.now());
-  const [progress, setProgress] = useState({ current: 0, total: 6, stage: '' });
+  const [progress, setProgress] = useState<{ current: number; total: number; stage: string; details?: string }>({ 
+    current: 0, 
+    total: 7, 
+    stage: '',
+    details: undefined 
+  });
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [undoToast, setUndoToast] = useState<{ id: number; title: string } | null>(null);
   const [lastFeedback, setLastFeedback] = useState<{ id: number; title: string } | null>(null);
@@ -851,7 +868,12 @@ export default function SuggestPage() {
       setError(null);
       setNoCandidatesReason(null);
       setLoading(true);
-      setProgress({ current: 0, total: 6, stage: 'Initializing...' });
+      setProgress({ current: 0, total: 7, stage: 'init', details: 'Preparing recommendation engine...' });
+      
+      // Reset pairwise state when refreshing suggestions
+      setPairwisePair(null);
+      setPairwiseCount(0);
+      setPairHistory(new Set());
       if (!supabase) throw new Error('Supabase not initialized');
       if (!uid) throw new Error('Not signed in');
       // Apply quick filters to source films
@@ -870,7 +892,7 @@ export default function SuggestPage() {
       });
       const uris = filteredFilms.map((f) => f.uri);
       console.log('[Suggest] fetching mappings for', uris.length, 'films');
-      setProgress({ current: 1, total: 6, stage: 'Loading your library...' });
+      setProgress({ current: 1, total: 7, stage: 'library', details: `Loading ${uris.length} films from your Letterboxd...` });
       const mappings = await getFilmMappings(uid, uris);
       console.log('[Suggest] mappings loaded', { mappingCount: mappings.size, totalFilms: uris.length });
 
@@ -897,18 +919,20 @@ export default function SuggestPage() {
 
       // Pre-fetch all TMDB details from cache for better taste profile analysis
       console.log('[Suggest] Pre-fetching TMDB details from cache');
-      setProgress({ current: 2, total: 6, stage: 'Loading movie details from cache...' });
       const allMappedIds = Array.from(mappings.values());
+      setProgress({ current: 2, total: 7, stage: 'cache', details: `Loading metadata for ${allMappedIds.length} movies...` });
       const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
+      const cacheHitRate = ((tmdbDetailsMap.size / allMappedIds.length) * 100).toFixed(1);
       console.log('[Suggest] TMDB details loaded from cache', {
         requested: allMappedIds.length,
         found: tmdbDetailsMap.size,
-        coverage: `${((tmdbDetailsMap.size / allMappedIds.length) * 100).toFixed(1)}%`
+        coverage: `${cacheHitRate}%`
       });
+      setProgress({ current: 2, total: 7, stage: 'cache', details: `Found ${tmdbDetailsMap.size}/${allMappedIds.length} movies in cache (${cacheHitRate}%)` });
 
       // Build taste profile with IDs for smarter discovery
       console.log('[Suggest] Building taste profile for smart discovery');
-      setProgress({ current: 3, total: 6, stage: 'Analyzing your taste profile...' });
+      setProgress({ current: 3, total: 7, stage: 'taste', details: 'Learning from your ratings and preferences...' });
 
       // Fetch negative feedback to learn from dislikes
       let negativeFeedbackIds: number[] = [];
@@ -946,6 +970,7 @@ export default function SuggestPage() {
       }));
       console.log('[Suggest] Watchlist films for taste profile:', watchlistFilms.length);
 
+      setProgress({ current: 3, total: 7, stage: 'taste', details: `Analyzing ${filteredFilms.length} films from your library...` });
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
@@ -954,6 +979,10 @@ export default function SuggestPage() {
         tmdbDetails: tmdbDetailsMap, // Pass pre-fetched details to analyze ALL movies, not just 100
         watchlistFilms // Pass watchlist for intent signals
       });
+      
+      // Update progress with taste profile results
+      const topGenresPreview = tasteProfile.topGenres.slice(0, 3).map(g => g.name).join(', ');
+      setProgress({ current: 3, total: 7, stage: 'taste', details: `Found preferences: ${topGenresPreview}${tasteProfile.topGenres.length > 3 ? '...' : ''}` });
 
       // === GENERATE WATCHLIST PICKS ===
       // Get unwatched watchlist films (onWatchlist=true but not watched)
@@ -1121,7 +1150,7 @@ export default function SuggestPage() {
 
       // Generate smart candidates using multiple TMDB discovery strategies
       console.log('[Suggest] Generating smart candidates');
-      setProgress({ current: 4, total: 6, stage: 'Discovering movies...' });
+      setProgress({ current: 4, total: 7, stage: 'discover', details: 'Searching across TMDB, TasteDive, Trakt, and more...' });
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
         topGenres: tasteProfile.topGenres,
@@ -1193,6 +1222,9 @@ export default function SuggestPage() {
       candidatesRaw.push(...listCandidates); // Add list-discovered candidates
       candidatesRaw.push(...exploratoryPicks); // Add exploratory picks
 
+      const sourceSummary = `TMDB: ${smartCandidates.trending.length + smartCandidates.similar.length + smartCandidates.discovered.length}, Trakt: ${decadeCandidates.length}, TasteDive: ${discoveryCandidates.length}`;
+      setProgress({ current: 4, total: 7, stage: 'discover', details: `Found ${candidatesRaw.length} candidates (${sourceSummary})` });
+
       console.log('[Suggest] Smart candidates breakdown', {
         trending: smartCandidates.trending.length,
         similar: smartCandidates.similar.length,
@@ -1262,7 +1294,7 @@ export default function SuggestPage() {
       setSourceLabel('Based on your watched & liked films + trending releases');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
       console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length, candidatesCount: candidates.length });
-      setProgress({ current: 5, total: 6, stage: 'Scoring suggestions...' });
+      setProgress({ current: 5, total: 7, stage: 'score', details: `Ranking ${candidates.length} candidates...` });
       const suggestions = await suggestByOverlap({
         userId: uid,
         films: lite,
@@ -1315,7 +1347,7 @@ export default function SuggestPage() {
       console.log('[Suggest] Tracking shown IDs', { total: recentShownIds.length, newThisRound: suggestions.length, limited: newShownIds.size > 200 });
 
       // Fetch full movie data for each suggestion to get videos, collections, etc.
-      setProgress({ current: 6, total: 6, stage: 'Fetching movie details...' });
+      setProgress({ current: 6, total: 7, stage: 'details', details: `Loading full details for ${suggestions.length} suggestions...` });
       const detailsPromises = suggestions.map(async (s) => {
         try {
           let movie = null;
@@ -1457,6 +1489,9 @@ export default function SuggestPage() {
       } catch (e) {
         console.error('[Suggest] Failed to log exposures', e);
       }
+      
+      // Mark progress as complete
+      setProgress({ current: 7, total: 7, stage: 'details', details: `Loaded ${details.length} personalized suggestions!` });
     } catch (e: any) {
       console.error('[Suggest] error in runSuggest', e);
       setError(e?.message ?? 'Failed to get suggestions');
@@ -1509,8 +1544,13 @@ export default function SuggestPage() {
     void runSuggest();
   }, [uid, sourceFilms.length, loading, items, runSuggest, hasCheckedStorage]);
 
-  // Build a pairwise comparison candidate whenever items change
+  // Build a pairwise comparison candidate whenever items change (but only on initial load)
   useEffect(() => {
+    // Only set initial pair when we don't have one yet and count is 0
+    // Let handlePairwiseVote/Skip manage subsequent pairs to avoid race conditions
+    if (pairwisePair !== null || pairwiseCount > 0) {
+      return;
+    }
     if (!items || items.length < 2) {
       setPairwisePair(null);
       return;
@@ -1521,7 +1561,7 @@ export default function SuggestPage() {
     }
     const candidate = findPairwiseCandidate(items.filter((i) => !i.dismissed), pairHistory);
     setPairwisePair(candidate);
-  }, [items, pairHistory, findPairwiseCandidate, pairwiseCount, PAIRWISE_SESSION_LIMIT]);
+  }, [items, pairHistory, findPairwiseCandidate, pairwiseCount, pairwisePair, PAIRWISE_SESSION_LIMIT]);
 
   useEffect(() => {
     const loadEvidence = async () => {
@@ -2502,45 +2542,47 @@ export default function SuggestPage() {
 
       {/* Hybrid Feedback Popup - Optional "Tell us why" */}
       {feedbackPopup && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center pb-4 sm:items-center sm:pb-0">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setFeedbackPopup(null)}
           />
 
-          {/* Popup Card */}
-          <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-sm w-full mx-4 p-4 animate-slide-up">
-            {/* Header */}
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">
-                  {feedbackPopup.insights.learningSummary}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Want to tell us more? (optional)
-                </p>
+          {/* Popup Card - Redesigned with scrollable content */}
+          <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            {/* Fixed Header */}
+            <div className="flex-shrink-0 p-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    {feedbackPopup.insights.learningSummary}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Want to tell us more? (optional)
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFeedbackPopup(null)}
+                  className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
+                  aria-label="Close"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
-              <button
-                onClick={() => setFeedbackPopup(null)}
-                className="text-gray-400 hover:text-gray-600 p-1"
-                aria-label="Close"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
             </div>
 
-            {/* Quick-tap reason buttons - Different for positive vs negative feedback */}
-            <div className="space-y-3">
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {feedbackPopup.feedbackType === 'negative' ? (
                 <>
                   {/* === NEGATIVE FEEDBACK OPTIONS === */}
 
                   {/* NUCLEAR OPTION - Dislike everything */}
                   <div>
-                    <p className="text-xs text-gray-400 mb-1.5">Strong dislike:</p>
+                    <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Strong dislike:</p>
                     <div className="flex flex-wrap gap-2">
                       {(() => {
                         const isSelected = selectedReasons.includes('dislike_all');
@@ -2558,7 +2600,7 @@ export default function SuggestPage() {
 
                   {/* Non-negative reasons (won't learn avoidance) */}
                   <div>
-                    <p className="text-xs text-gray-400 mb-1.5">Not a problem with the movie:</p>
+                    <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not a problem with the movie:</p>
                     <div className="flex flex-wrap gap-2">
                       {[
                         { key: 'already_seen', label: '✓ Already seen it', color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-900/60' },
@@ -2580,24 +2622,24 @@ export default function SuggestPage() {
                   </div>
 
                   {feedbackPopup.showMicroSurvey && (
-                    <div className="mt-2 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg p-2 bg-gray-50 dark:bg-gray-900">
-                      <p className="text-[11px] text-gray-600 dark:text-gray-400 mb-1">Quick check: what missed?</p>
+                    <div className="border border-dashed border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-900">
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Quick check: what missed?</p>
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => handleMicroSurveyChoice('cast')}
-                          className="px-3 py-1 text-[11px] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+                          className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                         >
                           🎭 Cast/tone off
                         </button>
                         <button
                           onClick={() => handleMicroSurveyChoice('tone')}
-                          className="px-3 py-1 text-[11px] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+                          className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                         >
                           🎨 Theme mismatch
                         </button>
                         <button
                           onClick={() => handleMicroSurveyChoice('runtime')}
-                          className="px-3 py-1 text-[11px] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+                          className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                         >
                           ⏱️ Too long/slow
                         </button>
@@ -2606,14 +2648,14 @@ export default function SuggestPage() {
                   )}
 
                   {/* Specific reasons section header */}
-                  <div className="border-t border-gray-200 pt-2">
-                    <p className="text-xs text-gray-500 mb-2">Or tell us specifically:</p>
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Or tell us specifically:</p>
                   </div>
 
                   {/* Actor-specific reasons - show ALL lead actors so user can pick specific ones */}
                   {feedbackPopup.leadActors.length > 0 && (
                     <div>
-                      <p className="text-xs text-gray-400 mb-1.5">Not a fan of this actor:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not a fan of this actor:</p>
                       <div className="flex flex-wrap gap-2">
                         {feedbackPopup.leadActors.map(actor => {
                           const reason = `actor:${actor}`;
@@ -2623,11 +2665,11 @@ export default function SuggestPage() {
                             <button
                               key={actor}
                               onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-full transition-colors', isSelected)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
                             >
-                              👎 {actor}
+                              <span>👎 {actor}</span>
                               {badge && (
-                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
                                   {badge.text}
                                 </span>
                               )}
@@ -2641,7 +2683,7 @@ export default function SuggestPage() {
                   {/* Franchise fatigue */}
                   {feedbackPopup.franchise && (
                     <div>
-                      <p className="text-xs text-gray-400 mb-1.5">Franchise fatigue:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Franchise fatigue:</p>
                       <div className="flex flex-wrap gap-2">
                         {(() => {
                           const reason = 'franchise';
@@ -2650,11 +2692,11 @@ export default function SuggestPage() {
                           return (
                             <button
                               onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-full transition-colors', isSelected)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-200 hover:bg-orange-200 dark:hover:bg-orange-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
                             >
-                              🔄 Done with {feedbackPopup.franchise.split(':')[0]}
+                              <span>🔄 Done with {feedbackPopup.franchise.split(':')[0]}</span>
                               {badge && (
-                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
                                   {badge.text}
                                 </span>
                               )}
@@ -2668,7 +2710,7 @@ export default function SuggestPage() {
                   {/* Genre-specific reasons */}
                   {feedbackPopup.genres.length > 0 && (
                     <div>
-                      <p className="text-xs text-gray-400 mb-1.5">Not into this genre:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not into this genre:</p>
                       <div className="flex flex-wrap gap-2">
                         {feedbackPopup.genres.slice(0, 3).map(genre => {
                           const reason = `genre:${genre}`;
@@ -2678,11 +2720,11 @@ export default function SuggestPage() {
                             <button
                               key={genre}
                               onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-200 hover:bg-purple-200 dark:hover:bg-purple-900/60 rounded-full transition-colors', isSelected)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-200 hover:bg-purple-200 dark:hover:bg-purple-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
                             >
-                              👎 {genre}
+                              <span>👎 {genre}</span>
                               {badge && (
-                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
                                   {badge.text}
                                 </span>
                               )}
@@ -2696,7 +2738,7 @@ export default function SuggestPage() {
                   {/* Topic/Theme-specific reasons (keywords) */}
                   {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
                     <div>
-                      <p className="text-xs text-gray-400 mb-1.5">Not interested in this topic:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not interested in this topic:</p>
                       <div className="flex flex-wrap gap-2">
                         {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
                           const reason = `keyword:${keyword}`;
@@ -2706,11 +2748,11 @@ export default function SuggestPage() {
                             <button
                               key={keyword}
                               onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 rounded-full transition-colors', isSelected)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
                             >
-                              🏷️ {keyword}
+                              <span>🏷️ {keyword}</span>
                               {badge && (
-                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
                                   {badge.text}
                                 </span>
                               )}
@@ -2721,10 +2763,10 @@ export default function SuggestPage() {
                     </div>
                   )}
 
-                  <div className="flex justify-end">
+                  <div className="flex justify-end pt-2">
                     <button
                       onClick={handleFastNeutralize}
-                      className="text-[11px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dashed"
+                      className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dashed"
                     >
                       👍 This is fine (reset)
                     </button>
@@ -2735,7 +2777,7 @@ export default function SuggestPage() {
                   {/* === POSITIVE FEEDBACK OPTIONS === */}
                   {/* Generic positive */}
                   <div>
-                    <p className="text-xs text-gray-400 mb-1.5">What made this a great pick?</p>
+                    <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">What made this a great pick?</p>
                     <div className="flex flex-wrap gap-2">
                       {[
                         { key: 'great_pick', label: '✨ Just a great pick!', color: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-900/60' },
@@ -2756,14 +2798,14 @@ export default function SuggestPage() {
                   </div>
 
                   {/* Specific reasons section header */}
-                  <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Or tell us specifically:</p>
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Or tell us specifically:</p>
                   </div>
 
                   {/* Actor love */}
                   {feedbackPopup.leadActors.length > 0 && (
                     <div>
-                      <p className="text-xs text-gray-400 mb-1.5">Love this actor:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this actor:</p>
                       <div className="flex flex-wrap gap-2">
                         {feedbackPopup.leadActors.map(actor => {
                           const reason = `actor:${actor}`;
@@ -2773,11 +2815,11 @@ export default function SuggestPage() {
                             <button
                               key={actor}
                               onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors', isSelected)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
                             >
-                              ❤️ {actor}
+                              <span>❤️ {actor}</span>
                               {badge && (
-                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
                                   {badge.text}
                                 </span>
                               )}
@@ -2791,7 +2833,7 @@ export default function SuggestPage() {
                   {/* Franchise love */}
                   {feedbackPopup.franchise && (
                     <div>
-                      <p className="text-xs text-gray-400 mb-1.5">Love this franchise:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this franchise:</p>
                       <div className="flex flex-wrap gap-2">
                         {(() => {
                           const reason = 'franchise';
@@ -2800,11 +2842,11 @@ export default function SuggestPage() {
                           return (
                             <button
                               onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors', isSelected)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
                             >
-                              🎬 More {feedbackPopup.franchise.split(':')[0]}!
+                              <span>🎬 More {feedbackPopup.franchise.split(':')[0]}!</span>
                               {badge && (
-                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
                                   {badge.text}
                                 </span>
                               )}
@@ -2818,7 +2860,7 @@ export default function SuggestPage() {
                   {/* Genre love */}
                   {feedbackPopup.genres.length > 0 && (
                     <div>
-                      <p className="text-xs text-gray-400 mb-1.5">Love this genre:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this genre:</p>
                       <div className="flex flex-wrap gap-2">
                         {feedbackPopup.genres.slice(0, 3).map(genre => {
                           const reason = `genre:${genre}`;
@@ -2828,11 +2870,11 @@ export default function SuggestPage() {
                             <button
                               key={genre}
                               onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded-full transition-colors', isSelected)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
                             >
-                              ❤️ {genre}
+                              <span>❤️ {genre}</span>
                               {badge && (
-                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
                                   {badge.text}
                                 </span>
                               )}
@@ -2846,7 +2888,7 @@ export default function SuggestPage() {
                   {/* Topic/Theme love (keywords) */}
                   {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
                     <div>
-                      <p className="text-xs text-gray-400 mb-1.5">Love this theme:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this theme:</p>
                       <div className="flex flex-wrap gap-2">
                         {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
                           const reason = `keyword:${keyword}`;
@@ -2856,11 +2898,11 @@ export default function SuggestPage() {
                             <button
                               key={keyword}
                               onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors', isSelected)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
                             >
-                              ❤️ {keyword}
+                              <span>❤️ {keyword}</span>
                               {badge && (
-                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/70 text-gray-700 rounded-full border border-gray-200" title={badge.title}>
+                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
                                   {badge.text}
                                 </span>
                               )}
@@ -2874,25 +2916,26 @@ export default function SuggestPage() {
               )}
             </div>
 
-            <div className="mt-3 flex flex-col items-center gap-2">
-              <div className="text-[11px] text-gray-500 dark:text-gray-400">
+            {/* Fixed Footer with Actions */}
+            <div className="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+              <div className="text-xs text-center text-gray-500 dark:text-gray-400 mb-2">
                 {selectedReasons.length > 0
                   ? `${selectedReasons.length} reason${selectedReasons.length === 1 ? '' : 's'} selected`
                   : 'Pick one or more reasons, then submit'}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-center gap-2">
                 <button
                   onClick={handleSubmitSelectedReasons}
                   disabled={selectedReasons.length === 0}
-                  className={`px-3 py-2 rounded-md text-xs font-semibold ${selectedReasons.length === 0 ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed' : 'bg-blue-600 dark:bg-blue-700 text-white hover:bg-blue-700 dark:hover:bg-blue-600'}`}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${selectedReasons.length === 0 ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed' : 'bg-blue-600 dark:bg-blue-700 text-white hover:bg-blue-700 dark:hover:bg-blue-600'}`}
                 >
                   Submit selected
                 </button>
                 <button
                   onClick={() => setFeedbackPopup(null)}
-                  className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                  className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
                 >
-                  Skip — we&apos;ll learn from patterns
+                  Skip
                 </button>
               </div>
             </div>
@@ -3153,14 +3196,14 @@ export default function SuggestPage() {
       )}
 
       {loading && (
-        <div className="mb-4">
-          <div className="h-2 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-500 ease-out"
-              style={{ width: `${progress.total ? (progress.current / progress.total) * 100 : 0}%` }}
-            />
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{progress.stage}</p>
+        <div className="mb-6">
+          <ProgressIndicator
+            current={progress.current}
+            total={progress.total}
+            stage={progress.stage}
+            stages={PROGRESS_STAGES}
+            details={progress.details}
+          />
         </div>
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -3267,7 +3310,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.watchlistPicks.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3334,7 +3377,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.seasonalPicks.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3394,7 +3437,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.perfectMatches.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3454,7 +3497,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.recentWatchMatches.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3514,7 +3557,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.directorMatches.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3574,7 +3617,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.studioMatches.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3634,7 +3677,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.actorMatches.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3694,7 +3737,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.genreMatches.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3754,7 +3797,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.documentaries.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3814,7 +3857,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.decadeMatches.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3874,7 +3917,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.smartDiscovery.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3934,7 +3977,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.hiddenGems.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -3994,7 +4037,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.cultClassics.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4054,7 +4097,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.crowdPleasers.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4114,7 +4157,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.newReleases.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4174,7 +4217,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.recentClassics.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4234,7 +4277,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.deepCuts.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4294,7 +4337,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.fromCollections.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4354,7 +4397,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.multiSourceConsensus.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4414,7 +4457,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.internationalCinema.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4474,7 +4517,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.animationPicks.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4534,7 +4577,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.quickWatches.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4594,7 +4637,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.epicFilms.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4654,7 +4697,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.criticallyAcclaimed.map((item) => (
                     <MovieCard
                       key={item.id}
@@ -4714,7 +4757,7 @@ export default function SuggestPage() {
                     <span>Refresh</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                   {categorizedSuggestions.moreRecommendations.map((item) => (
                     <MovieCard
                       key={item.id}

@@ -137,7 +137,7 @@
 2. ~~MMR rerank + UI strength badges + undo avoid~~ ✅
 3. ~~Pairwise A/B feedback + context-aware biases~~ ✅ 
 4. ~~Metrics & Evaluation (repeat-suggestion tracking, counterfactual replay, A/B testing)~~ ✅
-5. Collection completion + quality gates + micro-surveys (next focus)
+5. quality gates + micro-surveys (next focus)
 
 ---
 
