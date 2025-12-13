@@ -2,7 +2,7 @@
 import AuthGate from '@/components/AuthGate';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { getBlockedSuggestions, unblockSuggestion } from '@/lib/enrich';
+import { getBlockedSuggestions, unblockSuggestion, getAllowedSuggestions, removeAllowedSuggestion } from '@/lib/enrich';
 import { useImportData } from '@/lib/importStore';
 import Image from 'next/image';
 
@@ -15,6 +15,8 @@ export default function ProfilePage() {
   const [uid, setUid] = useState<string | null>(null);
   const [blockedMovies, setBlockedMovies] = useState<Array<{ tmdb_id: number; title?: string; poster_path?: string; year?: string }>>([]);
   const [loadingBlocked, setLoadingBlocked] = useState(false);
+  const [allowedMovies, setAllowedMovies] = useState<Array<{ tmdb_id: number; title?: string; poster_path?: string; year?: string }>>([]);
+  const [loadingAllowed, setLoadingAllowed] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -24,7 +26,10 @@ export default function ProfilePage() {
       setUid(userId);
       
       if (userId) {
-        await loadBlockedMovies(userId);
+        await Promise.all([
+          loadBlockedMovies(userId),
+          loadAllowedMovies(userId)
+        ]);
       }
     };
     void init();
@@ -79,6 +84,55 @@ export default function ProfilePage() {
     }
   };
 
+  const loadAllowedMovies = async (userId: string) => {
+    try {
+      setLoadingAllowed(true);
+      const allowedIds = await getAllowedSuggestions(userId);
+      
+      // Fetch movie details for each allowed ID
+      const detailsPromises = Array.from(allowedIds).map(async (tmdbId) => {
+        try {
+          // Try TuiMDB first, fallback to TMDB
+          let data = null;
+          try {
+            const tuiResponse = await fetch(`/api/tuimdb/movie?uid=${tmdbId}&_t=${Date.now()}`);
+            if (tuiResponse.ok) {
+              const tuiData = await tuiResponse.json();
+              if (tuiData.ok && tuiData.movie) data = tuiData.movie;
+            }
+          } catch (e) { /* fallback to TMDB */ }
+          
+          if (!data) {
+            const response = await fetch(`/api/tmdb/movie/${tmdbId}`);
+            if (response.ok) {
+              const tmdbData = await response.json();
+              if (tmdbData.ok && tmdbData.movie) data = tmdbData.movie;
+            }
+          }
+          
+          if (data) {
+            return {
+              tmdb_id: tmdbId,
+              title: data.title,
+              poster_path: data.poster_path,
+              year: data.release_date?.slice(0, 4)
+            };
+          }
+        } catch (e) {
+          console.error(`Failed to fetch details for ${tmdbId}:`, e);
+        }
+        return { tmdb_id: tmdbId };
+      });
+      
+      const details = await Promise.all(detailsPromises);
+      setAllowedMovies(details);
+    } catch (e) {
+      console.error('Failed to load allowed movies:', e);
+    } finally {
+      setLoadingAllowed(false);
+    }
+  };
+
   const handleUnblock = async (tmdbId: number) => {
     if (!uid) return;
     try {
@@ -91,6 +145,21 @@ export default function ProfilePage() {
       }
     } catch (e) {
       console.error('Failed to unblock movie:', e);
+    }
+  };
+
+  const handleRemoveAllowed = async (tmdbId: number) => {
+    if (!uid) return;
+    try {
+      await removeAllowedSuggestion(uid, tmdbId);
+      setAllowedMovies(prev => prev.filter(m => m.tmdb_id !== tmdbId));
+      
+      // Notify suggest page to refresh
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lettr:feedback-updated'));
+      }
+    } catch (e) {
+      console.error('Failed to remove allowed movie:', e);
     }
   };
 
@@ -155,8 +224,9 @@ export default function ProfilePage() {
         window.localStorage.removeItem('swr-cache');
       }
 
-      // Reset blocked movies state
+      // Reset blocked and allowed movies state
       setBlockedMovies([]);
+      setAllowedMovies([]);
 
       const totalDeleted = deleteResult?.deleted ? 
         Object.values(deleteResult.deleted).reduce((sum: number, n) => sum + (typeof n === 'number' ? n : 0), 0) : 0;
@@ -221,6 +291,54 @@ export default function ProfilePage() {
                         className="opacity-0 group-hover:opacity-100 transition-opacity bg-white text-gray-900 px-3 py-1 rounded-md text-sm font-medium"
                       >
                         Unblock
+                      </button>
+                    </div>
+                  </div>
+                  {movie.title && (
+                    <p className="mt-2 text-xs text-gray-700 line-clamp-2">
+                      {movie.title} {movie.year && `(${movie.year})`}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-lg border p-6 mb-6">
+          <h2 className="text-xl font-semibold mb-4">Liked Suggestions</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Movies you&apos;ve marked as &quot;More Like This&quot;. Click to remove them from your preferences.
+          </p>
+          
+          {loadingAllowed ? (
+            <p className="text-sm text-gray-500">Loading liked movies...</p>
+          ) : allowedMovies.length === 0 ? (
+            <p className="text-sm text-gray-500">No liked suggestions yet.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {allowedMovies.map((movie) => (
+                <div key={movie.tmdb_id} className="group relative">
+                  <div className="aspect-[2/3] bg-gray-100 rounded-md overflow-hidden relative">
+                    {movie.poster_path ? (
+                      <Image
+                        src={`https://image.tmdb.org/t/p/w342${movie.poster_path}`}
+                        alt={movie.title || 'Movie poster'}
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs text-center p-2">
+                        No poster
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all flex items-center justify-center">
+                      <button
+                        onClick={() => handleRemoveAllowed(movie.tmdb_id)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity bg-white text-gray-900 px-3 py-1 rounded-md text-sm font-medium"
+                      >
+                        Remove
                       </button>
                     </div>
                   </div>

@@ -61,23 +61,56 @@ html, body, #__next {
 }
 
 /* Dark-mode overrides for common light surfaces and low-contrast text */
-.dark .bg-white { background-color: rgb(31 41 55) !important; }
-.dark .bg-white\/95 { background-color: rgba(31, 41, 55, 0.95) !important; }
-.dark .bg-white\/70 { background-color: rgba(31, 41, 55, 0.7) !important; }
-.dark .bg-gray-50 { background-color: rgb(55 65 81) !important; }
-.dark .bg-gray-100 { background-color: rgb(55 65 81) !important; }
-.dark .bg-gray-200 { background-color: rgb(75 85 99) !important; }
-.dark .border-gray-100 { border-color: rgb(55 65 81) !important; }
-.dark .border-gray-200 { border-color: rgb(75 85 99) !important; }
-.dark .text-gray-900 { color: rgb(243 244 246) !important; }
-.dark .text-gray-800 { color: rgb(229 231 235) !important; }
-.dark .text-gray-700 { color: rgb(209 213 219) !important; }
-.dark .text-gray-600 { color: rgb(209 213 219) !important; }
-.dark .text-gray-500 { color: rgb(156 163 175) !important; }
+/* Soft dark mode overrides */
+.dark.dark-soft .bg-white { background-color: rgb(75, 85, 99) !important; } /* gray-600 */
+.dark.dark-soft .bg-white\/95 { background-color: rgba(75, 85, 99, 0.95) !important; }
+.dark.dark-soft .bg-white\/70 { background-color: rgba(75, 85, 99, 0.7) !important; }
+.dark.dark-soft .bg-gray-50 { background-color: rgb(107, 114, 128) !important; } /* gray-500 */
+.dark.dark-soft .bg-gray-100 { background-color: rgb(107, 114, 128) !important; }
+.dark.dark-soft .bg-gray-200 { background-color: rgb(156, 163, 175) !important; } /* gray-400 */
+.dark.dark-soft .border-gray-100 { border-color: rgb(107, 114, 128) !important; }
+.dark.dark-soft .border-gray-200 { border-color: rgb(156, 163, 175) !important; }
+
+/* Moderate dark mode overrides */
+.dark.dark-moderate .bg-white { background-color: rgb(55, 65, 81) !important; } /* gray-700 */
+.dark.dark-moderate .bg-white\/95 { background-color: rgba(55, 65, 81, 0.95) !important; }
+.dark.dark-moderate .bg-white\/70 { background-color: rgba(55, 65, 81, 0.7) !important; }
+.dark.dark-moderate .bg-gray-50 { background-color: rgb(75, 85, 99) !important; } /* gray-600 */
+.dark.dark-moderate .bg-gray-100 { background-color: rgb(75, 85, 99) !important; }
+.dark.dark-moderate .bg-gray-200 { background-color: rgb(107, 114, 128) !important; } /* gray-500 */
+.dark.dark-moderate .border-gray-100 { border-color: rgb(75, 85, 99) !important; }
+.dark.dark-moderate .border-gray-200 { border-color: rgb(107, 114, 128) !important; }
+
+/* Deep dark mode overrides */
+.dark.dark-deep .bg-white { background-color: rgb(31, 41, 55) !important; } /* gray-800 */
+.dark.dark-deep .bg-white\/95 { background-color: rgba(31, 41, 55, 0.95) !important; }
+.dark.dark-deep .bg-white\/70 { background-color: rgba(31, 41, 55, 0.7) !important; }
+.dark.dark-deep .bg-gray-50 { background-color: rgb(55, 65, 81) !important; } /* gray-700 */
+.dark.dark-deep .bg-gray-100 { background-color: rgb(55, 65, 81) !important; }
+.dark.dark-deep .bg-gray-200 { background-color: rgb(75, 85, 99) !important; } /* gray-600 */
+.dark.dark-deep .border-gray-100 { border-color: rgb(55, 65, 81) !important; }
+.dark.dark-deep .border-gray-200 { border-color: rgb(75, 85, 99) !important; }
+
+/* Pitch black overrides */
+.dark.dark-pitch .bg-white { background-color: rgb(17, 24, 39) !important; } /* gray-900 */
+.dark.dark-pitch .bg-white\/95 { background-color: rgba(17, 24, 39, 0.95) !important; }
+.dark.dark-pitch .bg-white\/70 { background-color: rgba(17, 24, 39, 0.7) !important; }
+.dark.dark-pitch .bg-gray-50 { background-color: rgb(31, 41, 55) !important; } /* gray-800 */
+.dark.dark-pitch .bg-gray-100 { background-color: rgb(31, 41, 55) !important; }
+.dark.dark-pitch .bg-gray-200 { background-color: rgb(55, 65, 81) !important; } /* gray-700 */
+.dark.dark-pitch .border-gray-100 { border-color: rgb(31, 41, 55) !important; }
+.dark.dark-pitch .border-gray-200 { border-color: rgb(55, 65, 81) !important; }
+
+/* Shared text color overrides for all dark modes */
+.dark .text-gray-900 { color: rgb(243, 244, 246) !important; } /* gray-100 */
+.dark .text-gray-800 { color: rgb(229, 231, 235) !important; } /* gray-200 */
+.dark .text-gray-700 { color: rgb(209, 213, 219) !important; } /* gray-300 */
+.dark .text-gray-600 { color: rgb(209, 213, 219) !important; } /* gray-300 */
+.dark .text-gray-500 { color: rgb(156, 163, 175) !important; } /* gray-400 */
 
 /* Dark text adjustments for semantic colors */
-.dark .text-blue-800 { color: rgb(191 219 254) !important; }
-.dark .text-blue-700 { color: rgb(191 219 254) !important; }
+.dark .text-blue-800 { color: rgb(191, 219, 254) !important; } /* blue-200 */
+.dark .text-blue-700 { color: rgb(191, 219, 254) !important; } /* blue-200 */
 .dark .text-blue-600 { color: rgb(191 219 254) !important; }
 .dark .text-green-800 { color: rgb(187 247 208) !important; }
 .dark .text-green-700 { color: rgb(187 247 208) !important; }

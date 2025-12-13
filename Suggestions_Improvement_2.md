@@ -114,12 +114,20 @@
 
 ## Metrics & Evaluation
 
-- [ ] Track: acceptance by reason type, source hit-rate per user, diversity, repeat-suggestion rate, regret events (later-liked after skip)
+- [x] Track: acceptance by reason type, source hit-rate per user, diversity, repeat-suggestion rate, regret events (later-liked after skip)
 	- [x] Acceptance by reason type surfaced on Stats (min 5 samples); consensus calibration card added
 	- [x] Diversity coverage from accepted feedback (genres/directors/actors/keywords) and regret recovery surfaced
-	- [ ] Repeat-suggestion rate pending (needs suggestion exposure log)
-- [ ] Counterfactual replay: log top-k scores to simulate weight tweaks before shipping
-- [ ] A/B specific knobs: MMR λ, exploration rate, source reliability scaling
+	- [x] Repeat-suggestion rate implemented with exposure logging and 30-day tracking on Stats page
+- [x] Counterfactual replay: log top-k scores to simulate weight tweaks before shipping
+	- [x] Implemented `suggestion_exposure_log` table to capture scoring metadata (base_score, consensus, sources, MMR params, metadata completeness)
+	- [x] Added `getCounterfactualReplayData()` function to retrieve scored suggestions with feedback outcomes for parameter simulation
+- [x] A/B specific knobs: MMR λ, exploration rate, source reliability scaling
+	- [x] Created A/B testing infrastructure with `ab_test_configs`, `ab_test_assignments`, and `ab_test_metrics` tables
+	- [x] Built `abTesting.ts` library with variant assignment, metric recording, and results aggregation
+	- [x] Supports parameter variations for MMR lambda, exploration rate, source weights, quality gates, and diversity settings
+- [x] Fixed pairwise learning stats showing 0's when comparisons exist
+	- [x] Defaulting consensusLevel to 'low' when undefined (movies with single-source recommendations)
+	- [x] Backfill migration for existing NULL consensus values in pairwise_events table
 
 ---
 
@@ -127,5 +135,84 @@
 
 1. ~~Confidence-aware weighting + hard/soft avoid + source reliability~~ ✅
 2. ~~MMR rerank + UI strength badges + undo avoid~~ ✅
-3. ~~Pairwise A/B feedback + context-aware biases~~ ✅ (partial; regularized updates pending)
-4. Collection completion + quality gates + micro-surveys (next focus)
+3. ~~Pairwise A/B feedback + context-aware biases~~ ✅ 
+4. ~~Metrics & Evaluation (repeat-suggestion tracking, counterfactual replay, A/B testing)~~ ✅
+5. Collection completion + quality gates + micro-surveys (next focus)
+
+---
+
+## Recent Completion (Dec 13, 2024)
+
+### Metrics & Evaluation Infrastructure
+
+Completed all tracking and A/B testing requirements:
+
+#### 1. Suggestion Exposure Logging
+- **Migration**: `20251213000000_suggestion_exposure_log.sql`
+- **Features**:
+  - Tracks every suggestion shown to users with full context
+  - Captures base scores, consensus levels, contributing sources
+  - Records MMR parameters, diversity rank, metadata completeness
+  - Stores session context (discovery level, filters, mode)
+- **Functions**: `logSuggestionExposure()` in `enrich.ts`
+- **Integration**: Auto-logs on `suggest/page.tsx` when recommendations generated
+
+#### 2. Repeat-Suggestion Rate Tracking
+- **Function**: `getRepeatSuggestionStats()` in `enrich.ts`
+- **Metrics**:
+  - Total exposures vs unique suggestions (30-day lookback)
+  - Repeat rate calculation
+  - Average time between repeat showings
+  - Top repeated suggestions list
+- **UI**: New "Suggestion Diversity" card on Stats page
+  - Shows total exposures, unique films, repeat percentage
+  - Color-coded thresholds (green <10%, yellow <20%, orange >20%)
+  - Actionable tips when repeat rate is high
+
+#### 3. Counterfactual Replay Analysis
+- **Function**: `getCounterfactualReplayData()` in `enrich.ts`
+- **Purpose**: Retrieve historical scored suggestions with feedback outcomes
+- **Use Case**: Simulate alternative parameter settings retroactively
+- **Script**: `scripts/counterfactual_replay.ts`
+  - Recalculates scores with different MMR lambda values
+  - Applies alternative source weight multipliers
+  - Reports estimated impact on acceptance rate
+  - Usage: `npx ts-node scripts/counterfactual_replay.ts <user_id>`
+
+#### 4. A/B Testing Infrastructure
+- **Migration**: `20251213010000_ab_testing_infrastructure.sql`
+- **Tables**:
+  - `ab_test_configs`: Test definitions with variants and traffic splits
+  - `ab_test_assignments`: User-to-variant mappings (sticky assignments)
+  - `ab_test_metrics`: Collected metrics per variant per user
+- **Library**: `src/lib/abTesting.ts`
+  - `getActiveABTests()`: Fetch currently running tests
+  - `getABTestVariant()`: Assign user to variant (or retrieve existing)
+  - `recordABTestMetric()`: Log metrics (acceptance rate, diversity, etc.)
+  - `getABTestResults()`: Aggregate and analyze test outcomes
+  - `userMeetsCriteria()`: Check targeting criteria
+- **Documentation**: `AB_TESTING_GUIDE.md`
+  - Complete setup instructions
+  - Example test configurations
+  - Integration patterns
+  - Best practices
+
+#### Testable Parameters
+- **MMR Lambda** (diversity vs relevance): 0.0–0.5
+- **Exploration Rate**: 0.0–0.3
+- **Source Weights**: Per-source reliability multipliers
+- **Quality Gate Threshold**: Metadata completeness minimum
+
+#### Key Metrics Supported
+- Acceptance rate (positive/total feedback)
+- Diversity score (unique genres/directors)
+- Repeat suggestion rate
+- Average rating given
+- Time to feedback
+- Session length
+
+### Implementation Impact
+- **Data-Driven Optimization**: Can now test parameter changes on real users
+- **Historical Analysis**: Counterfactual replay reduces risk before live tests
+- **Quality Monitoring**: Repeat-rate tracking ensures fresh recommendations
+- **Transparency**: Users see diversity metrics on Stats page
