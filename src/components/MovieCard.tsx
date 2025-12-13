@@ -419,8 +419,10 @@ export default function MovieCard({
     return { label: 'Exploratory', className: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300' };
   })();
 
-  const displayedReasons = expanded ? reasons : reasons?.slice(0, 3);
-  const hasMoreReasons = reasons && reasons.length > 3;
+  // Show moderate number of reasons by default to balance space usage
+  const defaultReasonCount = 6;
+  const displayedReasons = expanded ? reasons : reasons?.slice(0, defaultReasonCount);
+  const hasMoreReasons = reasons && reasons.length > defaultReasonCount;
 
   const handleCountClick = (films: Array<{ id: number; title: string }>, count: string, event: React.MouseEvent) => {
     event.preventDefault();
@@ -478,7 +480,7 @@ export default function MovieCard({
         />
       )}
 
-      <div className={`border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all h-full flex flex-col ${expanded ? '' : 'min-h-[280px]'} relative`}>
+      <div className={`border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col relative self-start w-full h-full`}>
         {/* Gray overlay when dismissed */}
         {dismissed && (
           <div className="absolute inset-0 bg-gray-900 bg-opacity-60 z-10 flex items-center justify-center rounded-lg">
@@ -500,298 +502,191 @@ export default function MovieCard({
             </div>
           </div>
         )}
-        <div className="flex gap-4 p-4 flex-1">
-          {/* Poster Column */}
-          <div className="flex-shrink-0 flex flex-col gap-2">
-            {/* Poster */}
-            <PosterImage posterPath={posterPath} title={title} />
 
-            {/* Badges under poster */}
-            <div className="flex flex-col gap-1 w-32">
-              {trailerKey && (
-                <button
-                  className="px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap transition-colors
-                    bg-red-100 text-red-800 hover:bg-red-200
-                    dark:bg-red-900/40 dark:text-red-100 dark:hover:bg-red-900/60"
-                  onClick={() => setShowVideo(true)}
-                  title="Watch trailer">
-                  ▶️ Trailer
-                </button>
-              )}
-              {isInWatchlist && (
-                <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded text-center whitespace-nowrap" title="In your watchlist">
-                  📋 Watchlist
+        {/* Header Section - Title, Year, Ratings */}
+        <div className="p-3 pb-2 border-b border-gray-100 dark:border-gray-700">
+          <h3 className="font-semibold text-base leading-tight mb-1 line-clamp-2" title={title}>
+            {title}
+          </h3>
+          
+          {/* Year and Ratings Row */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            {year && <span className="text-gray-600 dark:text-gray-400 font-medium">{year}</span>}
+            
+            {vote_average && (
+              <>
+                {year && <span className="text-gray-400">•</span>}
+                <span className="flex items-center gap-1" title={`TMDB: ${vote_average.toFixed(1)}/10 from ${vote_count ? vote_count.toLocaleString() : 'N/A'} votes`}>
+                  <span className="text-yellow-500">⭐</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{vote_average.toFixed(1)}</span>
                 </span>
-              )}
-              {voteCategoryBadge && (
-                <span className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${voteCategoryBadge.className}`}>
-                  {voteCategoryBadge.label}
-                </span>
-              )}
-              {/* Consensus badge shows confidence even if single source */}
-              {consensusBadge && (
+              </>
+            )}
+            
+            {imdb_rating && (
+              <>
+                <span className="text-gray-400">•</span>
                 <span
-                  className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${consensusBadge.className}`}
-                  title={sources && sources.length ? `Recommended by ${sources.map(s => SOURCE_LABELS[s] || s).join(', ')}` : 'Based on reliable sources'}
+                  className="flex items-center gap-1"
+                  title={`${getRatingSourceLabel(imdb_source)}: ${imdb_rating}/10`}
                 >
-                  🎯 {consensusBadge.label}
+                  <span className="font-medium text-gray-700 dark:text-gray-300">IMDb {imdb_rating}</span>
                 </span>
-              )}
-              {reliabilityBadge && (
-                <span
-                  className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${reliabilityBadge.className}`}
-                  title="Per-source reliability learned from your feedback"
-                >
-                  📈 {reliabilityBadge.label}
+              </>
+            )}
+            
+            {rotten_tomatoes && (
+              <>
+                <span className="text-gray-400">•</span>
+                <span className="flex items-center gap-1" title={`Rotten Tomatoes: ${rotten_tomatoes}`}>
+                  <span className="text-red-500">🍅</span>
+                  <span className="font-medium text-gray-700 dark:text-gray-300">{rotten_tomatoes}</span>
                 </span>
-              )}
-              {strengthBadge && (
-                <span
-                  className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${strengthBadge.className}`}
-                  title="Overall match strength from consensus and reliability"
-                >
-                  💡 {strengthBadge.label}
+              </>
+            )}
+            
+            {metacritic && (
+              <>
+                <span className="text-gray-400">•</span>
+                <span className="flex items-center gap-1" title={`Metacritic: ${metacritic}/100`}>
+                  <span className="text-green-600">Ⓜ️</span>
+                  <span className="font-medium text-gray-700 dark:text-gray-300">{metacritic}</span>
                 </span>
-              )}
-              {/* Multi-Source Badge - shows when recommended by multiple sources */}
-              {sources && sources.length >= 2 && (
-                <span 
-                  className={`px-2 py-1 text-xs font-medium rounded text-center whitespace-nowrap ${
-                    consensusLevel === 'high' 
-                      ? 'bg-emerald-100 text-emerald-800' 
-                      : consensusLevel === 'medium' 
-                        ? 'bg-amber-100 text-amber-800' 
-                        : 'bg-blue-100 text-blue-800'
-                  }`}
-                  title={`Recommended by: ${sources.map(s => SOURCE_LABELS[s] || s).join(', ')}`}
-                >
-                  🎯 {sources.length} Sources
-                </span>
-              )}
-            </div>
-
-            {/* Feedback and Save buttons moved under poster */}
-            {(onFeedback || onSave) && (
-              <div className="flex flex-col gap-2 w-32 mt-1">
-                {onFeedback && (
-                  <>
-                    <button
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        if (feedbackState) return;
-                        setFeedbackState('negative');
-                        await onFeedback(id, 'negative', reasons);
-                        setFeedbackState(null);
-                      }}
-                      disabled={!!feedbackState}
-                      className={`w-full py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border ${feedbackState === 'negative'
-                        ? 'bg-gray-200 text-gray-400 border-gray-200 cursor-wait'
-                        : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 border-gray-200'
-                        }`}
-                      title="Not interested in this suggestion"
-                    >
-                      {feedbackState === 'negative' ? (
-                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                      ) : (
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
-                        </svg>
-                      )}
-                      <span>{feedbackState === 'negative' ? 'Removing...' : 'Not Interested'}</span>
-                    </button>
-                    <button
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        if (feedbackState) return;
-                        setFeedbackState('positive');
-                        await onFeedback(id, 'positive', reasons);
-                        setFeedbackState(null);
-                      }}
-                      disabled={!!feedbackState}
-                      className={`w-full py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border ${feedbackState === 'positive'
-                        ? 'bg-blue-100 text-blue-400 border-blue-100 cursor-wait'
-                        : 'bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border-blue-100'
-                        }`}
-                      title="Show more suggestions like this"
-                    >
-                      {feedbackState === 'positive' ? (
-                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                      ) : (
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
-                        </svg>
-                      )}
-                      <span>{feedbackState === 'positive' ? 'Updating...' : 'More Like This'}</span>
-                    </button>
-                  </>
-                )}
-                {onSave && (
-                  <button
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      if (saveState !== 'idle') return;
-                      setSaveState('saving');
-                      try {
-                        await onSave(id, title, year, posterPath);
-                        setSaveState('saved');
-                      } catch (error) {
-                        console.error('Error saving movie:', error);
-                        setSaveState('idle');
-                      }
-                    }}
-                    disabled={saveState !== 'idle'}
-                    className={`w-full py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border ${saveState === 'saved'
-                      ? 'bg-green-100 text-green-700 border-green-200'
-                      : saveState === 'saving'
-                        ? 'bg-purple-100 text-purple-400 border-purple-100 cursor-wait'
-                        : 'bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-900 border-purple-100'
-                      }`}
-                    title={saveState === 'saved' ? 'Saved to your list' : 'Save to your list'}
-                  >
-                    {saveState === 'saving' ? (
-                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                    ) : saveState === 'saved' ? (
-                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    ) : (
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                      </svg>
-                    )}
-                    <span>
-                      {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : 'Save to List'}
-                    </span>
-                  </button>
-                )}
-              </div>
+              </>
             )}
           </div>
 
-          {/* Content */}
-          <div className="flex-1 overflow-hidden">
-            <div className="mb-1">
-              <h3 className="font-semibold text-lg break-words" title={title}>
-                {title}
-              </h3>
+          {/* Genres */}
+          {genres && genres.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {genres.slice(0, 5).map((genre, idx) => (
+                <span
+                  key={idx}
+                  className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
+                >
+                  {genre}
+                </span>
+              ))}
+              {genres.length > 5 && (
+                <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full">
+                  +{genres.length - 5}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Main Content Area */}
+        <div className="flex gap-3 p-3">
+          {/* Poster Column */}
+          <div className="flex-shrink-0">
+            <PosterImage posterPath={posterPath} title={title} />
+            
+            {/* Quick Action Buttons */}
+            {trailerKey && (
+              <button
+                className="mt-2 w-24 px-2 py-1.5 text-xs font-medium rounded text-center transition-colors
+                  bg-red-100 text-red-800 hover:bg-red-200
+                  dark:bg-red-900/40 dark:text-red-100 dark:hover:bg-red-900/60 flex items-center justify-center gap-1"
+                onClick={() => setShowVideo(true)}
+                title="Watch trailer">
+                <span>▶️</span>
+                <span>Trailer</span>
+              </button>
+            )}
+          </div>
+
+          {/* Content Column */}
+          <div className="flex-1 min-w-0 flex flex-col">
+            {/* Key Badges */}
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {strengthBadge && (
+                <span
+                  className={`px-2 py-1 text-xs font-medium rounded whitespace-nowrap ${strengthBadge.className}`}
+                  title="Overall match strength from consensus and reliability"
+                >
+                  {strengthBadge.label}
+                </span>
+              )}
+              
+              {consensusBadge && (
+                <span
+                  className={`px-2 py-1 text-xs font-medium rounded whitespace-nowrap ${consensusBadge.className}`}
+                  title={sources && sources.length ? `Recommended by ${sources.map(s => SOURCE_LABELS[s] || s).join(', ')}` : 'Based on reliable sources'}
+                >
+                  {consensusBadge.label}
+                </span>
+              )}
+              
+              {reliabilityBadge && (
+                <span
+                  className={`px-2 py-1 text-xs font-medium rounded whitespace-nowrap ${reliabilityBadge.className}`}
+                  title="Per-source reliability learned from your feedback"
+                >
+                  {reliabilityBadge.label}
+                </span>
+              )}
+              
+              {sources && sources.length >= 2 && (
+                <span 
+                  className="px-2 py-1 text-xs font-medium rounded whitespace-nowrap bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
+                  title={`Recommended by: ${sources.map(s => SOURCE_LABELS[s] || s).join(', ')}`}
+                >
+                  {sources.length} Sources
+                </span>
+              )}
+              
+              {isInWatchlist && (
+                <span className="px-2 py-1 text-xs font-medium bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 rounded whitespace-nowrap" title="In your watchlist">
+                  📋 Watchlist
+                </span>
+              )}
+              
+              {voteCategoryBadge && (
+                <span className={`px-2 py-1 text-xs font-medium rounded whitespace-nowrap ${voteCategoryBadge.className}`}>
+                  {voteCategoryBadge.label}
+                </span>
+              )}
+              
+              {collectionName && (
+                <span className="px-2 py-1 text-xs font-medium bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200 rounded whitespace-nowrap" title="Part of a collection">
+                  🎬 {collectionName}
+                </span>
+              )}
             </div>
 
-            {(year || vote_average || collectionName) && (
-              <div className="text-sm text-gray-600 dark:text-gray-400 mb-3 flex flex-wrap items-center gap-2">
-                {year && <span>{year}</span>}
-                {vote_average && (
-                  <>
-                    {year && <span>•</span>}
-                    <span className="flex items-center gap-1" title={`${vote_average.toFixed(1)}/10 from ${vote_count ? vote_count.toLocaleString() : 'N/A'} votes`}>
-                      <span className="text-yellow-500">⭐</span>
-                      <span className="font-medium">{vote_average.toFixed(1)}</span>
-                      <span className="text-gray-400 text-xs">/{10}</span>
-                    </span>
-                  </>
-                )}
-                {imdb_rating && (
-                  <>
-                    <span>•</span>
-                    <span
-                      className="flex items-center gap-1"
-                      title={`Rating from ${getRatingSourceLabel(imdb_source)}${imdb_source && imdb_source !== 'omdb' ? ' (OMDb unavailable, using fallback)' : ''}`}
-                    >
-                      <span className="text-yellow-500">⭐</span>
-                      <span className="font-medium">{imdb_rating}</span>
-                      {imdb_source && imdb_source !== 'omdb' && (
-                        <span className="text-xs text-gray-400 uppercase">({imdb_source})</span>
-                      )}
-                    </span>
-                  </>
-                )}
-                {rotten_tomatoes && (
-                  <>
-                    <span>•</span>
-                    <span className="flex items-center gap-1" title={`Rotten Tomatoes: ${rotten_tomatoes}`}>
-                      <span className="text-red-500">🍅</span>
-                      <span className="font-medium">{rotten_tomatoes}</span>
-                    </span>
-                  </>
-                )}
-                {metacritic && (
-                  <>
-                    <span>•</span>
-                    <span className="flex items-center gap-1" title={`Metacritic: ${metacritic}`}>
-                      <span className="text-green-600">Ⓜ️</span>
-                      <span className="font-medium">{metacritic}</span>
-                    </span>
-                  </>
-                )}
-                {awards && awards !== 'N/A' && (
-                  <div className="w-full mt-1 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-100 flex items-center gap-1">
-                    <span>🏆</span>
-                    <span className="truncate" title={awards}>{awards}</span>
-                  </div>
-                )}
-                {collectionName && (
-                  <>
-                    {(year || vote_average) && <span>•</span>}
-                    <span className="text-indigo-600" title="Part of a collection">
-                      🎬 {collectionName}
-                    </span>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Genre Tags */}
-            {genres && genres.length > 0 && (
-              <div className="flex flex-wrap gap-1 mb-2">
-                {genres.slice(0, 4).map((genre, idx) => (
-                  <span
-                    key={idx}
-                    className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
-                    title={`Genre: ${genre}`}
-                  >
-                    {genre}
-                  </span>
-                ))}
-                {genres.length > 4 && (
-                  <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full">
-                    +{genres.length - 4}
-                  </span>
-                )}
+            {/* Awards */}
+            {awards && awards !== 'N/A' && (
+              <div className="mb-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 px-2 py-1.5 rounded border border-amber-200 dark:border-amber-800 flex items-start gap-1.5">
+                <span className="mt-0.5">🏆</span>
+                <span className="flex-1 line-clamp-2" title={awards}>{awards}</span>
               </div>
             )}
 
             {/* Reasons */}
             {reasons && reasons.length > 0 && (
-              <div>
-                <ul className="space-y-1.5 overflow-hidden">
+              <div className={`mb-1 ${expanded ? 'flex-1 flex flex-col' : ''}`}>
+                <ul className={`space-y-1 ${expanded ? 'flex-1' : ''}`}>
                   {displayedReasons?.map((r, i) => (
-                    <li key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-start gap-2 leading-snug">
+                    <li key={i} className="text-xs text-gray-700 dark:text-gray-300 flex items-start gap-1.5 leading-tight">
                       <span className="text-blue-500 mt-0.5 flex-shrink-0">•</span>
-                      <div className="flex-1 flex flex-col gap-0.5">
-                        <div className="flex items-start gap-2 flex-wrap">
+                      <div className="flex-1 flex flex-col gap-0.5 min-w-0">
+                        <div className="flex items-start gap-1.5 flex-wrap">
                           {enhanceReasonText(r, i, contributingFilms, handleCountClick)}
                           {(() => {
                             const ev = getReasonEvidence(r);
                             if (!ev) return null;
                             const badgeClass = ev.label === 'Strong'
-                              ? 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 border border-emerald-100 dark:border-emerald-800'
+                              ? 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200'
                               : ev.label === 'Solid'
-                                ? 'bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200 border border-amber-100 dark:border-amber-800'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600';
+                                ? 'bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300';
                             return (
                               <span
-                                className={`px-2 py-0.5 text-[10px] font-semibold rounded-full whitespace-nowrap ${badgeClass}`}
+                                className={`px-1.5 py-0.5 text-[10px] font-medium rounded whitespace-nowrap ${badgeClass}`}
                                 title={ev.title}
                               >
-                                {`${ev.label} • ${ev.count} signals • ${ev.recencyLabel}`}
+                                {ev.label}
                               </span>
                             );
                           })()}
@@ -803,7 +698,7 @@ export default function MovieCard({
                 {hasMoreReasons && (
                   <button
                     onClick={() => setExpanded(!expanded)}
-                    className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium flex items-center gap-1 transition-colors"
+                    className="mt-1.5 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium flex items-center gap-1 transition-colors flex-shrink-0"
                   >
                     {expanded ? (
                       <>
@@ -814,7 +709,7 @@ export default function MovieCard({
                       </>
                     ) : (
                       <>
-                        <span>+{reasons.length - 3} more reason{reasons.length - 3 > 1 ? 's' : ''}</span>
+                        <span>+{reasons.length - defaultReasonCount} more</span>
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
@@ -825,26 +720,153 @@ export default function MovieCard({
               </div>
             )}
 
-            {/* Movie Description */}
-            {overview && (
-              <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-                <p className={`text-xs text-gray-600 dark:text-gray-400 leading-relaxed ${descriptionExpanded ? '' : 'line-clamp-3'}`}>
-                  {overview}
-                </p>
-                {overview.length > 100 && (
-                  <button
-                    onClick={() => setDescriptionExpanded(!descriptionExpanded)}
-                    className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium transition-colors"
-                  >
-                    {descriptionExpanded ? 'Read less' : 'Read more'}
-                  </button>
-                )}
-              </div>
-            )}
-
-
+            {/* Description */}
+            {overview && (() => {
+              const shouldShowToggle = overview.length > 120;
+              const shouldClamp = shouldShowToggle && !descriptionExpanded;
+              return (
+                <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700 flex flex-col">
+                  <p className={`text-xs text-gray-600 dark:text-gray-400 leading-relaxed ${shouldClamp ? 'line-clamp-3' : ''}`}>
+                    {overview}
+                  </p>
+                  {shouldShowToggle && (
+                    <button
+                      onClick={() => setDescriptionExpanded(!descriptionExpanded)}
+                      className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium self-start"
+                    >
+                      {descriptionExpanded ? 'Less' : 'More'}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
+
+        {/* Footer - Action Buttons */}
+        {(onFeedback || onSave) && (
+          <div className="p-3 pt-2 flex gap-2 flex-shrink-0 mt-auto">
+            {onFeedback && (
+              <>
+                <button
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    if (feedbackState) return;
+                    setFeedbackState('negative');
+                    await onFeedback(id, 'negative', reasons);
+                    setFeedbackState(null);
+                  }}
+                  disabled={!!feedbackState}
+                  className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${
+                    feedbackState === 'negative'
+                      ? 'bg-gray-200 text-gray-400 cursor-wait'
+                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200'
+                  }`}
+                  title="Not interested in this suggestion"
+                >
+                  {feedbackState === 'negative' ? (
+                    <>
+                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Removing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      <span className="whitespace-nowrap truncate">Not Interested</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    if (feedbackState) return;
+                    setFeedbackState('positive');
+                    await onFeedback(id, 'positive', reasons);
+                    setFeedbackState(null);
+                  }}
+                  disabled={!!feedbackState}
+                  className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${
+                    feedbackState === 'positive'
+                      ? 'bg-blue-200 text-blue-400 cursor-wait'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600'
+                  }`}
+                  title="Show more suggestions like this"
+                >
+                  {feedbackState === 'positive' ? (
+                    <>
+                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Updating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+                      </svg>
+                      <span className="whitespace-nowrap truncate">More Like This</span>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+            {onSave && (
+              <button
+                onClick={async (e) => {
+                  e.preventDefault();
+                  if (saveState !== 'idle') return;
+                  setSaveState('saving');
+                  try {
+                    await onSave(id, title, year, posterPath);
+                    setSaveState('saved');
+                  } catch (error) {
+                    console.error('Error saving movie:', error);
+                    setSaveState('idle');
+                  }
+                }}
+                disabled={saveState !== 'idle'}
+                className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${
+                  saveState === 'saved'
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+                    : saveState === 'saving'
+                      ? 'bg-purple-200 text-purple-400 cursor-wait'
+                      : 'bg-purple-600 hover:bg-purple-700 text-white dark:bg-purple-500 dark:hover:bg-purple-600'
+                }`}
+                title={saveState === 'saved' ? 'Saved to your list' : 'Save to your list'}
+              >
+                {saveState === 'saving' ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Saving...</span>
+                  </>
+                ) : saveState === 'saved' ? (
+                  <>
+                    <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    <span className="whitespace-nowrap truncate">Saved</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                    <span className="whitespace-nowrap truncate">Save to List</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Global styles for interactive film counts */}
