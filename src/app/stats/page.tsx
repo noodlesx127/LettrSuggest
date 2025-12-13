@@ -45,9 +45,21 @@ export default function StatsPage() {
     success_rate: number;
     rating_count: number;
   }>>([]);
+  const [pairwiseStats, setPairwiseStats] = useState<{
+    total_comparisons: number;
+    recent_30d: number;
+    recent_90d: number;
+    high_consensus_wins: number;
+    medium_consensus_wins: number;
+    low_consensus_wins: number;
+  } | null>(null);
   const [feedbackSummary, setFeedbackSummary] = useState<{ total: number; positive: number; negative: number; hitRate: number } | null>(null);
   const [sourceReliability, setSourceReliability] = useState<Array<{ source: string; total: number; positive: number; hitRate: number }>>([]);
+  const [sourceReliabilityRecent, setSourceReliabilityRecent] = useState<Array<{ source: string; total: number; positive: number; hitRate: number }>>([]);
   const [sourceConsensus, setSourceConsensus] = useState<Array<{ source: string; high: { pos: number; total: number }; medium: { pos: number; total: number }; low: { pos: number; total: number } }>>([]);
+  const [reasonAcceptance, setReasonAcceptance] = useState<Array<{ reason: string; total: number; positive: number; hitRate: number }>>([]);
+  const [consensusAcceptance, setConsensusAcceptance] = useState<{ high: { pos: number; total: number }; medium: { pos: number; total: number }; low: { pos: number; total: number } } | null>(null);
+  const [feedbackRows, setFeedbackRows] = useState<Array<any>>([]);
 
   useEffect(() => {
     async function getUid() {
@@ -84,6 +96,44 @@ export default function StatsPage() {
           .limit(10);
 
         setAdjacentPrefs(prefs || []);
+
+        // Fetch pairwise comparison stats
+        const { data: pairwiseEvents, error: pairwiseError } = await supabase
+          .from('pairwise_events')
+          .select('created_at, winner_consensus, loser_consensus')
+          .eq('user_id', uid);
+
+        if (pairwiseError) {
+          console.error('[Stats] Error fetching pairwise events:', pairwiseError);
+        } else if (pairwiseEvents && pairwiseEvents.length > 0) {
+          const now = Date.now();
+          const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+          const ninetyDaysAgo = now - 90 * 24 * 60 * 60 * 1000;
+
+          const recent30d = pairwiseEvents.filter(e => {
+            const ts = e.created_at ? new Date(e.created_at).getTime() : 0;
+            return ts >= thirtyDaysAgo;
+          }).length;
+
+          const recent90d = pairwiseEvents.filter(e => {
+            const ts = e.created_at ? new Date(e.created_at).getTime() : 0;
+            return ts >= ninetyDaysAgo;
+          }).length;
+
+          // Count consensus levels for winners
+          const highConsensusWins = pairwiseEvents.filter(e => e.winner_consensus === 'high').length;
+          const mediumConsensusWins = pairwiseEvents.filter(e => e.winner_consensus === 'medium').length;
+          const lowConsensusWins = pairwiseEvents.filter(e => e.winner_consensus === 'low').length;
+
+          setPairwiseStats({
+            total_comparisons: pairwiseEvents.length,
+            recent_30d,
+            recent_90d,
+            high_consensus_wins: highConsensusWins,
+            medium_consensus_wins: mediumConsensusWins,
+            low_consensus_wins: lowConsensusWins,
+          });
+        }
       } catch (e) {
         console.error('[Stats] Error fetching exploration data:', e);
       }
@@ -93,13 +143,14 @@ export default function StatsPage() {
   }, [uid]);
 
   // Fetch suggestion feedback to derive overall hit-rate and per-source reliability (now that sources are stored)
+  // Note: suggestion_feedback has a unique constraint on (user_id, tmdb_id) so no duplicates exist
   useEffect(() => {
     async function fetchFeedbackSummary() {
       if (!supabase || !uid) return;
       try {
         const { data, error } = await supabase
           .from('suggestion_feedback')
-          .select('feedback_type, recommendation_sources, consensus_level')
+          .select('feedback_type, recommendation_sources, consensus_level, reason_types, movie_features, tmdb_id, created_at')
           .eq('user_id', uid);
         if (error) {
           console.error('[Stats] Error fetching feedback summary:', error);
@@ -110,6 +161,33 @@ export default function StatsPage() {
         const negative = data?.filter(r => r.feedback_type === 'negative').length ?? 0;
         const hitRate = total > 0 ? positive / total : 0;
         setFeedbackSummary({ total, positive, negative, hitRate });
+        setFeedbackRows(data || []);
+
+        // Aggregate reason-type hit rates (acceptance by reason type)
+        const byReason = new Map<string, { pos: number; total: number }>();
+        data?.forEach(row => {
+          const reasons: string[] = Array.isArray((row as any).reason_types) ? (row as any).reason_types : [];
+          const isPos = row.feedback_type === 'positive';
+          reasons.forEach(r => {
+            const key = (r || '').toLowerCase();
+            if (!key) return;
+            const curr = byReason.get(key) ?? { pos: 0, total: 0 };
+            if (isPos) curr.pos += 1;
+            curr.total += 1;
+            byReason.set(key, curr);
+          });
+        });
+
+        const reasonEntries = Array.from(byReason.entries())
+          .map(([reason, stats]) => ({
+            reason,
+            total: stats.total,
+            positive: stats.pos,
+            hitRate: stats.total > 0 ? stats.pos / stats.total : 0,
+          }))
+          .filter(e => e.total >= 5)
+          .sort((a, b) => b.total - a.total);
+        setReasonAcceptance(reasonEntries);
 
         // Aggregate per-source hit rates
         const bySource = new Map<string, { pos: number; total: number }>();
@@ -137,6 +215,35 @@ export default function StatsPage() {
           .sort((a, b) => b.total - a.total);
         setSourceReliability(entries);
 
+        // Recent (90d) per-source reliability to catch regressions
+        const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+        const bySourceRecent = new Map<string, { pos: number; total: number }>();
+        data?.forEach(row => {
+          const ts = row.created_at ? new Date(row.created_at).getTime() : 0;
+          if (!ts || ts < ninetyDaysAgo) return;
+          const sources: string[] = Array.isArray((row as any).recommendation_sources) ? (row as any).recommendation_sources : [];
+          const isPos = row.feedback_type === 'positive';
+          sources.forEach(src => {
+            const key = (src || '').toLowerCase();
+            if (!key) return;
+            const curr = bySourceRecent.get(key) ?? { pos: 0, total: 0 };
+            if (isPos) curr.pos += 1;
+            curr.total += 1;
+            bySourceRecent.set(key, curr);
+          });
+        });
+
+        const recentEntries = Array.from(bySourceRecent.entries())
+          .map(([source, stats]) => ({
+            source,
+            total: stats.total,
+            positive: stats.pos,
+            hitRate: stats.total > 0 ? stats.pos / stats.total : 0,
+          }))
+          .filter(e => e.total >= 3)
+          .sort((a, b) => b.total - a.total);
+        setSourceReliabilityRecent(recentEntries);
+
         // Consensus-level split per source
         const bySourceConsensus = new Map<string, { high: { pos: number; total: number }; medium: { pos: number; total: number }; low: { pos: number; total: number } }>();
         data?.forEach(row => {
@@ -160,6 +267,18 @@ export default function StatsPage() {
           .filter(e => (e.high.total + e.medium.total + e.low.total) >= 5) // need some signal
           .sort((a, b) => (b.high.total + b.medium.total + b.low.total) - (a.high.total + a.medium.total + a.low.total));
         setSourceConsensus(consensusEntries);
+
+        // Aggregate consensus calibration across all sources
+        const consensusTotals = data?.reduce((acc, row) => {
+          const level = (row as any).consensus_level as ('high' | 'medium' | 'low' | null);
+          const bucket = level === 'high' ? 'high' : level === 'medium' ? 'medium' : 'low';
+          const isPos = row.feedback_type === 'positive';
+          acc[bucket].total += 1;
+          if (isPos) acc[bucket].pos += 1;
+          return acc;
+        }, { high: { pos: 0, total: 0 }, medium: { pos: 0, total: 0 }, low: { pos: 0, total: 0 } }) ?? null;
+
+        setConsensusAcceptance(consensusTotals);
       } catch (e) {
         console.error('[Stats] Exception fetching feedback summary', e);
       }
@@ -186,6 +305,21 @@ export default function StatsPage() {
       return filmDate >= cutoff;
     });
   }, [films, timeFilter]);
+
+  const filmByUri = useMemo(() => {
+    const map = new Map<string, any>();
+    films?.forEach(f => map.set(f.uri, f));
+    return map;
+  }, [films]);
+
+  const tmdbToFilm = useMemo(() => {
+    const map = new Map<number, any>();
+    filmMappings.forEach((tmdbId, uri) => {
+      const film = filmByUri.get(uri);
+      if (film) map.set(tmdbId, film);
+    });
+    return map;
+  }, [filmMappings, filmByUri]);
 
   // Load TMDB details for mapped films
   useEffect(() => {
@@ -1014,6 +1148,65 @@ export default function StatsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredFilms, tmdbDetails, films, filmMappings]);
 
+  const feedbackAnalytics = useMemo(() => {
+    if (!feedbackRows || feedbackRows.length === 0) return null;
+
+    const positives = feedbackRows.filter(r => r.feedback_type === 'positive');
+    const genreCounts = new Map<string, number>();
+    const directorCounts = new Map<string, number>();
+    const actorCounts = new Map<string, number>();
+    const keywordCounts = new Map<string, number>();
+
+    const addCount = (map: Map<string, number>, key?: string | null) => {
+      if (!key) return;
+      map.set(key, (map.get(key) ?? 0) + 1);
+    };
+
+    positives.forEach(row => {
+      const features = (row as any).movie_features || {};
+      (features.genres || []).forEach((g: any) => addCount(genreCounts, g?.name ?? g));
+      (features.directors || []).forEach((d: any) => addCount(directorCounts, d?.name ?? d));
+      (features.actors || []).forEach((a: any) => addCount(actorCounts, a?.name ?? a));
+      (features.keywords || []).forEach((k: any) => addCount(keywordCounts, k?.name ?? k));
+    });
+
+    const totalGenreCounts = Array.from(genreCounts.values()).reduce((s, v) => s + v, 0);
+    const topGenreCount = totalGenreCounts > 0 ? Math.max(...genreCounts.values()) : 0;
+
+    return {
+      positiveCount: positives.length,
+      uniqueGenres: genreCounts.size,
+      uniqueDirectors: directorCounts.size,
+      uniqueActors: actorCounts.size,
+      uniqueKeywords: keywordCounts.size,
+      topGenreShare: totalGenreCounts > 0 ? topGenreCount / totalGenreCounts : 0,
+    };
+  }, [feedbackRows]);
+
+  const regretStats = useMemo(() => {
+    if (!feedbackRows || feedbackRows.length === 0 || tmdbToFilm.size === 0) return null;
+    const negatives = feedbackRows.filter(r => r.feedback_type === 'negative');
+    const regretCandidates = negatives.filter(r => tmdbToFilm.has(r.tmdb_id));
+    const regrets = regretCandidates.filter(r => {
+      const film = tmdbToFilm.get(r.tmdb_id);
+      if (!film) return false;
+      const rating = film.rating ?? 0;
+      const liked = Boolean(film.liked);
+      return liked || rating >= 3.5;
+    });
+
+    const examples = regrets.slice(0, 3).map(r => {
+      const film = tmdbToFilm.get(r.tmdb_id);
+      return film?.title || `TMDB ${r.tmdb_id}`;
+    });
+
+    return {
+      regretCount: regrets.length,
+      totalCandidates: regretCandidates.length,
+      examples,
+    };
+  }, [feedbackRows, tmdbToFilm]);
+
   // Log taste profile build details for debugging
   useEffect(() => {
     if (!stats) return;
@@ -1660,6 +1853,28 @@ export default function StatsPage() {
             )}
           </div>
 
+          {consensusAcceptance && (consensusAcceptance.high.total + consensusAcceptance.medium.total + consensusAcceptance.low.total) > 0 && (
+            <div className="bg-white border rounded p-3 mt-3">
+              <div className="text-sm font-medium text-gray-900 mb-2">Consensus Calibration</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-gray-700">
+                {(['high', 'medium', 'low'] as const).map(level => {
+                  const bucket = consensusAcceptance[level];
+                  const rate = bucket.total > 0 ? (bucket.pos / bucket.total) * 100 : null;
+                  const label = level === 'high' ? 'High (3+ sources)' : level === 'medium' ? 'Medium (2 sources)' : 'Low (1 source)';
+                  return (
+                    <div key={level} className="bg-gray-50 px-2 py-2 rounded">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-gray-800">{label}</span>
+                        <span className="text-gray-500">{bucket.total} fb</span>
+                      </div>
+                      <div className="text-gray-800 mt-1">{rate != null ? `${rate.toFixed(0)}% (${bucket.pos}/${bucket.total})` : '—'}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {sourceReliability.length > 0 && (
             <div className="bg-white border rounded p-3 mt-3">
               <div className="text-sm font-medium text-gray-900 mb-2">Per-Source Reliability (min 3 samples)</div>
@@ -1670,6 +1885,78 @@ export default function StatsPage() {
                     <span className="text-gray-600">{(entry.hitRate * 100).toFixed(0)}% ({entry.positive}/{entry.total})</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {sourceReliabilityRecent.length > 0 && (
+            <div className="bg-white border rounded p-3 mt-3">
+              <div className="text-sm font-medium text-gray-900 mb-2">Per-Source Reliability (Last 90d, min 3 samples)</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs text-gray-700">
+                {sourceReliabilityRecent.map(entry => (
+                  <div key={entry.source} className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
+                    <span className="font-medium text-gray-800">{entry.source}</span>
+                    <span className="text-gray-600">{(entry.hitRate * 100).toFixed(0)}% ({entry.positive}/{entry.total})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {reasonAcceptance.length > 0 && (
+            <div className="bg-white border rounded p-3 mt-3">
+              <div className="text-sm font-medium text-gray-900 mb-2">Acceptance by Reason Type (min 5 samples)</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs text-gray-700">
+                {reasonAcceptance.map(entry => (
+                  <div key={entry.reason} className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
+                    <span className="font-medium text-gray-800">{entry.reason}</span>
+                    <span className="text-gray-600">{(entry.hitRate * 100).toFixed(0)}% ({entry.positive}/{entry.total})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {feedbackAnalytics && feedbackAnalytics.positiveCount >= 3 && (
+            <div className="bg-white border rounded p-3 mt-3">
+              <div className="text-sm font-medium text-gray-900 mb-2">Diversity of Accepted Suggestions</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-gray-700">
+                <div className="bg-gray-50 px-2 py-2 rounded">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-800">Genres</span>
+                    <span className="text-gray-500">{feedbackAnalytics.uniqueGenres} unique</span>
+                  </div>
+                  <div className="text-gray-800 mt-1">Top genre share: {(feedbackAnalytics.topGenreShare * 100).toFixed(0)}%</div>
+                </div>
+                <div className="bg-gray-50 px-2 py-2 rounded">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-800">Directors</span>
+                    <span className="text-gray-500">{feedbackAnalytics.uniqueDirectors} unique</span>
+                  </div>
+                  <div className="text-gray-800 mt-1">Actors: {feedbackAnalytics.uniqueActors} | Keywords: {feedbackAnalytics.uniqueKeywords}</div>
+                </div>
+                <div className="bg-gray-50 px-2 py-2 rounded">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-800">Accepted Titles</span>
+                    <span className="text-gray-500">{feedbackAnalytics.positiveCount} total</span>
+                  </div>
+                  <div className="text-gray-800 mt-1">Higher spread = better novelty balance</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {regretStats && regretStats.totalCandidates > 0 && (
+            <div className="bg-white border rounded p-3 mt-3">
+              <div className="text-sm font-medium text-gray-900 mb-2">Regret Recovery</div>
+              <div className="text-xs text-gray-700">
+                <div className="flex items-center justify-between mb-1">
+                  <span>Dismissed then later liked/watched</span>
+                  <span className="font-medium text-gray-800">{regretStats.regretCount}/{regretStats.totalCandidates}</span>
+                </div>
+                {regretStats.examples.length > 0 && (
+                  <div className="text-gray-600">Examples: {regretStats.examples.join(', ')}</div>
+                )}
               </div>
             </div>
           )}
@@ -1711,12 +1998,12 @@ export default function StatsPage() {
 
       {/* Watchlist Analysis Section - What the user WANTS to see */}
       {stats && !loadingDetails && stats.watchlistCount > 0 && (stats.watchlistTopGenres?.length > 0 || stats.watchlistTopDirectors?.length > 0) && (
-        <div className="bg-gradient-to-r from-cyan-50 to-blue-50 border border-cyan-200 rounded-lg p-6 mb-6">
+        <div className="bg-gradient-to-r from-cyan-50 to-blue-50 dark:from-cyan-950/30 dark:to-blue-950/30 border border-cyan-200 dark:border-cyan-800 rounded-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-900 text-lg">📋 What You Want to Watch</h2>
-            <span className="text-xs text-cyan-700 bg-cyan-100 px-2 py-1 rounded">{stats.watchlistCount} films on watchlist</span>
+            <h2 className="font-semibold text-gray-900 dark:text-gray-100 text-lg">📋 What You Want to Watch</h2>
+            <span className="text-xs text-cyan-700 dark:text-cyan-300 bg-cyan-100 dark:bg-cyan-900/40 px-2 py-1 rounded">{stats.watchlistCount} films on watchlist</span>
           </div>
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             Your watchlist shows what you&apos;re interested in — this signals positive intent to the recommendation algorithm.
           </p>
 
@@ -1869,12 +2156,12 @@ export default function StatsPage() {
 
       {/* Avoidance Profile Section - What we're filtering out */}
       {stats && !loadingDetails && (stats.avoidedGenres?.length > 0 || stats.avoidedKeywords?.length > 0 || stats.avoidedDirectors?.length > 0 || stats.mixedGenres?.length > 0 || stats.mixedKeywords?.length > 0 || stats.mixedDirectors?.length > 0) && (
-        <div className="bg-gradient-to-r from-red-50 to-orange-50 border border-red-200 rounded-lg p-6 mb-6">
+        <div className="bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-950/30 dark:to-orange-950/30 border border-red-200 dark:border-red-800 rounded-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-900 text-lg">🚫 Avoidance Profile</h2>
-            <span className="text-xs text-red-700 bg-red-100 px-2 py-1 rounded">Filters Suggestions</span>
+            <h2 className="font-semibold text-gray-900 dark:text-gray-100 text-lg">🚫 Avoidance Profile</h2>
+            <span className="text-xs text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 px-2 py-1 rounded">Filters Suggestions</span>
           </div>
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             Comparing {stats.likedFilmsCount} liked films (3+ stars or ❤️) vs {stats.dislikedFilmsCount} disliked films (≤1.5 stars).
             <strong> Only avoided if you dislike 60%+ of films with that attribute.</strong>
             <br />
@@ -2007,10 +2294,10 @@ export default function StatsPage() {
 
       {/* Discovery Preferences Section - Phase 5+ Adaptive Learning */}
       {explorationStats && (
-        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4 mb-6">
-          <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/30 dark:to-purple-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4 mb-6">
+          <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
             🔍 Your Discovery Preferences
-            <span className="text-xs text-indigo-600 font-normal">
+            <span className="text-xs text-indigo-600 dark:text-indigo-300 font-normal">
               (Adaptive Learning Active)
             </span>
           </h2>
@@ -2077,6 +2364,81 @@ export default function StatsPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Pairwise Learning Section */}
+      {pairwiseStats && pairwiseStats.total_comparisons > 0 && (
+        <div className="bg-gradient-to-r from-violet-50 to-fuchsia-50 dark:from-violet-950/30 dark:to-fuchsia-950/30 border border-violet-200 dark:border-violet-800 rounded-lg p-4 mb-6">
+          <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+            ⚖️ Pairwise Learning Stats
+            <span className="text-xs text-violet-600 dark:text-violet-300 font-normal">
+              (Your Head-to-Head Choices)
+            </span>
+          </h2>
+
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            When you choose between two similar films, the algorithm learns your subtle preferences.
+            These comparisons help refine recommendations by understanding which features matter most to you.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+            <div className="bg-white dark:bg-gray-800 rounded p-3 border border-violet-100 dark:border-violet-900">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Comparisons</div>
+              <div className="text-2xl font-bold text-violet-700 dark:text-violet-400">
+                {pairwiseStats.total_comparisons}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                All-time choices made
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded p-3 border border-violet-100 dark:border-violet-900">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Recent Activity</div>
+              <div className="text-lg font-bold text-violet-700 dark:text-violet-400">
+                {pairwiseStats.recent_30d} <span className="text-sm font-normal text-gray-600 dark:text-gray-400">last 30d</span>
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {pairwiseStats.recent_90d} in last 90 days
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded p-3 border border-violet-100 dark:border-violet-900">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Learning Signal</div>
+              <div className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span>High consensus wins</span>
+                  <span className="font-medium text-green-700 dark:text-green-400">{pairwiseStats.high_consensus_wins}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Medium consensus wins</span>
+                  <span className="font-medium text-yellow-700 dark:text-yellow-400">{pairwiseStats.medium_consensus_wins}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Low consensus wins</span>
+                  <span className="font-medium text-orange-700 dark:text-orange-400">{pairwiseStats.low_consensus_wins}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded p-3 border border-violet-100 dark:border-violet-900">
+            <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+              How Pairwise Learning Works
+            </div>
+            <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+              <div>• <strong>Consensus level</strong> shows how many sources agreed on each film (high = 3+ sources, medium = 2, low = 1)</div>
+              <div>• When you pick a film, the algorithm learns that its <strong>specific features</strong> (genre, actors, themes, year) were more appealing</div>
+              <div>• These micro-preferences accumulate to fine-tune your taste profile beyond simple ratings</div>
+              <div>• Choices between high-consensus films teach the algorithm about quality thresholds</div>
+              <div>• Choices between low-consensus films reveal your openness to niche/exploratory picks</div>
+            </div>
+          </div>
+
+          <div className="text-xs text-gray-500 dark:text-gray-400 bg-violet-50 dark:bg-violet-950/30 rounded p-2 mt-3">
+            💡 <strong>Tip:</strong> The more comparisons you make, the better the algorithm understands your nuanced preferences.
+            Try the pairwise comparison feature on the Suggestions page to help refine your recommendations!
           </div>
         </div>
       )}

@@ -44,6 +44,7 @@
 ### Stats Page
 - [x] Stats page: added Watchlist Momentum (recency buckets, median/avg age)
 - [x] Stats page: added Metadata Coverage + Consensus Strength cards to mirror quality gates and confidence
+- [x] Stats page: added Pairwise Learning Stats section (total comparisons, 30d/90d activity, consensus-level wins, educational explainer)
 
 ---
 
@@ -51,15 +52,21 @@
 
 ### Pairwise Learning
 - [x] First pass shipped (near-tie prompt + winner/loser logging)
-- [ ] Regularized feature-level updates from pairwise choices
+- [x] Regularized feature-level updates from pairwise choices
+- [x] Fixed pairwise session counter (now shows 1/3, 2/3, 3/3 correctly)
+- [x] Fixed modal flow (shows all 3 comparisons before closing)
+- [x] Fixed dismissed movies appearing in grid (both winner/loser hidden after choice)
+- [x] Added pairwise stats to Stats page (total comparisons, recent activity, consensus breakdown)
 
 ### Context-Aware Learning
 - [x] First-pass runtime/tone biases + family-safe filtering shipped
 - [ ] Time-of-day/device/mood toggle to bias tone/runtime/language (advanced)
 
 ### Counter-Evidence Handling
-- [ ] Store pos/neg counts per feature
-- [ ] Use Bayesian win rate instead of netting signals
+- [x] Added unique constraint on (user_id, tmdb_id) to prevent duplicate feedback entries
+- [x] Changed addFeedback to use upsert() - latest feedback wins on undo+redismiss
+- [x] Store pos/neg counts per feature (actors/keywords/directors/genres/collections)
+- [x] Use Bayesian win rate instead of netting signals
 
 ### Watchlist Intent
 - [x] Shipped recency + repetition boosts with decay for stale items
@@ -85,8 +92,8 @@
 - [ ] Bandit-style exploration that increases where confidence is low; clamp elsewhere
 
 ### Adjacent Feature Borrowing
-- [ ] Low-confidence features borrow small weight from similar actors/genres with strong evidence
-- [ ] Decay if unreinforced
+- [x] Low-confidence features borrow small weight from similar actors/genres with strong evidence
+- [x] Decay if unreinforced
 
 ### Suppression Explanations
 - [ ] Show why hidden ("suppressed due to 3 superhero skips")
@@ -96,15 +103,21 @@
 
 ## UX/Reasons
 
-- [ ] Reason strength + recency labels ("Learned from 4 signals, last 12d")
-- [ ] Fast corrections: one-tap "This is fine" to move avoid → neutral
-- [ ] Micro-surveys (rare): disambiguate repeated skips (actor vs tone vs runtime)
+- [x] Multi-select feedback reasons in popup (toggle chips + submit/skip) for More Like This / Not Interested
+- [x] Reason strength + recency labels ("Learned from 4 signals, last 12d")
+	- [x] Compute per-feature sample counts + decay windows exposed via feedback popup context
+	- [x] Render badge inline on suggestion cards and popup to show strength + last-seen age
+- [x] Fast corrections: one-tap "This is fine" to move avoid → neutral
+- [x] Micro-surveys (rare): disambiguate repeated skips (actor vs tone vs runtime)
 
 ---
 
 ## Metrics & Evaluation
 
 - [ ] Track: acceptance by reason type, source hit-rate per user, diversity, repeat-suggestion rate, regret events (later-liked after skip)
+	- [x] Acceptance by reason type surfaced on Stats (min 5 samples); consensus calibration card added
+	- [x] Diversity coverage from accepted feedback (genres/directors/actors/keywords) and regret recovery surfaced
+	- [ ] Repeat-suggestion rate pending (needs suggestion exposure log)
 - [ ] Counterfactual replay: log top-k scores to simulate weight tweaks before shipping
 - [ ] A/B specific knobs: MMR λ, exploration rate, source reliability scaling
 
