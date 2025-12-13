@@ -2476,7 +2476,7 @@ export default function StatsPage() {
 
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             This tracks how often you see the same suggestions, helping ensure fresh recommendations.
-            Lower repeat rates mean you're getting more variety.
+            Lower repeat rates mean you&apos;re getting more variety.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -2518,7 +2518,7 @@ export default function StatsPage() {
           </div>
 
           <div className="text-xs text-gray-500 dark:text-gray-400 bg-blue-50 dark:bg-blue-950/30 rounded p-2 mt-3">
-            💡 <strong>Note:</strong> A repeat rate under 15% is ideal. If you're seeing the same suggestions too often,
+            💡 <strong>Note:</strong> A repeat rate under 15% is ideal. If you&apos;re seeing the same suggestions too often,
             try adjusting the Discovery slider or exploring different categories.
           </div>
         </div>
