@@ -6,6 +6,60 @@ html, body, #__next {
   height: 100%;
 }
 
+/* Dark mode color variables for different darkness levels */
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+/* Soft dark mode (default for dark) */
+.dark.dark-soft {
+  --bg-primary: rgb(55, 65, 81); /* gray-700 */
+  --bg-secondary: rgb(75, 85, 99); /* gray-600 */
+  --bg-tertiary: rgb(107, 114, 128); /* gray-500 */
+}
+
+/* Moderate dark mode (balanced) */
+.dark.dark-moderate {
+  --bg-primary: rgb(31, 41, 55); /* gray-800 */
+  --bg-secondary: rgb(55, 65, 81); /* gray-700 */
+  --bg-tertiary: rgb(75, 85, 99); /* gray-600 */
+}
+
+/* Deep dark mode (darker immersion) */
+.dark.dark-deep {
+  --bg-primary: rgb(17, 24, 39); /* gray-900 */
+  --bg-secondary: rgb(31, 41, 55); /* gray-800 */
+  --bg-tertiary: rgb(55, 65, 81); /* gray-700 */
+}
+
+/* Pitch black (true black for OLED) */
+.dark.dark-pitch {
+  --bg-primary: rgb(0, 0, 0);
+  --bg-secondary: rgb(17, 24, 39); /* gray-900 */
+  --bg-tertiary: rgb(31, 41, 55); /* gray-800 */
+}
+
+/* Apply darkness level to body background */
+.dark.dark-soft body {
+  background-color: rgb(55, 65, 81);
+}
+
+.dark.dark-moderate body {
+  background-color: rgb(31, 41, 55);
+}
+
+.dark.dark-deep body {
+  background-color: rgb(17, 24, 39);
+}
+
+.dark.dark-pitch body {
+  background-color: rgb(0, 0, 0);
+}
+
 /* Feedback toast animation */
 @keyframes fade-in-up {
   from {

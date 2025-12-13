@@ -193,3 +193,28 @@ create policy "blocked_suggestions user insert" on public.blocked_suggestions
 drop policy if exists "blocked_suggestions user delete" on public.blocked_suggestions;
 create policy "blocked_suggestions user delete" on public.blocked_suggestions
   for delete using (auth.uid() = user_id);
+
+-- User settings: theme preferences and other user-specific configuration
+create table if not exists public.user_settings (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  theme_mode text not null default 'system', -- 'system', 'light', 'dark'
+  darkness_level text not null default 'moderate', -- 'soft', 'moderate', 'deep', 'pitch'
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+create index if not exists user_settings_user_idx on public.user_settings (user_id);
+
+alter table public.user_settings enable row level security;
+
+drop policy if exists "user_settings self read" on public.user_settings;
+create policy "user_settings self read" on public.user_settings
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "user_settings self upsert" on public.user_settings;
+create policy "user_settings self upsert" on public.user_settings
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "user_settings self update" on public.user_settings;
+create policy "user_settings self update" on public.user_settings
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
