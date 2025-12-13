@@ -4,7 +4,7 @@ import MovieCard, { FeatureEvidenceContext } from '@/components/MovieCard';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, getFeatureEvidenceSummary, neutralizeFeedback, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
+import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, getFeatureEvidenceSummary, neutralizeFeedback, logSuggestionExposure, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -1419,6 +1419,44 @@ export default function SuggestPage() {
       });
 
       setItems(details);
+
+      // Log exposure for repeat-suggestion tracking and counterfactual analysis
+      try {
+        const context = computeContext();
+        const calculateMetadataCompleteness = (item: MovieItem): number => {
+          let score = 0;
+          if (item.poster_path) score += 0.25;
+          if (item.trailerKey) score += 0.25;
+          if (item.overview) score += 0.2;
+          if (item.genres && item.genres.length > 0) score += 0.15;
+          if (item.runtime) score += 0.15;
+          return score;
+        };
+
+        await logSuggestionExposure({
+          userId: uid,
+          suggestions: details.map(d => ({
+            tmdbId: d.id,
+            baseScore: d.score,
+            consensusLevel: d.consensusLevel,
+            sources: d.sources,
+            reasons: d.reasons,
+            hasPoster: !!d.poster_path,
+            hasTrailer: !!d.trailerKey,
+            metadataCompleteness: calculateMetadataCompleteness(d),
+          })),
+          sessionContext: {
+            discoveryLevel,
+            excludeGenres,
+            yearMin,
+            yearMax,
+            mode,
+            contextMode: context.mode,
+          },
+        });
+      } catch (e) {
+        console.error('[Suggest] Failed to log exposures', e);
+      }
     } catch (e: any) {
       console.error('[Suggest] error in runSuggest', e);
       setError(e?.message ?? 'Failed to get suggestions');
@@ -1509,14 +1547,20 @@ export default function SuggestPage() {
         void runSuggest();
       }
     };
+    const feedbackHandler = () => {
+      setItems(null);
+      void runSuggest();
+    };
     if (typeof window !== 'undefined') {
       window.addEventListener('lettr:mappings-updated', handler);
       window.addEventListener('lettr:blocked-updated', blockedHandler);
+      window.addEventListener('lettr:feedback-updated', feedbackHandler);
     }
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('lettr:mappings-updated', handler);
         window.removeEventListener('lettr:blocked-updated', blockedHandler);
+        window.removeEventListener('lettr:feedback-updated', feedbackHandler);
       }
     };
   }, [runSuggest, uid]);
@@ -2039,7 +2083,7 @@ export default function SuggestPage() {
     const movieTitle = movie?.title || 'this movie';
     const feedbackMeta = {
       sources: movie?.sources,
-      consensusLevel: movie?.consensusLevel as ('high' | 'medium' | 'low' | undefined),
+      consensusLevel: movie?.consensusLevel ?? 'low',
     };
 
     try {
@@ -2219,11 +2263,11 @@ export default function SuggestPage() {
       await Promise.all([
         addFeedback(uid, winnerId, 'positive', winner?.reasons, {
           sources: winner?.sources,
-          consensusLevel: winner?.consensusLevel as 'high' | 'medium' | 'low' | undefined,
+          consensusLevel: winner?.consensusLevel ?? 'low',
         }),
         addFeedback(uid, loserId, 'negative', loser?.reasons, {
           sources: loser?.sources,
-          consensusLevel: loser?.consensusLevel as 'high' | 'medium' | 'low' | undefined,
+          consensusLevel: loser?.consensusLevel ?? 'low',
         }),
         recordPairwiseEvent(uid, {
           winnerId,
@@ -2231,8 +2275,8 @@ export default function SuggestPage() {
           sharedReasonTags: sharedTags,
           winnerSources: winner?.sources,
           loserSources: loser?.sources,
-          winnerConsensus: winner?.consensusLevel as 'high' | 'medium' | 'low' | undefined,
-          loserConsensus: loser?.consensusLevel as 'high' | 'medium' | 'low' | undefined,
+          winnerConsensus: winner?.consensusLevel ?? 'low',
+          loserConsensus: loser?.consensusLevel ?? 'low',
         }),
       ]);
 
@@ -2498,12 +2542,17 @@ export default function SuggestPage() {
                   <div>
                     <p className="text-xs text-gray-400 mb-1.5">Strong dislike:</p>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => handleExplicitReason('dislike_all')}
-                        className="px-3 py-1.5 text-xs bg-red-200 dark:bg-red-900/60 text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-900/80 rounded-full transition-colors font-medium border border-red-300 dark:border-red-800"
-                      >
-                        🚫 I don&apos;t like this movie
-                      </button>
+                      {(() => {
+                        const isSelected = selectedReasons.includes('dislike_all');
+                        return (
+                          <button
+                            onClick={() => toggleReasonSelection('dislike_all')}
+                            className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-200 dark:bg-red-900/60 text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-900/80 rounded-full transition-colors font-medium border border-red-300 dark:border-red-800', isSelected)}
+                          >
+                            🚫 I don&apos;t like this movie
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -2800,12 +2849,14 @@ export default function SuggestPage() {
                       <p className="text-xs text-gray-400 mb-1.5">Love this theme:</p>
                       <div className="flex flex-wrap gap-2">
                         {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
+                          const reason = `keyword:${keyword}`;
+                          const isSelected = selectedReasons.includes(reason);
                           const badge = getFeatureEvidenceBadge('keyword', keyword);
                           return (
                             <button
                               key={keyword}
-                              onClick={() => handleExplicitReason(`keyword:${keyword}`)}
-                              className="px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors"
+                              onClick={() => toggleReasonSelection(reason)}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors', isSelected)}
                             >
                               ❤️ {keyword}
                               {badge && (

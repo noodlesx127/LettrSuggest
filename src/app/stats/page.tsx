@@ -3,6 +3,7 @@ import AuthGate from '@/components/AuthGate';
 import Chart from '@/components/Chart';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
+import { getRepeatSuggestionStats } from '@/lib/enrich';
 import { useMemo, useState, useEffect } from 'react';
 import Image from 'next/image';
 
@@ -60,6 +61,12 @@ export default function StatsPage() {
   const [reasonAcceptance, setReasonAcceptance] = useState<Array<{ reason: string; total: number; positive: number; hitRate: number }>>([]);
   const [consensusAcceptance, setConsensusAcceptance] = useState<{ high: { pos: number; total: number }; medium: { pos: number; total: number }; low: { pos: number; total: number } } | null>(null);
   const [feedbackRows, setFeedbackRows] = useState<Array<any>>([]);
+  const [repeatSuggestionStats, setRepeatSuggestionStats] = useState<{
+    totalExposures: number;
+    uniqueSuggestions: number;
+    repeatRate: number;
+    avgTimeBetweenRepeats: number | null;
+  } | null>(null);
 
   useEffect(() => {
     async function getUid() {
@@ -140,6 +147,20 @@ export default function StatsPage() {
     }
 
     fetchExplorationStats();
+  }, [uid]);
+
+  // Fetch repeat-suggestion stats
+  useEffect(() => {
+    async function fetchRepeatStats() {
+      if (!uid) return;
+      try {
+        const stats = await getRepeatSuggestionStats(uid, 30);
+        setRepeatSuggestionStats(stats);
+      } catch (e) {
+        console.error('[Stats] Error fetching repeat-suggestion stats:', e);
+      }
+    }
+    fetchRepeatStats();
   }, [uid]);
 
   // Fetch suggestion feedback to derive overall hit-rate and per-source reliability (now that sources are stored)
@@ -2439,6 +2460,66 @@ export default function StatsPage() {
           <div className="text-xs text-gray-500 dark:text-gray-400 bg-violet-50 dark:bg-violet-950/30 rounded p-2 mt-3">
             💡 <strong>Tip:</strong> The more comparisons you make, the better the algorithm understands your nuanced preferences.
             Try the pairwise comparison feature on the Suggestions page to help refine your recommendations!
+          </div>
+        </div>
+      )}
+
+      {/* Repeat-Suggestion Tracking */}
+      {repeatSuggestionStats && repeatSuggestionStats.totalExposures > 0 && (
+        <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
+          <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+            🔄 Suggestion Diversity
+            <span className="text-xs text-blue-600 dark:text-blue-300 font-normal">
+              (Last 30 Days)
+            </span>
+          </h2>
+
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            This tracks how often you see the same suggestions, helping ensure fresh recommendations.
+            Lower repeat rates mean you're getting more variety.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-white dark:bg-gray-800 rounded p-3 border border-blue-100 dark:border-blue-900">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Exposures</div>
+              <div className="text-2xl font-bold text-blue-700 dark:text-blue-400">
+                {repeatSuggestionStats.totalExposures}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Suggestions shown
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded p-3 border border-blue-100 dark:border-blue-900">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Unique Films</div>
+              <div className="text-2xl font-bold text-blue-700 dark:text-blue-400">
+                {repeatSuggestionStats.uniqueSuggestions}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Different titles
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded p-3 border border-blue-100 dark:border-blue-900">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Repeat Rate</div>
+              <div className={`text-2xl font-bold ${
+                repeatSuggestionStats.repeatRate < 0.1 ? 'text-green-700 dark:text-green-400' :
+                repeatSuggestionStats.repeatRate < 0.2 ? 'text-yellow-700 dark:text-yellow-400' :
+                'text-orange-700 dark:text-orange-400'
+              }`}>
+                {(repeatSuggestionStats.repeatRate * 100).toFixed(1)}%
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {repeatSuggestionStats.avgTimeBetweenRepeats !== null && (
+                  <>Avg {repeatSuggestionStats.avgTimeBetweenRepeats.toFixed(1)} days between</>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="text-xs text-gray-500 dark:text-gray-400 bg-blue-50 dark:bg-blue-950/30 rounded p-2 mt-3">
+            💡 <strong>Note:</strong> A repeat rate under 15% is ideal. If you're seeing the same suggestions too often,
+            try adjusting the Discovery slider or exploring different categories.
           </div>
         </div>
       )}

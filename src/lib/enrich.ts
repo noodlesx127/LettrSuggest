@@ -208,30 +208,86 @@ export async function blockSuggestion(userId: string, tmdbId: number) {
   }
 }
 
-export async function unblockSuggestion(userId: string, tmdbId: number) {
-  if (!supabase) throw new Error('Supabase not initialized');
-  const { error } = await supabase.from('blocked_suggestions').delete().eq('user_id', userId).eq('tmdb_id', tmdbId);
-  if (error) {
-    console.error('[Supabase] unblockSuggestion error', { userId, tmdbId, error });
-    throw error;
+type FeedbackRow = {
+  feedback_type: 'positive' | 'negative';
+  reason_types?: string[] | null;
+  movie_features?: MovieFeatures | null;
+};
+
+async function buildFeatureUpdates(features: MovieFeatures): Promise<Array<{ type: FeatureType; id: number; name: string }>> {
+  const updates: Array<{ type: FeatureType; id: number; name: string }> = [];
+  features.actors.slice(0, 3).forEach((actor) => updates.push({ type: 'actor', id: actor.id, name: actor.name }));
+  features.keywords.slice(0, 8).forEach((keyword) => updates.push({ type: 'keyword', id: keyword.id, name: keyword.name }));
+  features.directors.slice(0, 1).forEach((director) => updates.push({ type: 'director', id: director.id, name: director.name }));
+  features.genres.slice(0, 3).forEach((genre) => updates.push({ type: 'genre', id: genre.id, name: genre.name }));
+  if (features.collection) {
+    updates.push({ type: 'collection', id: features.collection.id, name: features.collection.name });
   }
+  return updates;
 }
 
-export async function neutralizeFeedback(userId: string, tmdbId: number): Promise<void> {
+async function clearSuggestionFeedback(userId: string, tmdbId: number): Promise<void> {
   if (!supabase) throw new Error('Supabase not initialized');
 
-  try {
-    const features = await extractMovieFeatures(tmdbId);
-    const updates: Array<{ type: FeatureType; id: number; name: string }> = [];
+  const { data, error } = await supabase
+    .from('suggestion_feedback')
+    .select('feedback_type, reason_types, movie_features')
+    .eq('user_id', userId)
+    .eq('tmdb_id', tmdbId)
+    .maybeSingle();
 
-    features.actors.slice(0, 3).forEach((actor) => updates.push({ type: 'actor', id: actor.id, name: actor.name }));
-    features.keywords.slice(0, 8).forEach((keyword) => updates.push({ type: 'keyword', id: keyword.id, name: keyword.name }));
-    features.directors.slice(0, 1).forEach((director) => updates.push({ type: 'director', id: director.id, name: director.name }));
-    features.genres.slice(0, 3).forEach((genre) => updates.push({ type: 'genre', id: genre.id, name: genre.name }));
-    if (features.collection) {
-      updates.push({ type: 'collection', id: features.collection.id, name: features.collection.name });
+  if (error) {
+    console.error('[Supabase] clearSuggestionFeedback fetch error', { userId, tmdbId, error });
+    return;
+  }
+
+  if (!data) return;
+
+  const row = data as FeedbackRow;
+  const feedbackType = row.feedback_type;
+  const reasonTypes = row.reason_types ?? [];
+
+  // Adjust reason-level preferences
+  for (const reasonType of reasonTypes) {
+    const { data: existing } = await supabase
+      .from('user_reason_preferences')
+      .select('success_count, total_count')
+      .eq('user_id', userId)
+      .eq('reason_type', reasonType)
+      .maybeSingle();
+
+    const successCountRaw = existing?.success_count ?? 0;
+    const totalCountRaw = existing?.total_count ?? 0;
+    const successCount = feedbackType === 'positive' ? Math.max(0, successCountRaw - 1) : successCountRaw;
+    const totalCount = Math.max(0, totalCountRaw - 1);
+    const successRate = totalCount > 0 ? successCount / totalCount : 0.5;
+
+    await supabase
+      .from('user_reason_preferences')
+      .upsert({
+        user_id: userId,
+        reason_type: reasonType,
+        success_count: successCount,
+        total_count: totalCount,
+        success_rate: successRate,
+        last_updated: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id,reason_type'
+      });
+  }
+
+  // Adjust feature-level preferences
+  let features: MovieFeatures | null = row.movie_features ?? null;
+  if (!features) {
+    try {
+      features = await extractMovieFeatures(tmdbId);
+    } catch (e) {
+      console.error('[Supabase] clearSuggestionFeedback extract features failed', { tmdbId, error: e });
     }
+  }
 
+  if (features) {
+    const updates = await buildFeatureUpdates(features);
     for (const update of updates) {
       const { data: existing } = await supabase
         .from('user_feature_feedback')
@@ -241,8 +297,10 @@ export async function neutralizeFeedback(userId: string, tmdbId: number): Promis
         .eq('feature_id', update.id)
         .maybeSingle();
 
-      const positive = existing?.positive_count ?? 0;
-      const negative = Math.max(0, (existing?.negative_count ?? 0) - 1);
+      const positiveRaw = existing?.positive_count ?? 0;
+      const negativeRaw = existing?.negative_count ?? 0;
+      const positive = feedbackType === 'positive' ? Math.max(0, positiveRaw - 1) : positiveRaw;
+      const negative = feedbackType === 'negative' ? Math.max(0, negativeRaw - 1) : negativeRaw;
       const total = positive + negative;
       const inferredPreference = total > 0 ? positive / total : 0.5;
 
@@ -261,10 +319,51 @@ export async function neutralizeFeedback(userId: string, tmdbId: number): Promis
           onConflict: 'user_id,feature_type,feature_id'
         });
     }
+  }
 
-    await supabase.from('suggestion_feedback').delete().eq('user_id', userId).eq('tmdb_id', tmdbId);
-    await unblockSuggestion(userId, tmdbId).catch((e) => console.warn('[Neutralize] unblock failed', e));
-    console.log('[Neutralize] Cleared negative feedback', { userId: userId.slice(0, 8), tmdbId, featuresUpdated: updates.length });
+  // Remove the raw feedback row last
+  const { error: deleteError } = await supabase
+    .from('suggestion_feedback')
+    .delete()
+    .eq('user_id', userId)
+    .eq('tmdb_id', tmdbId);
+
+  if (deleteError) {
+    console.error('[Supabase] clearSuggestionFeedback delete error', { userId, tmdbId, deleteError });
+  }
+}
+
+export async function unblockSuggestion(userId: string, tmdbId: number, opts?: { skipFeedbackClear?: boolean }) {
+  if (!supabase) throw new Error('Supabase not initialized');
+
+  if (!opts?.skipFeedbackClear) {
+    await clearSuggestionFeedback(userId, tmdbId);
+  }
+
+  const { error } = await supabase.from('blocked_suggestions').delete().eq('user_id', userId).eq('tmdb_id', tmdbId);
+  if (error) {
+    console.error('[Supabase] unblockSuggestion error', { userId, tmdbId, error });
+    throw error;
+  }
+}
+
+export async function removeAllowedSuggestion(userId: string, tmdbId: number): Promise<void> {
+  try {
+    await clearSuggestionFeedback(userId, tmdbId);
+    console.log('[RemoveAllowed] Cleared positive feedback and related preferences', { userId: userId.slice(0, 8), tmdbId });
+  } catch (e) {
+    console.error('[RemoveAllowed] Failed to remove allowed suggestion', { tmdbId, error: e });
+    throw e;
+  }
+}
+
+export async function neutralizeFeedback(userId: string, tmdbId: number): Promise<void> {
+  if (!supabase) throw new Error('Supabase not initialized');
+
+  try {
+    await clearSuggestionFeedback(userId, tmdbId);
+    await unblockSuggestion(userId, tmdbId, { skipFeedbackClear: true }).catch((e) => console.warn('[Neutralize] unblock failed', e));
+    console.log('[Neutralize] Cleared feedback and unblocked', { userId: userId.slice(0, 8), tmdbId });
   } catch (e) {
     console.error('[Neutralize] Failed to neutralize feedback', { tmdbId, error: e });
   }
@@ -279,6 +378,22 @@ export async function getBlockedSuggestions(userId: string): Promise<Set<number>
 
   if (error) {
     console.error('[Supabase] getBlockedSuggestions error', { userId, error });
+    return new Set();
+  }
+
+  return new Set((data ?? []).map(row => Number(row.tmdb_id)));
+}
+
+export async function getAllowedSuggestions(userId: string): Promise<Set<number>> {
+  if (!supabase) throw new Error('Supabase not initialized');
+  const { data, error } = await supabase
+    .from('suggestion_feedback')
+    .select('tmdb_id')
+    .eq('user_id', userId)
+    .eq('feedback_type', 'positive');
+
+  if (error) {
+    console.error('[Supabase] getAllowedSuggestions error', { userId, error });
     return new Set();
   }
 
@@ -922,7 +1037,7 @@ export async function boostExplicitFeedback(
 
   try {
     // Get or create the feature record
-    // We need to find the feature_id - for simplicity, use name-based lookup or 0 for generic
+    // Look up by feature_name (primary identifier for user-selected feedback)
     const { data: existing } = await supabase
       .from('user_feature_feedback')
       .select('feature_id, positive_count, negative_count')
@@ -931,6 +1046,7 @@ export async function boostExplicitFeedback(
       .eq('feature_name', featureName)
       .maybeSingle();
 
+    // Use existing feature_id if available, otherwise 0 (will be updated later when ID is known)
     const featureId = existing?.feature_id || 0;
     const currentPositive = existing?.positive_count || 0;
     const currentNegative = existing?.negative_count || 0;
@@ -941,6 +1057,7 @@ export async function boostExplicitFeedback(
     const total = newPositive + newNegative;
     const inferredPreference = total > 0 ? newPositive / total : 0.5;
 
+    // Upsert using feature_name as the conflict key (matches new unique constraint)
     await supabase
       .from('user_feature_feedback')
       .upsert({
@@ -953,7 +1070,7 @@ export async function boostExplicitFeedback(
         inferred_preference: inferredPreference,
         last_updated: new Date().toISOString()
       }, {
-        onConflict: 'user_id,feature_type,feature_id'
+        onConflict: 'user_id,feature_type,feature_name'
       });
 
     console.log('[ExplicitFeedback] Updated', featureName, ':', { newPositive, newNegative, inferredPreference });
@@ -4898,5 +5015,282 @@ export async function learnFromHistoricalData(userId: string) {
 
   } catch (e) {
     console.error('[BatchLearning] Error during batch learning:', e);
+  }
+}
+
+/**
+ * Log suggestion exposures for repeat-suggestion tracking and counterfactual analysis
+ */
+export async function logSuggestionExposure(params: {
+  userId: string;
+  suggestions: Array<{
+    tmdbId: number;
+    category?: string;
+    baseScore?: number;
+    consensusLevel?: 'high' | 'medium' | 'low';
+    sources?: string[];
+    reasons?: string[];
+    mmrLambda?: number;
+    diversityRank?: number;
+    hasPoster?: boolean;
+    hasTrailer?: boolean;
+    metadataCompleteness?: number;
+  }>;
+  sessionContext?: {
+    discoveryLevel?: number;
+    excludeGenres?: string;
+    yearMin?: string;
+    yearMax?: string;
+    mode?: 'quick' | 'deep';
+    contextMode?: string;
+  };
+}): Promise<void> {
+  if (!supabase) {
+    console.warn('[ExposureLog] Supabase not available');
+    return;
+  }
+
+  const { userId, suggestions, sessionContext } = params;
+
+  try {
+    const exposureLogs = suggestions.map(s => ({
+      user_id: userId,
+      tmdb_id: s.tmdbId,
+      category: s.category,
+      session_context: sessionContext,
+      base_score: s.baseScore,
+      consensus_level: s.consensusLevel,
+      sources: s.sources,
+      reasons: s.reasons,
+      mmr_lambda: s.mmrLambda,
+      diversity_rank: s.diversityRank,
+      has_poster: s.hasPoster,
+      has_trailer: s.hasTrailer,
+      metadata_completeness: s.metadataCompleteness,
+    }));
+
+    const { error } = await supabase
+      .from('suggestion_exposure_log')
+      .insert(exposureLogs);
+
+    if (error) {
+      console.error('[ExposureLog] Error logging exposures:', error);
+    } else {
+      console.log('[ExposureLog] Logged', exposureLogs.length, 'suggestion exposures');
+    }
+  } catch (e) {
+    console.error('[ExposureLog] Exception logging exposures:', e);
+  }
+}
+
+/**
+ * Calculate repeat-suggestion rate for a user
+ */
+export async function getRepeatSuggestionStats(userId: string, lookbackDays = 30): Promise<{
+  totalExposures: number;
+  uniqueSuggestions: number;
+  repeatRate: number;
+  avgTimeBetweenRepeats: number | null;
+  topRepeatedSuggestions: Array<{ tmdbId: number; exposureCount: number; firstSeen: string; lastSeen: string }>;
+}> {
+  if (!supabase) {
+    return {
+      totalExposures: 0,
+      uniqueSuggestions: 0,
+      repeatRate: 0,
+      avgTimeBetweenRepeats: null,
+      topRepeatedSuggestions: [],
+    };
+  }
+
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
+
+    const { data: exposures, error } = await supabase
+      .from('suggestion_exposure_log')
+      .select('tmdb_id, exposed_at')
+      .eq('user_id', userId)
+      .gte('exposed_at', cutoffDate.toISOString())
+      .order('exposed_at', { ascending: true });
+
+    if (error) {
+      console.error('[RepeatStats] Error fetching exposures:', error);
+      return {
+        totalExposures: 0,
+        uniqueSuggestions: 0,
+        repeatRate: 0,
+        avgTimeBetweenRepeats: null,
+        topRepeatedSuggestions: [],
+      };
+    }
+
+    if (!exposures || exposures.length === 0) {
+      return {
+        totalExposures: 0,
+        uniqueSuggestions: 0,
+        repeatRate: 0,
+        avgTimeBetweenRepeats: null,
+        topRepeatedSuggestions: [],
+      };
+    }
+
+    const totalExposures = exposures.length;
+    const uniqueSuggestions = new Set(exposures.map(e => e.tmdb_id)).size;
+    const repeatRate = uniqueSuggestions > 0 ? (totalExposures - uniqueSuggestions) / totalExposures : 0;
+
+    // Group by tmdb_id to find repeats
+    const exposuresByMovie = new Map<number, Array<string>>();
+    for (const exp of exposures) {
+      const existing = exposuresByMovie.get(exp.tmdb_id) || [];
+      existing.push(exp.exposed_at);
+      exposuresByMovie.set(exp.tmdb_id, existing);
+    }
+
+    // Find repeated suggestions
+    const repeated = Array.from(exposuresByMovie.entries())
+      .filter(([_, timestamps]) => timestamps.length > 1)
+      .map(([tmdbId, timestamps]) => ({
+        tmdbId,
+        exposureCount: timestamps.length,
+        firstSeen: timestamps[0],
+        lastSeen: timestamps[timestamps.length - 1],
+      }))
+      .sort((a, b) => b.exposureCount - a.exposureCount)
+      .slice(0, 10);
+
+    // Calculate average time between repeats
+    let totalTimeDiffs = 0;
+    let repeatPairCount = 0;
+    for (const [_, timestamps] of exposuresByMovie.entries()) {
+      if (timestamps.length > 1) {
+        for (let i = 1; i < timestamps.length; i++) {
+          const diff = new Date(timestamps[i]).getTime() - new Date(timestamps[i - 1]).getTime();
+          totalTimeDiffs += diff;
+          repeatPairCount++;
+        }
+      }
+    }
+
+    const avgTimeBetweenRepeats = repeatPairCount > 0
+      ? totalTimeDiffs / repeatPairCount / (1000 * 60 * 60 * 24) // Convert to days
+      : null;
+
+    return {
+      totalExposures,
+      uniqueSuggestions,
+      repeatRate,
+      avgTimeBetweenRepeats,
+      topRepeatedSuggestions: repeated,
+    };
+  } catch (e) {
+    console.error('[RepeatStats] Exception calculating repeat stats:', e);
+    return {
+      totalExposures: 0,
+      uniqueSuggestions: 0,
+      repeatRate: 0,
+      avgTimeBetweenRepeats: null,
+      topRepeatedSuggestions: [],
+    };
+  }
+}
+
+/**
+ * Get counterfactual replay data for A/B testing parameter variations
+ * Retrieves scored suggestions with their metadata to simulate alternative ranking strategies
+ */
+export async function getCounterfactualReplayData(params: {
+  userId: string;
+  lookbackDays?: number;
+  minScore?: number;
+  categories?: string[];
+}): Promise<Array<{
+  tmdbId: number;
+  exposedAt: string;
+  category: string;
+  baseScore: number;
+  consensusLevel: string;
+  sources: string[];
+  reasons: string[];
+  mmrLambda: number;
+  diversityRank: number;
+  metadataCompleteness: number;
+  sessionContext: any;
+  // Join with feedback if available
+  feedbackType?: 'positive' | 'negative' | null;
+  feedbackAt?: string | null;
+}>> {
+  if (!supabase) {
+    return [];
+  }
+
+  const { userId, lookbackDays = 30, minScore, categories } = params;
+
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
+
+    let query = supabase
+      .from('suggestion_exposure_log')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('exposed_at', cutoffDate.toISOString())
+      .order('exposed_at', { ascending: false });
+
+    if (minScore !== undefined) {
+      query = query.gte('base_score', minScore);
+    }
+
+    if (categories && categories.length > 0) {
+      query = query.in('category', categories);
+    }
+
+    const { data: exposures, error } = await query;
+
+    if (error) {
+      console.error('[CounterfactualReplay] Error fetching exposure data:', error);
+      return [];
+    }
+
+    if (!exposures || exposures.length === 0) {
+      return [];
+    }
+
+    // Join with feedback data
+    const tmdbIds = exposures.map(e => e.tmdb_id);
+    const { data: feedbackData } = await supabase
+      .from('suggestion_feedback')
+      .select('tmdb_id, feedback_type, created_at')
+      .eq('user_id', userId)
+      .in('tmdb_id', tmdbIds);
+
+    const feedbackMap = new Map<number, { type: string; at: string }>();
+    if (feedbackData) {
+      for (const fb of feedbackData) {
+        feedbackMap.set(fb.tmdb_id, { type: fb.feedback_type, at: fb.created_at });
+      }
+    }
+
+    return exposures.map(exp => {
+      const feedback = feedbackMap.get(exp.tmdb_id);
+      return {
+        tmdbId: exp.tmdb_id,
+        exposedAt: exp.exposed_at,
+        category: exp.category || '',
+        baseScore: exp.base_score || 0,
+        consensusLevel: exp.consensus_level || 'low',
+        sources: exp.sources || [],
+        reasons: exp.reasons || [],
+        mmrLambda: exp.mmr_lambda || 0.25,
+        diversityRank: exp.diversity_rank || 0,
+        metadataCompleteness: exp.metadata_completeness || 0,
+        sessionContext: exp.session_context || {},
+        feedbackType: feedback?.type as 'positive' | 'negative' | null || null,
+        feedbackAt: feedback?.at || null,
+      };
+    });
+  } catch (e) {
+    console.error('[CounterfactualReplay] Exception fetching data:', e);
+    return [];
   }
 }
