@@ -188,14 +188,14 @@ export async function isMovieSaved(userId: string, tmdbId: number): Promise<bool
  * Export saved movies to Letterboxd CSV format
  */
 export function exportToLetterboxd(movies: SavedMovie[]): string {
-    // Letterboxd CSV format: Title,Year,tmdbID,Rating,WatchedDate
-    // For watchlist: Title,Year,tmdbID
-    const headers = 'Title,Year,tmdbID';
+    // Letterboxd watchlist import format uses "Name" not "Title"
+    // Format: Name,Year,tmdbID
+    const headers = 'Name,Year,tmdbID';
     const rows = movies.map(movie => {
-        const title = `"${movie.title.replace(/"/g, '""')}"`;
+        const name = `"${movie.title.replace(/"/g, '""')}"`;
         const year = movie.year || '';
         const tmdbId = movie.tmdb_id;
-        return `${title},${year},${tmdbId}`;
+        return `${name},${year},${tmdbId}`;
     });
 
     return [headers, ...rows].join('\n');
