@@ -1219,7 +1219,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .or('negative_count.gte.1,positive_count.gte.1'); // Start learning from FIRST interaction
 
     if (!data) {
-      return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], preferActors: [], preferKeywords: [] };
+      return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], avoidDirectors: [], avoidGenres: [], preferActors: [], preferKeywords: [], preferDirectors: [], preferGenres: [] };
     }
 
     // PANDORA-STYLE graduated penalty calculation

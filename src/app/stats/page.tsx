@@ -127,8 +127,8 @@ export default function StatsPage() {
 
           setPairwiseStats({
             total_comparisons: pairwiseEvents.length,
-            recent_30d,
-            recent_90d,
+            recent_30d: recent30d,
+            recent_90d: recent90d,
             high_consensus_wins: highConsensusWins,
             medium_consensus_wins: mediumConsensusWins,
             low_consensus_wins: lowConsensusWins,
