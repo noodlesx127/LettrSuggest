@@ -522,11 +522,12 @@ export default function StatsPage() {
     const rewatched = filteredFilms.filter(f => f.rewatch);
     const liked = filteredFilms.filter(f => f.liked);
 
-    // Ratings distribution
-    const ratingsBuckets = [0, 0, 0, 0, 0, 0];
+    // Ratings distribution (supports half-star ratings: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5)
+    const ratingsBuckets = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // 11 buckets for half-star ratings
     for (const f of rated) {
-      const r = Math.round(f.rating!);
-      if (r >= 0 && r <= 5) ratingsBuckets[r] += 1;
+      // Convert rating to bucket index: 0 -> 0, 0.5 -> 1, 1 -> 2, 1.5 -> 3, etc.
+      const bucketIndex = Math.round((f.rating ?? 0) * 2);
+      if (bucketIndex >= 0 && bucketIndex <= 10) ratingsBuckets[bucketIndex] += 1;
     }
 
     const avgRating = rated.length > 0
@@ -2502,11 +2503,10 @@ export default function StatsPage() {
 
             <div className="bg-white dark:bg-gray-800 rounded p-3 border border-blue-100 dark:border-blue-900">
               <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Repeat Rate</div>
-              <div className={`text-2xl font-bold ${
-                repeatSuggestionStats.repeatRate < 0.1 ? 'text-green-700 dark:text-green-400' :
-                repeatSuggestionStats.repeatRate < 0.2 ? 'text-yellow-700 dark:text-yellow-400' :
-                'text-orange-700 dark:text-orange-400'
-              }`}>
+              <div className={`text-2xl font-bold ${repeatSuggestionStats.repeatRate < 0.1 ? 'text-green-700 dark:text-green-400' :
+                  repeatSuggestionStats.repeatRate < 0.2 ? 'text-yellow-700 dark:text-yellow-400' :
+                    'text-orange-700 dark:text-orange-400'
+                }`}>
                 {(repeatSuggestionStats.repeatRate * 100).toFixed(1)}%
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
