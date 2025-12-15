@@ -206,7 +206,156 @@ export async function recordABTestMetric(params: {
 }
 
 /**
- * Get A/B test results for a specific test
+ * Welch's t-test for comparing two sample means with unequal variances
+ * Returns t-statistic and approximate degrees of freedom
+ */
+function welchTTest(
+  mean1: number, var1: number, n1: number,
+  mean2: number, var2: number, n2: number
+): { tStat: number; df: number } {
+  const se1 = var1 / n1;
+  const se2 = var2 / n2;
+  const se = Math.sqrt(se1 + se2);
+
+  if (se === 0) return { tStat: 0, df: 1 };
+
+  const tStat = (mean1 - mean2) / se;
+
+  // Welch-Satterthwaite degrees of freedom
+  const num = Math.pow(se1 + se2, 2);
+  const denom = Math.pow(se1, 2) / (n1 - 1) + Math.pow(se2, 2) / (n2 - 1);
+  const df = denom === 0 ? 1 : num / denom;
+
+  return { tStat, df };
+}
+
+/**
+ * Approximate p-value from t-statistic using Student's t-distribution
+ * Uses a numerical approximation suitable for two-tailed tests
+ */
+function tDistributionPValue(tStat: number, df: number): number {
+  const x = df / (df + tStat * tStat);
+  // Regularized incomplete beta function approximation
+  // For large df, approaches normal distribution
+  if (df > 100) {
+    // Use normal approximation for large df
+    const z = Math.abs(tStat);
+    const p = Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI);
+    return 2 * (1 - normalCDF(Math.abs(tStat)));
+  }
+
+  // Simple approximation for smaller df
+  const a = df / 2;
+  const b = 0.5;
+  // Beta function approximation
+  const beta = Math.exp(lnGamma(a) + lnGamma(b) - lnGamma(a + b));
+  const I = regularizedIncompleteBeta(x, a, b);
+  return I;
+}
+
+function normalCDF(x: number): number {
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const p = 0.3275911;
+
+  const sign = x < 0 ? -1 : 1;
+  x = Math.abs(x) / Math.sqrt(2);
+
+  const t = 1.0 / (1.0 + p * x);
+  const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+
+  return 0.5 * (1.0 + sign * y);
+}
+
+function lnGamma(x: number): number {
+  // Lanczos approximation
+  const g = 7;
+  const c = [
+    0.99999999999980993,
+    676.5203681218851,
+    -1259.1392167224028,
+    771.32342877765313,
+    -176.61502916214059,
+    12.507343278686905,
+    -0.13857109526572012,
+    9.9843695780195716e-6,
+    1.5056327351493116e-7
+  ];
+
+  if (x < 0.5) {
+    return Math.log(Math.PI / Math.sin(Math.PI * x)) - lnGamma(1 - x);
+  }
+
+  x -= 1;
+  let a = c[0];
+  for (let i = 1; i < g + 2; i++) {
+    a += c[i] / (x + i);
+  }
+  const t = x + g + 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a);
+}
+
+function regularizedIncompleteBeta(x: number, a: number, b: number): number {
+  // Simple continued fraction approximation
+  if (x === 0) return 0;
+  if (x === 1) return 1;
+
+  // Use symmetry for numerical stability
+  if (x > (a + 1) / (a + b + 2)) {
+    return 1 - regularizedIncompleteBeta(1 - x, b, a);
+  }
+
+  const lnBeta = lnGamma(a) + lnGamma(b) - lnGamma(a + b);
+  const front = Math.exp(Math.log(x) * a + Math.log(1 - x) * b - lnBeta) / a;
+
+  // Continued fraction (Lentz's algorithm)
+  let f = 1, c = 1, d = 0;
+  for (let m = 0; m <= 100; m++) {
+    const m2 = 2 * m;
+
+    // Even step
+    let an = (m === 0) ? 1 : (m * (b - m) * x) / ((a + m2 - 1) * (a + m2));
+    d = 1 + an * d;
+    if (Math.abs(d) < 1e-30) d = 1e-30;
+    c = 1 + an / c;
+    if (Math.abs(c) < 1e-30) c = 1e-30;
+    d = 1 / d;
+    f *= d * c;
+
+    // Odd step
+    an = -((a + m) * (a + b + m) * x) / ((a + m2) * (a + m2 + 1));
+    d = 1 + an * d;
+    if (Math.abs(d) < 1e-30) d = 1e-30;
+    c = 1 + an / c;
+    if (Math.abs(c) < 1e-30) c = 1e-30;
+    d = 1 / d;
+    const delta = d * c;
+    f *= delta;
+
+    if (Math.abs(delta - 1) < 1e-10) break;
+  }
+
+  return front * f;
+}
+
+export type StatisticalComparison = {
+  controlVariant: string;
+  testVariant: string;
+  metric: string;
+  controlMean: number;
+  testMean: number;
+  difference: number;
+  percentChange: number;
+  pValue: number;
+  isSignificant: boolean; // p < 0.05
+  confidenceInterval: { lower: number; upper: number };
+};
+
+/**
+ * Get A/B test results for a specific test with statistical significance
  */
 export async function getABTestResults(testId: number): Promise<{
   variants: Array<{
@@ -214,9 +363,10 @@ export async function getABTestResults(testId: number): Promise<{
     userCount: number;
     metrics: Record<string, { mean: number; stddev: number; count: number }>;
   }>;
+  comparisons: StatisticalComparison[];
 }> {
   if (!supabase) {
-    return { variants: [] };
+    return { variants: [], comparisons: [] };
   }
 
   try {
@@ -228,7 +378,7 @@ export async function getABTestResults(testId: number): Promise<{
 
     if (assignError) {
       console.error('[ABTest] Error fetching assignments:', assignError);
-      return { variants: [] };
+      return { variants: [], comparisons: [] };
     }
 
     // Get all metrics for this test
@@ -239,7 +389,7 @@ export async function getABTestResults(testId: number): Promise<{
 
     if (metricsError) {
       console.error('[ABTest] Error fetching metrics:', metricsError);
-      return { variants: [] };
+      return { variants: [], comparisons: [] };
     }
 
     // Aggregate by variant
@@ -271,7 +421,7 @@ export async function getABTestResults(testId: number): Promise<{
 
     // Calculate mean and stddev for each metric
     const results = Array.from(variantStats.entries()).map(([name, stats]) => {
-      const metricsObj: Record<string, { mean: number; stddev: number; count: number }> = {};
+      const metricsObj: Record<string, { mean: number; stddev: number; count: number; variance: number }> = {};
 
       for (const [metricName, values] of stats.metrics.entries()) {
         const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
@@ -282,6 +432,7 @@ export async function getABTestResults(testId: number): Promise<{
           mean,
           stddev,
           count: values.length,
+          variance,
         };
       }
 
@@ -292,10 +443,72 @@ export async function getABTestResults(testId: number): Promise<{
       };
     });
 
-    return { variants: results };
+    // Generate statistical comparisons between variants
+    const comparisons: StatisticalComparison[] = [];
+
+    // Find control variant (usually named 'control' or first variant)
+    const controlVariant = results.find(v => v.name.toLowerCase() === 'control') || results[0];
+
+    if (controlVariant && results.length > 1) {
+      const testVariants = results.filter(v => v.name !== controlVariant.name);
+
+      // Get all unique metric names
+      const allMetricNames = new Set<string>();
+      for (const variant of results) {
+        for (const metricName of Object.keys(variant.metrics)) {
+          allMetricNames.add(metricName);
+        }
+      }
+
+      // Compare each test variant against control for each metric
+      for (const testVariant of testVariants) {
+        for (const metricName of allMetricNames) {
+          const controlMetric = controlVariant.metrics[metricName];
+          const testMetric = testVariant.metrics[metricName];
+
+          if (!controlMetric || !testMetric || controlMetric.count < 2 || testMetric.count < 2) {
+            continue; // Need at least 2 samples for t-test
+          }
+
+          const { tStat, df } = welchTTest(
+            testMetric.mean, testMetric.variance, testMetric.count,
+            controlMetric.mean, controlMetric.variance, controlMetric.count
+          );
+
+          const pValue = tDistributionPValue(tStat, df);
+          const difference = testMetric.mean - controlMetric.mean;
+          const percentChange = controlMetric.mean !== 0
+            ? ((testMetric.mean - controlMetric.mean) / controlMetric.mean) * 100
+            : 0;
+
+          // 95% confidence interval for the difference
+          const criticalValue = 1.96; // Approximation for large samples
+          const se = Math.sqrt(testMetric.variance / testMetric.count + controlMetric.variance / controlMetric.count);
+          const marginOfError = criticalValue * se;
+
+          comparisons.push({
+            controlVariant: controlVariant.name,
+            testVariant: testVariant.name,
+            metric: metricName,
+            controlMean: controlMetric.mean,
+            testMean: testMetric.mean,
+            difference,
+            percentChange,
+            pValue,
+            isSignificant: pValue < 0.05,
+            confidenceInterval: {
+              lower: difference - marginOfError,
+              upper: difference + marginOfError,
+            },
+          });
+        }
+      }
+    }
+
+    return { variants: results, comparisons };
   } catch (e) {
     console.error('[ABTest] Exception getting test results:', e);
-    return { variants: [] };
+    return { variants: [], comparisons: [] };
   }
 }
 

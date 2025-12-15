@@ -2278,6 +2278,9 @@ export default function SuggestPage() {
 
   const handlePairwiseVote = async (winnerId: number, loserId: number) => {
     if (!uid) return;
+    
+    console.log('[Pairwise] Vote received:', { winnerId, loserId, currentCount: pairwiseCount });
+    
     const nextCount = pairwiseCount + 1;
     const nextHistory = new Set(pairHistory);
     nextHistory.add(makePairId(winnerId, loserId));
@@ -2333,6 +2336,7 @@ export default function SuggestPage() {
       } else {
         const availableItems = (items ?? []).filter((i) => !nextBlockedIds.has(i.id) && !i.dismissed);
         const next = findPairwiseCandidate(availableItems, nextHistory);
+        console.log('[Pairwise] Finding next pair:', { availableCount: availableItems.length, found: !!next, nextCount, limit: PAIRWISE_SESSION_LIMIT });
         setPairwisePair(next);
       }
     }
@@ -2345,9 +2349,16 @@ export default function SuggestPage() {
     setPairHistory(nextHistory);
     setPairwiseCount(nextCount);
     
+    console.log('[Pairwise] Skipping pair:', { aId, bId, nextCount, limit: PAIRWISE_SESSION_LIMIT });
+    
     // Find next pair, or close modal if limit reached
-    const next = nextCount >= PAIRWISE_SESSION_LIMIT ? null : findPairwiseCandidate(items ?? [], nextHistory);
-    setPairwisePair(next);
+    if (nextCount >= PAIRWISE_SESSION_LIMIT) {
+      setPairwisePair(null);
+    } else {
+      const next = findPairwiseCandidate(items ?? [], nextHistory);
+      console.log('[Pairwise] Finding next after skip:', { availableCount: items?.length ?? 0, found: !!next });
+      setPairwisePair(next);
+    }
   };
 
   const handleUndoDismiss = async (tmdbId: number) => {
