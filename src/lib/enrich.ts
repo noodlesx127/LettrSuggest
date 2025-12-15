@@ -113,32 +113,46 @@ export async function getFilmMappings(userId: string, uris: string[]) {
   }
 
   // Instead of chunking by URIs (which can hit query size limits),
-  // fetch ALL mappings for this user, then filter in memory
+  // fetch ALL mappings for this user (with pagination), then filter in memory
   console.log('[Mappings] fetching all mappings for user', { userId, uriCount: uris.length });
   const map = new Map<string, number>();
 
   try {
-    // Increase timeout to 15 seconds for large datasets
-    const queryPromise = supabase
-      .from('film_tmdb_map')
-      .select('uri, tmdb_id')
-      .eq('user_id', userId);
+    // Paginate through all mappings (PostgREST defaults to 1000 max per request)
+    const pageSize = 1000;
+    let from = 0;
+    const allMappings: Array<{ uri: string; tmdb_id: number }> = [];
 
-    const { data, error } = await withTimeout(
-      queryPromise as unknown as Promise<{ data: Array<{ uri: string; tmdb_id: number }>; error: any }>,
-      15000
-    );
+    while (true) {
+      const queryPromise = supabase
+        .from('film_tmdb_map')
+        .select('uri, tmdb_id')
+        .eq('user_id', userId)
+        .range(from, from + pageSize - 1);
 
-    if (error) {
-      console.error('[Mappings] error fetching mappings', { error, code: error.code, message: error.message, details: error.details });
-      return map;
+      const { data, error } = await withTimeout(
+        queryPromise as unknown as Promise<{ data: Array<{ uri: string; tmdb_id: number }>; error: any }>,
+        15000
+      );
+
+      if (error) {
+        console.error('[Mappings] error fetching mappings page', { from, error, code: error.code, message: error.message });
+        break;
+      }
+
+      const rows = data ?? [];
+      allMappings.push(...rows);
+
+      // If we got fewer than pageSize, we've fetched all rows
+      if (rows.length < pageSize) break;
+      from += pageSize;
     }
 
-    console.log('[Mappings] all mappings loaded', { totalRows: (data ?? []).length });
+    console.log('[Mappings] all mappings loaded', { totalRows: allMappings.length });
 
     // Filter to only the URIs we care about
     const uriSet = new Set(uris);
-    for (const row of data ?? []) {
+    for (const row of allMappings) {
       if (row.uri != null && row.tmdb_id != null && uriSet.has(row.uri)) {
         map.set(row.uri, Number(row.tmdb_id));
       }
@@ -156,6 +170,7 @@ export async function getFilmMappings(userId: string, uris: string[]) {
   console.log('[Mappings] finished getFilmMappings', { totalMappings: map.size, requestedUris: uris.length });
   return map;
 }
+
 
 /**
  * Bulk fetch TMDB movie details from cache for a list of IDs.
@@ -4949,38 +4964,68 @@ export async function learnFromHistoricalData(userId: string) {
   try {
     console.log('[BatchLearning] Starting analysis of historical data for user:', userId);
 
-    // 1. Get all film events for this user
-    const { data: films, error: filmsError } = await supabase
-      .from('film_events')
-      .select('uri, title, rating, liked')
-      .eq('user_id', userId);
-    // .not('rating', 'is', null); // Removed to include all watched films
+    // 1. Get all film events for this user (with pagination - PostgREST defaults to 1000 max)
+    const pageSize = 1000;
+    let films: Array<{ uri: string; title: string; rating: number | null; liked: boolean | null }> = [];
+    let from = 0;
 
-    if (filmsError) {
-      console.error('[BatchLearning] Error fetching films:', filmsError);
-      return;
+    while (true) {
+      const { data: pageData, error: pageError } = await supabase
+        .from('film_events')
+        .select('uri, title, rating, liked')
+        .eq('user_id', userId)
+        .range(from, from + pageSize - 1);
+
+      if (pageError) {
+        console.error('[BatchLearning] Error fetching films page:', pageError);
+        break;
+      }
+
+      const rows = pageData ?? [];
+      films.push(...rows);
+
+      if (rows.length < pageSize) break;
+      from += pageSize;
     }
 
-    if (!films || films.length < 10) {
-      console.log('[BatchLearning] Not enough rated films for learning', { count: films?.length || 0 });
+    if (films.length < 10) {
+      console.log('[BatchLearning] Not enough rated films for learning', { count: films.length });
       return;
     }
 
     console.log('[BatchLearning] Processing', films.length, 'rated films');
 
-    // 2. Get film mappings to TMDB IDs
-    const { data: mappings, error: mappingsError } = await supabase
-      .from('film_tmdb_map')
-      .select('uri, tmdb_id')
-      .eq('user_id', userId);
+    // 2. Get film mappings to TMDB IDs (with pagination)
+    let mappings: Array<{ uri: string; tmdb_id: number }> = [];
+    from = 0;
 
-    if (mappingsError || !mappings) {
-      console.error('[BatchLearning] Error fetching mappings:', mappingsError);
+    while (true) {
+      const { data: pageData, error: pageError } = await supabase
+        .from('film_tmdb_map')
+        .select('uri, tmdb_id')
+        .eq('user_id', userId)
+        .range(from, from + pageSize - 1);
+
+      if (pageError) {
+        console.error('[BatchLearning] Error fetching mappings page:', pageError);
+        break;
+      }
+
+      const rows = pageData ?? [];
+      mappings.push(...rows);
+
+      if (rows.length < pageSize) break;
+      from += pageSize;
+    }
+
+    if (mappings.length === 0) {
+      console.error('[BatchLearning] No mappings found');
       return;
     }
 
     const uriToTmdbId = new Map(mappings.map(m => [m.uri, m.tmdb_id]));
     console.log('[BatchLearning] Found', mappings.length, 'TMDB mappings');
+
 
     // 3. Get TMDB details for mapped films (in batches)
     const tmdbIds = Array.from(new Set(mappings.map(m => m.tmdb_id)));
@@ -5008,14 +5053,14 @@ export async function learnFromHistoricalData(userId: string) {
     const profile = await buildTasteProfile({
       films: films.map(f => ({
         uri: f.uri,
-        title: f.title,
-        rating: f.rating,
-        liked: f.liked
+        rating: f.rating ?? undefined,
+        liked: f.liked ?? undefined
       })),
       mappings: mappingsMap,
       topN: 10,
       tmdbDetails: tmdbDetails // Pass pre-fetched details
     });
+
 
     console.log('[BatchLearning] Built taste profile', {
       topGenres: profile.topGenres.length,
