@@ -4,6 +4,7 @@ import {
   analyzeSubgenrePatterns,
   analyzeCrossGenrePatterns,
   shouldFilterBySubgenre,
+  detectSubgenres, // ADDED
   boostForCrossGenreMatch,
   type SubgenrePattern,
   type CrossGenrePattern
@@ -3701,6 +3702,7 @@ export async function suggestByOverlap(params: {
     const subgenreCheck = shouldFilterBySubgenre(
       feats.genres,
       feats.keywords,
+      feats.keywordIds, // Added keywordIds
       m.title || '',
       subgenrePatterns
     );
@@ -4152,6 +4154,58 @@ export async function suggestByOverlap(params: {
         totalPenalty += directorPenalty;
         const avoidedDirector = params.enhancedProfile.avoidDirectors.find(d => d.id === matchedAvoidDirectors[0]);
         penaltyReasons.push(`Directed by ${avoidedDirector?.name || 'director'} whose films you don't enjoy`);
+      }
+    }
+
+    // PHASE 3: Subgenre Detection & Filtering (NEW)
+    // Detailed subgenre matching using TMDB Keyword IDs + Text
+    if (subgenrePatterns && subgenrePatterns.size > 0) {
+      const allText = `${m.title} ${m.overview || ''}`.toLowerCase();
+      // Detect subgenres across all candidate genres
+      const detectedSubgenres = new Set<string>();
+
+      for (const g of feats.genres) {
+        // Use both text and IDs for maximum accuracy
+        const subs = detectSubgenres(g, allText, feats.keywords, feats.keywordIds);
+        subs.forEach(s => detectedSubgenres.add(s));
+      }
+
+      // Check detected subgenres against profile
+      for (const subgenre of detectedSubgenres) {
+        // Check all patterns to see if there's an opinion on this subgenre
+        for (const [parentGenre, pattern] of subgenrePatterns.entries()) {
+          const subInfo = pattern.subgenres.get(subgenre);
+
+          // 1. Boost for Preferred Subgenres
+          if (pattern.preferredSubgenres.has(subgenre) || (subInfo && subInfo.weight > 2.0 && subInfo.liked > (subInfo.watched - subInfo.liked))) {
+            // Boost based on weight, capped
+            const weight = subInfo?.weight ?? 2.0;
+            const boost = Math.min(weight * 0.8, 4.0);
+            score += boost;
+
+            const prettyName = subgenre.replace(/^[A-Z]+_/, '').replace(/_/g, ' ').toLowerCase();
+            const parentPretty = parentGenre.toLowerCase();
+            reasons.push(`Matches your interest in ${prettyName} ${parentPretty} films`);
+            console.log(`[SubgenreBoost] Boosted "${m.title}" by ${boost.toFixed(2)} for ${subgenre}`);
+
+            // If we found a strong match, we can stop checking other patterns for THIS subgenre
+            // (One boost covers it)
+            break;
+          }
+
+          // 2. Penalty for Avoided Subgenres
+          const dislikedCount = subInfo ? (subInfo.watched - subInfo.liked) : 0;
+          if (pattern.avoidedSubgenres.has(subgenre) || (subInfo && subInfo.weight < -1.0 && dislikedCount > subInfo.liked)) {
+            const weight = subInfo?.weight ?? -2.0;
+            const penalty = Math.max(weight * 1.5, -8.0); // massive penalty for specific hatred
+            totalPenalty += penalty;
+
+            const prettyName = subgenre.replace(/^[A-Z]+_/, '').replace(/_/g, ' ').toLowerCase();
+            penaltyReasons.push(`Contains ${prettyName} elements match a subgenre you avoid`);
+            console.log(`[SubgenrePenalty] Penalized "${m.title}" by ${penalty.toFixed(2)} for ${subgenre}`);
+            break;
+          }
+        }
       }
     }
 

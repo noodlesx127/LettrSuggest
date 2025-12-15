@@ -4,6 +4,7 @@ import Chart from '@/components/Chart';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getRepeatSuggestionStats } from '@/lib/enrich';
+import { analyzeSubgenrePatterns } from '@/lib/subgenreDetection';
 import { useMemo, useState, useEffect } from 'react';
 import Image from 'next/image';
 
@@ -24,6 +25,7 @@ type TMDBDetails = {
     keywords?: Array<{ id: number; name: string }>;
     results?: Array<{ id: number; name: string }>;
   };
+  overview?: string; // Added for subgenre detection
 };
 
 export default function StatsPage() {
@@ -725,6 +727,40 @@ export default function StatsPage() {
       }
     }
 
+    // Subgenre Analysis
+    const filmsForSubgenreAnalysis = filteredFilms.map(f => {
+      const tmdbId = filmMappings.get(f.uri);
+      const details = tmdbId ? tmdbDetails.get(tmdbId) : undefined;
+      return {
+        title: f.title,
+        genres: details?.genres?.map(g => g.name) || [],
+        keywords: (details as any)?.keywords?.keywords?.map((k: any) => k.name) ||
+          (details as any)?.keywords?.results?.map((k: any) => k.name) || [],
+        keywordIds: (details as any)?.keywords?.keywords?.map((k: any) => k.id) ||
+          (details as any)?.keywords?.results?.map((k: any) => k.id) || [],
+        rating: f.rating ?? 0,
+        liked: f.liked
+      };
+    });
+
+    const subgenrePatterns = analyzeSubgenrePatterns(filmsForSubgenreAnalysis);
+    const allSubgenres: Array<{ name: string; weight: number; count: number; parent: string }> = [];
+
+    for (const [parent, pattern] of subgenrePatterns) {
+      for (const [sub, info] of pattern.subgenres) {
+        allSubgenres.push({
+          name: sub,
+          weight: info.weight,
+          count: info.watched,
+          parent
+        });
+      }
+    }
+
+    const topSubgenresList = allSubgenres
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 10);
+
     const topGenres = Array.from(genreCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
@@ -1153,6 +1189,8 @@ export default function StatsPage() {
       mixedGenres,
       mixedDirectors,
       mixedKeywords,
+      // Subgenre Stats
+      topSubgenresList,
       // Watchlist analysis - user intent signals
       watchlistTopGenres,
       watchlistTopKeywords,
@@ -1823,6 +1861,26 @@ export default function StatsPage() {
                     <p className="text-xs text-gray-500">{data.count} films</p>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {stats.topSubgenresList && stats.topSubgenresList.length > 0 && (
+            <div className="bg-white border rounded-lg p-4 mb-6">
+              <h2 className="font-semibold text-gray-900 mb-3">Top Specific Interests (Sub-genres)</h2>
+              <p className="text-sm text-gray-500 mb-3">
+                Identified from your viewing patterns using TMDB keywords and genres.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {stats.topSubgenresList.map(item => {
+                  const name = item.name.replace(/^[A-Z]+_/, '').replace(/_/g, ' ').toLowerCase();
+                  return (
+                    <div key={item.name} className="bg-indigo-50 border border-indigo-100 rounded px-3 py-2 flex flex-col min-w-[120px]">
+                      <span className="font-medium text-indigo-900 capitalize text-sm">{name}</span>
+                      <span className="text-xs text-indigo-600 mt-1">{item.count} watched</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -2504,8 +2562,8 @@ export default function StatsPage() {
             <div className="bg-white dark:bg-gray-800 rounded p-3 border border-blue-100 dark:border-blue-900">
               <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Repeat Rate</div>
               <div className={`text-2xl font-bold ${repeatSuggestionStats.repeatRate < 0.1 ? 'text-green-700 dark:text-green-400' :
-                  repeatSuggestionStats.repeatRate < 0.2 ? 'text-yellow-700 dark:text-yellow-400' :
-                    'text-orange-700 dark:text-orange-400'
+                repeatSuggestionStats.repeatRate < 0.2 ? 'text-yellow-700 dark:text-yellow-400' :
+                  'text-orange-700 dark:text-orange-400'
                 }`}>
                 {(repeatSuggestionStats.repeatRate * 100).toFixed(1)}%
               </div>
