@@ -1371,14 +1371,23 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       return Math.min(1.2 + (netPositive - 3) * 0.2, 2.0);
     };
 
-    // Apply recency boost - recent feedback matters more (like Pandora)
-    const applyRecencyBoost = (weight: number, lastUpdated: string): number => {
+    // Apply recency decay - recent feedback matters more (like Pandora)
+    // Uses exponential decay with configurable half-life for smooth degradation
+    const HALF_LIFE_DAYS = 90; // Signal loses half its weight every 90 days
+    const DECAY_FACTOR = Math.LN2 / HALF_LIFE_DAYS;
+
+    const applyRecencyDecay = (weight: number, lastUpdated: string): number => {
       const daysSince = (Date.now() - new Date(lastUpdated).getTime()) / (1000 * 60 * 60 * 24);
-      // Recent feedback (< 7 days) gets 1.5x boost
-      // Older feedback (> 30 days) gets 0.7x reduction
-      if (daysSince < 7) return weight * 1.3;
-      if (daysSince < 30) return weight;
-      return weight * 0.8;
+
+      // Fresh signals (<7 days) get a small boost to prioritize recent learning
+      if (daysSince < 7) return weight * 1.15;
+
+      // Apply exponential decay: weight * e^(-λt) where λ = ln(2)/half-life
+      // At 90 days: 50% weight, at 180 days: 25% weight, at 270 days: 12.5%
+      const decayMultiplier = Math.exp(-DECAY_FACTOR * daysSince);
+
+      // Floor at 20% to prevent total signal loss (user may still dislike that feature)
+      return weight * Math.max(0.2, decayMultiplier);
     };
 
     // ACTORS: Start avoiding after just 1 net rejection
@@ -1387,7 +1396,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .map(f => ({
         id: f.feature_id,
         name: f.feature_name,
-        weight: applyRecencyBoost(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
+        weight: applyRecencyDecay(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
         count: f.negative_count
       }))
       .sort((a, b) => b.weight - a.weight)
@@ -1399,7 +1408,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .map(f => ({
         id: f.feature_id,
         name: f.feature_name,
-        weight: applyRecencyBoost(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
+        weight: applyRecencyDecay(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
         count: f.negative_count
       }))
       .sort((a, b) => b.weight - a.weight)
@@ -1424,7 +1433,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .map(f => ({
         id: f.feature_id,
         name: f.feature_name,
-        weight: applyRecencyBoost(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
+        weight: applyRecencyDecay(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
         count: f.positive_count
       }))
       .sort((a, b) => b.weight - a.weight)
@@ -1436,7 +1445,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .map(f => ({
         id: f.feature_id,
         name: f.feature_name,
-        weight: applyRecencyBoost(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
+        weight: applyRecencyDecay(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
         count: f.positive_count
       }))
       .sort((a, b) => b.weight - a.weight)
@@ -1448,7 +1457,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .map(f => ({
         id: f.feature_id,
         name: f.feature_name,
-        weight: applyRecencyBoost(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
+        weight: applyRecencyDecay(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
         count: f.negative_count
       }))
       .sort((a, b) => b.weight - a.weight)
@@ -1459,7 +1468,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .map(f => ({
         id: f.feature_id,
         name: f.feature_name,
-        weight: applyRecencyBoost(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
+        weight: applyRecencyDecay(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
         count: f.positive_count
       }))
       .sort((a, b) => b.weight - a.weight)
@@ -1471,7 +1480,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .map(f => ({
         id: f.feature_id,
         name: f.feature_name,
-        weight: applyRecencyBoost(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
+        weight: applyRecencyDecay(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
         count: f.negative_count
       }))
       .sort((a, b) => b.weight - a.weight)
@@ -1482,7 +1491,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .map(f => ({
         id: f.feature_id,
         name: f.feature_name,
-        weight: applyRecencyBoost(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
+        weight: applyRecencyDecay(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
         count: f.positive_count
       }))
       .sort((a, b) => b.weight - a.weight)
@@ -3039,6 +3048,7 @@ export async function suggestByOverlap(params: {
   sources?: string[];
   consensusLevel?: 'high' | 'medium' | 'low';
   reliabilityMultiplier?: number;
+  metadataCompleteness?: number;
 }>> {
   // Build user profile from liked/highly-rated mapped films.
   // Use as much history as possible, but cap TMDB fetches to avoid huge fan-out
@@ -3701,6 +3711,43 @@ export async function suggestByOverlap(params: {
 
     let score = 0;
     const reasons: string[] = [];
+
+    /**
+     * Compute metadata completeness as a normalized 0-1 score
+     * Weight components by importance for user decision-making:
+     * - Poster: 30% (essential for browsing)
+     * - Overview: 25% (needed for informed decision)
+     * - Votes: 20% (confidence in rating)
+     * - Backdrop: 15% (visual appeal)
+     * - Trailer: 10% (nice to have)
+     */
+    const computeMetadataCompleteness = (): number => {
+      const weights = {
+        poster: 0.30,
+        overview: 0.25,
+        votes: 0.20,
+        backdrop: 0.15,
+        trailer: 0.10,
+      };
+
+      const hasPosterLocal = Boolean(m.poster_path || (m as any).omdb_poster);
+      const hasBackdropLocal = Boolean(m.backdrop_path);
+      const hasOverviewLocal = Boolean(m.overview && m.overview.trim().length > 20);
+      const hasTrailerLocal = Boolean((m as any).videos?.results?.some((v: any) =>
+        v.site === 'YouTube' && v.type === 'Trailer'
+      ));
+      const hasVotesLocal = Boolean((m as any).vote_count && (m as any).vote_count >= 50);
+
+      return (
+        (hasPosterLocal ? weights.poster : 0) +
+        (hasOverviewLocal ? weights.overview : 0) +
+        (hasVotesLocal ? weights.votes : 0) +
+        (hasBackdropLocal ? weights.backdrop : 0) +
+        (hasTrailerLocal ? weights.trailer : 0)
+      );
+    };
+
+    const metadataCompleteness = computeMetadataCompleteness();
 
     // Soft avoid: previously dismissed items get a strong penalty but are not fully removed
     if (negativeFeedbackIds.has(cid)) {
@@ -4534,7 +4581,8 @@ export async function suggestByOverlap(params: {
       // Multi-source recommendation data
       sources: sourceMeta?.sources,
       consensusLevel: sourceMeta?.consensusLevel,
-      reliabilityMultiplier
+      reliabilityMultiplier,
+      metadataCompleteness
     };
     resultsAcc.push(r);
     // Early return the result; caller will slice after sorting
@@ -4558,6 +4606,7 @@ export async function suggestByOverlap(params: {
     studios?: string[];
     actors?: string[];
     reliabilityMultiplier?: number;
+    metadataCompleteness?: number;
   }>;
   results.sort((a, b) => b.score - a.score);
 
