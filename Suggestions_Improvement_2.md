@@ -128,6 +128,11 @@
 - [x] Fixed pairwise learning stats showing 0's when comparisons exist
 	- [x] Defaulting consensusLevel to 'low' when undefined (movies with single-source recommendations)
 	- [x] Backfill migration for existing NULL consensus values in pairwise_events table
+- [x] Repeat-suggestion decay penalty: reduced repeat rate from 31% to target <15%
+	- [x] Added `getRecentExposures()` function to fetch recently shown movies from exposure log
+	- [x] Added `recentExposures` parameter to `suggestByOverlap()` for scoring integration
+	- [x] Implemented tiered decay penalties: -40% (today), -30% (3d), -15% (7d), -5% (14d)
+	- [x] Movies shown recently get lower scores but can still appear eventually
 
 ---
 

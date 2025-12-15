@@ -5,7 +5,7 @@ import ProgressIndicator from '@/components/ProgressIndicator';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, getFeatureEvidenceSummary, neutralizeFeedback, logSuggestionExposure, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
+import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, getFeatureEvidenceSummary, neutralizeFeedback, logSuggestionExposure, getRecentExposures, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -115,11 +115,11 @@ export default function SuggestPage() {
   const [refreshingSections, setRefreshingSections] = useState<Set<string>>(new Set());
   const [shownIds, setShownIds] = useState<Set<number>>(new Set());
   const [cacheKey, setCacheKey] = useState<number>(Date.now());
-  const [progress, setProgress] = useState<{ current: number; total: number; stage: string; details?: string }>({ 
-    current: 0, 
-    total: 7, 
+  const [progress, setProgress] = useState<{ current: number; total: number; stage: string; details?: string }>({
+    current: 0,
+    total: 7,
     stage: '',
-    details: undefined 
+    details: undefined
   });
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [undoToast, setUndoToast] = useState<{ id: number; title: string } | null>(null);
@@ -869,7 +869,7 @@ export default function SuggestPage() {
       setNoCandidatesReason(null);
       setLoading(true);
       setProgress({ current: 0, total: 7, stage: 'init', details: 'Preparing recommendation engine...' });
-      
+
       // Reset pairwise state when refreshing suggestions
       setPairwisePair(null);
       setPairwiseCount(0);
@@ -979,7 +979,7 @@ export default function SuggestPage() {
         tmdbDetails: tmdbDetailsMap, // Pass pre-fetched details to analyze ALL movies, not just 100
         watchlistFilms // Pass watchlist for intent signals
       });
-      
+
       // Update progress with taste profile results
       const topGenresPreview = tasteProfile.topGenres.slice(0, 3).map(g => g.name).join(', ');
       setProgress({ current: 3, total: 7, stage: 'taste', details: `Found preferences: ${topGenresPreview}${tasteProfile.topGenres.length > 3 ? '...' : ''}` });
@@ -1290,6 +1290,11 @@ export default function SuggestPage() {
       // So passing top genres as "recent" is a decent approximation of "current state".
       const recentGenreNames = tasteProfile.topGenres.slice(0, 5).map(g => g.name);
 
+      // Fetch recent exposures to apply repeat penalty
+      // This penalizes movies shown recently to favor fresh content
+      const recentExposures = await getRecentExposures(uid, 14);
+      console.log('[Suggest] Recent exposures for repeat prevention:', recentExposures.size);
+
       const context = computeContext();
       setSourceLabel('Based on your watched & liked films + trending releases');
       const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
@@ -1313,6 +1318,7 @@ export default function SuggestPage() {
         featureFeedback: featureFeedback || undefined,
         watchlistEntries,
         context,
+        recentExposures, // Apply repeat penalty to recently shown movies
         enhancedProfile: {
           topActors: tasteProfile.topActors,
           topStudios: tasteProfile.topStudios,
@@ -1489,7 +1495,7 @@ export default function SuggestPage() {
       } catch (e) {
         console.error('[Suggest] Failed to log exposures', e);
       }
-      
+
       // Mark progress as complete
       setProgress({ current: 7, total: 7, stage: 'details', details: `Loaded ${details.length} personalized suggestions!` });
     } catch (e: any) {
@@ -2278,9 +2284,9 @@ export default function SuggestPage() {
 
   const handlePairwiseVote = async (winnerId: number, loserId: number) => {
     if (!uid) return;
-    
+
     console.log('[Pairwise] Vote received:', { winnerId, loserId, currentCount: pairwiseCount });
-    
+
     const nextCount = pairwiseCount + 1;
     const nextHistory = new Set(pairHistory);
     nextHistory.add(makePairId(winnerId, loserId));
@@ -2348,9 +2354,9 @@ export default function SuggestPage() {
     nextHistory.add(makePairId(aId, bId));
     setPairHistory(nextHistory);
     setPairwiseCount(nextCount);
-    
+
     console.log('[Pairwise] Skipping pair:', { aId, bId, nextCount, limit: PAIRWISE_SESSION_LIMIT });
-    
+
     // Find next pair, or close modal if limit reached
     if (nextCount >= PAIRWISE_SESSION_LIMIT) {
       setPairwisePair(null);
@@ -2531,2273 +2537,2273 @@ export default function SuggestPage() {
   return (
     <AuthGate>
       <FeatureEvidenceContext.Provider value={featureEvidence}>
-      {/* Feedback Toast */}
-      {feedbackMessage && (
-        <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded shadow-lg z-50 animate-fade-in-up">
-          {feedbackMessage}
-        </div>
-      )}
-
-      {/* Undo Toast for dismissed suggestions */}
-      {undoToast && (
-        <div className="fixed bottom-4 left-4 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-4 py-3 rounded shadow-lg border border-gray-200 dark:border-gray-700 z-50 flex items-center gap-3 animate-fade-in-up">
-          <div className="text-sm">Removed “{undoToast.title}”.</div>
-          <button
-            className="text-sm font-semibold text-blue-700 hover:text-blue-900"
-            onClick={() => handleUndoDismiss(undoToast.id)}
-          >
-            Undo
-          </button>
-        </div>
-      )}
-
-      {/* Hybrid Feedback Popup - Optional "Tell us why" */}
-      {feedbackPopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
-            onClick={() => setFeedbackPopup(null)}
-          />
-
-          {/* Popup Card - Redesigned with scrollable content */}
-          <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
-            {/* Fixed Header */}
-            <div className="flex-shrink-0 p-4 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">
-                    {feedbackPopup.insights.learningSummary}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Want to tell us more? (optional)
-                  </p>
-                </div>
-                <button
-                  onClick={() => setFeedbackPopup(null)}
-                  className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
-                  aria-label="Close"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {feedbackPopup.feedbackType === 'negative' ? (
-                <>
-                  {/* === NEGATIVE FEEDBACK OPTIONS === */}
-
-                  {/* NUCLEAR OPTION - Dislike everything */}
-                  <div>
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Strong dislike:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {(() => {
-                        const isSelected = selectedReasons.includes('dislike_all');
-                        return (
-                          <button
-                            onClick={() => toggleReasonSelection('dislike_all')}
-                            className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-200 dark:bg-red-900/60 text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-900/80 rounded-full transition-colors font-medium border border-red-300 dark:border-red-800', isSelected)}
-                          >
-                            🚫 I don&apos;t like this movie
-                          </button>
-                        );
-                      })()}
-                    </div>
-                  </div>
-
-                  {/* Non-negative reasons (won't learn avoidance) */}
-                  <div>
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not a problem with the movie:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { key: 'already_seen', label: '✓ Already seen it', color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-900/60' },
-                        { key: 'not_in_mood', label: '😴 Not in the mood', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600' },
-                        { key: 'too_long', label: '⏱️ Too long right now', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600' },
-                      ].map(({ key, label, color }) => {
-                        const isSelected = selectedReasons.includes(key);
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => toggleReasonSelection(key)}
-                            className={getReasonButtonClasses(`px-3 py-1.5 text-xs rounded-full transition-colors ${color}`, isSelected)}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {feedbackPopup.showMicroSurvey && (
-                    <div className="border border-dashed border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-900">
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Quick check: what missed?</p>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => handleMicroSurveyChoice('cast')}
-                          className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                        >
-                          🎭 Cast/tone off
-                        </button>
-                        <button
-                          onClick={() => handleMicroSurveyChoice('tone')}
-                          className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                        >
-                          🎨 Theme mismatch
-                        </button>
-                        <button
-                          onClick={() => handleMicroSurveyChoice('runtime')}
-                          className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                        >
-                          ⏱️ Too long/slow
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Specific reasons section header */}
-                  <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Or tell us specifically:</p>
-                  </div>
-
-                  {/* Actor-specific reasons - show ALL lead actors so user can pick specific ones */}
-                  {feedbackPopup.leadActors.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not a fan of this actor:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.leadActors.map(actor => {
-                          const reason = `actor:${actor}`;
-                          const isSelected = selectedReasons.includes(reason);
-                          const badge = getFeatureEvidenceBadge('actor', actor);
-                          return (
-                            <button
-                              key={actor}
-                              onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                            >
-                              <span>👎 {actor}</span>
-                              {badge && (
-                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                  {badge.text}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Franchise fatigue */}
-                  {feedbackPopup.franchise && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Franchise fatigue:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {(() => {
-                          const reason = 'franchise';
-                          const isSelected = selectedReasons.includes(reason);
-                          const badge = getFeatureEvidenceBadge('collection', feedbackPopup.franchise);
-                          return (
-                            <button
-                              onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-200 hover:bg-orange-200 dark:hover:bg-orange-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                            >
-                              <span>🔄 Done with {feedbackPopup.franchise.split(':')[0]}</span>
-                              {badge && (
-                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                  {badge.text}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Genre-specific reasons */}
-                  {feedbackPopup.genres.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not into this genre:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.genres.slice(0, 3).map(genre => {
-                          const reason = `genre:${genre}`;
-                          const isSelected = selectedReasons.includes(reason);
-                          const badge = getFeatureEvidenceBadge('genre', genre);
-                          return (
-                            <button
-                              key={genre}
-                              onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-200 hover:bg-purple-200 dark:hover:bg-purple-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                            >
-                              <span>👎 {genre}</span>
-                              {badge && (
-                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                  {badge.text}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Topic/Theme-specific reasons (keywords) */}
-                  {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not interested in this topic:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
-                          const reason = `keyword:${keyword}`;
-                          const isSelected = selectedReasons.includes(reason);
-                          const badge = getFeatureEvidenceBadge('keyword', keyword);
-                          return (
-                            <button
-                              key={keyword}
-                              onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                            >
-                              <span>🏷️ {keyword}</span>
-                              {badge && (
-                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                  {badge.text}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      onClick={handleFastNeutralize}
-                      className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dashed"
-                    >
-                      👍 This is fine (reset)
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* === POSITIVE FEEDBACK OPTIONS === */}
-                  {/* Generic positive */}
-                  <div>
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">What made this a great pick?</p>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { key: 'great_pick', label: '✨ Just a great pick!', color: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-900/60' },
-                        { key: 'love_all', label: '❤️ I love everything about this!', color: 'bg-emerald-200 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-300 dark:hover:bg-emerald-900/80 border border-emerald-300 dark:border-emerald-800 font-medium' },
-                      ].map(({ key, label, color }) => {
-                        const isSelected = selectedReasons.includes(key);
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => toggleReasonSelection(key)}
-                            className={getReasonButtonClasses(`px-3 py-1.5 text-xs rounded-full transition-colors ${color}`, isSelected)}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Specific reasons section header */}
-                  <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Or tell us specifically:</p>
-                  </div>
-
-                  {/* Actor love */}
-                  {feedbackPopup.leadActors.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this actor:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.leadActors.map(actor => {
-                          const reason = `actor:${actor}`;
-                          const isSelected = selectedReasons.includes(reason);
-                          const badge = getFeatureEvidenceBadge('actor', actor);
-                          return (
-                            <button
-                              key={actor}
-                              onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                            >
-                              <span>❤️ {actor}</span>
-                              {badge && (
-                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                  {badge.text}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Franchise love */}
-                  {feedbackPopup.franchise && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this franchise:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {(() => {
-                          const reason = 'franchise';
-                          const isSelected = selectedReasons.includes(reason);
-                          const badge = getFeatureEvidenceBadge('collection', feedbackPopup.franchise);
-                          return (
-                            <button
-                              onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                            >
-                              <span>🎬 More {feedbackPopup.franchise.split(':')[0]}!</span>
-                              {badge && (
-                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                  {badge.text}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Genre love */}
-                  {feedbackPopup.genres.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this genre:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.genres.slice(0, 3).map(genre => {
-                          const reason = `genre:${genre}`;
-                          const isSelected = selectedReasons.includes(reason);
-                          const badge = getFeatureEvidenceBadge('genre', genre);
-                          return (
-                            <button
-                              key={genre}
-                              onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                            >
-                              <span>❤️ {genre}</span>
-                              {badge && (
-                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                  {badge.text}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Topic/Theme love (keywords) */}
-                  {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this theme:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
-                          const reason = `keyword:${keyword}`;
-                          const isSelected = selectedReasons.includes(reason);
-                          const badge = getFeatureEvidenceBadge('keyword', keyword);
-                          return (
-                            <button
-                              key={keyword}
-                              onClick={() => toggleReasonSelection(reason)}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                            >
-                              <span>❤️ {keyword}</span>
-                              {badge && (
-                                <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                  {badge.text}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Fixed Footer with Actions */}
-            <div className="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-              <div className="text-xs text-center text-gray-500 dark:text-gray-400 mb-2">
-                {selectedReasons.length > 0
-                  ? `${selectedReasons.length} reason${selectedReasons.length === 1 ? '' : 's'} selected`
-                  : 'Pick one or more reasons, then submit'}
-              </div>
-              <div className="flex items-center justify-center gap-2">
-                <button
-                  onClick={handleSubmitSelectedReasons}
-                  disabled={selectedReasons.length === 0}
-                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${selectedReasons.length === 0 ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed' : 'bg-blue-600 dark:bg-blue-700 text-white hover:bg-blue-700 dark:hover:bg-blue-600'}`}
-                >
-                  Submit selected
-                </button>
-                <button
-                  onClick={() => setFeedbackPopup(null)}
-                  className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
-                >
-                  Skip
-                </button>
-              </div>
-            </div>
+        {/* Feedback Toast */}
+        {feedbackMessage && (
+          <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded shadow-lg z-50 animate-fade-in-up">
+            {feedbackMessage}
           </div>
-        </div>
-      )}
-      {pairwisePair && (
-        <>
-          {/* Fullscreen Trailer Modal for Pairwise */}
-          {pairwiseVideoId !== null && (
-            <div
-              className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4"
-              onClick={() => setPairwiseVideoId(null)}
+        )}
+
+        {/* Undo Toast for dismissed suggestions */}
+        {undoToast && (
+          <div className="fixed bottom-4 left-4 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-4 py-3 rounded shadow-lg border border-gray-200 dark:border-gray-700 z-50 flex items-center gap-3 animate-fade-in-up">
+            <div className="text-sm">Removed “{undoToast.title}”.</div>
+            <button
+              className="text-sm font-semibold text-blue-700 hover:text-blue-900"
+              onClick={() => handleUndoDismiss(undoToast.id)}
             >
-              <div
-                className="relative w-full max-w-4xl aspect-video"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {(() => {
-                  const videoItem = pairwiseVideoId === pairwisePair.a.id ? pairwisePair.a : pairwisePair.b;
-                  return videoItem.trailerKey ? (
-                    <iframe
-                      src={`https://www.youtube.com/embed/${videoItem.trailerKey}?autoplay=1`}
-                      title={`${videoItem.title} trailer`}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                      className="absolute inset-0 w-full h-full rounded-lg"
-                    />
-                  ) : null;
-                })()}
-                <button
-                  onClick={() => setPairwiseVideoId(null)}
-                  className="absolute -top-10 right-0 w-8 h-8 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full flex items-center justify-center text-white text-lg transition-all"
-                  aria-label="Close trailer"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-          )}
-          
-        <div className="mb-5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Which fits you better right now?</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">These two were neck-and-neck; your pick will tune future rankings.</p>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-gray-500">
-              <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200">Pairwise learning</span>
-              <span>{pairwiseCount + 1}/{PAIRWISE_SESSION_LIMIT} this session</span>
-              <button
-                className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                onClick={() => handlePairwiseSkip(pairwisePair.a.id, pairwisePair.b.id)}
-              >
-                Skip
-              </button>
-            </div>
+              Undo
+            </button>
           </div>
-          <div className="mt-3 grid gap-4 md:grid-cols-2">
-            {[pairwisePair.a, pairwisePair.b].map((item, idx) => {
-              const other = idx === 0 ? pairwisePair.b : pairwisePair.a;
-              return (
-                <div key={item.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col">
-                  {/* Header badge */}
-                  <div className="px-3 py-2 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-                    <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Option {idx === 0 ? 'A' : 'B'}</div>
+        )}
+
+        {/* Hybrid Feedback Popup - Optional "Tell us why" */}
+        {feedbackPopup && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+              onClick={() => setFeedbackPopup(null)}
+            />
+
+            {/* Popup Card - Redesigned with scrollable content */}
+            <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+              {/* Fixed Header */}
+              <div className="flex-shrink-0 p-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {feedbackPopup.insights.learningSummary}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Want to tell us more? (optional)
+                    </p>
                   </div>
-                  
-                  {/* Movie content */}
-                  <div className="flex gap-3 p-3">
-                    {/* Poster */}
-                    {item.poster_path ? (
-                      <div className="w-20 h-28 flex-shrink-0 bg-gray-700 rounded overflow-hidden">
-                        <img 
-                          src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
-                          alt={item.title}
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                        />
+                  <button
+                    onClick={() => setFeedbackPopup(null)}
+                    className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
+                    aria-label="Close"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Scrollable Content */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {feedbackPopup.feedbackType === 'negative' ? (
+                  <>
+                    {/* === NEGATIVE FEEDBACK OPTIONS === */}
+
+                    {/* NUCLEAR OPTION - Dislike everything */}
+                    <div>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Strong dislike:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(() => {
+                          const isSelected = selectedReasons.includes('dislike_all');
+                          return (
+                            <button
+                              onClick={() => toggleReasonSelection('dislike_all')}
+                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-200 dark:bg-red-900/60 text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-900/80 rounded-full transition-colors font-medium border border-red-300 dark:border-red-800', isSelected)}
+                            >
+                              🚫 I don&apos;t like this movie
+                            </button>
+                          );
+                        })()}
                       </div>
-                    ) : (
-                      <div className="w-20 h-28 flex-shrink-0 bg-gray-700 dark:bg-gray-600 rounded flex items-center justify-center text-gray-400 dark:text-gray-500 text-xs text-center p-1">
-                        No poster
+                    </div>
+
+                    {/* Non-negative reasons (won't learn avoidance) */}
+                    <div>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not a problem with the movie:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { key: 'already_seen', label: '✓ Already seen it', color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-900/60' },
+                          { key: 'not_in_mood', label: '😴 Not in the mood', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600' },
+                          { key: 'too_long', label: '⏱️ Too long right now', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600' },
+                        ].map(({ key, label, color }) => {
+                          const isSelected = selectedReasons.includes(key);
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => toggleReasonSelection(key)}
+                              className={getReasonButtonClasses(`px-3 py-1.5 text-xs rounded-full transition-colors ${color}`, isSelected)}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {feedbackPopup.showMicroSurvey && (
+                      <div className="border border-dashed border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-900">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Quick check: what missed?</p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleMicroSurveyChoice('cast')}
+                            className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            🎭 Cast/tone off
+                          </button>
+                          <button
+                            onClick={() => handleMicroSurveyChoice('tone')}
+                            className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            🎨 Theme mismatch
+                          </button>
+                          <button
+                            onClick={() => handleMicroSurveyChoice('runtime')}
+                            className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            ⏱️ Too long/slow
+                          </button>
+                        </div>
                       </div>
                     )}
-                    
-                    {/* Info */}
-                    <div className="flex-1 min-w-0 flex flex-col">
-                      <div className="font-semibold text-base text-gray-900 dark:text-gray-100 mb-1">
-                        {item.title}
+
+                    {/* Specific reasons section header */}
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Or tell us specifically:</p>
+                    </div>
+
+                    {/* Actor-specific reasons - show ALL lead actors so user can pick specific ones */}
+                    {feedbackPopup.leadActors.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not a fan of this actor:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {feedbackPopup.leadActors.map(actor => {
+                            const reason = `actor:${actor}`;
+                            const isSelected = selectedReasons.includes(reason);
+                            const badge = getFeatureEvidenceBadge('actor', actor);
+                            return (
+                              <button
+                                key={actor}
+                                onClick={() => toggleReasonSelection(reason)}
+                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                              >
+                                <span>👎 {actor}</span>
+                                {badge && (
+                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                    {badge.text}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                      {item.year && (
-                        <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">{item.year}</div>
-                      )}
-                      
-                      {/* Genres */}
-                      {item.genres && item.genres.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mb-2">
-                          {item.genres.slice(0, 3).map((genre, i) => (
-                            <span key={i} className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full">
-                              {genre}
-                            </span>
-                          ))}
+                    )}
+
+                    {/* Franchise fatigue */}
+                    {feedbackPopup.franchise && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Franchise fatigue:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {(() => {
+                            const reason = 'franchise';
+                            const isSelected = selectedReasons.includes(reason);
+                            const badge = getFeatureEvidenceBadge('collection', feedbackPopup.franchise);
+                            return (
+                              <button
+                                onClick={() => toggleReasonSelection(reason)}
+                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-200 hover:bg-orange-200 dark:hover:bg-orange-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                              >
+                                <span>🔄 Done with {feedbackPopup.franchise.split(':')[0]}</span>
+                                {badge && (
+                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                    {badge.text}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })()}
                         </div>
-                      )}
-                      
-                      {/* Rating */}
-                      {item.vote_average && (
-                        <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400 mb-2">
-                          <span className="text-yellow-500">⭐</span>
-                          <span className="font-medium">{item.vote_average.toFixed(1)}</span>
-                          <span className="text-gray-400 dark:text-gray-500 text-xs">/10</span>
+                      </div>
+                    )}
+
+                    {/* Genre-specific reasons */}
+                    {feedbackPopup.genres.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not into this genre:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {feedbackPopup.genres.slice(0, 3).map(genre => {
+                            const reason = `genre:${genre}`;
+                            const isSelected = selectedReasons.includes(reason);
+                            const badge = getFeatureEvidenceBadge('genre', genre);
+                            return (
+                              <button
+                                key={genre}
+                                onClick={() => toggleReasonSelection(reason)}
+                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-200 hover:bg-purple-200 dark:hover:bg-purple-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                              >
+                                <span>👎 {genre}</span>
+                                {badge && (
+                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                    {badge.text}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
                         </div>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Description */}
-                  {item.overview && (
-                    <div className="px-3 pb-3">
-                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-3 leading-relaxed">
-                        {item.overview}
-                      </p>
-                    </div>
-                  )}
-                  
-                  {/* Trailer button */}
-                  {item.trailerKey && (
-                    <div className="px-3 pb-2">
+                      </div>
+                    )}
+
+                    {/* Topic/Theme-specific reasons (keywords) */}
+                    {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not interested in this topic:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
+                            const reason = `keyword:${keyword}`;
+                            const isSelected = selectedReasons.includes(reason);
+                            const badge = getFeatureEvidenceBadge('keyword', keyword);
+                            return (
+                              <button
+                                key={keyword}
+                                onClick={() => toggleReasonSelection(reason)}
+                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                              >
+                                <span>🏷️ {keyword}</span>
+                                {badge && (
+                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                    {badge.text}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end pt-2">
                       <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setPairwiseVideoId(item.id);
-                        }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-100 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-md transition-colors font-medium"
+                        onClick={handleFastNeutralize}
+                        className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline decoration-dashed"
                       >
-                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" />
-                        </svg>
-                        Watch Trailer
+                        👍 This is fine (reset)
                       </button>
                     </div>
-                  )}
-                  
-                  {/* Reasons */}
-                  <div className="px-3 pb-3 border-t border-gray-100 dark:border-gray-700 pt-3">
-                    <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Why this matches you:</div>
-                    <div className="text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
-                      {item.reasons.slice(0, 2).map((reason, i) => (
-                        <div key={i} className="flex items-start gap-1.5">
-                          <span className="text-blue-500 mt-0.5">•</span>
-                          <span>{reason}</span>
+                  </>
+                ) : (
+                  <>
+                    {/* === POSITIVE FEEDBACK OPTIONS === */}
+                    {/* Generic positive */}
+                    <div>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">What made this a great pick?</p>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { key: 'great_pick', label: '✨ Just a great pick!', color: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-900/60' },
+                          { key: 'love_all', label: '❤️ I love everything about this!', color: 'bg-emerald-200 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-300 dark:hover:bg-emerald-900/80 border border-emerald-300 dark:border-emerald-800 font-medium' },
+                        ].map(({ key, label, color }) => {
+                          const isSelected = selectedReasons.includes(key);
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => toggleReasonSelection(key)}
+                              className={getReasonButtonClasses(`px-3 py-1.5 text-xs rounded-full transition-colors ${color}`, isSelected)}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Specific reasons section header */}
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Or tell us specifically:</p>
+                    </div>
+
+                    {/* Actor love */}
+                    {feedbackPopup.leadActors.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this actor:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {feedbackPopup.leadActors.map(actor => {
+                            const reason = `actor:${actor}`;
+                            const isSelected = selectedReasons.includes(reason);
+                            const badge = getFeatureEvidenceBadge('actor', actor);
+                            return (
+                              <button
+                                key={actor}
+                                onClick={() => toggleReasonSelection(reason)}
+                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                              >
+                                <span>❤️ {actor}</span>
+                                {badge && (
+                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                    {badge.text}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                  
-                  {/* Badges */}
-                  <div className="px-3 pb-3">
-                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                      {item.consensusLevel && (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800">
-                          Consensus: {item.consensusLevel}
-                        </span>
-                      )}
-                      {item.sources?.length ? (
-                        <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-800">
-                          {item.sources.length} source{item.sources.length === 1 ? '' : 's'}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  
-                  {/* Action button */}
-                  <div className="px-3 pb-3 mt-auto">
-                    <button
-                      className="w-full inline-flex items-center justify-center rounded-md bg-blue-600 dark:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
-                      onClick={() => handlePairwiseVote(item.id, other.id)}
-                    >
-                      Choose this one
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        </>
-      )}
+                      </div>
+                    )}
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Suggestions</h1>
-          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Based on your liked and highly rated films.</p>
-        </div>
-        <div className="flex flex-col items-end gap-1 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-600 dark:text-gray-400">Mode:</span>
-            <button
-              type="button"
-              className={`px-2 py-1 rounded border text-xs ${mode === 'quick' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
-              onClick={() => { setMode('quick'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
-            >
-              Quick
-            </button>
-            <button
-              type="button"
-              className={`px-2 py-1 rounded border text-xs ${mode === 'deep' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
-              onClick={() => { setMode('deep'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
-            >
-              Deep dive
-            </button>
-          </div>
-          <p className="text-[10px] text-gray-500">
-            Quick is snappy; Deep dive scans more candidates.
-          </p>
-        </div>
-      </div>
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <div>
-          <label className="block text-xs text-gray-600">Exclude genres (comma)</label>
-          <input
-            value={excludeGenres}
-            onChange={(e) => setExcludeGenres(e.target.value)}
-            placeholder="e.g., horror, musical"
-            className="border rounded px-2 py-1 text-sm"
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-600">Year min</label>
-          <input value={yearMin} onChange={(e) => setYearMin(e.target.value)} placeholder="e.g., 1990" className="border rounded px-2 py-1 text-sm w-24" />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-600">Year max</label>
-          <input value={yearMax} onChange={(e) => setYearMax(e.target.value)} placeholder="e.g., 2025" className="border rounded px-2 py-1 text-sm w-24" />
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
-            title="Get completely fresh suggestions (clears history)"
-            onClick={() => { setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
-          >
-            <span>🔄</span>
-            <span>Refresh</span>
-          </button>
-        </div>
-      </div>
+                    {/* Franchise love */}
+                    {feedbackPopup.franchise && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this franchise:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {(() => {
+                            const reason = 'franchise';
+                            const isSelected = selectedReasons.includes(reason);
+                            const badge = getFeatureEvidenceBadge('collection', feedbackPopup.franchise);
+                            return (
+                              <button
+                                onClick={() => toggleReasonSelection(reason)}
+                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                              >
+                                <span>🎬 More {feedbackPopup.franchise.split(':')[0]}!</span>
+                                {badge && (
+                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                    {badge.text}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    )}
 
-      {/* Enrichment Warning - show if less than 50% of films are mapped */}
-      {mappingCoverage && mappingCoverage.mapped < mappingCoverage.total * 0.5 && !loading && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 flex gap-3">
-          <span className="text-lg">⚠️</span>
-          <div className="text-sm text-amber-900">
-            <p>Only {mappingCoverage.mapped} of {mappingCoverage.total} films are mapped to TMDB. Recommendations may miss items.</p>
-            <p className="text-xs text-amber-800 mt-1">Import more data or refresh mappings to improve coverage.</p>
-          </div>
-        </div>
-      )}
+                    {/* Genre love */}
+                    {feedbackPopup.genres.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this genre:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {feedbackPopup.genres.slice(0, 3).map(genre => {
+                            const reason = `genre:${genre}`;
+                            const isSelected = selectedReasons.includes(reason);
+                            const badge = getFeatureEvidenceBadge('genre', genre);
+                            return (
+                              <button
+                                key={genre}
+                                onClick={() => toggleReasonSelection(reason)}
+                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                              >
+                                <span>❤️ {genre}</span>
+                                {badge && (
+                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                    {badge.text}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
-      {loading && (
-        <div className="mb-6">
-          <ProgressIndicator
-            current={progress.current}
-            total={progress.total}
-            stage={progress.stage}
-            stages={PROGRESS_STAGES}
-            details={progress.details}
-          />
-        </div>
-      )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {
-        !loading && !error && noCandidatesReason && (
-          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
-            {noCandidatesReason}
-          </p>
-        )
-      }
-      {
-        items && categorizedSuggestions && (
-          <div className="space-y-8">
-            <div className="flex items-center justify-between gap-3 text-sm text-gray-700 flex-wrap">
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-gray-600" title="Lower = safer, familiar picks. Higher = more exploratory, diverse picks.">Discovery vs Safety</label>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={discoveryLevel}
-                  onChange={(e) => {
-                    const newValue = Number(e.target.value);
-                    setDiscoveryLevel(newValue);
-                    // Debounced auto-refresh when slider changes
-                    if ((window as any).__discoverySliderTimeout) {
-                      clearTimeout((window as any).__discoverySliderTimeout);
-                    }
-                    (window as any).__discoverySliderTimeout = setTimeout(() => {
-                      setItems(null);
-                      setShownIds(new Set());
-                      setRefreshTick((x) => x + 1);
-                      void runSuggest();
-                    }, 800);
-                  }}
-                  className="w-40 accent-blue-600"
-                  title="Drag to adjust. Changes apply automatically after a brief pause."
-                />
-                <span className="text-xs text-gray-500 w-8 text-right">{discoveryLevel}%</span>
-                {discoveryLevel !== 50 && (
-                  <button
-                    onClick={() => {
-                      setDiscoveryLevel(50);
-                      setItems(null);
-                      setShownIds(new Set());
-                      setRefreshTick((x) => x + 1);
-                      void runSuggest();
-                    }}
-                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline whitespace-nowrap"
-                    title="Reset to default (50%)"
-                  >
-                    Reset
-                  </button>
+                    {/* Topic/Theme love (keywords) */}
+                    {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this theme:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
+                            const reason = `keyword:${keyword}`;
+                            const isSelected = selectedReasons.includes(reason);
+                            const badge = getFeatureEvidenceBadge('keyword', keyword);
+                            return (
+                              <button
+                                key={keyword}
+                                onClick={() => toggleReasonSelection(reason)}
+                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                              >
+                                <span>❤️ {keyword}</span>
+                                {badge && (
+                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                    {badge.text}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-gray-600">Context</label>
-                <select
-                  value={contextMode}
-                  onChange={(e) => setContextMode(e.target.value as typeof contextMode)}
-                  className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-800"
-                >
-                  <option value="auto">Auto (time-based)</option>
-                  <option value="weeknight">Weeknight wind-down</option>
-                  <option value="short">Short session</option>
-                  <option value="immersive">Immersive/long-form</option>
-                  <option value="family">Family/group friendly</option>
-                  <option value="background">Easy-background</option>
-                </select>
+
+              {/* Fixed Footer with Actions */}
+              <div className="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                <div className="text-xs text-center text-gray-500 dark:text-gray-400 mb-2">
+                  {selectedReasons.length > 0
+                    ? `${selectedReasons.length} reason${selectedReasons.length === 1 ? '' : 's'} selected`
+                    : 'Pick one or more reasons, then submit'}
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    onClick={handleSubmitSelectedReasons}
+                    disabled={selectedReasons.length === 0}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${selectedReasons.length === 0 ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed' : 'bg-blue-600 dark:bg-blue-700 text-white hover:bg-blue-700 dark:hover:bg-blue-600'}`}
+                  >
+                    Submit selected
+                  </button>
+                  <button
+                    onClick={() => setFeedbackPopup(null)}
+                    className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
+                  >
+                    Skip
+                  </button>
+                </div>
               </div>
-              <button
-                onClick={handleUndoLastFeedback}
-                disabled={!lastFeedback}
-                className={`px-3 py-1.5 rounded border text-sm font-medium transition-colors ${lastFeedback ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed'}`}
-                title={lastFeedback ? `Restore "${lastFeedback.title}" and unblock it` : 'No feedback to undo yet'}
+            </div>
+          </div>
+        )}
+        {pairwisePair && (
+          <>
+            {/* Fullscreen Trailer Modal for Pairwise */}
+            {pairwiseVideoId !== null && (
+              <div
+                className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4"
+                onClick={() => setPairwiseVideoId(null)}
               >
-                ↩️ Undo last feedback
+                <div
+                  className="relative w-full max-w-4xl aspect-video"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {(() => {
+                    const videoItem = pairwiseVideoId === pairwisePair.a.id ? pairwisePair.a : pairwisePair.b;
+                    return videoItem.trailerKey ? (
+                      <iframe
+                        src={`https://www.youtube.com/embed/${videoItem.trailerKey}?autoplay=1`}
+                        title={`${videoItem.title} trailer`}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        className="absolute inset-0 w-full h-full rounded-lg"
+                      />
+                    ) : null;
+                  })()}
+                  <button
+                    onClick={() => setPairwiseVideoId(null)}
+                    className="absolute -top-10 right-0 w-8 h-8 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full flex items-center justify-center text-white text-lg transition-all"
+                    aria-label="Close trailer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="mb-5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Which fits you better right now?</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">These two were neck-and-neck; your pick will tune future rankings.</p>
+                </div>
+                <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                  <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200">Pairwise learning</span>
+                  <span>{pairwiseCount + 1}/{PAIRWISE_SESSION_LIMIT} this session</span>
+                  <button
+                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    onClick={() => handlePairwiseSkip(pairwisePair.a.id, pairwisePair.b.id)}
+                  >
+                    Skip
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-4 md:grid-cols-2">
+                {[pairwisePair.a, pairwisePair.b].map((item, idx) => {
+                  const other = idx === 0 ? pairwisePair.b : pairwisePair.a;
+                  return (
+                    <div key={item.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col">
+                      {/* Header badge */}
+                      <div className="px-3 py-2 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                        <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Option {idx === 0 ? 'A' : 'B'}</div>
+                      </div>
+
+                      {/* Movie content */}
+                      <div className="flex gap-3 p-3">
+                        {/* Poster */}
+                        {item.poster_path ? (
+                          <div className="w-20 h-28 flex-shrink-0 bg-gray-700 rounded overflow-hidden">
+                            <img
+                              src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
+                              alt={item.title}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-20 h-28 flex-shrink-0 bg-gray-700 dark:bg-gray-600 rounded flex items-center justify-center text-gray-400 dark:text-gray-500 text-xs text-center p-1">
+                            No poster
+                          </div>
+                        )}
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0 flex flex-col">
+                          <div className="font-semibold text-base text-gray-900 dark:text-gray-100 mb-1">
+                            {item.title}
+                          </div>
+                          {item.year && (
+                            <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">{item.year}</div>
+                          )}
+
+                          {/* Genres */}
+                          {item.genres && item.genres.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-2">
+                              {item.genres.slice(0, 3).map((genre, i) => (
+                                <span key={i} className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full">
+                                  {genre}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Rating */}
+                          {item.vote_average && (
+                            <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                              <span className="text-yellow-500">⭐</span>
+                              <span className="font-medium">{item.vote_average.toFixed(1)}</span>
+                              <span className="text-gray-400 dark:text-gray-500 text-xs">/10</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Description */}
+                      {item.overview && (
+                        <div className="px-3 pb-3">
+                          <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-3 leading-relaxed">
+                            {item.overview}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Trailer button */}
+                      {item.trailerKey && (
+                        <div className="px-3 pb-2">
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setPairwiseVideoId(item.id);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-100 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-md transition-colors font-medium"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" />
+                            </svg>
+                            Watch Trailer
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Reasons */}
+                      <div className="px-3 pb-3 border-t border-gray-100 dark:border-gray-700 pt-3">
+                        <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Why this matches you:</div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
+                          {item.reasons.slice(0, 2).map((reason, i) => (
+                            <div key={i} className="flex items-start gap-1.5">
+                              <span className="text-blue-500 mt-0.5">•</span>
+                              <span>{reason}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Badges */}
+                      <div className="px-3 pb-3">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                          {item.consensusLevel && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800">
+                              Consensus: {item.consensusLevel}
+                            </span>
+                          )}
+                          {item.sources?.length ? (
+                            <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-800">
+                              {item.sources.length} source{item.sources.length === 1 ? '' : 's'}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Action button */}
+                      <div className="px-3 pb-3 mt-auto">
+                        <button
+                          className="w-full inline-flex items-center justify-center rounded-md bg-blue-600 dark:bg-blue-700 text-white text-sm font-medium px-4 py-2.5 hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
+                          onClick={() => handlePairwiseVote(item.id, other.id)}
+                        >
+                          Choose this one
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Suggestions</h1>
+            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Based on your liked and highly rated films.</p>
+          </div>
+          <div className="flex flex-col items-end gap-1 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-gray-600 dark:text-gray-400">Mode:</span>
+              <button
+                type="button"
+                className={`px-2 py-1 rounded border text-xs ${mode === 'quick' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
+                onClick={() => { setMode('quick'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
+              >
+                Quick
+              </button>
+              <button
+                type="button"
+                className={`px-2 py-1 rounded border text-xs ${mode === 'deep' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
+                onClick={() => { setMode('deep'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
+              >
+                Deep dive
               </button>
             </div>
-            {sourceLabel && (
-              <p className="text-xs text-gray-500 mb-4">Source: {sourceLabel}</p>
-            )}
-
-            {/* Picks From Your Letterboxd Watchlist - TOP PRIORITY */}
-            {categorizedSuggestions.watchlistPicks.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📋</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Picks From Your Letterboxd Watchlist</h2>
-                      <p className="text-xs text-gray-600">Movies you saved to watch, prioritized by what you&apos;ve been enjoying recently</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('watchlistPicks')}
-                    disabled={refreshingSections.has('watchlistPicks')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('watchlistPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.watchlistPicks.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={true}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Seasonal/Holiday Recommendations Section */}
-            {categorizedSuggestions.seasonalPicks.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">
-                      {categorizedSuggestions.seasonalConfig.title.includes('Christmas') ? '🎄' :
-                        categorizedSuggestions.seasonalConfig.title.includes('Halloween') ? '🎃' :
-                          categorizedSuggestions.seasonalConfig.title.includes('Thanksgiving') ? '🦃' :
-                            categorizedSuggestions.seasonalConfig.title.includes('Valentine') ? '💝' :
-                              categorizedSuggestions.seasonalConfig.title.includes('Fourth') || categorizedSuggestions.seasonalConfig.title.includes('Independence') ? '🎆' :
-                                categorizedSuggestions.seasonalConfig.title.includes('Easter') ? '🐰' : '📅'}
-                    </span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">{categorizedSuggestions.seasonalConfig.title}</h2>
-                      <p className="text-xs text-gray-600">{categorizedSuggestions.seasonalConfig.description}</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('seasonalPicks')}
-                    disabled={refreshingSections.has('seasonalPicks')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('seasonalPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.seasonalPicks.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Perfect Matches Section */}
-            {categorizedSuggestions.perfectMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎯</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Perfect Matches</h2>
-                      <p className="text-xs text-gray-600">These match everything you love</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('perfectMatches')}
-                    disabled={refreshingSections.has('perfectMatches')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('perfectMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.perfectMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Based on Recent Watches Section */}
-            {categorizedSuggestions.recentWatchMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">⏱️</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Based on Recent Watches</h2>
-                      <p className="text-xs text-gray-600">Similar to films you&apos;ve enjoyed recently</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('recentWatchMatches')}
-                    disabled={refreshingSections.has('recentWatchMatches')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('recentWatchMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.recentWatchMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Inspired by Directors You Love Section */}
-            {categorizedSuggestions.directorMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎬</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Inspired by Directors You Love</h2>
-                      <p className="text-xs text-gray-600">From filmmakers you enjoy and directors with similar styles</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('directorMatches')}
-                    disabled={refreshingSections.has('directorMatches')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('directorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.directorMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* From Studios You Love Section */}
-            {categorizedSuggestions.studioMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎞️</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">From Studios You Love</h2>
-                      <p className="text-xs text-gray-600">More from production companies whose style you enjoy</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('studioMatches')}
-                    disabled={refreshingSections.has('studioMatches')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('studioMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.studioMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* From Actors You Love Section */}
-            {categorizedSuggestions.actorMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">⭐</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">From Actors You Love</h2>
-                      <p className="text-xs text-gray-600">More from your favorite performers</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('actorMatches')}
-                    disabled={refreshingSections.has('actorMatches')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('actorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.actorMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Your Favorite Genres Section */}
-            {categorizedSuggestions.genreMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎭</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Your Favorite Genres</h2>
-                      <p className="text-xs text-gray-600">Based on genres you watch most</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('genreMatches')}
-                    disabled={refreshingSections.has('genreMatches')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('genreMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.genreMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Documentaries Section */}
-            {categorizedSuggestions.documentaries.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📹</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Documentaries</h2>
-                      <p className="text-xs text-gray-600">Real stories and factual films</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('documentaries')}
-                    disabled={refreshingSections.has('documentaries')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('documentaries') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.documentaries.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Best of the [Decade]s Section */}
-            {categorizedSuggestions.decadeMatches.length >= 1 && topDecade && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📅</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Best of the {topDecade}s</h2>
-                      <p className="text-xs text-gray-600">Top picks from your favorite era</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('decadeMatches')}
-                    disabled={refreshingSections.has('decadeMatches')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('decadeMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.decadeMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Smart Discovery (Hidden Gems) Section */}
-            {categorizedSuggestions.smartDiscovery.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">💎</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Hidden Gems for You</h2>
-                      <p className="text-xs text-gray-600">Highly rated films you might have missed</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('smartDiscovery')}
-                    disabled={refreshingSections.has('smartDiscovery')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('smartDiscovery') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.smartDiscovery.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Hidden Gems Section */}
-            {categorizedSuggestions.hiddenGems.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🔍</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Hidden Gems</h2>
-                      <p className="text-xs text-gray-600">Older films that match your taste</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('hiddenGems')}
-                    disabled={refreshingSections.has('hiddenGems')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('hiddenGems') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.hiddenGems.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Cult Classics Section */}
-            {categorizedSuggestions.cultClassics.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎭</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Cult Classics</h2>
-                      <p className="text-xs text-gray-600">Films with dedicated followings</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('cultClassics')}
-                    disabled={refreshingSections.has('cultClassics')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('cultClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.cultClassics.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Crowd Pleasers Section */}
-            {categorizedSuggestions.crowdPleasers.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎉</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Crowd Pleasers</h2>
-                      <p className="text-xs text-gray-600">Widely loved and highly rated</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('crowdPleasers')}
-                    disabled={refreshingSections.has('crowdPleasers')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('crowdPleasers') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.crowdPleasers.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* New & Trending Section */}
-            {categorizedSuggestions.newReleases.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">✨</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">New & Trending</h2>
-                      <p className="text-xs text-gray-600">Fresh picks based on your taste</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('newReleases')}
-                    disabled={refreshingSections.has('newReleases')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('newReleases') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.newReleases.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Recent Classics Section */}
-            {categorizedSuggestions.recentClassics.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎬</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Recent Classics</h2>
-                      <p className="text-xs text-gray-600">Great films from 2015-2022</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('recentClassics')}
-                    disabled={refreshingSections.has('recentClassics')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('recentClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.recentClassics.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Deep Cuts Section */}
-            {categorizedSuggestions.deepCuts.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🌟</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Deep Cuts</h2>
-                      <p className="text-xs text-gray-600">Niche matches for your specific taste</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('deepCuts')}
-                    disabled={refreshingSections.has('deepCuts')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('deepCuts') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.deepCuts.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* From Collections Section */}
-            {categorizedSuggestions.fromCollections.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📚</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">From Collections</h2>
-                      <p className="text-xs text-gray-600">Complete franchises and series</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('fromCollections')}
-                    disabled={refreshingSections.has('fromCollections')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('fromCollections') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.fromCollections.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Multi-Source Consensus Section - Films recommended by multiple sources */}
-            {categorizedSuggestions.multiSourceConsensus.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎯</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Multi-Source Consensus</h2>
-                      <p className="text-xs text-gray-600">Recommended by multiple sources (TMDB, TasteDive, Trakt)</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('multiSourceConsensus')}
-                    disabled={refreshingSections.has('multiSourceConsensus')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('multiSourceConsensus') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.multiSourceConsensus.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* International Cinema Section - Non-English films */}
-            {categorizedSuggestions.internationalCinema.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🌍</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">International Cinema</h2>
-                      <p className="text-xs text-gray-600">World cinema that matches your taste</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('internationalCinema')}
-                    disabled={refreshingSections.has('internationalCinema')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('internationalCinema') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.internationalCinema.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Animation Picks Section */}
-            {categorizedSuggestions.animationPicks.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎨</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Animation Picks</h2>
-                      <p className="text-xs text-gray-600">Animated films for you</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('animationPicks')}
-                    disabled={refreshingSections.has('animationPicks')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('animationPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.animationPicks.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Quick Watches Section - Under 100 minutes */}
-            {categorizedSuggestions.quickWatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">⚡</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Quick Watches</h2>
-                      <p className="text-xs text-gray-600">Great films under 100 minutes</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('quickWatches')}
-                    disabled={refreshingSections.has('quickWatches')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('quickWatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.quickWatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Epic Films Section - Over 150 minutes */}
-            {categorizedSuggestions.epicFilms.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎬</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Epic Films</h2>
-                      <p className="text-xs text-gray-600">Immersive experiences over 2.5 hours</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('epicFilms')}
-                    disabled={refreshingSections.has('epicFilms')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('epicFilms') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.epicFilms.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Critically Acclaimed Section */}
-            {categorizedSuggestions.criticallyAcclaimed.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🏆</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">Critically Acclaimed</h2>
-                      <p className="text-xs text-gray-600">Top-rated by critics (IMDB 8+, RT 90%+)</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('criticallyAcclaimed')}
-                    disabled={refreshingSections.has('criticallyAcclaimed')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('criticallyAcclaimed') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.criticallyAcclaimed.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* More Recommendations Section - Fallback for remaining suggestions */}
-            {categorizedSuggestions.moreRecommendations.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎥</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">More Recommendations</h2>
-                      <p className="text-xs text-gray-600">Additional films you might enjoy</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection('moreRecommendations')}
-                    disabled={refreshingSections.has('moreRecommendations')}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg className={`w-3 h-3 ${refreshingSections.has('moreRecommendations') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.moreRecommendations.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+            <p className="text-[10px] text-gray-500">
+              Quick is snappy; Deep dive scans more candidates.
+            </p>
           </div>
-        )
-      }
-      {
-        !items && (
-          <p className="text-gray-700">Your personalized recommendations will appear here.</p>
-        )
-      }
+        </div>
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-xs text-gray-600">Exclude genres (comma)</label>
+            <input
+              value={excludeGenres}
+              onChange={(e) => setExcludeGenres(e.target.value)}
+              placeholder="e.g., horror, musical"
+              className="border rounded px-2 py-1 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600">Year min</label>
+            <input value={yearMin} onChange={(e) => setYearMin(e.target.value)} placeholder="e.g., 1990" className="border rounded px-2 py-1 text-sm w-24" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600">Year max</label>
+            <input value={yearMax} onChange={(e) => setYearMax(e.target.value)} placeholder="e.g., 2025" className="border rounded px-2 py-1 text-sm w-24" />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
+              title="Get completely fresh suggestions (clears history)"
+              onClick={() => { setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
+            >
+              <span>🔄</span>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Enrichment Warning - show if less than 50% of films are mapped */}
+        {mappingCoverage && mappingCoverage.mapped < mappingCoverage.total * 0.5 && !loading && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 flex gap-3">
+            <span className="text-lg">⚠️</span>
+            <div className="text-sm text-amber-900">
+              <p>Only {mappingCoverage.mapped} of {mappingCoverage.total} films are mapped to TMDB. Recommendations may miss items.</p>
+              <p className="text-xs text-amber-800 mt-1">Import more data or refresh mappings to improve coverage.</p>
+            </div>
+          </div>
+        )}
+
+        {loading && (
+          <div className="mb-6">
+            <ProgressIndicator
+              current={progress.current}
+              total={progress.total}
+              stage={progress.stage}
+              stages={PROGRESS_STAGES}
+              details={progress.details}
+            />
+          </div>
+        )}
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {
+          !loading && !error && noCandidatesReason && (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
+              {noCandidatesReason}
+            </p>
+          )
+        }
+        {
+          items && categorizedSuggestions && (
+            <div className="space-y-8">
+              <div className="flex items-center justify-between gap-3 text-sm text-gray-700 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-600" title="Lower = safer, familiar picks. Higher = more exploratory, diverse picks.">Discovery vs Safety</label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={discoveryLevel}
+                    onChange={(e) => {
+                      const newValue = Number(e.target.value);
+                      setDiscoveryLevel(newValue);
+                      // Debounced auto-refresh when slider changes
+                      if ((window as any).__discoverySliderTimeout) {
+                        clearTimeout((window as any).__discoverySliderTimeout);
+                      }
+                      (window as any).__discoverySliderTimeout = setTimeout(() => {
+                        setItems(null);
+                        setShownIds(new Set());
+                        setRefreshTick((x) => x + 1);
+                        void runSuggest();
+                      }, 800);
+                    }}
+                    className="w-40 accent-blue-600"
+                    title="Drag to adjust. Changes apply automatically after a brief pause."
+                  />
+                  <span className="text-xs text-gray-500 w-8 text-right">{discoveryLevel}%</span>
+                  {discoveryLevel !== 50 && (
+                    <button
+                      onClick={() => {
+                        setDiscoveryLevel(50);
+                        setItems(null);
+                        setShownIds(new Set());
+                        setRefreshTick((x) => x + 1);
+                        void runSuggest();
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline whitespace-nowrap"
+                      title="Reset to default (50%)"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-600">Context</label>
+                  <select
+                    value={contextMode}
+                    onChange={(e) => setContextMode(e.target.value as typeof contextMode)}
+                    className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-800"
+                  >
+                    <option value="auto">Auto (time-based)</option>
+                    <option value="weeknight">Weeknight wind-down</option>
+                    <option value="short">Short session</option>
+                    <option value="immersive">Immersive/long-form</option>
+                    <option value="family">Family/group friendly</option>
+                    <option value="background">Easy-background</option>
+                  </select>
+                </div>
+                <button
+                  onClick={handleUndoLastFeedback}
+                  disabled={!lastFeedback}
+                  className={`px-3 py-1.5 rounded border text-sm font-medium transition-colors ${lastFeedback ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed'}`}
+                  title={lastFeedback ? `Restore "${lastFeedback.title}" and unblock it` : 'No feedback to undo yet'}
+                >
+                  ↩️ Undo last feedback
+                </button>
+              </div>
+              {sourceLabel && (
+                <p className="text-xs text-gray-500 mb-4">Source: {sourceLabel}</p>
+              )}
+
+              {/* Picks From Your Letterboxd Watchlist - TOP PRIORITY */}
+              {categorizedSuggestions.watchlistPicks.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">📋</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Picks From Your Letterboxd Watchlist</h2>
+                        <p className="text-xs text-gray-600">Movies you saved to watch, prioritized by what you&apos;ve been enjoying recently</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('watchlistPicks')}
+                      disabled={refreshingSections.has('watchlistPicks')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('watchlistPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.watchlistPicks.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={true}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Seasonal/Holiday Recommendations Section */}
+              {categorizedSuggestions.seasonalPicks.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">
+                        {categorizedSuggestions.seasonalConfig.title.includes('Christmas') ? '🎄' :
+                          categorizedSuggestions.seasonalConfig.title.includes('Halloween') ? '🎃' :
+                            categorizedSuggestions.seasonalConfig.title.includes('Thanksgiving') ? '🦃' :
+                              categorizedSuggestions.seasonalConfig.title.includes('Valentine') ? '💝' :
+                                categorizedSuggestions.seasonalConfig.title.includes('Fourth') || categorizedSuggestions.seasonalConfig.title.includes('Independence') ? '🎆' :
+                                  categorizedSuggestions.seasonalConfig.title.includes('Easter') ? '🐰' : '📅'}
+                      </span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">{categorizedSuggestions.seasonalConfig.title}</h2>
+                        <p className="text-xs text-gray-600">{categorizedSuggestions.seasonalConfig.description}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('seasonalPicks')}
+                      disabled={refreshingSections.has('seasonalPicks')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('seasonalPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.seasonalPicks.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Perfect Matches Section */}
+              {categorizedSuggestions.perfectMatches.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎯</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Perfect Matches</h2>
+                        <p className="text-xs text-gray-600">These match everything you love</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('perfectMatches')}
+                      disabled={refreshingSections.has('perfectMatches')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('perfectMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.perfectMatches.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Based on Recent Watches Section */}
+              {categorizedSuggestions.recentWatchMatches.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">⏱️</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Based on Recent Watches</h2>
+                        <p className="text-xs text-gray-600">Similar to films you&apos;ve enjoyed recently</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('recentWatchMatches')}
+                      disabled={refreshingSections.has('recentWatchMatches')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('recentWatchMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.recentWatchMatches.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Inspired by Directors You Love Section */}
+              {categorizedSuggestions.directorMatches.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎬</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Inspired by Directors You Love</h2>
+                        <p className="text-xs text-gray-600">From filmmakers you enjoy and directors with similar styles</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('directorMatches')}
+                      disabled={refreshingSections.has('directorMatches')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('directorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.directorMatches.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* From Studios You Love Section */}
+              {categorizedSuggestions.studioMatches.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎞️</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">From Studios You Love</h2>
+                        <p className="text-xs text-gray-600">More from production companies whose style you enjoy</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('studioMatches')}
+                      disabled={refreshingSections.has('studioMatches')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('studioMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.studioMatches.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* From Actors You Love Section */}
+              {categorizedSuggestions.actorMatches.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">⭐</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">From Actors You Love</h2>
+                        <p className="text-xs text-gray-600">More from your favorite performers</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('actorMatches')}
+                      disabled={refreshingSections.has('actorMatches')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('actorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.actorMatches.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Your Favorite Genres Section */}
+              {categorizedSuggestions.genreMatches.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎭</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Your Favorite Genres</h2>
+                        <p className="text-xs text-gray-600">Based on genres you watch most</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('genreMatches')}
+                      disabled={refreshingSections.has('genreMatches')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('genreMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.genreMatches.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Documentaries Section */}
+              {categorizedSuggestions.documentaries.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">📹</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Documentaries</h2>
+                        <p className="text-xs text-gray-600">Real stories and factual films</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('documentaries')}
+                      disabled={refreshingSections.has('documentaries')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('documentaries') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.documentaries.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Best of the [Decade]s Section */}
+              {categorizedSuggestions.decadeMatches.length >= 1 && topDecade && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">📅</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Best of the {topDecade}s</h2>
+                        <p className="text-xs text-gray-600">Top picks from your favorite era</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('decadeMatches')}
+                      disabled={refreshingSections.has('decadeMatches')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('decadeMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.decadeMatches.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Smart Discovery (Hidden Gems) Section */}
+              {categorizedSuggestions.smartDiscovery.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">💎</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Hidden Gems for You</h2>
+                        <p className="text-xs text-gray-600">Highly rated films you might have missed</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('smartDiscovery')}
+                      disabled={refreshingSections.has('smartDiscovery')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('smartDiscovery') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.smartDiscovery.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Hidden Gems Section */}
+              {categorizedSuggestions.hiddenGems.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🔍</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Hidden Gems</h2>
+                        <p className="text-xs text-gray-600">Older films that match your taste</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('hiddenGems')}
+                      disabled={refreshingSections.has('hiddenGems')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('hiddenGems') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.hiddenGems.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Cult Classics Section */}
+              {categorizedSuggestions.cultClassics.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎭</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Cult Classics</h2>
+                        <p className="text-xs text-gray-600">Films with dedicated followings</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('cultClassics')}
+                      disabled={refreshingSections.has('cultClassics')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('cultClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.cultClassics.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Crowd Pleasers Section */}
+              {categorizedSuggestions.crowdPleasers.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎉</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Crowd Pleasers</h2>
+                        <p className="text-xs text-gray-600">Widely loved and highly rated</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('crowdPleasers')}
+                      disabled={refreshingSections.has('crowdPleasers')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('crowdPleasers') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.crowdPleasers.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* New & Trending Section */}
+              {categorizedSuggestions.newReleases.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">✨</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">New & Trending</h2>
+                        <p className="text-xs text-gray-600">Fresh picks based on your taste</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('newReleases')}
+                      disabled={refreshingSections.has('newReleases')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('newReleases') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.newReleases.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Recent Classics Section */}
+              {categorizedSuggestions.recentClassics.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎬</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Recent Classics</h2>
+                        <p className="text-xs text-gray-600">Great films from 2015-2022</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('recentClassics')}
+                      disabled={refreshingSections.has('recentClassics')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('recentClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.recentClassics.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Deep Cuts Section */}
+              {categorizedSuggestions.deepCuts.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🌟</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Deep Cuts</h2>
+                        <p className="text-xs text-gray-600">Niche matches for your specific taste</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('deepCuts')}
+                      disabled={refreshingSections.has('deepCuts')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('deepCuts') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.deepCuts.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* From Collections Section */}
+              {categorizedSuggestions.fromCollections.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">📚</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">From Collections</h2>
+                        <p className="text-xs text-gray-600">Complete franchises and series</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('fromCollections')}
+                      disabled={refreshingSections.has('fromCollections')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('fromCollections') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.fromCollections.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Multi-Source Consensus Section - Films recommended by multiple sources */}
+              {categorizedSuggestions.multiSourceConsensus.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎯</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Multi-Source Consensus</h2>
+                        <p className="text-xs text-gray-600">Recommended by multiple sources (TMDB, TasteDive, Trakt)</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('multiSourceConsensus')}
+                      disabled={refreshingSections.has('multiSourceConsensus')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('multiSourceConsensus') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.multiSourceConsensus.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* International Cinema Section - Non-English films */}
+              {categorizedSuggestions.internationalCinema.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🌍</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">International Cinema</h2>
+                        <p className="text-xs text-gray-600">World cinema that matches your taste</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('internationalCinema')}
+                      disabled={refreshingSections.has('internationalCinema')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('internationalCinema') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.internationalCinema.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Animation Picks Section */}
+              {categorizedSuggestions.animationPicks.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎨</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Animation Picks</h2>
+                        <p className="text-xs text-gray-600">Animated films for you</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('animationPicks')}
+                      disabled={refreshingSections.has('animationPicks')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('animationPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.animationPicks.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Quick Watches Section - Under 100 minutes */}
+              {categorizedSuggestions.quickWatches.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">⚡</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Quick Watches</h2>
+                        <p className="text-xs text-gray-600">Great films under 100 minutes</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('quickWatches')}
+                      disabled={refreshingSections.has('quickWatches')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('quickWatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.quickWatches.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Epic Films Section - Over 150 minutes */}
+              {categorizedSuggestions.epicFilms.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎬</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Epic Films</h2>
+                        <p className="text-xs text-gray-600">Immersive experiences over 2.5 hours</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('epicFilms')}
+                      disabled={refreshingSections.has('epicFilms')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('epicFilms') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.epicFilms.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Critically Acclaimed Section */}
+              {categorizedSuggestions.criticallyAcclaimed.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🏆</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Critically Acclaimed</h2>
+                        <p className="text-xs text-gray-600">Top-rated by critics (IMDB 8+, RT 90%+)</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('criticallyAcclaimed')}
+                      disabled={refreshingSections.has('criticallyAcclaimed')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('criticallyAcclaimed') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.criticallyAcclaimed.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                        vote_average={item.vote_average}
+                        vote_count={item.vote_count}
+                        overview={item.overview}
+                        contributingFilms={item.contributingFilms}
+                        dismissed={item.dismissed}
+                        imdb_rating={item.imdb_rating}
+                        rotten_tomatoes={item.rotten_tomatoes}
+                        metacritic={item.metacritic}
+                        awards={item.awards}
+                        genres={item.genres}
+                        sources={item.sources}
+                        consensusLevel={item.consensusLevel}
+                        reliabilityMultiplier={item.reliabilityMultiplier}
+                        onUndoDismiss={handleUndoDismiss}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* More Recommendations Section - Fallback for remaining suggestions */}
+              {categorizedSuggestions.moreRecommendations.length >= 1 && (
+                <section>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🎥</span>
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">More Recommendations</h2>
+                        <p className="text-xs text-gray-600">Additional films you might enjoy</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRefreshSection('moreRecommendations')}
+                      disabled={refreshingSections.has('moreRecommendations')}
+                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                      title="Refresh this section"
+                    >
+                      <svg className={`w-3 h-3 ${refreshingSections.has('moreRecommendations') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                    {categorizedSuggestions.moreRecommendations.map((item) => (
+                      <MovieCard
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        year={item.year}
+                        posterPath={posters[item.id]}
+                        trailerKey={item.trailerKey}
+                        isInWatchlist={watchlistTmdbIds.has(item.id)}
+                        reasons={item.reasons}
+                        score={item.score}
+                        voteCategory={item.voteCategory}
+                        collectionName={item.collectionName}
+                        onFeedback={handleFeedback}
+                        onSave={handleSave}
+                        isSaved={savedMovieIds.has(item.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )
+        }
+        {
+          !items && (
+            <p className="text-gray-700">Your personalized recommendations will appear here.</p>
+          )
+        }
       </FeatureEvidenceContext.Provider>
     </AuthGate>
   );

@@ -3028,6 +3028,8 @@ export async function suggestByOverlap(params: {
     watchlistKeywords?: string[];
     watchlistDirectors?: string[];
   };
+  // Recent exposures for repeat penalty (Map of tmdbId -> days since exposure)
+  recentExposures?: Map<number, number>;
 }): Promise<Array<{
   tmdbId: number;
   score: number;
@@ -4562,6 +4564,34 @@ export async function suggestByOverlap(params: {
       }
     }
 
+    // REPEAT DECAY PENALTY: Penalize recently shown movies to favor fresh content
+    // Movies shown recently get their scores reduced based on how recent the exposure was
+    if (params.recentExposures) {
+      const daysSince = params.recentExposures.get(cid);
+      if (daysSince !== undefined) {
+        let repeatPenalty = 1.0; // No penalty by default
+        if (daysSince < 1) {
+          // Shown today or yesterday: heavy penalty
+          repeatPenalty = 0.60; // -40%
+        } else if (daysSince < 3) {
+          // Shown in last 3 days: moderate penalty
+          repeatPenalty = 0.70; // -30%
+        } else if (daysSince < 7) {
+          // Shown in last week: light penalty
+          repeatPenalty = 0.85; // -15%
+        } else if (daysSince < 14) {
+          // Shown in last 2 weeks: minimal penalty
+          repeatPenalty = 0.95; // -5%
+        }
+
+        if (repeatPenalty < 1.0) {
+          const oldScore = score;
+          score = score * repeatPenalty;
+          console.log(`[RepeatPenalty] "${m.title}" penalized: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${Math.round(daysSince * 10) / 10}d ago, ${repeatPenalty}x)`);
+        }
+      }
+    }
+
     const r = {
       tmdbId: cid,
       score,
@@ -5129,6 +5159,65 @@ export async function logSuggestionExposure(params: {
     }
   } catch (e) {
     console.error('[ExposureLog] Exception logging exposures:', e);
+  }
+}
+
+/**
+ * Get recently exposed movie IDs with their most recent exposure timestamp.
+ * Used to apply decay penalties to recently shown movies.
+ * Returns a Map of tmdbId -> days since last exposure for efficient lookup.
+ */
+export async function getRecentExposures(
+  userId: string,
+  lookbackDays: number = 14
+): Promise<Map<number, number>> {
+  if (!supabase) {
+    return new Map();
+  }
+
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
+
+    const { data: exposures, error } = await supabase
+      .from('suggestion_exposure_log')
+      .select('tmdb_id, exposed_at')
+      .eq('user_id', userId)
+      .gte('exposed_at', cutoffDate.toISOString())
+      .order('exposed_at', { ascending: false });
+
+    if (error) {
+      console.error('[RecentExposures] Error fetching exposures:', error);
+      return new Map();
+    }
+
+    if (!exposures || exposures.length === 0) {
+      return new Map();
+    }
+
+    // Build map of tmdbId -> days since most recent exposure
+    const now = Date.now();
+    const exposureMap = new Map<number, number>();
+
+    for (const exp of exposures) {
+      const tmdbId = exp.tmdb_id;
+      // Only store the most recent (first) exposure for each movie
+      if (!exposureMap.has(tmdbId)) {
+        const exposedAt = new Date(exp.exposed_at).getTime();
+        const daysSince = (now - exposedAt) / (1000 * 60 * 60 * 24);
+        exposureMap.set(tmdbId, daysSince);
+      }
+    }
+
+    console.log('[RecentExposures] Loaded exposure data', {
+      uniqueMovies: exposureMap.size,
+      lookbackDays,
+    });
+
+    return exposureMap;
+  } catch (e) {
+    console.error('[RecentExposures] Exception:', e);
+    return new Map();
   }
 }
 
