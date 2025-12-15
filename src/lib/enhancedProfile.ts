@@ -400,10 +400,13 @@ export async function buildEnhancedTasteProfile(params: {
   // E.g., "likes action but avoids superhero action"
   const filmsForSubgenreAnalysis = params.watchedFilms.map(f => {
     const cached = f.tmdbId ? params.tmdbCache.get(f.tmdbId) : null;
+    const keywordsRaw = cached?.keywords?.keywords || cached?.keywords?.results || [];
+
     return {
       title: f.title,
       genres: cached?.genres?.map(g => g.name) || [],
-      keywords: (cached as any)?.keywords?.map((k: any) => k.name) || [],
+      keywords: keywordsRaw.map(k => k.name),
+      keywordIds: keywordsRaw.map(k => k.id),
       rating: f.rating,
       liked: f.liked
     };
