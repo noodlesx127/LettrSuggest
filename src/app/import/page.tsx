@@ -1,5 +1,6 @@
 'use client';
 import AuthGate from '@/components/AuthGate';
+import UnmappedFilmModal, { type UnmappedFilm } from '@/components/UnmappedFilmModal';
 import { useCallback, useMemo, useState, useEffect } from 'react';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
@@ -24,7 +25,7 @@ const STEPS: { key: ImportStep; label: string; description: string }[] = [
 
 function StepIndicator({ currentStep, completedSteps }: { currentStep: ImportStep; completedSteps: Set<ImportStep> }) {
   if (currentStep === 'idle') return null;
-  
+
   return (
     <div className="mb-6">
       <div className="flex items-center justify-between">
@@ -32,19 +33,18 @@ function StepIndicator({ currentStep, completedSteps }: { currentStep: ImportSte
           const isCompleted = completedSteps.has(step.key);
           const isCurrent = currentStep === step.key;
           const isPending = !isCompleted && !isCurrent;
-          
+
           return (
             <div key={step.key} className="flex items-center flex-1">
               {/* Step circle */}
               <div className="flex flex-col items-center">
                 <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium transition-all duration-300 ${
-                    isCompleted
-                      ? 'bg-green-500 text-white'
-                      : isCurrent
+                  className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium transition-all duration-300 ${isCompleted
+                    ? 'bg-green-500 text-white'
+                    : isCurrent
                       ? 'bg-blue-600 text-white ring-4 ring-blue-200'
                       : 'bg-gray-200 text-gray-500'
-                  }`}
+                    }`}
                 >
                   {isCompleted ? (
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -58,7 +58,7 @@ function StepIndicator({ currentStep, completedSteps }: { currentStep: ImportSte
                   {step.label}
                 </span>
               </div>
-              
+
               {/* Connector line */}
               {idx < STEPS.length - 1 && (
                 <div className={`flex-1 h-1 mx-2 rounded ${isCompleted ? 'bg-green-500' : 'bg-gray-200'}`} />
@@ -67,7 +67,7 @@ function StepIndicator({ currentStep, completedSteps }: { currentStep: ImportSte
           );
         })}
       </div>
-      
+
       {/* Current step description */}
       {currentStep !== 'complete' && (
         <div className="mt-4 text-center">
@@ -115,11 +115,16 @@ export default function ImportPage() {
     total: number;
     isReimport: boolean;
   } | null>(null);
-  
+
   // Step tracking
   const [currentStep, setCurrentStep] = useState<ImportStep>('idle');
   const [completedSteps, setCompletedSteps] = useState<Set<ImportStep>>(new Set());
-  
+
+  // Unmapped films tracking
+  const [unmappedFilms, setUnmappedFilms] = useState<UnmappedFilm[]>([]);
+  const [showUnmappedModal, setShowUnmappedModal] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
   const completeStep = useCallback((step: ImportStep) => {
     setCompletedSteps(prev => new Set([...prev, step]));
   }, []);
@@ -202,12 +207,31 @@ export default function ImportPage() {
       let existingMappings = new Set<string>();
       if (!forceReenrich) {
         try {
-          const { data: existingData } = await supabase!.from('film_tmdb_map')
-            .select('uri')
-            .eq('user_id', uid);
-          if (existingData) {
-            existingMappings = new Set(existingData.map(m => m.uri));
+          // Paginate through all mappings (PostgREST defaults to 1000 max per request)
+          const pageSize = 1000;
+          let from = 0;
+
+          while (true) {
+            const { data: pageData, error } = await supabase!.from('film_tmdb_map')
+              .select('uri')
+              .eq('user_id', uid)
+              .range(from, from + pageSize - 1);
+
+            if (error) {
+              console.warn('[Import] Error fetching mappings page', { from, error });
+              break;
+            }
+
+            const rows = pageData ?? [];
+            for (const m of rows) {
+              existingMappings.add(m.uri);
+            }
+
+            // If we got fewer than pageSize, we've fetched all rows
+            if (rows.length < pageSize) break;
+            from += pageSize;
           }
+
           console.log(`[Import] Found ${existingMappings.size} existing mappings`);
         } catch (e) {
           console.warn('[Import] Could not fetch existing mappings, will attempt all', e);
@@ -215,6 +239,7 @@ export default function ImportPage() {
       } else {
         console.log('[Import] Force re-enrich enabled, will re-enrich all films');
       }
+
 
       // Filter to only films that need mapping (or all if force re-enrich)
       const toTry = filmList.filter(f => f.title && !existingMappings.has(f.uri));
@@ -254,6 +279,10 @@ export default function ImportPage() {
       const concurrency = 2; // Reduced to avoid rate limits
       let lastRequestTime = 0;
       const minDelay = 300; // 300ms between requests (max ~3 requests/sec)
+      const skippedFilms: UnmappedFilm[] = []; // Track films that couldn't be mapped
+
+      // Store userId for modal
+      setUserId(uid);
 
       setMappingProgress({ current: 0, total: toTry.length });
       setStatus(`Enriching films with TMDB, OMDb, and Watchmode data… 0/${toTry.length}`);
@@ -262,6 +291,7 @@ export default function ImportPage() {
 
       // Import the enrichment function
       const { enrichMovieForImport } = await import('@/lib/importEnrich');
+
 
       const worker = async () => {
         while (true) {
@@ -298,8 +328,9 @@ export default function ImportPage() {
                   window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
                 }
               } else {
-                // No results found
+                // No results found - track for manual mapping
                 skipped += 1;
+                skippedFilms.push({ uri: f.uri, title: f.title, year: f.year ?? undefined });
                 success = true;
                 console.log(`[Import] No TMDB results for: ${f.title} (${f.year || 'no year'})`);
                 setMappingProgress({ current: enriched + skipped + failed, total: toTry.length });
@@ -315,6 +346,8 @@ export default function ImportPage() {
               } else {
                 console.error(`[Import] Failed to enrich ${f.title} after 3 retries`, e);
                 failed += 1;
+                // Track failed films for manual mapping too
+                skippedFilms.push({ uri: f.uri, title: f.title, year: f.year ?? undefined });
                 setMappingProgress({ current: enriched + skipped + failed, total: toTry.length });
                 setStatus(`Enriching films… ${enriched + skipped + failed}/${toTry.length} (${enriched} enriched, ${failed} failed)`);
               }
@@ -323,6 +356,12 @@ export default function ImportPage() {
         }
       };
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+      // Store unmapped films for manual mapping
+      if (skippedFilms.length > 0) {
+        setUnmappedFilms(skippedFilms);
+        console.log(`[Import] ${skippedFilms.length} films need manual mapping`);
+      }
 
       const totalEnriched = enriched + existingMappings.size;
       setStatus(`✓ Successfully enriched ${totalEnriched} of ${filmList.length} films with multi-API data (${enriched} new, ${existingMappings.size} existing, ${skipped} no match, ${failed} failed)`);
@@ -360,11 +399,11 @@ export default function ImportPage() {
           // Skip files in deleted/ or orphaned/ subdirectories
           const lowerEntry = entry.toLowerCase();
           if (lowerEntry.includes('/deleted/') || lowerEntry.includes('/orphaned/') ||
-              lowerEntry.startsWith('deleted/') || lowerEntry.startsWith('orphaned/')) {
+            lowerEntry.startsWith('deleted/') || lowerEntry.startsWith('orphaned/')) {
             console.log('[Import] Skipping deleted/orphaned file:', entry);
             continue;
           }
-          
+
           const key = entry.replace(/^.*\//, '').toLowerCase();
           // support likes/films.csv nested path
           const logical = ((): keyof ParsedData | null => {
@@ -399,14 +438,14 @@ export default function ImportPage() {
       for (const f of fileArr) {
         if (!f.name.toLowerCase().endsWith('.csv')) continue;
         const lower = f.webkitRelativePath?.toLowerCase() || f.name.toLowerCase();
-        
+
         // Skip files from deleted/ and orphaned/ subdirectories
-        if (lower.includes('/deleted/') || lower.includes('/orphaned/') || 
-            lower.includes('\\deleted\\') || lower.includes('\\orphaned\\')) {
+        if (lower.includes('/deleted/') || lower.includes('/orphaned/') ||
+          lower.includes('\\deleted\\') || lower.includes('\\orphaned\\')) {
           console.log('[Import] skipping deleted/orphaned file:', lower);
           continue;
         }
-        
+
         let logical: keyof ParsedData | null = null;
         if (lower.endsWith('watched.csv')) logical = 'watched';
         else if (lower.endsWith('diary.csv')) logical = 'diary';
@@ -447,11 +486,11 @@ export default function ImportPage() {
       console.log('[Import] normalizeData done', { filmCount: norm.films.length, distinctFilms: norm.distinctFilms });
       setDistinct(norm.distinctFilms);
       setFilms(norm.films);
-      
+
       // Parse complete, move to save
       completeStep('parse');
       setCurrentStep('save');
-      
+
       // Persist locally (IndexedDB)
       await saveFilmsLocally(norm.films);
       console.log('[Import] films saved locally');
@@ -459,7 +498,7 @@ export default function ImportPage() {
       console.log('[Import] autoSaveToSupabase start');
       await autoSaveToSupabase(norm.films);
       console.log('[Import] autoSaveToSupabase done');
-      
+
       // Upsert diary events for accurate watch counts if view/table exists
       try {
         if (next.diary?.length) {
@@ -482,11 +521,11 @@ export default function ImportPage() {
       } catch {
         // ignore diary upsert errors (table may not exist yet)
       }
-      
+
       // Save complete, move to enrich
       completeStep('save');
       setCurrentStep('enrich');
-      
+
       // Auto-map (await to show progress)
       console.log('[Import] autoMapBatch start', { filmCount: norm.films.length });
       await autoMapBatch(norm.films);
@@ -509,7 +548,7 @@ export default function ImportPage() {
           console.error('[Import] Batch learning failed (non-critical):', e);
         }
       }
-      
+
       // All done!
       completeStep('learn');
       setCurrentStep('complete');
@@ -548,10 +587,10 @@ export default function ImportPage() {
       <p className="text-gray-600 text-sm mb-6">
         Upload your Letterboxd export ZIP or drag in individual CSVs. Parsing happens locally in your browser.
       </p>
-      
+
       {/* Step Progress Indicator */}
       <StepIndicator currentStep={currentStep} completedSteps={completedSteps} />
-      
+
       {/* Upload Area - shown when idle or in early stages */}
       {(currentStep === 'idle' || currentStep === 'upload') && (
         <div className="space-y-3">
@@ -609,7 +648,7 @@ export default function ImportPage() {
           </div>
         </div>
       )}
-      
+
       {/* Progress Area - shown during import */}
       {currentStep !== 'idle' && currentStep !== 'upload' && (
         <div className="space-y-4">
@@ -624,7 +663,7 @@ export default function ImportPage() {
               </p>
             </div>
           )}
-          
+
           {/* Status message */}
           {status && (
             <div className={`p-4 rounded-lg ${currentStep === 'complete' ? 'bg-green-50 border border-green-200' : 'bg-blue-50 border border-blue-200'}`}>
@@ -633,7 +672,7 @@ export default function ImportPage() {
               </p>
             </div>
           )}
-          
+
           {/* Error message */}
           {error && (
             <div className="p-4 rounded-lg bg-red-50 border border-red-200">
@@ -659,7 +698,7 @@ export default function ImportPage() {
               <p className="text-xs text-gray-500 mt-2">
                 Fetching movie details, ratings, and streaming info from multiple sources…
               </p>
-              
+
               {/* New films breakdown */}
               {newFilmsBreakdown && newFilmsBreakdown.isReimport && (
                 <div className="mt-4 pt-4 border-t border-gray-100">
@@ -717,7 +756,7 @@ export default function ImportPage() {
           )}
         </div>
       )}
-      
+
       {/* Complete state - show next steps */}
       {currentStep === 'complete' && (
         <div className="mt-6 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6 text-center">
@@ -741,6 +780,50 @@ export default function ImportPage() {
           </div>
         </div>
       )}
+
+      {/* Unmapped Films Notification */}
+      {unmappedFilms.length > 0 && currentStep === 'complete' && (
+        <div className="mt-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                {unmappedFilms.length} film{unmappedFilms.length !== 1 ? 's' : ''} couldn&apos;t be matched automatically
+              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                These films need manual matching to appear in your stats and suggestions.
+              </p>
+              <button
+                onClick={() => setShowUnmappedModal(true)}
+                className="mt-3 inline-flex items-center px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded transition-colors"
+              >
+                Fix Unmapped Films
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unmapped Film Modal */}
+      {userId && (
+        <UnmappedFilmModal
+          isOpen={showUnmappedModal}
+          onClose={() => setShowUnmappedModal(false)}
+          unmappedFilms={unmappedFilms}
+          userId={userId}
+          onFilmMapped={(uri, tmdbId) => {
+            // Remove the mapped film from the unmapped list
+            setUnmappedFilms(prev => prev.filter(f => f.uri !== uri));
+            // Dispatch event to update other components
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('lettr:mappings-updated'));
+            }
+          }}
+        />
+      )}
     </AuthGate>
   );
 }
+
