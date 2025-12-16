@@ -28,6 +28,7 @@ export interface MovieRatingQuestion {
     posterPath?: string | null;
     overview?: string;
     genres?: string[];
+    trailerKey?: string | null;
 }
 
 export type QuizQuestion = GenreRatingQuestion | ThemePreferenceQuestion | MovieRatingQuestion;
@@ -161,6 +162,11 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
 
         return (movieData || []).map(row => {
             const movie = row.data as Record<string, unknown>;
+            // Extract trailer from videos
+            const videos = (movie.videos as { results?: Array<{ site: string; type: string; key: string; official?: boolean }> })?.results || [];
+            const trailer = videos.find(v => v.site === 'YouTube' && v.type === 'Trailer' && v.official)
+                || videos.find(v => v.site === 'YouTube' && v.type === 'Trailer');
+
             return {
                 type: 'movie_rating' as const,
                 tmdbId: row.tmdb_id,
@@ -169,6 +175,7 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
                 posterPath: movie.poster_path as string | null,
                 overview: movie.overview as string | undefined,
                 genres: ((movie.genres as Array<{ name: string }>) || []).map(g => g.name),
+                trailerKey: trailer?.key || null,
             };
         });
     } catch (e) {

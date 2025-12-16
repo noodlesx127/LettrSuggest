@@ -88,7 +88,7 @@ export default function UserQuiz({ userId, isOpen, onClose }: UserQuizProps) {
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full overflow-hidden transition-all ${currentQuestion?.type === 'movie_rating' ? 'max-w-2xl' : 'max-w-lg'}`}>
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -322,7 +322,7 @@ function ThemePreferenceView({
     );
 }
 
-// Movie Rating Question View
+// Movie Rating Question View - Enhanced with trailer
 function MovieRatingView({
     question,
     onAnswer,
@@ -334,6 +334,8 @@ function MovieRatingView({
     onSkip: () => void;
     submitting: boolean;
 }) {
+    const [showTrailer, setShowTrailer] = useState(false);
+
     return (
         <div className="flex-1 flex flex-col">
             <div className="text-center mb-4">
@@ -343,49 +345,88 @@ function MovieRatingView({
                 </h3>
             </div>
 
-            {/* Movie card */}
-            <div className="flex gap-4 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl mb-4">
-                {/* Poster */}
-                {question.posterPath ? (
-                    <div className="w-24 h-36 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-700">
-                        <img
-                            src={`https://image.tmdb.org/t/p/w185${question.posterPath}`}
-                            alt={question.title}
-                            className="w-full h-full object-cover"
+            {/* Movie card - enhanced layout */}
+            <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl mb-4 overflow-hidden">
+                {/* Trailer or Poster Header */}
+                {showTrailer && question.trailerKey ? (
+                    <div className="relative aspect-video w-full bg-black">
+                        <iframe
+                            className="w-full h-full"
+                            src={`https://www.youtube.com/embed/${question.trailerKey}?autoplay=1`}
+                            title={`${question.title} Trailer`}
+                            allowFullScreen
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                         />
+                        <button
+                            onClick={() => setShowTrailer(false)}
+                            className="absolute top-2 right-2 w-8 h-8 bg-black/70 rounded-full flex items-center justify-center text-white hover:bg-black/90 transition-colors"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                ) : question.posterPath ? (
+                    <div className="relative">
+                        <div className="flex">
+                            {/* Large Poster */}
+                            <div className="w-1/3 flex-shrink-0">
+                                <img
+                                    src={`https://image.tmdb.org/t/p/w342${question.posterPath}`}
+                                    alt={question.title}
+                                    className="w-full h-auto"
+                                />
+                            </div>
+                            {/* Info */}
+                            <div className="flex-1 p-4 flex flex-col">
+                                <h4 className="font-bold text-gray-900 dark:text-gray-100 text-xl leading-tight">
+                                    {question.title}
+                                </h4>
+                                {question.year && (
+                                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{question.year}</p>
+                                )}
+                                {question.genres && question.genres.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-2">
+                                        {question.genres.slice(0, 4).map((genre, i) => (
+                                            <span
+                                                key={i}
+                                                className="px-2 py-0.5 text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
+                                            >
+                                                {genre}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                                {question.overview && (
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-3 line-clamp-5">
+                                        {question.overview}
+                                    </p>
+                                )}
+                                {question.trailerKey && (
+                                    <button
+                                        onClick={() => setShowTrailer(true)}
+                                        className="mt-auto pt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1.5"
+                                    >
+                                        <span>▶</span>
+                                        <span>Watch Trailer</span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 ) : (
-                    <div className="w-24 h-36 flex-shrink-0 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                        <span className="text-2xl">🎬</span>
+                    <div className="p-4">
+                        <h4 className="font-bold text-gray-900 dark:text-gray-100 text-xl">
+                            {question.title}
+                        </h4>
+                        {question.year && (
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{question.year}</p>
+                        )}
+                        {question.overview && (
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-3">
+                                {question.overview}
+                            </p>
+                        )}
                     </div>
                 )}
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                    <h4 className="font-semibold text-gray-900 dark:text-gray-100 text-lg leading-tight">
-                        {question.title}
-                    </h4>
-                    {question.year && (
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{question.year}</p>
-                    )}
-                    {question.genres && question.genres.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                            {question.genres.slice(0, 3).map((genre, i) => (
-                                <span
-                                    key={i}
-                                    className="px-2 py-0.5 text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
-                                >
-                                    {genre}
-                                </span>
-                            ))}
-                        </div>
-                    )}
-                    {question.overview && (
-                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 line-clamp-3">
-                            {question.overview}
-                        </p>
-                    )}
-                </div>
             </div>
 
             {/* Thumbs up/down buttons */}
