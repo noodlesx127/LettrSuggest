@@ -1622,6 +1622,14 @@ export default function SuggestPage() {
       const uris = filteredFilms.map((f) => f.uri);
       const mappings = await getFilmMappings(uid, uris);
 
+      // Fetch feature feedback for replacements too
+      let featureFeedback = undefined;
+      try {
+        featureFeedback = await getAvoidedFeatures(uid);
+      } catch (e) {
+        // ignore
+      }
+
       // Build sets of watched and blocked IDs
       const watchedIds = new Set<number>();
       for (const f of filteredFilms) {
@@ -1701,7 +1709,8 @@ export default function SuggestPage() {
           watchlistGenres: tasteProfile.watchlistGenres,
           watchlistKeywords: tasteProfile.watchlistKeywords,
           watchlistDirectors: tasteProfile.watchlistDirectors
-        }
+        },
+        featureFeedback
       });
 
       if (suggestions.length === 0) return null;
@@ -1776,6 +1785,14 @@ export default function SuggestPage() {
       const filteredFilms = sourceFilms;
       const uris = filteredFilms.map((f) => f.uri);
       const mappings = await getFilmMappings(uid, uris);
+
+      // Fetch feature feedback
+      let featureFeedback = undefined;
+      try {
+        featureFeedback = await getAvoidedFeatures(uid);
+      } catch (e) {
+        // ignore
+      }
 
       // Build sets of watched and blocked IDs
       const watchedIds = new Set<number>();
@@ -1871,7 +1888,8 @@ export default function SuggestPage() {
           watchlistGenres: tasteProfile.watchlistGenres,
           watchlistKeywords: tasteProfile.watchlistKeywords,
           watchlistDirectors: tasteProfile.watchlistDirectors
-        }
+        },
+        featureFeedback
       });
 
       if (suggestions.length === 0) return [];

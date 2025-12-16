@@ -6,7 +6,11 @@ const nextConfig = {
     typedRoutes: true
   },
   // Suppress verbose fetch logging (GET /api/... 200 in Xms, cache info, etc.)
-  logging: false,
+  logging: {
+    fetches: {
+      fullUrl: false
+    }
+  },
   images: {
     remotePatterns: [
       {

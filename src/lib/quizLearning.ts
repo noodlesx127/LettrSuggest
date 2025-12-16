@@ -4,6 +4,7 @@
  */
 
 import { supabase } from './supabaseClient';
+import { detectSubgenres, stringHash } from './subgenreDetection';
 
 // Types
 export type QuizQuestionType = 'genre_rating' | 'theme_preference' | 'movie_rating';
@@ -469,9 +470,44 @@ async function updateKeywordPreference(
 }
 
 /**
- * Update movie preference based on thumbs up/down
- * This also updates feature preferences for the movie's genres, actors, keywords
+ * Helper to update a single feature preference
  */
+async function updateSingleFeaturePreference(
+    userId: string,
+    type: string,
+    id: number,
+    name: string,
+    isPositive: boolean
+) {
+    if (!supabase) return;
+
+    const { data: existing } = await supabase
+        .from('user_feature_feedback')
+        .select('positive_count, negative_count')
+        .eq('user_id', userId)
+        .eq('feature_type', type)
+        .eq('feature_id', id)
+        .maybeSingle();
+
+    const positiveCount = (existing?.positive_count || 0) + (isPositive ? 1 : 0);
+    const negativeCount = (existing?.negative_count || 0) + (isPositive ? 0 : 1);
+    const total = positiveCount + negativeCount;
+    // Bayesian avg with Laplace smoothing
+    const inferredPreference = (positiveCount + 1) / (total + 2);
+
+    await supabase
+        .from('user_feature_feedback')
+        .upsert({
+            user_id: userId,
+            feature_type: type,
+            feature_id: id,
+            feature_name: name,
+            positive_count: positiveCount,
+            negative_count: negativeCount,
+            inferred_preference: inferredPreference,
+            last_updated: new Date().toISOString(),
+        }, { onConflict: 'user_id,feature_type,feature_id' });
+}
 async function updateMoviePreference(
     userId: string,
     question: MovieRatingQuestion,
@@ -494,31 +530,41 @@ async function updateMoviePreference(
     // Update genre preferences
     const genres = (movie.genres as Array<{ id: number; name: string }>) || [];
     for (const genre of genres.slice(0, 3)) {
-        const { data: existing } = await supabase
-            .from('user_feature_feedback')
-            .select('positive_count, negative_count')
-            .eq('user_id', userId)
-            .eq('feature_type', 'genre')
-            .eq('feature_id', genre.id)
-            .maybeSingle();
+        await updateSingleFeaturePreference(userId, 'genre', genre.id, genre.name, isPositive);
+    }
 
-        const positiveCount = (existing?.positive_count || 0) + (isPositive ? 1 : 0);
-        const negativeCount = (existing?.negative_count || 0) + (isPositive ? 0 : 1);
-        const total = positiveCount + negativeCount;
-        const inferredPreference = (positiveCount + 1) / (total + 2);
+    // Update keyword preferences
+    const keywords = (movie.keywords as { keywords?: Array<{ id: number; name: string }> })?.keywords || [];
+    const keywordNames = keywords.map(k => k.name);
+    const keywordIds = keywords.map(k => k.id);
+    for (const kw of keywords.slice(0, 5)) {
+        await updateSingleFeaturePreference(userId, 'keyword', kw.id, kw.name, isPositive);
+    }
 
-        await supabase
-            .from('user_feature_feedback')
-            .upsert({
-                user_id: userId,
-                feature_type: 'genre',
-                feature_id: genre.id,
-                feature_name: genre.name,
-                positive_count: positiveCount,
-                negative_count: negativeCount,
-                inferred_preference: inferredPreference,
-                last_updated: new Date().toISOString(),
-            }, { onConflict: 'user_id,feature_type,feature_id' });
+    // Update subgenre preferences
+    const title = (movie.title as string) || '';
+    const overview = (movie.overview as string) || '';
+    const allText = `${title} ${overview}`.toLowerCase();
+
+    for (const genre of genres) {
+        const subs = detectSubgenres(genre.name, allText, keywordNames, keywordIds);
+        for (const subKey of subs) {
+            const id = stringHash(subKey);
+            await updateSingleFeaturePreference(userId, 'subgenre', id, subKey, isPositive);
+        }
+    }
+
+    // Update actor preferences
+    const credits = movie.credits as { cast?: Array<{ id: number; name: string; order: number }>; crew?: Array<{ id: number; name: string; job: string }> } | undefined;
+    const cast = (credits?.cast || []).slice(0, 3);
+    for (const actor of cast) {
+        await updateSingleFeaturePreference(userId, 'actor', actor.id, actor.name, isPositive);
+    }
+
+    // Update director preferences
+    const directors = (credits?.crew || []).filter(c => c.job === 'Director').slice(0, 2);
+    for (const director of directors) {
+        await updateSingleFeaturePreference(userId, 'director', director.id, director.name, isPositive);
     }
 
     // Add to blocked suggestions if thumbs down
@@ -603,9 +649,10 @@ export async function seedPreferencesFromHistory(
     keywordsSeeded: number;
     actorsSeeded: number;
     directorsSeeded: number;
+    subgenresSeeded: number;
 }> {
     if (!supabase) {
-        return { success: false, genresSeeded: 0, keywordsSeeded: 0, actorsSeeded: 0, directorsSeeded: 0 };
+        return { success: false, genresSeeded: 0, keywordsSeeded: 0, actorsSeeded: 0, directorsSeeded: 0, subgenresSeeded: 0 };
     }
 
     console.log('[SeedPreferences] Starting preference seeding', { userId: userId.slice(0, 8), filmCount: films.length });
@@ -615,6 +662,11 @@ export async function seedPreferencesFromHistory(
     const keywordWeights = new Map<number, { name: string; positive: number; negative: number }>();
     const actorWeights = new Map<number, { name: string; positive: number; negative: number }>();
     const directorWeights = new Map<number, { name: string; positive: number; negative: number }>();
+    const subgenreWeights = new Map<number, { name: string; positive: number; negative: number }>();
+
+    // Helper to generate a stable numeric ID from a string key (for subgenres)
+    // We define it here to avoid polluting module scope if only used here
+    // const stringHash = (str: string): number => { ... } // REMOVED local definition
 
     // Get weight delta based on rating/like/rewatch
     const getWeightDelta = (film: typeof films[0]): { pos: number; neg: number } => {
@@ -677,11 +729,31 @@ export async function seedPreferencesFromHistory(
 
         // Extract keywords
         const keywords = (movie.keywords as { keywords?: Array<{ id: number; name: string }> })?.keywords || [];
+        const keywordNames = keywords.map(k => k.name);
+        const keywordIds = keywords.map(k => k.id);
+
         for (const kw of keywords.slice(0, 5)) {
             const existing = keywordWeights.get(kw.id) || { name: kw.name, positive: 0, negative: 0 };
             existing.positive += delta.pos;
             existing.negative += delta.neg;
             keywordWeights.set(kw.id, existing);
+        }
+
+        // Extract and process SUBGENRES
+        const title = (movie.title as string) || '';
+        const overview = (movie.overview as string) || '';
+        const allText = `${title} ${overview}`.toLowerCase();
+
+        for (const genre of genres) {
+            const subs = detectSubgenres(genre.name, allText, keywordNames, keywordIds);
+            subs.forEach(subKey => {
+                // Use hash for ID, but store Key as name
+                const id = stringHash(subKey);
+                const existing = subgenreWeights.get(id) || { name: subKey, positive: 0, negative: 0 };
+                existing.positive += delta.pos;
+                existing.negative += delta.neg;
+                subgenreWeights.set(id, existing);
+            });
         }
 
         // Extract cast (top 3 actors)
@@ -714,6 +786,7 @@ export async function seedPreferencesFromHistory(
         keywords: keywordWeights.size,
         actors: actorWeights.size,
         directors: directorWeights.size,
+        subgenres: subgenreWeights.size,
     });
 
     // Upsert to user_feature_feedback
@@ -722,6 +795,7 @@ export async function seedPreferencesFromHistory(
         weights: Map<number, { name: string; positive: number; negative: number }>
     ): Promise<number> => {
         let count = 0;
+        const updates = [];
         for (const [id, data] of weights.entries()) {
             // Only seed if there's significant signal (2+ interactions)
             if (data.positive + data.negative < 2) continue;
@@ -729,21 +803,29 @@ export async function seedPreferencesFromHistory(
             const total = data.positive + data.negative;
             const inferredPreference = (data.positive + 1) / (total + 2); // Laplace smoothing
 
-            if (!supabase) continue;
-            await supabase
-                .from('user_feature_feedback')
-                .upsert({
-                    user_id: userId,
-                    feature_type: type,
-                    feature_id: id,
-                    feature_name: data.name,
-                    positive_count: data.positive,
-                    negative_count: data.negative,
-                    inferred_preference: inferredPreference,
-                    last_updated: new Date().toISOString(),
-                }, { onConflict: 'user_id,feature_type,feature_id' });
+            updates.push({
+                user_id: userId,
+                feature_type: type,
+                feature_id: id,
+                feature_name: data.name,
+                positive_count: data.positive,
+                negative_count: data.negative,
+                inferred_preference: inferredPreference,
+                last_updated: new Date().toISOString(),
+            });
 
-            count++;
+            if (updates.length >= 50) {
+                if (supabase) {
+                    await supabase.from('user_feature_feedback').upsert(updates, { onConflict: 'user_id,feature_type,feature_id' });
+                }
+                count += updates.length;
+                updates.length = 0;
+            }
+        }
+
+        if (updates.length > 0 && supabase) {
+            await supabase.from('user_feature_feedback').upsert(updates, { onConflict: 'user_id,feature_type,feature_id' });
+            count += updates.length;
         }
         return count;
     };
@@ -752,6 +834,7 @@ export async function seedPreferencesFromHistory(
     const keywordsSeeded = await upsertFeatures('keyword', keywordWeights);
     const actorsSeeded = await upsertFeatures('actor', actorWeights);
     const directorsSeeded = await upsertFeatures('director', directorWeights);
+    const subgenresSeeded = await upsertFeatures('subgenre', subgenreWeights);
 
     console.log('[SeedPreferences] Seeding complete', {
         userId: userId.slice(0, 8),
@@ -759,7 +842,8 @@ export async function seedPreferencesFromHistory(
         keywordsSeeded,
         actorsSeeded,
         directorsSeeded,
+        subgenresSeeded
     });
 
-    return { success: true, genresSeeded, keywordsSeeded, actorsSeeded, directorsSeeded };
+    return { success: true, genresSeeded, keywordsSeeded, actorsSeeded, directorsSeeded, subgenresSeeded };
 }
