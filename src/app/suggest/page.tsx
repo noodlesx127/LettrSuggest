@@ -3157,7 +3157,7 @@ export default function SuggestPage() {
               title="Take a quick quiz to improve your suggestions"
             >
               <span>🎯</span>
-              <span>Take Quiz</span>
+              <span>Improve Suggestions Quiz</span>
             </button>
           </div>
           <div className="flex flex-col items-end gap-1 text-xs">
