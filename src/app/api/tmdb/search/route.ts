@@ -63,9 +63,14 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'TMDB_API_KEY not configured' }, { status: 500 });
     }
 
-    const tmdbUrl = new URL('https://api.themoviedb.org/3/search/movie');
+    // Use multi-search to get both movies AND TV shows
+    // This fixes the issue where TV shows like "Archangel (2005)" or "The American Revolution (2025)" 
+    // were not being found because /search/movie only returns movies
+    const tmdbUrl = new URL('https://api.themoviedb.org/3/search/multi');
     tmdbUrl.searchParams.set('api_key', apiKey);
     tmdbUrl.searchParams.set('query', query);
+    // Note: /search/multi uses "year" for movies but doesn't filter TV by year in the same way
+    // We'll filter by year client-side after getting results
     if (year) tmdbUrl.searchParams.set('year', year);
 
     const r = await fetchWithRetry(tmdbUrl.toString(), {
@@ -80,7 +85,40 @@ export async function GET(req: Request) {
     }
 
     const data = await r.json();
-    return NextResponse.json({ ok: true, results: data?.results ?? [] });
+
+    // Filter to only movies and TV shows (exclude person results)
+    // Normalize TV show fields to match movie format for consistent handling
+    const results = (data?.results ?? [])
+      .filter((item: any) => item.media_type === 'movie' || item.media_type === 'tv')
+      .map((item: any) => {
+        if (item.media_type === 'tv') {
+          // Normalize TV fields to match movie format
+          return {
+            ...item,
+            // TV uses 'name' instead of 'title'
+            title: item.title || item.name,
+            // TV uses 'first_air_date' instead of 'release_date'
+            release_date: item.release_date || item.first_air_date,
+            // Keep both for debugging/display purposes
+            original_name: item.original_name,
+            first_air_date: item.first_air_date,
+          };
+        }
+        return item;
+      });
+
+    // If a year was specified, also filter TV shows by first_air_date year
+    // (since /search/multi only filters movies by year)
+    const yearNum = year ? parseInt(year, 10) : null;
+    const filteredResults = yearNum
+      ? results.filter((item: any) => {
+        const itemYear = item.release_date ? new Date(item.release_date).getFullYear() : null;
+        // If we have a year, allow matches within 1 year tolerance (for edge cases)
+        return !itemYear || Math.abs(itemYear - yearNum) <= 1;
+      })
+      : results;
+
+    return NextResponse.json({ ok: true, results: filteredResults });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'Unexpected error' }, { status: 500 });
   }
