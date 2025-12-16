@@ -3391,12 +3391,29 @@ export async function suggestByOverlap(params: {
     }
   }
 
+  // Exclude watchlist movies from main suggestions - they have their own dedicated section
+  // ("Picks From Your Letterboxd Watchlist")
+  const watchlistTmdbIds = new Set(params.watchlistEntries?.map(e => e.tmdbId) ?? []);
+  const candidatesAfterWatchlistExclusion = validCandidates.filter(id => !watchlistTmdbIds.has(id));
+
+  if (watchlistTmdbIds.size > 0) {
+    console.log('[SuggestByOverlap] Excluded watchlist movies from main suggestions:', {
+      watchlistCount: watchlistTmdbIds.size,
+      originalCandidates: validCandidates.length,
+      filteredCandidates: candidatesAfterWatchlistExclusion.length
+    });
+  }
+
+  // Use filtered candidates for the rest of the function
+  const finalCandidates = candidatesAfterWatchlistExclusion;
+
   const likedCap = 800;
   const dislikedCap = 400;
   // If the user has an enormous number of liked films, bias towards
   // the most recent ones (assuming input films are roughly chronological).
   const likedIds = likedIdsAll.length > likedCap ? likedIdsAll.slice(-likedCap) : likedIdsAll;
   const dislikedIds = dislikedIdsAll.length > dislikedCap ? dislikedIdsAll.slice(-dislikedCap) : dislikedIdsAll;
+
 
   // Create a map of film URI to its rating and liked status for weighted profile building
   const filmPreferenceMap = new Map<string, { rating?: number; liked?: boolean }>();
@@ -3698,7 +3715,7 @@ export async function suggestByOverlap(params: {
   const watchlistKeywordSet = new Set(params.enhancedProfile?.watchlistKeywords ?? []);
   const watchlistDirectorSet = new Set(params.enhancedProfile?.watchlistDirectors ?? []);
 
-  const maxC = Math.min(params.maxCandidates ?? 120, validCandidates.length);
+  const maxC = Math.min(params.maxCandidates ?? 120, finalCandidates.length);
   const desired = Math.max(10, Math.min(500, params.desiredResults ?? 50)); // Increased max from 30 to 500 to support 24 sections
 
   // Helper to fetch from cache first in bulk where possible
@@ -3707,7 +3724,7 @@ export async function suggestByOverlap(params: {
   }
 
   const resultsAcc: Array<{ tmdbId: number; score: number; reasons: string[]; title?: string; release_date?: string; genres?: string[]; poster_path?: string | null; contributingFilms?: Record<string, Array<{ id: number; title: string }>> }> = [];
-  const pool = await mapLimit(validCandidates.slice(0, maxC), params.concurrency ?? 8, async (cid) => {
+  const pool = await mapLimit(finalCandidates.slice(0, maxC), params.concurrency ?? 8, async (cid) => {
     if (seenIds.has(cid)) return null; // skip already-liked
     const m = await fetchFromCache(cid);
     if (!m) return null;
