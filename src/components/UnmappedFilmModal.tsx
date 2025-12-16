@@ -1,7 +1,7 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Image from 'next/image';
-import { searchTmdb, upsertFilmMapping, upsertTmdbCache } from '@/lib/enrich';
+import { searchTmdb, upsertFilmMapping, upsertTmdbCache, fetchMovieById } from '@/lib/enrich';
 
 export interface UnmappedFilm {
     uri: string;
@@ -17,6 +17,57 @@ interface Props {
     onFilmMapped: (uri: string, tmdbId: number) => void;
 }
 
+interface LetterboxdSuggestion {
+    tmdbId: number;
+    mediaType: 'movie' | 'tv';
+    movie?: any;
+    loading: boolean;
+    error?: string;
+}
+
+/**
+ * Parse a TMDB URL or ID string to extract the ID and media type
+ * Supports:
+ *   - https://www.themoviedb.org/movie/53094-welt-am-draht
+ *   - https://www.themoviedb.org/tv/86449
+ *   - movie:53094
+ *   - tv:86449
+ *   - 53094 (assumes movie)
+ */
+function parseTmdbInput(input: string): { id: number; mediaType: 'movie' | 'tv' } | null {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+
+    // URL pattern: themoviedb.org/(movie|tv)/{id}
+    const urlMatch = trimmed.match(/themoviedb\.org\/(movie|tv)\/(\d+)/i);
+    if (urlMatch) {
+        return {
+            mediaType: urlMatch[1].toLowerCase() as 'movie' | 'tv',
+            id: parseInt(urlMatch[2], 10)
+        };
+    }
+
+    // Prefix pattern: movie:123 or tv:123
+    const prefixMatch = trimmed.match(/^(movie|tv):(\d+)$/i);
+    if (prefixMatch) {
+        return {
+            mediaType: prefixMatch[1].toLowerCase() as 'movie' | 'tv',
+            id: parseInt(prefixMatch[2], 10)
+        };
+    }
+
+    // Plain number (assume movie)
+    const numMatch = trimmed.match(/^(\d+)$/);
+    if (numMatch) {
+        return {
+            mediaType: 'movie',
+            id: parseInt(numMatch[1], 10)
+        };
+    }
+
+    return null;
+}
+
 export default function UnmappedFilmModal({ isOpen, onClose, unmappedFilms, userId, onFilmMapped }: Props) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [searchQ, setSearchQ] = useState('');
@@ -24,6 +75,14 @@ export default function UnmappedFilmModal({ isOpen, onClose, unmappedFilms, user
     const [results, setResults] = useState<any[] | null>(null);
     const [searching, setSearching] = useState(false);
     const [mapping, setMapping] = useState(false);
+
+    // Letterboxd suggestion state
+    const [letterboxdSuggestion, setLetterboxdSuggestion] = useState<LetterboxdSuggestion | null>(null);
+
+    // Manual TMDB ID input state
+    const [manualIdInput, setManualIdInput] = useState('');
+    const [manualIdLoading, setManualIdLoading] = useState(false);
+    const [manualIdError, setManualIdError] = useState('');
 
     const currentFilm = unmappedFilms[currentIndex];
     const remainingCount = unmappedFilms.length - currentIndex;
@@ -33,7 +92,49 @@ export default function UnmappedFilmModal({ isOpen, onClose, unmappedFilms, user
         setSearchQ(film.title);
         setSearchYear(film.year);
         setResults(null);
+        setLetterboxdSuggestion(null);
+        setManualIdInput('');
+        setManualIdError('');
     }, []);
+
+    // Auto-lookup TMDB ID from Letterboxd when film changes
+    useEffect(() => {
+        if (!isOpen || !currentFilm?.uri) return;
+
+        const lookupLetterboxd = async () => {
+            setLetterboxdSuggestion({ tmdbId: 0, mediaType: 'movie', loading: true });
+
+            try {
+                const res = await fetch(`/api/letterboxd/tmdb-id?uri=${encodeURIComponent(currentFilm.uri)}`);
+                const data = await res.json();
+
+                if (data.ok && data.tmdbId) {
+                    // Fetch the movie details to show
+                    setLetterboxdSuggestion({
+                        tmdbId: data.tmdbId,
+                        mediaType: data.mediaType || 'movie',
+                        loading: true
+                    });
+
+                    // Fetch movie details
+                    const movie = await fetchMovieById(data.tmdbId, data.mediaType);
+                    setLetterboxdSuggestion({
+                        tmdbId: data.tmdbId,
+                        mediaType: data.mediaType || 'movie',
+                        movie,
+                        loading: false
+                    });
+                } else {
+                    setLetterboxdSuggestion(null);
+                }
+            } catch (e) {
+                console.error('[UnmappedModal] Letterboxd lookup error:', e);
+                setLetterboxdSuggestion(null);
+            }
+        };
+
+        lookupLetterboxd();
+    }, [isOpen, currentFilm?.uri]);
 
     // Initialize search with current film's info
     const runSearch = async () => {
@@ -50,11 +151,39 @@ export default function UnmappedFilmModal({ isOpen, onClose, unmappedFilms, user
         }
     };
 
-    const applyMapping = async (tmdbId: number) => {
+    // Fetch movie by manual ID input
+    const fetchManualId = async () => {
+        const parsed = parseTmdbInput(manualIdInput);
+        if (!parsed) {
+            setManualIdError('Invalid format. Use TMDB URL, ID, or "tv:123"');
+            return;
+        }
+
+        setManualIdLoading(true);
+        setManualIdError('');
+
+        try {
+            const movie = await fetchMovieById(parsed.id, parsed.mediaType);
+            if (movie) {
+                // Add to results for display
+                setResults([movie]);
+            } else {
+                setManualIdError('No movie found with that ID');
+            }
+        } catch (e) {
+            console.error('[UnmappedModal] Manual ID fetch error:', e);
+            setManualIdError('Failed to fetch movie');
+        } finally {
+            setManualIdLoading(false);
+        }
+    };
+
+    const applyMapping = async (tmdbId: number, movieData?: any) => {
         if (!userId || !currentFilm) return;
         setMapping(true);
         try {
-            const chosen = results?.find((r) => r.id === tmdbId);
+            // Use provided movie data or find from results
+            const chosen = movieData || results?.find((r) => r.id === tmdbId);
             if (chosen) {
                 await upsertTmdbCache(chosen);
             }
@@ -130,8 +259,62 @@ export default function UnmappedFilmModal({ isOpen, onClose, unmappedFilms, user
                     </p>
                 </div>
 
+                {/* Letterboxd Suggestion */}
+                {letterboxdSuggestion && (
+                    <div className="p-4 bg-green-50 dark:bg-green-900/20 border-b dark:border-gray-700">
+                        <p className="text-sm font-medium text-green-800 dark:text-green-200 mb-2">
+                            ✨ Suggested match from Letterboxd
+                        </p>
+                        {letterboxdSuggestion.loading ? (
+                            <p className="text-xs text-green-600 dark:text-green-400">Loading...</p>
+                        ) : letterboxdSuggestion.movie ? (
+                            <button
+                                onClick={() => applyMapping(letterboxdSuggestion.tmdbId, letterboxdSuggestion.movie)}
+                                disabled={mapping}
+                                className="flex items-center gap-3 w-full text-left p-2 rounded border border-green-300 dark:border-green-700 hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors disabled:opacity-50"
+                            >
+                                <div className="w-12 h-18 bg-gray-200 dark:bg-gray-700 rounded overflow-hidden flex-shrink-0 relative">
+                                    {letterboxdSuggestion.movie.poster_path ? (
+                                        <Image
+                                            src={`https://image.tmdb.org/t/p/w92${letterboxdSuggestion.movie.poster_path}`}
+                                            alt={letterboxdSuggestion.movie.title || letterboxdSuggestion.movie.name}
+                                            fill
+                                            sizes="48px"
+                                            className="object-cover"
+                                        />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">
+                                            ?
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-green-900 dark:text-green-100 truncate">
+                                        {letterboxdSuggestion.movie.title || letterboxdSuggestion.movie.name}
+                                    </p>
+                                    <p className="text-xs text-green-600 dark:text-green-400">
+                                        {(letterboxdSuggestion.movie.release_date || letterboxdSuggestion.movie.first_air_date)?.slice(0, 4) || 'Unknown year'}
+                                        {' • '}
+                                        {letterboxdSuggestion.mediaType === 'tv' ? 'TV Show' : 'Movie'}
+                                        {' • '}
+                                        TMDB ID: {letterboxdSuggestion.tmdbId}
+                                    </p>
+                                </div>
+                                <span className="text-green-600 dark:text-green-400 text-sm">
+                                    Use this →
+                                </span>
+                            </button>
+                        ) : (
+                            <p className="text-xs text-green-600 dark:text-green-400">
+                                Could not load movie details
+                            </p>
+                        )}
+                    </div>
+                )}
+
                 {/* Search Section */}
-                <div className="p-4 border-b dark:border-gray-700">
+                <div className="p-4 border-b dark:border-gray-700 space-y-3">
+                    {/* Title Search */}
                     <div className="flex gap-2">
                         <input
                             className="flex-1 text-sm border dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-gray-100"
@@ -156,6 +339,30 @@ export default function UnmappedFilmModal({ isOpen, onClose, unmappedFilms, user
                             {searching ? 'Searching…' : 'Search'}
                         </button>
                     </div>
+
+                    {/* Manual TMDB ID Input */}
+                    <div className="flex gap-2 items-center">
+                        <input
+                            className="flex-1 text-sm border dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-gray-100"
+                            placeholder="Or paste TMDB URL/ID (e.g., https://themoviedb.org/tv/86449 or tv:86449)"
+                            value={manualIdInput}
+                            onChange={(e) => {
+                                setManualIdInput(e.target.value);
+                                setManualIdError('');
+                            }}
+                            onKeyDown={(e) => e.key === 'Enter' && fetchManualId()}
+                        />
+                        <button
+                            onClick={fetchManualId}
+                            disabled={manualIdLoading || !manualIdInput.trim()}
+                            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded disabled:opacity-50"
+                        >
+                            {manualIdLoading ? 'Loading…' : 'Fetch'}
+                        </button>
+                    </div>
+                    {manualIdError && (
+                        <p className="text-xs text-red-500">{manualIdError}</p>
+                    )}
                 </div>
 
                 {/* Results */}
@@ -166,9 +373,14 @@ export default function UnmappedFilmModal({ isOpen, onClose, unmappedFilms, user
                         </p>
                     )}
                     {results && results.length === 0 && (
-                        <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
-                            No results found. Try a different search term.
-                        </p>
+                        <div className="text-center py-8">
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                No results found. Try a different search term.
+                            </p>
+                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                                Tip: Try the original language title, or paste a TMDB URL above
+                            </p>
+                        </div>
                     )}
                     {results && results.length > 0 && (
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -183,7 +395,7 @@ export default function UnmappedFilmModal({ isOpen, onClose, unmappedFilms, user
                                         {movie.poster_path ? (
                                             <Image
                                                 src={`https://image.tmdb.org/t/p/w185${movie.poster_path}`}
-                                                alt={movie.title}
+                                                alt={movie.title || movie.name}
                                                 fill
                                                 sizes="(max-width: 768px) 50vw, 200px"
                                                 className="object-cover"
@@ -193,13 +405,22 @@ export default function UnmappedFilmModal({ isOpen, onClose, unmappedFilms, user
                                                 No poster
                                             </div>
                                         )}
+                                        {/* Media type badge */}
+                                        {movie.media_type && (
+                                            <span className={`absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded ${movie.media_type === 'tv'
+                                                    ? 'bg-purple-500 text-white'
+                                                    : 'bg-blue-500 text-white'
+                                                }`}>
+                                                {movie.media_type === 'tv' ? 'TV' : 'Movie'}
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="p-2">
                                         <p className="text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-2">
-                                            {movie.title}
+                                            {movie.title || movie.name}
                                         </p>
                                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                                            {movie.release_date ? movie.release_date.slice(0, 4) : 'Unknown year'}
+                                            {(movie.release_date || movie.first_air_date)?.slice(0, 4) || 'Unknown year'}
                                         </p>
                                     </div>
                                 </button>

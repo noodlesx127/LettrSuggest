@@ -78,6 +78,65 @@ export async function searchTmdb(query: string, year?: number) {
   }
 }
 
+/**
+ * Fetch a movie or TV show by TMDB ID
+ * Supports both movies and TV shows, with field normalization for TV
+ */
+export async function fetchMovieById(id: number, mediaType: 'movie' | 'tv' = 'movie'): Promise<TMDBMovie | null> {
+  console.log('[MovieAPI] fetchById start', { id, mediaType });
+  try {
+    const apiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY || process.env.TMDB_API_KEY;
+    if (!apiKey) {
+      // Try fetching via API route instead
+      const baseUrl = getBaseUrl();
+      const url = new URL(`/api/tmdb/movie`, baseUrl);
+      url.searchParams.set('id', String(id));
+      url.searchParams.set('mediaType', mediaType);
+
+      const r = await fetch(url.toString());
+      const j = await r.json();
+
+      if (r.ok && j.ok && j.movie) {
+        return j.movie;
+      }
+      console.error('[MovieAPI] fetchById API route failed', j);
+      return null;
+    }
+
+    // Direct TMDB API call
+    const endpoint = mediaType === 'tv'
+      ? `https://api.themoviedb.org/3/tv/${id}`
+      : `https://api.themoviedb.org/3/movie/${id}`;
+
+    const tmdbUrl = new URL(endpoint);
+    tmdbUrl.searchParams.set('api_key', apiKey);
+    tmdbUrl.searchParams.set('append_to_response', 'credits,keywords');
+
+    const r = await fetch(tmdbUrl.toString());
+    if (!r.ok) {
+      console.error('[MovieAPI] fetchById TMDB error', { status: r.status });
+      return null;
+    }
+
+    const data = await r.json();
+
+    // Normalize TV show fields to match movie format
+    if (mediaType === 'tv') {
+      return {
+        ...data,
+        title: data.title || data.name,
+        release_date: data.release_date || data.first_air_date,
+        media_type: 'tv',
+      };
+    }
+
+    return { ...data, media_type: 'movie' };
+  } catch (e) {
+    console.error('[MovieAPI] fetchById exception', e);
+    return null;
+  }
+}
+
 export async function upsertTmdbCache(movie: TMDBMovie) {
   if (!supabase) throw new Error('Supabase not initialized');
   const { error } = await supabase.from('tmdb_movies').upsert({ tmdb_id: movie.id, data: movie }, { onConflict: 'tmdb_id' });

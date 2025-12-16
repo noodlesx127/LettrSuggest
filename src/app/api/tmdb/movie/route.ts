@@ -5,6 +5,8 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
+    const mediaType = url.searchParams.get('mediaType') || 'movie';
+
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
     const apiKey = process.env.TMDB_API_KEY;
@@ -16,8 +18,12 @@ export async function GET(req: Request) {
     const appendParts = new Set([...defaultAppend.split(','), ...clientAppend.split(',')].filter(Boolean));
     const appendToResponse = Array.from(appendParts).join(',');
 
-    // 1. Fetch from TMDB (using api_key for v3 auth)
-    const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?api_key=${apiKey}&append_to_response=${appendToResponse}`;
+    // Support both movies and TV shows
+    const endpoint = mediaType === 'tv'
+      ? `https://api.themoviedb.org/3/tv/${encodeURIComponent(id)}`
+      : `https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}`;
+
+    const tmdbUrl = `${endpoint}?api_key=${apiKey}&append_to_response=${appendToResponse}`;
     const r = await fetch(tmdbUrl, {
       headers: {
         Accept: 'application/json',
@@ -30,7 +36,20 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'TMDB request failed', status: r.status, body: text }, { status: 502 });
     }
 
-    const tmdbData = await r.json();
+    let tmdbData = await r.json();
+
+    // Normalize TV show fields to match movie format
+    if (mediaType === 'tv') {
+      tmdbData = {
+        ...tmdbData,
+        title: tmdbData.title || tmdbData.name,
+        release_date: tmdbData.release_date || tmdbData.first_air_date,
+        media_type: 'tv',
+      };
+    } else {
+      tmdbData.media_type = 'movie';
+    }
+
     let finalMovie = tmdbData;
 
     // 2. OMDb enrichment - DISABLED (API key issues)
