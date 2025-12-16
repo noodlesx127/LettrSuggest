@@ -942,6 +942,7 @@ interface MovieFeatures {
   genres: Array<{ id: number; name: string }>;
   collection?: { id: number; name: string };
   studios: Array<{ id: number; name: string }>;
+  subgenres: Array<{ key: string; parentGenre: string }>;
 }
 
 /**
@@ -1101,10 +1102,24 @@ export async function boostExplicitFeedback(
 async function extractMovieFeatures(tmdbId: number): Promise<MovieFeatures> {
   const movie = await fetchTmdbMovieCached(tmdbId);
   if (!movie) {
-    return { actors: [], keywords: [], directors: [], genres: [], studios: [] };
+    return { actors: [], keywords: [], directors: [], genres: [], studios: [], subgenres: [] };
   }
 
   const features = extractFeatures(movie);
+
+  // Detect subgenres from genres + keywords using existing function
+  const allText = (movie.title || '').toLowerCase() + ' ' + (movie.overview || '').toLowerCase();
+  const detectedSubgenres: Array<{ key: string; parentGenre: string }> = [];
+
+  for (const genre of features.genres) {
+    const subs = detectSubgenres(genre, allText, features.keywords, features.keywordIds);
+    for (const sub of subs) {
+      // Avoid duplicates
+      if (!detectedSubgenres.some(s => s.key === sub)) {
+        detectedSubgenres.push({ key: sub, parentGenre: genre });
+      }
+    }
+  }
 
   return {
     actors: (movie.credits?.cast || []).slice(0, 5).map((a: any, idx: number) => ({
@@ -1131,7 +1146,8 @@ async function extractMovieFeatures(tmdbId: number): Promise<MovieFeatures> {
     studios: features.productionCompanyIds.map((id, idx) => ({
       id,
       name: features.productionCompanies[idx]
-    }))
+    })),
+    subgenres: detectedSubgenres
   };
 }
 
@@ -1195,6 +1211,19 @@ async function updateFeaturePreferences(
       feature_id: features.collection.id,
       feature_name: features.collection.name
     });
+  }
+
+  // Track subgenres - nuanced taste signals (e.g., HORROR_FOLK, THRILLER_PSYCHOLOGICAL)
+  // Use 0 as feature_id since subgenres don't have numeric IDs; use key as unique identifier
+  if (features.subgenres && features.subgenres.length > 0) {
+    features.subgenres.slice(0, 5).forEach(subgenre => {
+      updates.push({
+        feature_type: 'subgenre',
+        feature_id: 0, // Subgenres use key as identifier, not numeric ID
+        feature_name: subgenre.key // e.g., 'HORROR_FOLK'
+      });
+    });
+    console.log('[SubgenreFeedback] Detected subgenres for feedback learning:', features.subgenres.map(s => s.key));
   }
 
   // Update each feature's feedback counts
@@ -1334,13 +1363,15 @@ export async function getAvoidedFeatures(userId: string): Promise<{
   avoidFranchises: Array<{ id: number; name: string; weight: number; count: number }>;
   avoidDirectors: Array<{ id: number; name: string; weight: number; count: number }>;
   avoidGenres: Array<{ id: number; name: string; weight: number; count: number }>;
+  avoidSubgenres: Array<{ key: string; weight: number; count: number }>;
   preferActors: Array<{ id: number; name: string; weight: number; count: number }>;
   preferKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
   preferDirectors: Array<{ id: number; name: string; weight: number; count: number }>;
   preferGenres: Array<{ id: number; name: string; weight: number; count: number }>;
+  preferSubgenres: Array<{ key: string; weight: number; count: number }>;
 }> {
   if (!supabase) {
-    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], avoidDirectors: [], avoidGenres: [], preferActors: [], preferKeywords: [], preferDirectors: [], preferGenres: [] };
+    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], avoidDirectors: [], avoidGenres: [], avoidSubgenres: [], preferActors: [], preferKeywords: [], preferDirectors: [], preferGenres: [], preferSubgenres: [] };
   }
 
   try {
@@ -1352,7 +1383,7 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .or('negative_count.gte.1,positive_count.gte.1'); // Start learning from FIRST interaction
 
     if (!data) {
-      return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], avoidDirectors: [], avoidGenres: [], preferActors: [], preferKeywords: [], preferDirectors: [], preferGenres: [] };
+      return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], avoidDirectors: [], avoidGenres: [], avoidSubgenres: [], preferActors: [], preferKeywords: [], preferDirectors: [], preferGenres: [], preferSubgenres: [] };
     }
 
     // PANDORA-STYLE graduated penalty calculation
@@ -1513,22 +1544,45 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 5);
 
+    // SUBGENRES: Start avoiding/preferring after 1 net rejection/approval (specific taste signals)
+    const avoidSubgenres = data
+      .filter(f => f.feature_type === 'subgenre' && (f.negative_count - f.positive_count) >= 1)
+      .map(f => ({
+        key: f.feature_name, // Subgenre key like 'HORROR_FOLK'
+        weight: applyRecencyDecay(calcGraduatedPenalty(f.negative_count, f.positive_count), f.last_updated),
+        count: f.negative_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 15);
+
+    const preferSubgenres = data
+      .filter(f => f.feature_type === 'subgenre' && (f.positive_count - f.negative_count) >= 1)
+      .map(f => ({
+        key: f.feature_name,
+        weight: applyRecencyDecay(calcGraduatedBoost(f.negative_count, f.positive_count), f.last_updated),
+        count: f.positive_count
+      }))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 15);
+
     console.log('[PandoraLearning] Loaded graduated preferences', {
       avoidActors: avoidActors.map(a => `${a.name}(${a.count}👎, -${a.weight.toFixed(1)})`).slice(0, 3),
       avoidKeywords: avoidKeywords.map(k => `${k.name}(${k.count}👎)`).slice(0, 5),
       avoidFranchises: avoidFranchises.map(f => f.name),
       avoidDirectors: avoidDirectors.map(d => `${d.name}(${d.count}👎)`).slice(0, 3),
       avoidGenres: avoidGenres.map(g => `${g.name}(${g.count}👎)`).slice(0, 3),
+      avoidSubgenres: avoidSubgenres.map(s => `${s.key}(${s.count}👎)`).slice(0, 5),
       preferActors: preferActors.map(a => `${a.name}(${a.count}👍)`).slice(0, 3),
       preferKeywords: preferKeywords.map(k => `${k.name}(${k.count}👍)`).slice(0, 5),
       preferDirectors: preferDirectors.map(d => `${d.name}(${d.count}👍)`).slice(0, 3),
-      preferGenres: preferGenres.map(g => `${g.name}(${g.count}👍)`).slice(0, 3)
+      preferGenres: preferGenres.map(g => `${g.name}(${g.count}👍)`).slice(0, 3),
+      preferSubgenres: preferSubgenres.map(s => `${s.key}(${s.count}👍)`).slice(0, 5)
     });
 
-    return { avoidActors, avoidKeywords, avoidFranchises, avoidDirectors, avoidGenres, preferActors, preferKeywords, preferDirectors, preferGenres };
+    return { avoidActors, avoidKeywords, avoidFranchises, avoidDirectors, avoidGenres, avoidSubgenres, preferActors, preferKeywords, preferDirectors, preferGenres, preferSubgenres };
   } catch (e) {
     console.error('[PandoraLearning] Error loading graduated features', e);
-    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], avoidDirectors: [], avoidGenres: [], preferActors: [], preferKeywords: [], preferDirectors: [], preferGenres: [] };
+    return { avoidActors: [], avoidKeywords: [], avoidFranchises: [], avoidDirectors: [], avoidGenres: [], avoidSubgenres: [], preferActors: [], preferKeywords: [], preferDirectors: [], preferGenres: [], preferSubgenres: [] };
   }
 }
 
@@ -3026,10 +3080,12 @@ export async function suggestByOverlap(params: {
     avoidFranchises: Array<{ id: number; name: string; weight: number; count: number }>;
     avoidDirectors: Array<{ id: number; name: string; weight: number; count: number }>;
     avoidGenres: Array<{ id: number; name: string; weight: number; count: number }>;
+    avoidSubgenres: Array<{ key: string; weight: number; count: number }>; // e.g., HORROR_FOLK
     preferActors: Array<{ id: number; name: string; weight: number; count: number }>;
     preferKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
     preferDirectors: Array<{ id: number; name: string; weight: number; count: number }>;
     preferGenres: Array<{ id: number; name: string; weight: number; count: number }>;
+    preferSubgenres: Array<{ key: string; weight: number; count: number }>; // e.g., HORROR_FOLK
   };
   enhancedProfile?: {
     topActors: Array<{ id: number; name: string; weight: number }>;
@@ -4432,6 +4488,54 @@ export async function suggestByOverlap(params: {
           const topGenre = matchedPreferGenres.sort((a, b) => b.weight - a.weight)[0];
           reasons.push(`Features ${topGenre.name} — a genre you consistently enjoy`);
           console.log(`[PandoraLearning] Genre boost for "${m.title}": ${matchedPreferGenres.map(g => g.name).join(', ')} (+${genreBoost.toFixed(1)})`);
+        }
+      }
+
+      // PENALTY for subgenres user has rejected (from feedback learning)
+      // Detect candidate movie's subgenres first
+      const candidateAllText = (m.title || '').toLowerCase() + ' ' + (m.overview || '').toLowerCase();
+      const candidateSubgenres = new Set<string>();
+      for (const g of feats.genres) {
+        const subs = detectSubgenres(g, candidateAllText, feats.keywords, feats.keywordIds);
+        subs.forEach(s => candidateSubgenres.add(s));
+      }
+
+      if (ff.avoidSubgenres && ff.avoidSubgenres.length > 0 && candidateSubgenres.size > 0) {
+        const matchedAvoidSubgenres = ff.avoidSubgenres.filter(s => candidateSubgenres.has(s.key));
+
+        if (matchedAvoidSubgenres.length > 0) {
+          const subgenrePenalty = -applySoftCap(
+            matchedAvoidSubgenres.reduce((sum, s) => {
+              const confidence = confidenceFromCount(s.count);
+              return sum + (s.weight * confidence * 0.6); // Slightly stronger than keyword penalty
+            }, 0),
+            4.0
+          );
+          totalPenalty += subgenrePenalty;
+          const topSubgenre = matchedAvoidSubgenres.sort((a, b) => b.weight - a.weight)[0];
+          const prettyName = topSubgenre.key.replace(/^[A-Z]+_/, '').replace(/_/g, ' ').toLowerCase();
+          penaltyReasons.push(`Contains ${prettyName} — a specific style you've been avoiding`);
+          console.log(`[PandoraLearning] Subgenre penalty for "${m.title}": ${matchedAvoidSubgenres.map(s => s.key).join(', ')} (${subgenrePenalty.toFixed(1)})`);
+        }
+      }
+
+      // BOOST for subgenres user prefers (from feedback learning)
+      if (ff.preferSubgenres && ff.preferSubgenres.length > 0 && candidateSubgenres.size > 0) {
+        const matchedPreferSubgenres = ff.preferSubgenres.filter(s => candidateSubgenres.has(s.key));
+
+        if (matchedPreferSubgenres.length > 0) {
+          const subgenreBoost = applySoftCap(
+            matchedPreferSubgenres.reduce((sum, s) => {
+              const confidence = confidenceFromCount(s.count);
+              return sum + (s.weight * confidence * 0.5);
+            }, 0),
+            3.0
+          );
+          score += subgenreBoost;
+          const topSubgenre = matchedPreferSubgenres.sort((a, b) => b.weight - a.weight)[0];
+          const prettyName = topSubgenre.key.replace(/^[A-Z]+_/, '').replace(/_/g, ' ').toLowerCase();
+          reasons.push(`Matches your taste in ${prettyName} — a style you consistently enjoy`);
+          console.log(`[PandoraLearning] Subgenre boost for "${m.title}": ${matchedPreferSubgenres.map(s => s.key).join(', ')} (+${subgenreBoost.toFixed(1)})`);
         }
       }
     }
