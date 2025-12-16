@@ -130,55 +130,108 @@ async function getAnsweredQuestions(userId: string): Promise<Set<string>> {
 /**
  * Get candidate movies for movie rating questions from user's TMDB cache
  */
+/**
+ * Get candidate movies for movie rating questions from user's TMDB cache
+ * FILTERS:
+ * - Not watched
+ * - Not already answered
+ * - Not blocked (thumbs down)
+ * - Genres are not "avoided" (strong negative feedback)
+ * 
+ * VARIETY:
+ * - Shuffles trending list to avoid "only recent movies" bias
+ */
 async function getCandidateMovies(userId: string, answered: Set<string>): Promise<MovieRatingQuestion[]> {
     if (!supabase) return [];
 
     try {
-        // Get popular movies from TMDB cache that user hasn't watched
+        // 1. Get watched movies
         const { data: watchedData } = await supabase
             .from('film_tmdb_map')
             .select('tmdb_id')
             .eq('user_id', userId);
-
         const watchedIds = new Set((watchedData || []).map(r => r.tmdb_id));
 
-        // Get some movies from TMDB trending/popular
+        // 2. Get blocked suggestions (thumbs down)
+        const { data: blockedData } = await supabase
+            .from('blocked_suggestions')
+            .select('tmdb_id')
+            .eq('user_id', userId);
+        const blockedIds = new Set((blockedData || []).map(r => r.tmdb_id));
+
+        // 3. Get avoided genres (negative feedback)
+        // Consider avoided if negative > positive + 2, or preference < 0.3
+        const { data: genreFeedback } = await supabase
+            .from('user_feature_feedback')
+            .select('feature_id, positive_count, negative_count, inferred_preference')
+            .eq('user_id', userId)
+            .eq('feature_type', 'genre');
+
+        const avoidedGenreIds = new Set<number>();
+        for (const f of genreFeedback || []) {
+            if (f.inferred_preference < 0.35 || f.negative_count > (f.positive_count + 1)) {
+                avoidedGenreIds.add(f.feature_id);
+            }
+        }
+
+        // 4. Get trending/popular movies (fetch more to allow for filtering & shuffling)
         const { data: trendingData } = await supabase
             .from('tmdb_trending')
             .select('tmdb_id')
             .eq('period', 'week')
-            .limit(100);
+            .limit(200); // Increased from 100 to 200 to get more variety
 
-        const candidateIds = (trendingData || [])
+        // 5. Filter IDs by watched/blocked/answered
+        let candidateIds = (trendingData || [])
             .map(r => r.tmdb_id)
-            .filter(id => !watchedIds.has(id) && !answered.has(`movie:${id}`));
+            .filter(id =>
+                !watchedIds.has(id) &&
+                !blockedIds.has(id) &&
+                !answered.has(`movie:${id}`)
+            );
 
         if (candidateIds.length === 0) return [];
 
-        // Fetch movie details
+        // 6. SHUFFLE to reduce recency/popularity bias
+        // This ensures typically "lower ranked" trending movies get a chance
+        candidateIds = candidateIds.sort(() => Math.random() - 0.5);
+
+        // 7. Fetch details for a chunk (e.g. top 30 after shuffle)
+        // We fetch a bit more than we need because some might be filtered by genre
         const { data: movieData } = await supabase
             .from('tmdb_movies')
             .select('tmdb_id, data')
-            .in('tmdb_id', candidateIds.slice(0, 20));
+            .in('tmdb_id', candidateIds.slice(0, 30)); // Take 30 random candidates
 
-        return (movieData || []).map(row => {
+        const questions: MovieRatingQuestion[] = [];
+
+        for (const row of movieData || []) {
             const movie = row.data as Record<string, unknown>;
-            // Extract trailer from videos
+            const genres = (movie.genres as Array<{ id: number; name: string }>) || [];
+
+            // 8. Filter by AVOIDED GENRES
+            // If movie has ANY avoided genre, skip it
+            const hasAvoidedGenre = genres.some(g => avoidedGenreIds.has(g.id));
+            if (hasAvoidedGenre) continue;
+
+            // Extract trailer
             const videos = (movie.videos as { results?: Array<{ site: string; type: string; key: string; official?: boolean }> })?.results || [];
             const trailer = videos.find(v => v.site === 'YouTube' && v.type === 'Trailer' && v.official)
                 || videos.find(v => v.site === 'YouTube' && v.type === 'Trailer');
 
-            return {
+            questions.push({
                 type: 'movie_rating' as const,
                 tmdbId: row.tmdb_id,
                 title: (movie.title as string) || 'Unknown',
                 year: movie.release_date ? String(movie.release_date).slice(0, 4) : undefined,
                 posterPath: movie.poster_path as string | null,
-                overview: movie.overview as string | undefined,
-                genres: ((movie.genres as Array<{ name: string }>) || []).map(g => g.name),
+                overview: movie.overview as string || undefined,
+                genres: genres.map(g => g.name),
                 trailerKey: trailer?.key || null,
-            };
-        });
+            });
+        }
+
+        return questions;
     } catch (e) {
         console.error('[QuizLearning] Failed to get candidate movies', e);
         return [];
