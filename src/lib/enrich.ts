@@ -4,7 +4,8 @@ import {
   analyzeSubgenrePatterns,
   analyzeCrossGenrePatterns,
   shouldFilterBySubgenre,
-  detectSubgenres, // ADDED
+  detectSubgenres,
+  stringHash, // ADDED
   boostForCrossGenreMatch,
   type SubgenrePattern,
   type CrossGenrePattern
@@ -688,7 +689,7 @@ function deriveContextMode(context?: SuggestContext): { mode: Exclude<SuggestCon
 }
 
 type FeatureDelta = {
-  feature_type: 'actor' | 'keyword' | 'collection' | 'director' | 'genre';
+  feature_type: 'actor' | 'keyword' | 'collection' | 'director' | 'genre' | 'subgenre';
   feature_id: number;
   feature_name: string;
   deltaPositive: number;
@@ -712,6 +713,11 @@ function selectPairwiseFeatureSlice(features: MovieFeatures): FeatureDelta[] {
   features.genres.slice(0, 3).forEach((genre) =>
     rows.push({ feature_type: 'genre', feature_id: genre.id, feature_name: genre.name, deltaPositive: 0, deltaNegative: 0 })
   );
+  if (features.subgenres && features.subgenres.length > 0) {
+    features.subgenres.slice(0, 5).forEach((subgenre) =>
+      rows.push({ feature_type: 'subgenre', feature_id: subgenre.id, feature_name: subgenre.key, deltaPositive: 0, deltaNegative: 0 })
+    );
+  }
   return rows;
 }
 
@@ -1001,7 +1007,7 @@ interface MovieFeatures {
   genres: Array<{ id: number; name: string }>;
   collection?: { id: number; name: string };
   studios: Array<{ id: number; name: string }>;
-  subgenres: Array<{ key: string; parentGenre: string }>;
+  subgenres: Array<{ id: number; key: string; parentGenre: string }>;
 }
 
 /**
@@ -1168,14 +1174,18 @@ async function extractMovieFeatures(tmdbId: number): Promise<MovieFeatures> {
 
   // Detect subgenres from genres + keywords using existing function
   const allText = (movie.title || '').toLowerCase() + ' ' + (movie.overview || '').toLowerCase();
-  const detectedSubgenres: Array<{ key: string; parentGenre: string }> = [];
+  const detectedSubgenres: Array<{ id: number; key: string; parentGenre: string }> = [];
 
   for (const genre of features.genres) {
     const subs = detectSubgenres(genre, allText, features.keywords, features.keywordIds);
     for (const sub of subs) {
       // Avoid duplicates
       if (!detectedSubgenres.some(s => s.key === sub)) {
-        detectedSubgenres.push({ key: sub, parentGenre: genre });
+        detectedSubgenres.push({
+          id: stringHash(sub),
+          key: sub,
+          parentGenre: genre
+        });
       }
     }
   }
@@ -1273,12 +1283,11 @@ async function updateFeaturePreferences(
   }
 
   // Track subgenres - nuanced taste signals (e.g., HORROR_FOLK, THRILLER_PSYCHOLOGICAL)
-  // Use 0 as feature_id since subgenres don't have numeric IDs; use key as unique identifier
   if (features.subgenres && features.subgenres.length > 0) {
     features.subgenres.slice(0, 5).forEach(subgenre => {
       updates.push({
         feature_type: 'subgenre',
-        feature_id: 0, // Subgenres use key as identifier, not numeric ID
+        feature_id: subgenre.id,
         feature_name: subgenre.key // e.g., 'HORROR_FOLK'
       });
     });
