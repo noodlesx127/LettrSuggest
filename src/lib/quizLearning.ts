@@ -129,9 +129,6 @@ async function getAnsweredQuestions(userId: string): Promise<Set<string>> {
 
 /**
  * Get candidate movies for movie rating questions from user's TMDB cache
- */
-/**
- * Get candidate movies for movie rating questions from user's TMDB cache
  * FILTERS:
  * - Not watched
  * - Not already answered
@@ -174,16 +171,40 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
             }
         }
 
-        // 4. Get trending/popular movies (fetch more to allow for filtering & shuffling)
+        // 4. Source A: Get trending/popular movies (Recent Bias)
         const { data: trendingData } = await supabase
             .from('tmdb_trending')
             .select('tmdb_id')
             .eq('period', 'week')
-            .limit(200); // Increased from 100 to 200 to get more variety
+            .limit(100);
 
-        // 5. Filter IDs by watched/blocked/answered
-        let candidateIds = (trendingData || [])
-            .map(r => r.tmdb_id)
+        // 5. Source B: Get RANDOM library movies (Old/Classic Bias)
+        // We use a random offset to pick deep cuts from the cache
+        const { count } = await supabase
+            .from('tmdb_movies')
+            .select('*', { count: 'exact', head: true });
+
+        const totalMovies = count || 1000;
+        const randomOffset = Math.floor(Math.random() * Math.max(0, totalMovies - 100));
+
+        const { data: libraryData } = await supabase
+            .from('tmdb_movies')
+            .select('tmdb_id')
+            .range(randomOffset, randomOffset + 100);
+
+        // Combine sources
+        const allCandidates = [
+            ...(trendingData || []).map(r => r.tmdb_id),
+            ...(libraryData || []).map(r => r.tmdb_id)
+        ];
+
+        // 6. Filter IDs by watched/blocked/answered
+        const seenCandidates = new Set<number>();
+        let candidateIds = allCandidates.filter(id => {
+            if (seenCandidates.has(id)) return false;
+            seenCandidates.add(id);
+            return true;
+        })
             .filter(id =>
                 !watchedIds.has(id) &&
                 !blockedIds.has(id) &&
