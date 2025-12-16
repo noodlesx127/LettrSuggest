@@ -21,6 +21,20 @@
 ## Current Focus
 - Enhanced genre granularity, seasonal recommendations, and **advanced subgenre-level filtering**.
 
+### ✅ User Quiz Feature (Dec 15, 2025)
+**Repeatable taste quiz to accelerate preference learning:**
+- ✅ New "Take Quiz" button on suggestions page header
+- ✅ Modal-based quiz with 10 questions per session
+- ✅ Three question types:
+  - **Genre Rating**: 5-point scale (Never → Love it!)
+  - **Theme Preference**: Yes/Maybe/No for keywords
+  - **Movie Thumbs Up/Down**: Rate movie interest
+- ✅ Answers update `user_feature_feedback` for learning
+- ✅ Avoids repeat questions using `user_quiz_responses` table
+- ✅ Shows progress and total questions answered
+- 📊 Impact: Faster preference calibration, clearer signals for ambiguous preferences
+
+
 ### ✅ TuiMDB Dual-ID Integration (Nov 15, 2025)
 **TuiMDB UIDs now collected during import:**
 - ✅ Movies enriched with both TMDB ID and TuiMDB UID
