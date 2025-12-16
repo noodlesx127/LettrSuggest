@@ -11,6 +11,7 @@ import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
 import { updateExplorationStats, getAdaptiveExplorationRate, getGenreTransitions, handleNegativeFeedback } from '@/lib/adaptiveLearning';
+import UserQuiz from '@/components/UserQuiz';
 import type { FilmEvent } from '@/lib/normalize';
 
 /**
@@ -138,6 +139,7 @@ export default function SuggestPage() {
   const [featureEvidence, setFeatureEvidence] = useState<Record<string, FeatureEvidenceSummary>>({});
   const [microSurveyCount, setMicroSurveyCount] = useState<number>(0);
   const [pairwiseVideoId, setPairwiseVideoId] = useState<number | null>(null); // Track which pairwise option is showing video
+  const [quizOpen, setQuizOpen] = useState(false); // Taste quiz modal state
 
   // Hybrid feedback popup state - optional "tell us why" after feedback
   const [feedbackPopup, setFeedbackPopup] = useState<{
@@ -3144,9 +3146,19 @@ export default function SuggestPage() {
         )}
 
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Suggestions</h1>
-            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Based on your liked and highly rated films.</p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Suggestions</h1>
+              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Based on your liked and highly rated films.</p>
+            </div>
+            <button
+              onClick={() => setQuizOpen(true)}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 transition-all shadow-sm flex items-center gap-1.5"
+              title="Take a quick quiz to improve your suggestions"
+            >
+              <span>🎯</span>
+              <span>Take Quiz</span>
+            </button>
           </div>
           <div className="flex flex-col items-end gap-1 text-xs">
             <div className="flex items-center gap-2">
@@ -4804,6 +4816,15 @@ export default function SuggestPage() {
             <p className="text-gray-700">Your personalized recommendations will appear here.</p>
           )
         }
+
+        {/* Taste Quiz Modal */}
+        {uid && (
+          <UserQuiz
+            userId={uid}
+            isOpen={quizOpen}
+            onClose={() => setQuizOpen(false)}
+          />
+        )}
       </FeatureEvidenceContext.Provider>
     </AuthGate>
   );
