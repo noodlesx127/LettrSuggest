@@ -185,33 +185,109 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
 }
 
 /**
+ * Get existing feature feedback to identify gaps and ambiguities
+ */
+async function getFeatureFeedback(userId: string): Promise<Map<string, { positive: number; negative: number; total: number; preference: number }>> {
+    if (!supabase) return new Map();
+
+    const { data, error } = await supabase
+        .from('user_feature_feedback')
+        .select('feature_type, feature_id, positive_count, negative_count, inferred_preference')
+        .eq('user_id', userId);
+
+    if (error) {
+        console.error('[QuizLearning] Failed to fetch feature feedback', error);
+        return new Map();
+    }
+
+    const feedback = new Map<string, { positive: number; negative: number; total: number; preference: number }>();
+    for (const row of data || []) {
+        const key = `${row.feature_type}:${row.feature_id}`;
+        feedback.set(key, {
+            positive: row.positive_count,
+            negative: row.negative_count,
+            total: row.positive_count + row.negative_count,
+            preference: row.inferred_preference,
+        });
+    }
+    return feedback;
+}
+
+/**
+ * Score a feature for quiz priority
+ * Lower score = higher priority (ask first)
+ * Priority order: 1) No data 2) Low data 3) Ambiguous 4) Strong preference
+ */
+function scoreFeaturePriority(feedback: Map<string, { positive: number; negative: number; total: number; preference: number }>, type: string, id: number): number {
+    const key = `${type}:${id}`;
+    const data = feedback.get(key);
+
+    if (!data) {
+        // No data - highest priority (score 0)
+        return 0;
+    }
+
+    if (data.total < 3) {
+        // Low data - high priority (score 1-10 based on count)
+        return data.total * 3;
+    }
+
+    // Ambiguous preferences (near 0.5) are higher priority than strong ones
+    const ambiguity = 1 - Math.abs(data.preference - 0.5) * 2; // 0 = strong, 1 = ambiguous
+    return 10 + (1 - ambiguity) * 40; // Score 10-50 based on clarity
+}
+
+/**
  * Generate a batch of quiz questions for a session
+ * SMART PRIORITIZATION:
+ * 1. First, ask about features with NO existing data (cold start)
+ * 2. Then, ask about features with LOW sample counts (<3)
+ * 3. Then, ask about AMBIGUOUS preferences (near 0.5)
+ * 4. Random fallback for well-understood preferences
  */
 export async function generateQuizQuestions(
     userId: string,
     count: number = 10
 ): Promise<QuizQuestion[]> {
     const answered = await getAnsweredQuestions(userId);
+    const feedback = await getFeatureFeedback(userId);
     const questions: QuizQuestion[] = [];
 
-    // Get unanswered genres
-    const unansweredGenres = QUIZ_GENRES.filter(g => !answered.has(`genre:${g.id}`));
+    // Get unanswered genres with priority scores
+    const unansweredGenres = QUIZ_GENRES
+        .filter(g => !answered.has(`genre:${g.id}`))
+        .map(g => ({ ...g, priority: scoreFeaturePriority(feedback, 'genre', g.id) }))
+        .sort((a, b) => a.priority - b.priority); // Lower = higher priority
 
-    // Get unanswered keywords
-    const unansweredKeywords = QUIZ_KEYWORDS.filter(k => !answered.has(`keyword:${k.id}`));
+    // Get unanswered keywords with priority scores
+    const unansweredKeywords = QUIZ_KEYWORDS
+        .filter(k => !answered.has(`keyword:${k.id}`))
+        .map(k => ({ ...k, priority: scoreFeaturePriority(feedback, 'keyword', k.id) }))
+        .sort((a, b) => a.priority - b.priority);
 
-    // Get candidate movies
+    // Get candidate movies (these are already filtered for unwatched)
     const candidateMovies = await getCandidateMovies(userId, answered);
-
-    // Shuffle all pools
-    const shuffledGenres = [...unansweredGenres].sort(() => Math.random() - 0.5);
-    const shuffledKeywords = [...unansweredKeywords].sort(() => Math.random() - 0.5);
+    // Shuffle movies since we can't easily score them
     const shuffledMovies = [...candidateMovies].sort(() => Math.random() - 0.5);
 
-    // Build question list with mixed types
+    // Log prioritization info
+    const hasData = feedback.size > 0;
+    const topGenrePriority = unansweredGenres[0]?.priority ?? 999;
+    const topKeywordPriority = unansweredKeywords[0]?.priority ?? 999;
+
+    console.log('[QuizLearning] Prioritization', {
+        hasExistingData: hasData,
+        feedbackCount: feedback.size,
+        topGenre: unansweredGenres[0]?.name,
+        topGenrePriority,
+        topKeyword: unansweredKeywords[0]?.name,
+        topKeywordPriority,
+    });
+
+    // Build question list - prioritize by combined score
     let genreIdx = 0, keywordIdx = 0, movieIdx = 0;
 
-    // Distribute roughly evenly: 3-4 of each type for 10 questions
+    // For 10 questions: ~4 genres, ~3 keywords, ~3 movies
     const typeRotation: QuizQuestionType[] = [
         'genre_rating', 'theme_preference', 'movie_rating',
         'genre_rating', 'theme_preference', 'movie_rating',
@@ -222,21 +298,21 @@ export async function generateQuizQuestions(
     for (let i = 0; i < count && i < typeRotation.length; i++) {
         const type = typeRotation[i];
 
-        if (type === 'genre_rating' && genreIdx < shuffledGenres.length) {
-            const genre = shuffledGenres[genreIdx++];
+        if (type === 'genre_rating' && genreIdx < unansweredGenres.length) {
+            const genre = unansweredGenres[genreIdx++];
             questions.push({ type: 'genre_rating', genreId: genre.id, genreName: genre.name });
-        } else if (type === 'theme_preference' && keywordIdx < shuffledKeywords.length) {
-            const keyword = shuffledKeywords[keywordIdx++];
+        } else if (type === 'theme_preference' && keywordIdx < unansweredKeywords.length) {
+            const keyword = unansweredKeywords[keywordIdx++];
             questions.push({ type: 'theme_preference', keywordId: keyword.id, keywordName: keyword.name });
         } else if (type === 'movie_rating' && movieIdx < shuffledMovies.length) {
             questions.push(shuffledMovies[movieIdx++]);
         } else {
             // Fallback: try other types
-            if (genreIdx < shuffledGenres.length) {
-                const genre = shuffledGenres[genreIdx++];
+            if (genreIdx < unansweredGenres.length) {
+                const genre = unansweredGenres[genreIdx++];
                 questions.push({ type: 'genre_rating', genreId: genre.id, genreName: genre.name });
-            } else if (keywordIdx < shuffledKeywords.length) {
-                const keyword = shuffledKeywords[keywordIdx++];
+            } else if (keywordIdx < unansweredKeywords.length) {
+                const keyword = unansweredKeywords[keywordIdx++];
                 questions.push({ type: 'theme_preference', keywordId: keyword.id, keywordName: keyword.name });
             } else if (movieIdx < shuffledMovies.length) {
                 questions.push(shuffledMovies[movieIdx++]);
@@ -246,7 +322,8 @@ export async function generateQuizQuestions(
 
     console.log('[QuizLearning] Generated questions', {
         count: questions.length,
-        types: questions.map(q => q.type)
+        types: questions.map(q => q.type),
+        strategy: hasData ? 'smart-prioritized' : 'cold-start',
     });
 
     return questions;
