@@ -575,3 +575,191 @@ export async function getQuizStats(userId: string): Promise<{
         lastQuizDate: data?.[0]?.created_at || null,
     };
 }
+
+/**
+ * Seed user preferences from import history
+ * This should run ONCE after import to pre-populate user_feature_feedback
+ * based on the user's watch history (ratings, likes, rewatches)
+ * 
+ * Weight calculation:
+ * - Highly rated (4.5-5 stars) or liked + rewatch: +3 positive
+ * - Good rating (3.5-4 stars) or liked: +2 positive
+ * - Average (3 stars): +1 positive
+ * - Low rating (1-2 stars): +2 negative
+ * - Very low rating (0.5-1 stars): +3 negative
+ */
+export async function seedPreferencesFromHistory(
+    userId: string,
+    films: Array<{
+        tmdbId: number;
+        rating?: number;
+        liked?: boolean;
+        rewatch?: boolean;
+    }>,
+    onProgress?: (current: number, total: number) => void
+): Promise<{
+    success: boolean;
+    genresSeeded: number;
+    keywordsSeeded: number;
+    actorsSeeded: number;
+    directorsSeeded: number;
+}> {
+    if (!supabase) {
+        return { success: false, genresSeeded: 0, keywordsSeeded: 0, actorsSeeded: 0, directorsSeeded: 0 };
+    }
+
+    console.log('[SeedPreferences] Starting preference seeding', { userId: userId.slice(0, 8), filmCount: films.length });
+
+    // Aggregate feature weights
+    const genreWeights = new Map<number, { name: string; positive: number; negative: number }>();
+    const keywordWeights = new Map<number, { name: string; positive: number; negative: number }>();
+    const actorWeights = new Map<number, { name: string; positive: number; negative: number }>();
+    const directorWeights = new Map<number, { name: string; positive: number; negative: number }>();
+
+    // Get weight delta based on rating/like/rewatch
+    const getWeightDelta = (film: typeof films[0]): { pos: number; neg: number } => {
+        const rating = film.rating ?? 0;
+        const hasRating = rating > 0;
+
+        // Liked + rewatch = strong positive
+        if (film.liked && film.rewatch) return { pos: 3, neg: 0 };
+
+        // Very high rating (4.5-5)
+        if (hasRating && rating >= 4.5) return { pos: 3, neg: 0 };
+
+        // Good rating (3.5-4.5) or liked
+        if ((hasRating && rating >= 3.5) || film.liked) return { pos: 2, neg: 0 };
+
+        // Average (3)
+        if (hasRating && rating >= 3) return { pos: 1, neg: 0 };
+
+        // Low rating (1.5-2.5)
+        if (hasRating && rating >= 1.5) return { pos: 0, neg: 2 };
+
+        // Very low rating (0.5-1)
+        if (hasRating && rating >= 0.5) return { pos: 0, neg: 3 };
+
+        // No rating, no like - neutral, skip
+        return { pos: 0, neg: 0 };
+    };
+
+    // Process each film
+    let processed = 0;
+    for (const film of films) {
+        const delta = getWeightDelta(film);
+        if (delta.pos === 0 && delta.neg === 0) {
+            processed++;
+            continue; // Skip films with no signal
+        }
+
+        // Fetch movie features from cache
+        const { data: movieData } = await supabase
+            .from('tmdb_movies')
+            .select('data')
+            .eq('tmdb_id', film.tmdbId)
+            .maybeSingle();
+
+        if (!movieData?.data) {
+            processed++;
+            continue;
+        }
+
+        const movie = movieData.data as Record<string, unknown>;
+
+        // Extract genres
+        const genres = (movie.genres as Array<{ id: number; name: string }>) || [];
+        for (const genre of genres.slice(0, 3)) {
+            const existing = genreWeights.get(genre.id) || { name: genre.name, positive: 0, negative: 0 };
+            existing.positive += delta.pos;
+            existing.negative += delta.neg;
+            genreWeights.set(genre.id, existing);
+        }
+
+        // Extract keywords
+        const keywords = (movie.keywords as { keywords?: Array<{ id: number; name: string }> })?.keywords || [];
+        for (const kw of keywords.slice(0, 5)) {
+            const existing = keywordWeights.get(kw.id) || { name: kw.name, positive: 0, negative: 0 };
+            existing.positive += delta.pos;
+            existing.negative += delta.neg;
+            keywordWeights.set(kw.id, existing);
+        }
+
+        // Extract cast (top 3 actors)
+        const credits = movie.credits as { cast?: Array<{ id: number; name: string; order: number }>; crew?: Array<{ id: number; name: string; job: string }> } | undefined;
+        const cast = (credits?.cast || []).slice(0, 3);
+        for (const actor of cast) {
+            const existing = actorWeights.get(actor.id) || { name: actor.name, positive: 0, negative: 0 };
+            existing.positive += delta.pos;
+            existing.negative += delta.neg;
+            actorWeights.set(actor.id, existing);
+        }
+
+        // Extract directors
+        const directors = (credits?.crew || []).filter(c => c.job === 'Director').slice(0, 2);
+        for (const director of directors) {
+            const existing = directorWeights.get(director.id) || { name: director.name, positive: 0, negative: 0 };
+            existing.positive += delta.pos;
+            existing.negative += delta.neg;
+            directorWeights.set(director.id, existing);
+        }
+
+        processed++;
+        if (onProgress && processed % 50 === 0) {
+            onProgress(processed, films.length);
+        }
+    }
+
+    console.log('[SeedPreferences] Aggregated weights', {
+        genres: genreWeights.size,
+        keywords: keywordWeights.size,
+        actors: actorWeights.size,
+        directors: directorWeights.size,
+    });
+
+    // Upsert to user_feature_feedback
+    const upsertFeatures = async (
+        type: string,
+        weights: Map<number, { name: string; positive: number; negative: number }>
+    ): Promise<number> => {
+        let count = 0;
+        for (const [id, data] of weights.entries()) {
+            // Only seed if there's significant signal (2+ interactions)
+            if (data.positive + data.negative < 2) continue;
+
+            const total = data.positive + data.negative;
+            const inferredPreference = (data.positive + 1) / (total + 2); // Laplace smoothing
+
+            if (!supabase) continue;
+            await supabase
+                .from('user_feature_feedback')
+                .upsert({
+                    user_id: userId,
+                    feature_type: type,
+                    feature_id: id,
+                    feature_name: data.name,
+                    positive_count: data.positive,
+                    negative_count: data.negative,
+                    inferred_preference: inferredPreference,
+                    last_updated: new Date().toISOString(),
+                }, { onConflict: 'user_id,feature_type,feature_id' });
+
+            count++;
+        }
+        return count;
+    };
+
+    const genresSeeded = await upsertFeatures('genre', genreWeights);
+    const keywordsSeeded = await upsertFeatures('keyword', keywordWeights);
+    const actorsSeeded = await upsertFeatures('actor', actorWeights);
+    const directorsSeeded = await upsertFeatures('director', directorWeights);
+
+    console.log('[SeedPreferences] Seeding complete', {
+        userId: userId.slice(0, 8),
+        genresSeeded,
+        keywordsSeeded,
+        actorsSeeded,
+        directorsSeeded,
+    });
+
+    return { success: true, genresSeeded, keywordsSeeded, actorsSeeded, directorsSeeded };
+}

@@ -8,6 +8,7 @@ import { normalizeData } from '@/lib/normalize';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { searchTmdb, upsertFilmMapping, upsertTmdbCache, learnFromHistoricalData } from '@/lib/enrich';
+import { seedPreferencesFromHistory } from '@/lib/quizLearning';
 import { upsertDiaryEvents } from '@/lib/diary';
 import { saveFilmsLocally } from '@/lib/db';
 import type { FilmEvent } from '@/lib/normalize';
@@ -542,6 +543,31 @@ export default function ImportPage() {
       const uid2 = sessionRes2?.session?.user?.id;
       if (uid2) {
         try {
+          // Get TMDB mappings for seeding
+          const { data: mappingsData } = await supabase!.from('film_tmdb_map')
+            .select('uri, tmdb_id')
+            .eq('user_id', uid2);
+
+          const uriToTmdbId = new Map((mappingsData || []).map(m => [m.uri, m.tmdb_id]));
+
+          // Prepare films with TMDB IDs for seeding
+          const filmsForSeeding = norm.films
+            .filter(f => uriToTmdbId.has(f.uri))
+            .map(f => ({
+              tmdbId: uriToTmdbId.get(f.uri)!,
+              rating: f.rating ?? undefined,
+              liked: f.liked ?? undefined,
+              rewatch: f.rewatch ?? undefined,
+            }));
+
+          // Seed feature preferences from watch history
+          setStatus('Learning your preferences…');
+          const seedResult = await seedPreferencesFromHistory(uid2, filmsForSeeding, (current, total) => {
+            setStatus(`Learning preferences… ${current}/${total}`);
+          });
+          console.log('[Import] Feature seeding complete', seedResult);
+
+          // Also run existing learning for genre transitions
           await learnFromHistoricalData(uid2);
           console.log('[Import] Batch learning complete');
         } catch (e) {
