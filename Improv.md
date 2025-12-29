@@ -3,9 +3,28 @@
 > [!IMPORTANT]
 > **User Feedback Applied**: (1) Remove OMDb completely due to rate limits, (2) Maximize all recommendation sources beyond TMDB
 
+## Implementation Status Summary
+
+| Issue # | Problem | Fix | Status |
+|---------|---------|-----|--------|
+| **#1** | OMDb rate limits | P1.1 Remove OMDb | ✅ Done |
+| **#2** | Missing Simkl API | P2.1 Add Simkl | ⏭️ Skipped (no rec endpoint) |
+| **#3** | TasteDive underutilized | P2.2 Cross-media | ⏭️ Deferred (complex) |
+| **#4** | Liked status underweighted | P2.4 Better weights | ✅ Done |
+| **#5** | Watchlist not used | P1.3 Watchlist discovery | ✅ Done |
+| **#6** | No streaming display | P2.3 Streaming badges | ✅ Done (UI ready) |
+| **#7** | TuiMDB genres unused | - | ⏸️ Not addressed |
+| **#8** | Seed count limited | P1.2 Increase to 25 | ✅ Done |
+| **#9** | No repeat prevention | P1.4 Persist shownIds | ✅ Done (localStorage 7-day TTL) |
+| **#10** | Subgenre keywords missing | P3.2 Expand keywords | ✅ Done (+35 new) |
+| **#11** | Director discovery narrow | - | ⏸️ Not addressed |
+| **NEW** | No source transparency | P2.5 Show API sources | ✅ Done |
+
+---
+
 ## Executive Summary
 
-The suggestion algorithm is sophisticated with **multi-source recommendation aggregation** from 5+ APIs, **90+ subgenre detection**, **adaptive exploration learning**, and **24 categorized suggestion sections**. However, there are several areas where the Letterboxd user data and available APIs could be utilized more effectively.
+The suggestion algorithm is sophisticated with **multi-source recommendation aggregation** from 5+ APIs, **125+ subgenre detection**, **adaptive exploration learning**, and **24 categorized suggestion sections**. This audit identified 11 issues and proposed 10 improvements, of which **8 have been implemented**.
 
 ---
 
