@@ -143,8 +143,8 @@ async function fetchTraktRelatedIds(seedId: number, limit = 10): Promise<number[
 export async function fetchSimilarMovieIds(seedIds: number[], limitPerSeed = 10): Promise<number[]> {
   const allIds = new Set<number>();
 
-  // Limit seeds to avoid too many API calls
-  const limitedSeeds = seedIds.slice(0, 10);
+  // Limit seeds to avoid too many API calls (increased from 10 to 25 for more diversity)
+  const limitedSeeds = seedIds.slice(0, 25);
 
   for (const seedId of limitedSeeds) {
     try {
@@ -286,6 +286,7 @@ export async function discoverMoviesByProfile(options: {
  */
 export async function generateSmartCandidates(profile: {
   highlyRatedIds: number[];
+  watchlistIds?: number[]; // NEW: User's Letterboxd watchlist for intent-based discovery
   topGenres: Array<{ id: number; weight: number }>;
   topKeywords: Array<{ id: number; name: string; weight: number }>;
   topDirectors: Array<{ id: number; name: string; weight: number }>;
@@ -293,14 +294,15 @@ export async function generateSmartCandidates(profile: {
   topStudios?: Array<{ id: number; name: string; weight: number }>;
   excludeYearRange?: { min?: number; max?: number };
   tmdbDetailsMap?: Map<number, { title?: string; imdb_id?: string }>;
-}): Promise<{ 
-  trending: number[]; 
-  similar: number[]; 
-  discovered: number[]; 
+}): Promise<{
+  trending: number[];
+  similar: number[];
+  discovered: number[];
   sourceMetadata: Map<number, { sources: string[]; consensusLevel: 'high' | 'medium' | 'low' }>;
 }> {
   console.log('[SmartCandidates] Generating with enhanced profile', {
     highlyRatedCount: profile.highlyRatedIds.length,
+    watchlistCount: profile.watchlistIds?.length ?? 0,
     topGenresCount: profile.topGenres.length,
     topKeywordsCount: profile.topKeywords.length,
     topDirectorsCount: profile.topDirectors.length,
@@ -333,9 +335,18 @@ export async function generateSmartCandidates(profile: {
       // Import Server Action (safe for client use)
       const { getAggregatedRecommendations } = await import('@/app/actions/recommendations');
 
-      // Get top 15 highly-rated films as seeds WITH TITLES from cache (increased from 10)
-      // More seeds = more diverse recommendations from Trakt & TasteDive
-      const seedMovies = profile.highlyRatedIds.slice(0, 15).map(tmdbId => {
+      // Combine highly-rated films with watchlist for richer seed pool
+      // highlyRatedIds = what user loved (past preferences)
+      // watchlistIds = what user wants to watch (future intent/discovery signals)
+      const combinedSeedIds = [
+        ...profile.highlyRatedIds.slice(0, 20), // Top 20 from watch history
+        ...(profile.watchlistIds?.slice(0, 10) ?? []), // Top 10 from watchlist (intent signals)
+      ];
+
+      // Deduplicate while preserving order
+      const uniqueSeedIds = [...new Set(combinedSeedIds)].slice(0, 25);
+
+      const seedMovies = uniqueSeedIds.map(tmdbId => {
         const details = profile.tmdbDetailsMap?.get(tmdbId);
         return {
           tmdbId,
@@ -345,7 +356,9 @@ export async function generateSmartCandidates(profile: {
       }).filter(s => s.title); // Only include seeds where we have a title (TasteDive needs it)
 
       console.log('[SmartCandidates] Seed movies with titles:', {
-        total: 15,
+        fromHighlyRated: Math.min(20, profile.highlyRatedIds.length),
+        fromWatchlist: Math.min(10, profile.watchlistIds?.length ?? 0),
+        combined: uniqueSeedIds.length,
         withTitles: seedMovies.length,
         sampleTitles: seedMovies.slice(0, 5).map(s => s.title)
       });
@@ -360,7 +373,7 @@ export async function generateSmartCandidates(profile: {
         // Only add if score is decent
         if (rec.score > 0.5) {
           results.similar.push(rec.tmdbId);
-          
+
           // Store source metadata for multi-source badge display
           results.sourceMetadata.set(rec.tmdbId, {
             sources: rec.sources.map(s => s.source),
@@ -369,7 +382,7 @@ export async function generateSmartCandidates(profile: {
         }
       }
 
-      console.log('[SmartCandidates] Aggregated recommendations added:', results.similar.length, 
+      console.log('[SmartCandidates] Aggregated recommendations added:', results.similar.length,
         'with source tracking:', results.sourceMetadata.size);
     }
   } catch (e) {

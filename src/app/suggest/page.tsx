@@ -1150,11 +1150,19 @@ export default function SuggestPage() {
         .map(f => mappings.get(f.uri))
         .filter((id): id is number => id != null);
 
+      // Get watchlist film IDs for intent-based discovery (P1.3 improvement)
+      const watchlistIdArray = filteredFilms
+        .filter(f => f.onWatchlist === true)
+        .map(f => mappings.get(f.uri))
+        .filter((id): id is number => id != null);
+      console.log('[Suggest] Watchlist IDs for discovery:', watchlistIdArray.length);
+
       // Generate smart candidates using multiple TMDB discovery strategies
       console.log('[Suggest] Generating smart candidates');
       setProgress({ current: 4, total: 7, stage: 'discover', details: 'Searching across TMDB, TasteDive, Trakt, and more...' });
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
+        watchlistIds: watchlistIdArray, // NEW: Use watchlist for intent-based discovery
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors,
@@ -1662,6 +1670,7 @@ export default function SuggestPage() {
 
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
+        watchlistIds: watchlistFilmsForMore.map(f => mappings.get(f.uri)!), // Use watchlist for intent-based discovery
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors
@@ -1838,6 +1847,7 @@ export default function SuggestPage() {
 
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
+        watchlistIds: watchlistFilmsForRefresh.map(f => mappings.get(f.uri)!), // Use watchlist for intent-based discovery
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors

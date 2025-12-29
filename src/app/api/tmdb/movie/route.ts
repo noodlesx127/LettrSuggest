@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getOMDbByIMDB, mergeTMDBAndOMDb } from '@/lib/omdb';
 
 export async function GET(req: Request) {
   try {
@@ -50,28 +49,7 @@ export async function GET(req: Request) {
       tmdbData.media_type = 'movie';
     }
 
-    let finalMovie = tmdbData;
-
-    // 2. OMDb enrichment - DISABLED (API key issues)
-    // To re-enable, uncomment the block below and ensure OMDB_API_KEY is valid
-    /*
-    if (tmdbData.imdb_id) {
-      try {
-        console.log(`[API] Attempting OMDb enrichment for ${tmdbData.imdb_id}`);
-        const omdbData = await getOMDbByIMDB(tmdbData.imdb_id, { plot: 'full' });
-        if (omdbData) {
-          console.log(`[API] OMDb data fetched successfully for ${tmdbData.imdb_id}`);
-          finalMovie = mergeTMDBAndOMDb(tmdbData, omdbData);
-        } else {
-          console.log(`[API] OMDb returned no data for ${tmdbData.imdb_id}`);
-        }
-      } catch (error) {
-        console.error(`[API] Failed to fetch OMDb data for ${tmdbData.imdb_id}:`, error);
-      }
-    }
-    */
-
-    return NextResponse.json({ ok: true, movie: finalMovie });
+    return NextResponse.json({ ok: true, movie: tmdbData });
   } catch (e: any) {
     console.error('[API] Unexpected error:', e);
     return NextResponse.json({ error: e?.message ?? 'Unexpected error' }, { status: 500 });
