@@ -508,11 +508,11 @@ export default function MovieCard({
           <h3 className="font-semibold text-base leading-tight mb-1 line-clamp-2" title={title}>
             {title}
           </h3>
-          
+
           {/* Year and Ratings Row */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
             {year && <span className="text-gray-600 dark:text-gray-400 font-medium">{year}</span>}
-            
+
             {vote_average && (
               <>
                 {year && <span className="text-gray-400">•</span>}
@@ -522,7 +522,7 @@ export default function MovieCard({
                 </span>
               </>
             )}
-            
+
             {imdb_rating && (
               <>
                 <span className="text-gray-400">•</span>
@@ -534,7 +534,7 @@ export default function MovieCard({
                 </span>
               </>
             )}
-            
+
             {rotten_tomatoes && (
               <>
                 <span className="text-gray-400">•</span>
@@ -544,7 +544,7 @@ export default function MovieCard({
                 </span>
               </>
             )}
-            
+
             {metacritic && (
               <>
                 <span className="text-gray-400">•</span>
@@ -581,7 +581,7 @@ export default function MovieCard({
           {/* Poster Column */}
           <div className="flex-shrink-0">
             <PosterImage posterPath={posterPath} title={title} />
-            
+
             {/* Quick Action Buttons */}
             {trailerKey && (
               <button
@@ -608,7 +608,7 @@ export default function MovieCard({
                   {strengthBadge.label}
                 </span>
               )}
-              
+
               {consensusBadge && (
                 <span
                   className={`px-2 py-1 text-xs font-medium rounded whitespace-nowrap ${consensusBadge.className}`}
@@ -617,7 +617,7 @@ export default function MovieCard({
                   {consensusBadge.label}
                 </span>
               )}
-              
+
               {reliabilityBadge && (
                 <span
                   className={`px-2 py-1 text-xs font-medium rounded whitespace-nowrap ${reliabilityBadge.className}`}
@@ -626,28 +626,37 @@ export default function MovieCard({
                   {reliabilityBadge.label}
                 </span>
               )}
-              
+
               {sources && sources.length >= 2 && (
-                <span 
+                <span
                   className="px-2 py-1 text-xs font-medium rounded whitespace-nowrap bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
                   title={`Recommended by: ${sources.map(s => SOURCE_LABELS[s] || s).join(', ')}`}
                 >
-                  {sources.length} Sources
+                  {sources.map(s => SOURCE_LABELS[s] || s).join(' + ')}
                 </span>
               )}
-              
+
+              {sources && sources.length === 1 && (
+                <span
+                  className="px-2 py-1 text-xs font-medium rounded whitespace-nowrap bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
+                  title={`Recommended by ${SOURCE_LABELS[sources[0]] || sources[0]}`}
+                >
+                  via {SOURCE_LABELS[sources[0]] || sources[0]}
+                </span>
+              )}
+
               {isInWatchlist && (
                 <span className="px-2 py-1 text-xs font-medium bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 rounded whitespace-nowrap" title="In your watchlist">
                   📋 Watchlist
                 </span>
               )}
-              
+
               {voteCategoryBadge && (
                 <span className={`px-2 py-1 text-xs font-medium rounded whitespace-nowrap ${voteCategoryBadge.className}`}>
                   {voteCategoryBadge.label}
                 </span>
               )}
-              
+
               {collectionName && (
                 <span className="px-2 py-1 text-xs font-medium bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200 rounded whitespace-nowrap" title="Part of a collection">
                   🎬 {collectionName}
@@ -757,11 +766,10 @@ export default function MovieCard({
                     setFeedbackState(null);
                   }}
                   disabled={!!feedbackState}
-                  className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${
-                    feedbackState === 'negative'
+                  className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${feedbackState === 'negative'
                       ? 'bg-gray-200 text-gray-400 cursor-wait'
                       : 'bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200'
-                  }`}
+                    }`}
                   title="Not interested in this suggestion"
                 >
                   {feedbackState === 'negative' ? (
@@ -790,11 +798,10 @@ export default function MovieCard({
                     setFeedbackState(null);
                   }}
                   disabled={!!feedbackState}
-                  className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${
-                    feedbackState === 'positive'
+                  className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${feedbackState === 'positive'
                       ? 'bg-blue-200 text-blue-400 cursor-wait'
                       : 'bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600'
-                  }`}
+                    }`}
                   title="Show more suggestions like this"
                 >
                   {feedbackState === 'positive' ? (
@@ -831,13 +838,12 @@ export default function MovieCard({
                   }
                 }}
                 disabled={saveState !== 'idle'}
-                className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${
-                  saveState === 'saved'
+                className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${saveState === 'saved'
                     ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
                     : saveState === 'saving'
                       ? 'bg-purple-200 text-purple-400 cursor-wait'
                       : 'bg-purple-600 hover:bg-purple-700 text-white dark:bg-purple-500 dark:hover:bg-purple-600'
-                }`}
+                  }`}
                 title={saveState === 'saved' ? 'Saved to your list' : 'Save to your list'}
               >
                 {saveState === 'saving' ? (
