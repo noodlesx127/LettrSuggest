@@ -114,14 +114,17 @@ export async function buildEnhancedTasteProfile(params: {
   const watchlistGenres = new Map<string, number>();
   const watchlistDirectors = new Map<string, number>();
 
-  // Helper to calculate preference weight
+  // P2.4: Increased weight differentiation for "liked" films
+  // "Liked" status is a strong positive signal - should have significantly more impact
   const getWeight = (rating?: number, isLiked?: boolean): number => {
     const r = rating ?? 3;
-    if (r >= 4.5) return isLiked ? 2.0 : 1.5;
-    if (r >= 3.5) return isLiked ? 1.5 : 1.2;
-    if (r >= 2.5) return isLiked ? 1.0 : 0.3;
-    if (r >= 1.5) return isLiked ? 0.7 : 0.1;
-    return isLiked ? 0.5 : 0.0;
+    // Liked films get a significant boost (1.5x-2x) compared to just rated
+    if (r >= 4.5) return isLiked ? 2.5 : 1.5;  // +1.0 gap (was +0.5)
+    if (r >= 4.0) return isLiked ? 2.0 : 1.2;  // +0.8 gap (new tier)
+    if (r >= 3.5) return isLiked ? 1.5 : 0.9;  // +0.6 gap (was +0.3)
+    if (r >= 2.5) return isLiked ? 1.0 : 0.3;  // +0.7 gap (was +0.7)
+    if (r >= 1.5) return isLiked ? 0.7 : 0.1;  // +0.6 gap unchanged
+    return isLiked ? 0.5 : 0.0;               // Liked but 1-star is still some signal
   };
 
   // Statistics
