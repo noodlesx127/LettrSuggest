@@ -257,12 +257,13 @@ For implemented improvements:
 
 ## Recommended Action Plan
 
-| Priority | Task | Effort | Impact |
-|----------|------|--------|--------|
-| **P1.1** | Remove OMDb completely | 30 min | Eliminates rate limit errors |
-| **P1.2** | Increase seed count 10→25 | 5 min | More diverse recs |
-| **P1.3** | Add watchlist to discovery | 30 min | Uses intent signals |
-| **P1.4** | Persist shown IDs | 1 hour | No session repeats |
-| **P2.1** | Add Simkl recommendation API | 2 hours | New unique movies |
-| **P2.2** | Enhance TasteDive cross-media | 1 hour | Better hidden gems |
-| **P2.5** | Show rec source on MovieCard | 30 min | User transparency |
+| Priority | Task | Effort | Impact | Status |
+|----------|------|--------|--------|--------|
+| **P1.1** | Remove OMDb completely | 30 min | Eliminates rate limit errors | ✅ Done |
+| **P1.2** | Increase seed count 10→25 | 5 min | More diverse recs | ✅ Done |
+| **P1.3** | Add watchlist to discovery | 30 min | Uses intent signals | ✅ Done |
+| **P1.4** | Persist shown IDs (localStorage) | 1 hour | No session repeats | ✅ Done |
+| **P2.1** | Add Simkl API | 2 hours | New unique movies | ⏭️ Skipped (no rec endpoint) |
+| **P2.2** | Enhance TasteDive cross-media | 1 hour | Better hidden gems | ⏸️ Pending |
+| **P2.5** | Show rec source on MovieCard | 30 min | User transparency | ✅ Done |
+
