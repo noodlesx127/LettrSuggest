@@ -201,6 +201,49 @@ export default function SuggestPage() {
     }
   }, []);
 
+  // P1.4: Load shownIds from localStorage on mount (7-day TTL to prevent stale data)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('lettrsuggest_shown_ids');
+      if (stored) {
+        const { ids, timestamp } = JSON.parse(stored);
+        const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+        const isValid = timestamp && (Date.now() - timestamp) < SEVEN_DAYS_MS;
+
+        if (isValid && Array.isArray(ids) && ids.length > 0) {
+          console.log('[Suggest] Restored shown IDs from localStorage', ids.length);
+          setShownIds(new Set(ids));
+        } else if (!isValid) {
+          // Clear expired data
+          console.log('[Suggest] Cleared expired shown IDs data');
+          localStorage.removeItem('lettrsuggest_shown_ids');
+        }
+      }
+    } catch (e) {
+      console.error('[Suggest] Failed to restore shown IDs', e);
+    }
+  }, []);
+
+  // P1.4: Save shownIds to localStorage when they change (debounced)
+  useEffect(() => {
+    if (shownIds.size > 0) {
+      const timeoutId = setTimeout(() => {
+        try {
+          const data = {
+            ids: Array.from(shownIds),
+            timestamp: Date.now()
+          };
+          localStorage.setItem('lettrsuggest_shown_ids', JSON.stringify(data));
+          console.log('[Suggest] Saved shown IDs to localStorage', shownIds.size);
+        } catch (e) {
+          console.error('[Suggest] Failed to save shown IDs', e);
+        }
+      }, 500); // Debounce to avoid excessive writes
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [shownIds]);
+
   // Save to session storage when items change
   useEffect(() => {
     if (items && items.length > 0) {
