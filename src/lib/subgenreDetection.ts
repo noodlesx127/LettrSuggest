@@ -226,6 +226,61 @@ export const SUBGENRE_KEYWORDS = {
   FANTASY_FAIRY_TALE: ['fairy tale', 'fairytale', 'storybook', 'once upon a time', 'enchanted'],
   FANTASY_SWORD_SORCERY: ['sword and sorcery', 'conan', 'barbarian', 'adventure fantasy'],
   FANTASY_MYTHOLOGICAL: ['mythological', 'greek mythology', 'norse mythology', 'legends', 'gods'],
+
+  // ============================================
+  // P3.2: NEW SUBGENRES - WAR (8)
+  // ============================================
+  WAR_WW1: ['world war 1', 'world war i', 'wwi', 'ww1', 'trenches', 'great war', '1917', 'gallipoli'],
+  WAR_WW2: ['world war 2', 'world war ii', 'wwii', 'ww2', 'nazi', 'holocaust', 'd-day', 'normandy', 'pacific theater'],
+  WAR_VIETNAM: ['vietnam war', 'vietnam', 'saigon', 'jungle warfare', 'apocalypse now', 'platoon'],
+  WAR_MODERN: ['modern warfare', 'iraq war', 'afghanistan', 'desert storm', 'war on terror', 'seal team'],
+  WAR_CIVIL: ['civil war', 'american civil war', 'brother against brother', 'revolutionary war'],
+  WAR_COLD: ['cold war', 'iron curtain', 'nuclear threat', 'soviet', 'espionage cold war'],
+  WAR_ANCIENT: ['ancient warfare', 'roman legion', 'gladiator', 'spartan', 'medieval battle', 'siege'],
+  WAR_ANTI: ['anti-war', 'antiwar', 'pacifist', 'war is hell', 'futility of war', 'conscientious objector'],
+
+  // ============================================
+  // P3.2: NEW SUBGENRES - CRIME (10)
+  // ============================================
+  CRIME_GANGSTER: ['gangster', 'mob', 'mafia', 'organized crime', 'crime family', 'godfather', 'cosa nostra', 'cartel'],
+  CRIME_HEIST: ['heist', 'robbery', 'bank heist', 'casino heist', 'diamond heist', 'perfect crime'],
+  CRIME_NOIR: ['noir', 'film noir', 'neo-noir', 'hardboiled', 'femme fatale', 'private eye'],
+  CRIME_PRISON: ['prison', 'jail', 'incarceration', 'escape', 'warden', 'death row', 'solitary'],
+  CRIME_DRUG: ['drug dealer', 'drug trafficking', 'narco', 'cartel', 'drug lord', 'breaking bad', 'dealer'],
+  CRIME_SERIAL_KILLER: ['serial killer', 'mass murderer', 'psychopath', 'killer', 'manhunt', 'profiler', 'fbi'],
+  CRIME_DOCUMENTARY: ['true crime', 'crime documentary', 'investigation', 'cold case', 'unsolved'],
+  CRIME_POLICE: ['police procedural', 'detective', 'cop', 'investigation', 'law enforcement', 'badge'],
+  CRIME_COURTROOM: ['courtroom', 'trial', 'jury', 'verdict', 'legal thriller', 'prosecutor', 'defense attorney'],
+  CRIME_VIGILANTE: ['vigilante', 'revenge', 'justice', 'one man army', 'death wish', 'punisher'],
+
+  // ============================================
+  // P3.2: NEW SUBGENRES - MUSICAL (5)
+  // ============================================
+  MUSICAL_CLASSIC: ['classic musical', 'golden age', 'broadway', 'song and dance', 'rogers and hammerstein'],
+  MUSICAL_MODERN: ['modern musical', 'pop musical', 'contemporary musical', 'la la land', 'greatest showman'],
+  MUSICAL_ROCK: ['rock musical', 'rock opera', 'rock and roll', 'rock concert', 'bohemian rhapsody'],
+  MUSICAL_ANIMATED: ['animated musical', 'disney musical', 'singing animals', 'cartoon musical'],
+  MUSICAL_JUKEBOX: ['jukebox musical', 'catalog musical', 'mamma mia', 'song catalog'],
+
+  // ============================================
+  // P3.2: NEW SUBGENRES - FAMILY/KIDS (6)
+  // ============================================
+  FAMILY_ADVENTURE: ['family adventure', 'kids adventure', 'treasure hunt', 'journey', 'quest'],
+  FAMILY_FANTASY: ['family fantasy', 'magical world', 'fairyland', 'wizard', 'enchanted'],
+  FAMILY_ANIMAL: ['animal movie', 'talking animals', 'pet', 'dog movie', 'horse movie', 'wildlife'],
+  FAMILY_HOLIDAY: ['family holiday', 'christmas movie', 'holiday special', 'santa', 'easter bunny'],
+  FAMILY_SPORTS: ['kids sports', 'youth sports', 'little league', 'underdog team', 'mighty ducks'],
+  FAMILY_COMEDY: ['family comedy', 'kids comedy', 'slapstick family', 'home alone', 'silly'],
+
+  // ============================================
+  // P3.2: NEW SUBGENRES - WESTERN (6)
+  // ============================================
+  WESTERN_CLASSIC: ['classic western', 'traditional western', 'john wayne', 'cowboys', 'frontier'],
+  WESTERN_SPAGHETTI: ['spaghetti western', 'sergio leone', 'clint eastwood', 'italian western', 'morricone'],
+  WESTERN_REVISIONIST: ['revisionist western', 'anti-western', 'unforgiven', 'deconstruction', 'gray morality'],
+  WESTERN_NEO: ['neo-western', 'modern western', 'contemporary western', 'no country', 'sicario'],
+  WESTERN_COMEDY: ['western comedy', 'comedic western', 'blazing saddles', 'parody western'],
+  WESTERN_HORROR: ['weird west', 'supernatural western', 'horror western', 'bone tomahawk', 'ghost town'],
 };
 
 /**
@@ -242,8 +297,11 @@ export function analyzeSubgenrePatterns(films: Array<{
 
   const patterns = new Map<string, SubgenrePattern>();
 
-  // Initialize patterns for each major genre
-  const majorGenres = ['Action', 'Science Fiction', 'Horror', 'Comedy', 'Drama', 'Thriller'];
+  // Initialize patterns for each major genre (P3.2: expanded list)
+  const majorGenres = [
+    'Action', 'Science Fiction', 'Horror', 'Comedy', 'Drama', 'Thriller',
+    'War', 'Crime', 'Music', 'Family', 'Western', 'Animation', 'Documentary', 'Romance', 'Fantasy'
+  ];
 
   for (const genre of majorGenres) {
     patterns.set(genre, {
