@@ -87,17 +87,16 @@ export async function enrichMovieForImport(
 
             if (serverData.ratings) {
                 const r = serverData.ratings;
-                if (r.imdb_rating) {
-                    movie.imdb_rating = r.imdb_rating;
-                    movie.imdb_votes = r.imdb_votes;
+                // Use 'rating' field (TMDB or Watchmode source)
+                if (r.rating) {
+                    movie.imdb_rating = r.rating;
                 }
                 if (r.rotten_tomatoes) movie.rotten_tomatoes = r.rotten_tomatoes;
                 if (r.metacritic) movie.metacritic = r.metacritic;
-                if (r.awards) movie.awards = r.awards;
 
                 console.log('[ImportEnrich] Ratings aggregated:', {
-                    imdb: r.imdb_rating,
-                    source: r.imdb_source,
+                    rating: r.rating,
+                    source: r.rating_source,
                     rt: r.rotten_tomatoes,
                 });
             }
