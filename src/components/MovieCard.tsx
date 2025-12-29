@@ -73,6 +73,8 @@ type MovieCardProps = {
   reliabilityMultiplier?: number;
   onUndoDismiss?: (id: number) => void;
   featureEvidence?: Record<string, FeatureEvidenceSummary>;
+  // P2.3: Streaming availability
+  streamingSources?: Array<{ name: string; type: 'sub' | 'buy' | 'rent' | 'free'; url?: string }>;
 };
 
 // Source display labels
@@ -304,7 +306,8 @@ export default function MovieCard({
   consensusLevel,
   reliabilityMultiplier,
   onUndoDismiss,
-  featureEvidence
+  featureEvidence,
+  streamingSources // P2.3
 }: MovieCardProps) {
   const [showVideo, setShowVideo] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -574,6 +577,37 @@ export default function MovieCard({
               )}
             </div>
           )}
+
+          {/* P2.3: Streaming Availability */}
+          {streamingSources && streamingSources.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">📺</span>
+              {streamingSources
+                .filter(s => s.type === 'sub' || s.type === 'free') // Prioritize subscription/free
+                .slice(0, 4)
+                .map((s, idx) => (
+                  <a
+                    key={idx}
+                    href={s.url || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`px-2 py-0.5 text-xs rounded-full transition-colors ${s.type === 'sub'
+                        ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-200 hover:bg-purple-200 dark:hover:bg-purple-900/60'
+                        : 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-900/60'
+                      }`}
+                    title={s.type === 'sub' ? `Stream on ${s.name}` : `Free on ${s.name}`}
+                    onClick={(e) => !s.url && e.preventDefault()}
+                  >
+                    {s.name}
+                  </a>
+                ))}
+              {streamingSources.filter(s => s.type === 'sub' || s.type === 'free').length > 4 && (
+                <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 rounded-full">
+                  +{streamingSources.filter(s => s.type === 'sub' || s.type === 'free').length - 4}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Main Content Area */}
@@ -767,8 +801,8 @@ export default function MovieCard({
                   }}
                   disabled={!!feedbackState}
                   className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${feedbackState === 'negative'
-                      ? 'bg-gray-200 text-gray-400 cursor-wait'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200'
+                    ? 'bg-gray-200 text-gray-400 cursor-wait'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200'
                     }`}
                   title="Not interested in this suggestion"
                 >
@@ -799,8 +833,8 @@ export default function MovieCard({
                   }}
                   disabled={!!feedbackState}
                   className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${feedbackState === 'positive'
-                      ? 'bg-blue-200 text-blue-400 cursor-wait'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600'
+                    ? 'bg-blue-200 text-blue-400 cursor-wait'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600'
                     }`}
                   title="Show more suggestions like this"
                 >
@@ -839,10 +873,10 @@ export default function MovieCard({
                 }}
                 disabled={saveState !== 'idle'}
                 className={`flex-1 py-2 px-2 rounded text-xs font-medium flex items-center justify-center gap-1 transition-colors min-w-0 ${saveState === 'saved'
-                    ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
-                    : saveState === 'saving'
-                      ? 'bg-purple-200 text-purple-400 cursor-wait'
-                      : 'bg-purple-600 hover:bg-purple-700 text-white dark:bg-purple-500 dark:hover:bg-purple-600'
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+                  : saveState === 'saving'
+                    ? 'bg-purple-200 text-purple-400 cursor-wait'
+                    : 'bg-purple-600 hover:bg-purple-700 text-white dark:bg-purple-500 dark:hover:bg-purple-600'
                   }`}
                 title={saveState === 'saved' ? 'Saved to your list' : 'Save to your list'}
               >
