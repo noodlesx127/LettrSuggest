@@ -265,6 +265,8 @@ For implemented improvements:
 | **P1.4** | Persist shown IDs (localStorage) | 1 hour | No session repeats | ✅ Done |
 | **P2.1** | Add Simkl API | 2 hours | New unique movies | ⏭️ Skipped (no rec endpoint) |
 | **P2.2** | Enhance TasteDive cross-media | 1 hour | Better hidden gems | ⏭️ Deferred (complex) |
+| **P2.3** | Add streaming availability | 30 min | See where to watch | ✅ Done |
 | **P2.4** | Better "Liked" weight | 30 min | Stronger preference signal | ✅ Done |
 | **P2.5** | Show rec source on MovieCard | 30 min | User transparency | ✅ Done |
+| **P3.2** | Expand subgenre keywords | 1 hour | Better niche detection | ✅ Done |
 
