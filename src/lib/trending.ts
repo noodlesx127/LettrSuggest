@@ -294,6 +294,13 @@ export async function generateSmartCandidates(profile: {
   topStudios?: Array<{ id: number; name: string; weight: number }>;
   excludeYearRange?: { min?: number; max?: number };
   tmdbDetailsMap?: Map<number, { title?: string; imdb_id?: string }>;
+  // Issue #7: TuiMDB niche genre preferences
+  nichePreferences?: {
+    likesAnime: boolean;
+    likesStandUp: boolean;
+    likesFoodDocs: boolean;
+    likesTravelDocs: boolean;
+  };
 }): Promise<{
   trending: number[];
   similar: number[];
@@ -480,14 +487,15 @@ export async function generateSmartCandidates(profile: {
   }
 
   // 4. Discover by favorite directors (no year restrictions)
+  // Issue #11: Expanded from 3 to 8 directors for users with diverse tastes
   try {
     if (profile.topDirectors.length > 0) {
       // Shuffle director selection for variety
       const shuffledDirectors = [...profile.topDirectors].sort(() => Math.random() - 0.5);
 
-      // Try with top directors, no year filter
+      // Try with top directors (expanded from 3 to 8), no year filter
       const directorDiscovered = await discoverMoviesByProfile({
-        people: shuffledDirectors.slice(0, 3).map(d => d.id),
+        people: shuffledDirectors.slice(0, 8).map(d => d.id),
         peopleMode: 'OR', // Match ANY of the top directors
         sortBy: 'vote_average.desc',
         limit: 100
@@ -495,7 +503,7 @@ export async function generateSmartCandidates(profile: {
       results.discovered.push(...directorDiscovered);
       console.log('[SmartCandidates] Director discovery', {
         count: directorDiscovered.length,
-        directors: shuffledDirectors.slice(0, 3).map(d => ({ id: d.id, name: d.name }))
+        directors: shuffledDirectors.slice(0, 8).map(d => ({ id: d.id, name: d.name }))
       });
 
       // Fallback: Try with single director if multiple directors returned nothing
@@ -583,6 +591,61 @@ export async function generateSmartCandidates(profile: {
     }
   } catch (e) {
     console.error('[SmartCandidates] Single genre discovery failed', e);
+  }
+
+  // 8. Issue #7: TuiMDB niche genre discovery (Anime, Food docs, Travel docs)
+  // These are unique to TuiMDB and not covered by standard TMDB genres
+  if (profile.nichePreferences) {
+    try {
+      const niche = profile.nichePreferences;
+
+      // Anime discovery (Animation genre + anime-related keywords)
+      if (niche.likesAnime && results.discovered.length < 350) {
+        const animationGenreId = 16; // TMDB Animation genre
+        const animeKeywords = [210024, 6534, 9715, 1663]; // anime, japanese animation, manga, studio ghibli
+        const animeDiscovered = await discoverMoviesByProfile({
+          genres: [animationGenreId],
+          keywords: animeKeywords.slice(0, 2),
+          sortBy: 'vote_average.desc',
+          minVotes: 50,
+          limit: 50
+        });
+        results.discovered.push(...animeDiscovered);
+        console.log('[SmartCandidates] Anime discovery (TuiMDB #7)', { count: animeDiscovered.length });
+      }
+
+      // Food documentary discovery
+      if (niche.likesFoodDocs && results.discovered.length < 350) {
+        const docGenreId = 99; // TMDB Documentary genre
+        const foodKeywords = [1726, 5565, 1424, 803]; // cooking, food, chef, restaurant
+        const foodDocDiscovered = await discoverMoviesByProfile({
+          genres: [docGenreId],
+          keywords: foodKeywords.slice(0, 2),
+          sortBy: 'popularity.desc',
+          minVotes: 20,
+          limit: 30
+        });
+        results.discovered.push(...foodDocDiscovered);
+        console.log('[SmartCandidates] Food doc discovery (TuiMDB #7)', { count: foodDocDiscovered.length });
+      }
+
+      // Travel documentary discovery
+      if (niche.likesTravelDocs && results.discovered.length < 350) {
+        const docGenreId = 99; // TMDB Documentary genre
+        const travelKeywords = [699, 3616, 252, 10842]; // travel, journey, adventure, expedition
+        const travelDocDiscovered = await discoverMoviesByProfile({
+          genres: [docGenreId],
+          keywords: travelKeywords.slice(0, 2),
+          sortBy: 'popularity.desc',
+          minVotes: 20,
+          limit: 30
+        });
+        results.discovered.push(...travelDocDiscovered);
+        console.log('[SmartCandidates] Travel doc discovery (TuiMDB #7)', { count: travelDocDiscovered.length });
+      }
+    } catch (e) {
+      console.error('[SmartCandidates] Niche genre discovery failed', e);
+    }
   }
 
   console.log('[SmartCandidates] Generated', {
