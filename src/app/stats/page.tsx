@@ -365,19 +365,36 @@ export default function StatsPage() {
 
       try {
         // Get ALL mappings for this user instead of using .in() which can hit query limits
-        console.log('[Stats] Fetching mappings for user');
-        const { data: allMappings, error: mappingError } = await supabase!
-          .from('film_tmdb_map')
-          .select('uri, tmdb_id')
-          .eq('user_id', uid);
+        // Paginate through all results (PostgREST defaults to 1000 max per request)
+        console.log('[Stats] Fetching mappings for user (paginated)');
+        const pageSize = 1000;
+        let from = 0;
+        const allMappings: Array<{ uri: string; tmdb_id: number }> = [];
 
-        if (mappingError) {
-          console.error('[Stats] Error fetching mappings:', mappingError);
-          setDetailsError(`Error loading mappings: ${mappingError.message}`);
-          clearTimeout(timeoutId);
-          setLoadingDetails(false);
-          return;
+        while (true) {
+          const { data: pageData, error: mappingError } = await supabase!
+            .from('film_tmdb_map')
+            .select('uri, tmdb_id')
+            .eq('user_id', uid)
+            .range(from, from + pageSize - 1);
+
+          if (mappingError) {
+            console.error('[Stats] Error fetching mappings page:', { from, error: mappingError });
+            setDetailsError(`Error loading mappings: ${mappingError.message}`);
+            clearTimeout(timeoutId);
+            setLoadingDetails(false);
+            return;
+          }
+
+          const rows = pageData ?? [];
+          allMappings.push(...rows);
+
+          // If we got fewer than pageSize, we've fetched all rows
+          if (rows.length < pageSize) break;
+          from += pageSize;
         }
+
+        console.log(`[Stats] Total mappings fetched: ${allMappings.length}`);
 
         if (!allMappings || allMappings.length === 0) {
           console.log('[Stats] No mappings found for user');
