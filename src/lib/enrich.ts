@@ -51,17 +51,7 @@ export type TMDBMovie = {
   lists?: { results?: Array<{ id: number; name: string; description?: string; item_count?: number }> };
   tuimdb_uid?: number; // TuiMDB's internal UID for cross-referencing
   enhanced_genres?: Array<{ id: number; name: string; source: 'tmdb' | 'tuimdb' }>; // Merged TMDB + TuiMDB genres
-  // OMDb enrichment fields
   imdb_id?: string; // IMDB ID from TMDB (e.g., "tt0111161")
-  imdb_rating?: string; // IMDB rating from OMDb (e.g., "9.3")
-  imdb_votes?: string; // IMDB vote count (e.g., "2,500,000")
-  rotten_tomatoes?: string; // Rotten Tomatoes score (e.g., "91%")
-  metacritic?: string; // Metacritic score (e.g., "82")
-  awards?: string; // Awards text (e.g., "Won 3 Oscars. 145 wins & 142 nominations")
-  box_office?: string; // Box office gross (e.g., "$28,767,189")
-  rated?: string; // Content rating (e.g., "PG-13", "R")
-  omdb_plot_full?: string; // Full plot from OMDb
-  omdb_poster?: string; // OMDb poster URL (fallback if TMDB missing)
 };
 
 /**
@@ -2242,7 +2232,25 @@ export async function buildTasteProfile(params: {
     totalFilms: number;
     rewatchRate: number;
   };
+  nichePreferences: {
+    likesAnime: boolean;
+    likesStandUp: boolean;
+    likesFoodDocs: boolean;
+    likesTravelDocs: boolean;
+  };
 }> {
+  const { detectNicheGenres } = await import('./genreEnhancement');
+
+  // Prepare films for niche detection
+  const nicheFilms = params.films.map(f => ({
+    title: '', // Titles not strictly needed for keyword matching in detectNicheGenres if IDs are present, but we might want them
+    genres: [], // detectNicheGenres will need to be robust or we provide IDs
+    rating: f.rating,
+    liked: f.liked
+  }));
+
+  // However, buildTasteProfile in enrich.ts might not have titles for all films.
+  // Let's actually use the data we are already collecting in the loop below.
   console.log('=== BUILD TASTE PROFILE START ===');
   console.log('[TasteProfile] Input params:', {
     filmsCount: params.films.length,
@@ -2714,6 +2722,7 @@ export async function buildTasteProfile(params: {
   }
 
   // Sort and return top N for each category
+  // Sort and return top N for each category
   const topGenres = Array.from(genreWeights.entries())
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, topN)
@@ -2877,6 +2886,20 @@ export async function buildTasteProfile(params: {
 
   console.log('=== BUILD TASTE PROFILE END ===');
 
+  // Issue #7: Detect niche genre preferences
+  const nicheFilmsForDetection = likedFilms.map(f => {
+    const tmdbId = params.mappings.get(f.uri);
+    const details = tmdbId ? params.tmdbDetails?.get(tmdbId) : null;
+    return {
+      title: details?.title || f.uri.split('/').filter(Boolean).pop()?.replace(/-/g, ' ') || '',
+      genres: details?.genres?.map((g: any) => g.name) || [],
+      rating: f.rating,
+      liked: f.liked
+    };
+  });
+
+  const nichePreferences = detectNicheGenres(nicheFilmsForDetection);
+
   return {
     topGenres,
     topKeywords,
@@ -2890,7 +2913,8 @@ export async function buildTasteProfile(params: {
     watchlistGenres: Array.from(watchlistGenreNames),
     watchlistKeywords: Array.from(watchlistKeywordNames),
     watchlistDirectors: Array.from(watchlistDirectorNames),
-    userStats
+    userStats,
+    nichePreferences
   };
 }
 

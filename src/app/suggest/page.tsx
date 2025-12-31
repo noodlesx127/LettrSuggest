@@ -54,6 +54,7 @@ type MovieItem = {
   original_language?: string;
   spoken_languages?: string[];
   production_countries?: string[];
+  streamingSources?: Array<{ name: string; type: 'sub' | 'buy' | 'rent' | 'free'; url?: string }>;
 };
 
 type CategorizedSuggestions = {
@@ -1205,13 +1206,14 @@ export default function SuggestPage() {
       setProgress({ current: 4, total: 7, stage: 'discover', details: 'Searching across TMDB, TasteDive, Trakt, and more...' });
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
-        watchlistIds: watchlistIdArray, // NEW: Use watchlist for intent-based discovery
+        watchlistIds: watchlistIdArray, // Pass watchlist for intent-based discovery (P1.3)
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors,
         topActors: tasteProfile.topActors,
         topStudios: tasteProfile.topStudios,
-        tmdbDetailsMap // Pass details for TasteDive to use titles
+        tmdbDetailsMap, // Pass details for TasteDive to use titles
+        nichePreferences: tasteProfile.nichePreferences // Issue #7 implementation
       });
 
       // Fetch decade candidates
@@ -1449,6 +1451,15 @@ export default function SuggestPage() {
             const spoken_languages = (movie.spoken_languages || []).map((l: any) => l.iso_639_1);
             const production_countries = (movie.production_countries || []).map((c: any) => c.iso_3166_1);
 
+            // P2.3: Fetch streaming availability from Watchmode
+            let streamingSources: any[] = [];
+            try {
+              const { getStreamingSourcesByTMDB } = await import('@/lib/watchmode');
+              streamingSources = await getStreamingSourcesByTMDB(s.tmdbId);
+            } catch (e) {
+              console.warn(`[Suggest] Failed to fetch streaming sources for ${s.tmdbId}`, e);
+            }
+
             return {
               id: s.tmdbId,
               title: s.title ?? movie.title ?? `#${s.tmdbId}`,
@@ -1470,7 +1481,8 @@ export default function SuggestPage() {
               runtime,
               original_language,
               spoken_languages,
-              production_countries
+              production_countries,
+              streamingSources // P2.3 implementation
             };
           }
         } catch (e) {
@@ -1716,7 +1728,8 @@ export default function SuggestPage() {
         watchlistIds: watchlistFilmsForMore.map(f => mappings.get(f.uri)!), // Use watchlist for intent-based discovery
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
-        topDirectors: tasteProfile.topDirectors
+        topDirectors: tasteProfile.topDirectors,
+        nichePreferences: tasteProfile.nichePreferences
       });
 
       let candidatesRaw: number[] = [];
@@ -1893,7 +1906,8 @@ export default function SuggestPage() {
         watchlistIds: watchlistFilmsForRefresh.map(f => mappings.get(f.uri)!), // Use watchlist for intent-based discovery
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
-        topDirectors: tasteProfile.topDirectors
+        topDirectors: tasteProfile.topDirectors,
+        nichePreferences: tasteProfile.nichePreferences
       });
 
       let candidatesRaw: number[] = [];
