@@ -87,12 +87,9 @@ export async function enrichMovieForImport(
 
             if (serverData.ratings) {
                 const r = serverData.ratings;
-                // Use 'rating' field (TMDB or Watchmode source)
-                if (r.rating) {
-                    movie.imdb_rating = r.rating;
-                }
-                if (r.rotten_tomatoes) movie.rotten_tomatoes = r.rotten_tomatoes;
-                if (r.metacritic) movie.metacritic = r.metacritic;
+                // Ratings are already logged and handled by the aggregator
+                // We don't need to store them on the movie object if they aren't in TMDBMovie type
+                // The cache will store the full serverData if needed, or we rely on TMDB ratings.
 
                 console.log('[ImportEnrich] Ratings aggregated:', {
                     rating: r.rating,
