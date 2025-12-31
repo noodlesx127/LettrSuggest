@@ -13,11 +13,11 @@
 | **#4** | Liked status underweighted | P2.4 Better weights | ✅ Done |
 | **#5** | Watchlist not used | P1.3 Watchlist discovery | ✅ Done |
 | **#6** | No streaming display | P2.3 Streaming badges | ✅ Done (UI ready) |
-| **#7** | TuiMDB genres unused | - | ⏸️ Not addressed |
+| **#7** | TuiMDB genres unused | Niche discovery step | ✅ Done (Anime/Food/Travel) |
 | **#8** | Seed count limited | P1.2 Increase to 25 | ✅ Done |
 | **#9** | No repeat prevention | P1.4 Persist shownIds | ✅ Done (localStorage 7-day TTL) |
 | **#10** | Subgenre keywords missing | P3.2 Expand keywords | ✅ Done (+35 new) |
-| **#11** | Director discovery narrow | - | ⏸️ Not addressed |
+| **#11** | Director discovery narrow | Expand 3→8 | ✅ Done |
 | **NEW** | No source transparency | P2.5 Show API sources | ✅ Done |
 
 ---
