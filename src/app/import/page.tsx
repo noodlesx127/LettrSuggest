@@ -543,12 +543,32 @@ export default function ImportPage() {
       const uid2 = sessionRes2?.session?.user?.id;
       if (uid2) {
         try {
-          // Get TMDB mappings for seeding
-          const { data: mappingsData } = await supabase!.from('film_tmdb_map')
-            .select('uri, tmdb_id')
-            .eq('user_id', uid2);
+          // Get TMDB mappings for seeding (paginated - PostgREST defaults to 1000 max per request)
+          const pageSize = 1000;
+          let from = 0;
+          const allMappings: Array<{ uri: string; tmdb_id: number }> = [];
 
-          const uriToTmdbId = new Map((mappingsData || []).map(m => [m.uri, m.tmdb_id]));
+          while (true) {
+            const { data: pageData, error } = await supabase!.from('film_tmdb_map')
+              .select('uri, tmdb_id')
+              .eq('user_id', uid2)
+              .range(from, from + pageSize - 1);
+
+            if (error) {
+              console.warn('[Import] Error fetching mappings page for learning', { from, error });
+              break;
+            }
+
+            const rows = pageData ?? [];
+            allMappings.push(...rows);
+
+            // If we got fewer than pageSize, we've fetched all rows
+            if (rows.length < pageSize) break;
+            from += pageSize;
+          }
+
+          console.log(`[Import] Fetched ${allMappings.length} TMDB mappings for learning`);
+          const uriToTmdbId = new Map(allMappings.map(m => [m.uri, m.tmdb_id]));
 
           // Prepare films with TMDB IDs for seeding
           const filmsForSeeding = norm.films
