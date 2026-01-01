@@ -3637,7 +3637,7 @@ export async function suggestByOverlap(params: {
 
     // Secondary factors (20%)
     keyword: 0.5,         // 10% - Keyword/subgenre matching
-    studio: 0.5,          // 10% - Production company matching (NEW)
+    studio: 0.8,          // 10% - Production company matching (increased for A24/Ghibli fans)
 
     // Tertiary factors (10%)
     cast: 0.2,            // 5% - Supporting cast matching
