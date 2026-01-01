@@ -283,7 +283,8 @@ export default function GenreSuggestPage() {
                 topN: 10,
                 negativeFeedbackIds,
                 tmdbDetails: tmdbDetailsMap,
-                watchlistFilms
+                watchlistFilms,
+                userId: uid
             });
 
             // Get highly-rated film IDs
