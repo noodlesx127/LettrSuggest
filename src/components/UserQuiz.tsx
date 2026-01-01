@@ -9,10 +9,18 @@ import {
     type GenreRatingQuestion,
     type ThemePreferenceQuestion,
     type MovieRatingQuestion,
+    type SubgenrePreferenceQuestion,
+    type ActorPreferenceQuestion,
+    type DirectorPreferenceQuestion,
+    type EraPreferenceQuestion,
     type GenreRatingAnswer,
     type ThemePreferenceAnswer,
     type MovieRatingAnswer,
+    type SubgenrePreferenceAnswer,
+    type PersonPreferenceAnswer,
+    type EraPreferenceAnswer,
 } from '@/lib/quizLearning';
+
 
 interface UserQuizProps {
     userId: string;
@@ -54,7 +62,7 @@ export default function UserQuiz({ userId, isOpen, onClose }: UserQuizProps) {
     const currentQuestion = questions[currentIndex];
     const progress = questions.length > 0 ? ((currentIndex) / questions.length) * 100 : 0;
 
-    const handleAnswer = useCallback(async (answer: GenreRatingAnswer | ThemePreferenceAnswer | MovieRatingAnswer) => {
+    const handleAnswer = useCallback(async (answer: GenreRatingAnswer | ThemePreferenceAnswer | MovieRatingAnswer | SubgenrePreferenceAnswer | PersonPreferenceAnswer | EraPreferenceAnswer) => {
         if (!currentQuestion || submitting) return;
 
         setSubmitting(true);
@@ -164,6 +172,34 @@ export default function UserQuiz({ userId, isOpen, onClose }: UserQuizProps) {
                         />
                     ) : currentQuestion?.type === 'movie_rating' ? (
                         <MovieRatingView
+                            question={currentQuestion}
+                            onAnswer={handleAnswer}
+                            onSkip={handleSkip}
+                            submitting={submitting}
+                        />
+                    ) : currentQuestion?.type === 'subgenre_preference' ? (
+                        <SubgenrePreferenceView
+                            question={currentQuestion}
+                            onAnswer={handleAnswer}
+                            onSkip={handleSkip}
+                            submitting={submitting}
+                        />
+                    ) : currentQuestion?.type === 'actor_preference' ? (
+                        <ActorPreferenceView
+                            question={currentQuestion}
+                            onAnswer={handleAnswer}
+                            onSkip={handleSkip}
+                            submitting={submitting}
+                        />
+                    ) : currentQuestion?.type === 'director_preference' ? (
+                        <DirectorPreferenceView
+                            question={currentQuestion}
+                            onAnswer={handleAnswer}
+                            onSkip={handleSkip}
+                            submitting={submitting}
+                        />
+                    ) : currentQuestion?.type === 'era_preference' ? (
+                        <EraPreferenceView
                             question={currentQuestion}
                             onAnswer={handleAnswer}
                             onSkip={handleSkip}
@@ -450,6 +486,243 @@ function MovieRatingView({
             </div>
 
             <div className="mt-4 flex justify-center">
+                <button
+                    onClick={onSkip}
+                    disabled={submitting}
+                    className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
+                >
+                    Skip this question
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// Subgenre Preference Question View
+function SubgenrePreferenceView({
+    question,
+    onAnswer,
+    onSkip,
+    submitting,
+}: {
+    question: SubgenrePreferenceQuestion;
+    onAnswer: (answer: SubgenrePreferenceAnswer) => void;
+    onSkip: () => void;
+    submitting: boolean;
+}) {
+    const options = [
+        { value: 'love' as const, label: 'Love it!', emoji: '😍', color: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60' },
+        { value: 'like' as const, label: 'I enjoy these', emoji: '👍', color: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60' },
+        { value: 'neutral' as const, label: 'Depends on the movie', emoji: '🤔', color: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200 dark:hover:bg-yellow-900/60' },
+        { value: 'dislike' as const, label: 'Not for me', emoji: '👎', color: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/60' },
+    ];
+
+    return (
+        <div className="flex-1 flex flex-col">
+            <div className="text-center mb-6">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                    {question.parentGenreName} Sub-genre
+                </p>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                    How do you feel about{' '}
+                    <span className="text-purple-600 dark:text-purple-400">{question.subgenreName}</span>?
+                </h3>
+            </div>
+
+            <div className="flex-1 flex flex-col justify-center gap-3">
+                {options.map(({ value, label, emoji, color }) => (
+                    <button
+                        key={value}
+                        onClick={() => onAnswer({ preference: value })}
+                        disabled={submitting}
+                        className={`w-full px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${color} ${submitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        <span className="text-2xl">{emoji}</span>
+                        <span className="flex-1 text-left">{label}</span>
+                    </button>
+                ))}
+            </div>
+
+            <div className="mt-6 flex justify-center">
+                <button
+                    onClick={onSkip}
+                    disabled={submitting}
+                    className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
+                >
+                    Skip this question
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// Actor Preference Question View
+function ActorPreferenceView({
+    question,
+    onAnswer,
+    onSkip,
+    submitting,
+}: {
+    question: ActorPreferenceQuestion;
+    onAnswer: (answer: PersonPreferenceAnswer) => void;
+    onSkip: () => void;
+    submitting: boolean;
+}) {
+    const options = [
+        { value: 'fan' as const, label: 'I&apos;m a fan!', emoji: '⭐', color: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60' },
+        { value: 'neutral' as const, label: 'Neutral', emoji: '😐', color: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200 dark:hover:bg-yellow-900/60' },
+        { value: 'avoid' as const, label: 'I avoid their movies', emoji: '🚫', color: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/60' },
+    ];
+
+    return (
+        <div className="flex-1 flex flex-col">
+            <div className="text-center mb-6">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Actor Preference</p>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                    What do you think of{' '}
+                    <span className="text-blue-600 dark:text-blue-400">{question.actorName}</span>?
+                </h3>
+                {question.knownFor && (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                        Known for: {question.knownFor}
+                    </p>
+                )}
+            </div>
+
+            <div className="flex-1 flex flex-col justify-center gap-4">
+                {options.map(({ value, label, emoji, color }) => (
+                    <button
+                        key={value}
+                        onClick={() => onAnswer({ preference: value })}
+                        disabled={submitting}
+                        className={`w-full px-6 py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-3 text-lg ${color} ${submitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        <span className="text-2xl">{emoji}</span>
+                        <span>{label}</span>
+                    </button>
+                ))}
+            </div>
+
+            <div className="mt-6 flex justify-center">
+                <button
+                    onClick={onSkip}
+                    disabled={submitting}
+                    className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
+                >
+                    Skip this question
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// Director Preference Question View
+function DirectorPreferenceView({
+    question,
+    onAnswer,
+    onSkip,
+    submitting,
+}: {
+    question: DirectorPreferenceQuestion;
+    onAnswer: (answer: PersonPreferenceAnswer) => void;
+    onSkip: () => void;
+    submitting: boolean;
+}) {
+    const options = [
+        { value: 'fan' as const, label: 'Love their work!', emoji: '🎬', color: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60' },
+        { value: 'neutral' as const, label: 'Haven&apos;t noticed', emoji: '😐', color: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200 dark:hover:bg-yellow-900/60' },
+        { value: 'avoid' as const, label: 'Not my style', emoji: '🚫', color: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/60' },
+    ];
+
+    return (
+        <div className="flex-1 flex flex-col">
+            <div className="text-center mb-6">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Director Preference</p>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                    How do you feel about{' '}
+                    <span className="text-orange-600 dark:text-orange-400">{question.directorName}</span>?
+                </h3>
+                {question.knownFor && (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                        Known for: {question.knownFor}
+                    </p>
+                )}
+            </div>
+
+            <div className="flex-1 flex flex-col justify-center gap-4">
+                {options.map(({ value, label, emoji, color }) => (
+                    <button
+                        key={value}
+                        onClick={() => onAnswer({ preference: value })}
+                        disabled={submitting}
+                        className={`w-full px-6 py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-3 text-lg ${color} ${submitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        <span className="text-2xl">{emoji}</span>
+                        <span>{label}</span>
+                    </button>
+                ))}
+            </div>
+
+            <div className="mt-6 flex justify-center">
+                <button
+                    onClick={onSkip}
+                    disabled={submitting}
+                    className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
+                >
+                    Skip this question
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// Era Preference Question View
+function EraPreferenceView({
+    question,
+    onAnswer,
+    onSkip,
+    submitting,
+}: {
+    question: EraPreferenceQuestion;
+    onAnswer: (answer: EraPreferenceAnswer) => void;
+    onSkip: () => void;
+    submitting: boolean;
+}) {
+    const options = [
+        { value: 'love' as const, label: 'Love this era!', emoji: '❤️', color: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60' },
+        { value: 'like' as const, label: 'Enjoy it', emoji: '👍', color: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60' },
+        { value: 'neutral' as const, label: 'No preference', emoji: '😐', color: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200 dark:hover:bg-yellow-900/60' },
+        { value: 'dislike' as const, label: 'Not my era', emoji: '👎', color: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/60' },
+    ];
+
+    return (
+        <div className="flex-1 flex flex-col">
+            <div className="text-center mb-6">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Decade Preference</p>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                    How do you feel about{' '}
+                    <span className="text-pink-600 dark:text-pink-400">{question.eraName}</span> movies?
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 italic">
+                    {question.eraDescription}
+                </p>
+            </div>
+
+            <div className="flex-1 flex flex-col justify-center gap-3">
+                {options.map(({ value, label, emoji, color }) => (
+                    <button
+                        key={value}
+                        onClick={() => onAnswer({ preference: value })}
+                        disabled={submitting}
+                        className={`w-full px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${color} ${submitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        <span className="text-2xl">{emoji}</span>
+                        <span className="flex-1 text-left">{label}</span>
+                    </button>
+                ))}
+            </div>
+
+            <div className="mt-6 flex justify-center">
                 <button
                     onClick={onSkip}
                     disabled={submitting}

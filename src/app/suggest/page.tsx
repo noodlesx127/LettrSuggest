@@ -1023,7 +1023,8 @@ export default function SuggestPage() {
         topN: 10,
         negativeFeedbackIds,
         tmdbDetails: tmdbDetailsMap, // Pass pre-fetched details to analyze ALL movies, not just 100
-        watchlistFilms // Pass watchlist for intent signals
+        watchlistFilms, // Pass watchlist for intent signals
+        userId: uid ?? undefined // Pass user ID for explicit preference fetching
       });
 
       // Update progress with taste profile results
@@ -1721,7 +1722,8 @@ export default function SuggestPage() {
         films: filteredFilms,
         mappings,
         topN: 10,
-        watchlistFilms: watchlistFilmsForMore
+        watchlistFilms: watchlistFilmsForMore,
+        userId: uid ?? undefined
       });
 
       const smartCandidates = await generateSmartCandidates({
@@ -1900,7 +1902,8 @@ export default function SuggestPage() {
         mappings,
         topN: 10,
         negativeFeedbackIds,
-        watchlistFilms: watchlistFilmsForRefresh
+        watchlistFilms: watchlistFilmsForRefresh,
+        userId: uid ?? undefined
       });
 
       const smartCandidates = await generateSmartCandidates({

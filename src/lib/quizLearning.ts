@@ -6,8 +6,15 @@
 import { supabase } from './supabaseClient';
 import { detectSubgenres, stringHash } from './subgenreDetection';
 
-// Types
-export type QuizQuestionType = 'genre_rating' | 'theme_preference' | 'movie_rating';
+// Types - Extended with new question types
+export type QuizQuestionType =
+    | 'genre_rating'
+    | 'theme_preference'
+    | 'movie_rating'
+    | 'subgenre_preference'
+    | 'actor_preference'
+    | 'director_preference'
+    | 'era_preference';
 
 export interface GenreRatingQuestion {
     type: 'genre_rating';
@@ -32,7 +39,46 @@ export interface MovieRatingQuestion {
     trailerKey?: string | null;
 }
 
-export type QuizQuestion = GenreRatingQuestion | ThemePreferenceQuestion | MovieRatingQuestion;
+// NEW: Subgenre preference question
+export interface SubgenrePreferenceQuestion {
+    type: 'subgenre_preference';
+    subgenreKey: string;      // e.g., 'HORROR_FOLK'
+    subgenreName: string;     // e.g., 'Folk Horror'
+    parentGenreName: string;  // e.g., 'Horror'
+}
+
+// NEW: Actor preference question
+export interface ActorPreferenceQuestion {
+    type: 'actor_preference';
+    actorId: number;
+    actorName: string;
+    knownFor?: string;  // e.g., "The Dark Knight, Inception"
+}
+
+// NEW: Director preference question
+export interface DirectorPreferenceQuestion {
+    type: 'director_preference';
+    directorId: number;
+    directorName: string;
+    knownFor?: string;
+}
+
+// NEW: Era/Decade preference question
+export interface EraPreferenceQuestion {
+    type: 'era_preference';
+    decade: number;          // e.g., 1980
+    eraName: string;         // e.g., "1980s"
+    eraDescription: string;  // e.g., "Practical effects, synth soundtracks"
+}
+
+export type QuizQuestion =
+    | GenreRatingQuestion
+    | ThemePreferenceQuestion
+    | MovieRatingQuestion
+    | SubgenrePreferenceQuestion
+    | ActorPreferenceQuestion
+    | DirectorPreferenceQuestion
+    | EraPreferenceQuestion;
 
 export interface GenreRatingAnswer {
     rating: 1 | 2 | 3 | 4 | 5; // 1=Never, 2=Rarely, 3=Sometimes, 4=Often, 5=Love it
@@ -46,7 +92,28 @@ export interface MovieRatingAnswer {
     thumbsUp: boolean;
 }
 
-export type QuizAnswer = GenreRatingAnswer | ThemePreferenceAnswer | MovieRatingAnswer;
+// NEW: Subgenre answer (same as theme preference)
+export interface SubgenrePreferenceAnswer {
+    preference: 'love' | 'like' | 'neutral' | 'dislike';
+}
+
+// NEW: Person preference answer
+export interface PersonPreferenceAnswer {
+    preference: 'fan' | 'neutral' | 'avoid';
+}
+
+// NEW: Era preference answer
+export interface EraPreferenceAnswer {
+    preference: 'love' | 'like' | 'neutral' | 'dislike';
+}
+
+export type QuizAnswer =
+    | GenreRatingAnswer
+    | ThemePreferenceAnswer
+    | MovieRatingAnswer
+    | SubgenrePreferenceAnswer
+    | PersonPreferenceAnswer
+    | EraPreferenceAnswer;
 
 // Genre list for quiz questions (TMDB genre IDs)
 const QUIZ_GENRES = [
@@ -70,8 +137,9 @@ const QUIZ_GENRES = [
     { id: 37, name: 'Western' },
 ];
 
-// Common keywords/themes for quiz questions
+// Common keywords/themes for quiz questions - MASSIVELY EXPANDED (150+ keywords)
 const QUIZ_KEYWORDS = [
+    // ==== CLASSIC THEMES (Original 37) ====
     { id: 9715, name: 'superhero' },
     { id: 4344, name: 'musical' },
     { id: 10349, name: 'survival' },
@@ -92,7 +160,6 @@ const QUIZ_KEYWORDS = [
     { id: 1430, name: 'conspiracy' },
     { id: 11332, name: 'martial arts' },
     { id: 1454, name: 'world war ii' },
-    // Additional themes for more variety
     { id: 4379, name: 'remake' },
     { id: 9748, name: 'revenge' },
     { id: 207317, name: 'christmas' },
@@ -108,7 +175,313 @@ const QUIZ_KEYWORDS = [
     { id: 3929, name: 'independent film' },
     { id: 1299, name: 'monster' },
     { id: 157430, name: 'dark comedy' },
+
+    // ==== SETTINGS & LOCATIONS ====
+    { id: 1844, name: 'prison' },
+    { id: 10084, name: 'new york' },
+    { id: 1382, name: 'los angeles' },
+    { id: 187056, name: 'las vegas' },
+    { id: 4613, name: 'small town' },
+    { id: 6917, name: 'island' },
+    { id: 12988, name: 'jungle' },
+    { id: 10289, name: 'ocean' },
+    { id: 1826, name: 'desert' },
+    { id: 9692, name: 'space station' },
+    { id: 14643, name: 'underwater' },
+    { id: 2052, name: 'haunted' },
+    { id: 15101, name: 'parallel universe' },
+    { id: 10891, name: 'high school' },
+    { id: 207928, name: 'college' },
+    { id: 12565, name: 'hospital' },
+    { id: 14639, name: 'suburbia' },
+
+    // ==== STORY ELEMENTS ====
+    { id: 9673, name: 'twist ending' },
+    { id: 10873, name: 'buddy cop' },
+    { id: 5565, name: 'biography' },
+    { id: 1631, name: 'race against time' },
+    { id: 233, name: 'treasure hunt' },
+    { id: 9916, name: 'amnesia' },
+    { id: 3650, name: 'double cross' },
+    { id: 10714, name: 'chase' },
+    { id: 2910, name: 'rescue mission' },
+    { id: 6077, name: 'love triangle' },
+    { id: 209117, name: 'unreliable narrator' },
+    { id: 15058, name: 'mistaken identity' },
+    { id: 161176, name: 'chosen one' },
+    { id: 9755, name: 'parody' },
+    { id: 3616, name: 'fish out of water' },
+    { id: 11057, name: 'midlife crisis' },
+    { id: 10617, name: 'forbidden fruit' },
+    { id: 10959, name: 'star-crossed lovers' },
+
+    // ==== CHARACTER TYPES ====
+    { id: 14552, name: 'assassin' },
+    { id: 3085, name: 'bounty hunter' },
+    { id: 14901, name: 'detective' },
+    { id: 6029, name: 'soldier' },
+    { id: 15157, name: 'scientist' },
+    { id: 12309, name: 'outlaw' },
+    { id: 10527, name: 'vigilante' },
+    { id: 2623, name: 'gangster' },
+    { id: 4424, name: 'psychopath' },
+    { id: 12995, name: 'genius' },
+    { id: 11081, name: 'werewolf' },
+    { id: 14909, name: 'alien' },
+    { id: 10061, name: 'ghost' },
+    { id: 9714, name: 'robot' },
+    { id: 156770, name: 'witch' },
+    { id: 3205, name: 'pirate' },
+    { id: 1293, name: 'samurai' },
+    { id: 15145, name: 'ninja' },
+    { id: 170362, name: 'hitman' },
+    { id: 10149, name: 'cowboy' },
+
+    // ==== EMOTIONS & TONE ====
+    { id: 9717, name: 'feel good' },
+    { id: 155430, name: 'tearjerker' },
+    { id: 6054, name: 'heartwarming' },
+    { id: 10850, name: 'suspenseful' },
+    { id: 3741, name: 'sexy' },
+    { id: 9729, name: 'inspirational' },
+    { id: 6539, name: 'nostalgic' },
+    { id: 156174, name: 'occult' },
+    { id: 1965, name: 'mind-bending' },
+    { id: 17015, name: 'mind control' },
+    { id: 163053, name: 'atmospheric' },
+
+    // ==== CONCEPTS & IDEAS ====
+    { id: 3270, name: 'immortality' },
+    { id: 402, name: 'cloning' },
+    { id: 14601, name: 'virtual reality' },
+    { id: 1449, name: 'apocalypse' },
+    { id: 9951, name: 'alien contact' },
+    { id: 4426, name: 'dream' },
+    { id: 779, name: 'nuclear war' },
+    { id: 14757, name: 'memory' },
+    { id: 10085, name: 'multiverse' },
+    { id: 16120, name: 'simulation' },
+    { id: 174582, name: 'possession' },
+    { id: 6992, name: 'cult' },
+    { id: 1325, name: 'exorcism' },
+    { id: 3766, name: 'cannibalism' },
+    { id: 10370, name: 'drug addiction' },
+    { id: 214780, name: 'courtroom' },
+    { id: 14533, name: 'bank robbery' },
+    { id: 9891, name: 'jewel theft' },
+    { id: 10028, name: 'steampunk' },
+    { id: 12190, name: 'cyberpunk' },
+
+    // ==== RELATIONSHIPS ====
+    { id: 161859, name: 'bromance' },
+    { id: 156852, name: 'enemies to lovers' },
+    { id: 15012, name: 'long-distance relationship' },
+    { id: 9840, name: 'wedding' },
+    { id: 11479, name: 'divorce' },
+    { id: 155889, name: 'family drama' },
+    { id: 10168, name: 'adoption' },
+    { id: 11348, name: 'pregnancy' },
+    { id: 12648, name: 'sibling rivalry' },
+
+    // ==== BASED ON... ====
+    { id: 9717, name: 'based on comic' },
+    { id: 9716, name: 'based on video game' },
+    { id: 207322, name: 'based on podcast' },
+    { id: 10596, name: 'based on play' },
+    { id: 155573, name: 'true crime' },
+    { id: 2673, name: 'historical fiction' },
+    { id: 287501, name: 'anime adaptation' },
+
+    // ==== MORE SPECIFIC GENRES ====
+    { id: 155387, name: 'mockumentary' },
+    { id: 6930, name: 'stop motion' },
+    { id: 10084, name: 'black and white' },
+    { id: 11324, name: 'silent film' },
+    { id: 4270, name: 'noir' },
+    { id: 1942, name: 'exploitation' },
+    { id: 10077, name: 'grindhouse' },
+    { id: 14692, name: 'slasher' },
+    { id: 191736, name: 'torture porn' },
+    { id: 155574, name: 'eco-horror' },
 ];
+
+// ==== SUBGENRES FOR DIRECT QUESTIONS ====
+// Derived from subgenreData.ts - includes all major subgenres for direct preference queries
+const QUIZ_SUBGENRES = [
+    // HORROR subgenres
+    { key: 'HORROR_SUPERNATURAL', name: 'Supernatural Horror', parent: 'Horror' },
+    { key: 'HORROR_PSYCHOLOGICAL', name: 'Psychological Horror', parent: 'Horror' },
+    { key: 'HORROR_SLASHER', name: 'Slasher Films', parent: 'Horror' },
+    { key: 'HORROR_ZOMBIE', name: 'Zombie Horror', parent: 'Horror' },
+    { key: 'HORROR_BODY', name: 'Body Horror', parent: 'Horror' },
+    { key: 'HORROR_FOLK', name: 'Folk Horror', parent: 'Horror' },
+    { key: 'HORROR_WITCH', name: 'Witch Films', parent: 'Horror' },
+    { key: 'HORROR_COSMIC', name: 'Cosmic Horror', parent: 'Horror' },
+    { key: 'HORROR_GOTHIC', name: 'Gothic Horror', parent: 'Horror' },
+    { key: 'HORROR_FOUND_FOOTAGE', name: 'Found Footage Horror', parent: 'Horror' },
+    { key: 'HORROR_MONSTER', name: 'Monster Movies', parent: 'Horror' },
+    { key: 'HORROR_VAMPIRE', name: 'Vampire Films', parent: 'Horror' },
+    { key: 'HORROR_WEREWOLF', name: 'Werewolf Films', parent: 'Horror' },
+    { key: 'HORROR_COMEDY', name: 'Horror Comedy', parent: 'Horror' },
+    { key: 'HORROR_EXTREME', name: 'Extreme Horror', parent: 'Horror' },
+    { key: 'HORROR_GIALLO', name: 'Giallo', parent: 'Horror' },
+
+    // THRILLER subgenres
+    { key: 'THRILLER_PSYCHOLOGICAL', name: 'Psychological Thriller', parent: 'Thriller' },
+    { key: 'THRILLER_CONSPIRACY', name: 'Conspiracy Thriller', parent: 'Thriller' },
+    { key: 'THRILLER_CRIME', name: 'Crime Thriller', parent: 'Thriller' },
+    { key: 'THRILLER_NEO_NOIR', name: 'Neo-Noir', parent: 'Thriller' },
+    { key: 'THRILLER_LEGAL', name: 'Legal Thriller', parent: 'Thriller' },
+    { key: 'THRILLER_POLITICAL', name: 'Political Thriller', parent: 'Thriller' },
+    { key: 'THRILLER_SPY', name: 'Spy Thriller', parent: 'Thriller' },
+    { key: 'THRILLER_REVENGE', name: 'Revenge Thriller', parent: 'Thriller' },
+    { key: 'THRILLER_ACTION', name: 'Action Thriller', parent: 'Thriller' },
+
+    // SCI-FI subgenres
+    { key: 'SCIFI_SPACE', name: 'Space Exploration', parent: 'Science Fiction' },
+    { key: 'SCIFI_CYBERPUNK', name: 'Cyberpunk', parent: 'Science Fiction' },
+    { key: 'SCIFI_TIME_TRAVEL', name: 'Time Travel', parent: 'Science Fiction' },
+    { key: 'SCIFI_ALIEN', name: 'Alien Films', parent: 'Science Fiction' },
+    { key: 'SCIFI_POST_APOCALYPTIC', name: 'Post-Apocalyptic', parent: 'Science Fiction' },
+    { key: 'SCIFI_DYSTOPIA', name: 'Dystopian Sci-Fi', parent: 'Science Fiction' },
+    { key: 'SCIFI_SPACE_OPERA', name: 'Space Opera', parent: 'Science Fiction' },
+    { key: 'SCIFI_STEAMPUNK', name: 'Steampunk', parent: 'Science Fiction' },
+    { key: 'SCIFI_ROBOT', name: 'Robot/AI Films', parent: 'Science Fiction' },
+    { key: 'SCIFI_KAIJU', name: 'Kaiju/Giant Monster', parent: 'Science Fiction' },
+    { key: 'SCIFI_INVASION', name: 'Alien Invasion', parent: 'Science Fiction' },
+
+    // DRAMA subgenres
+    { key: 'DRAMA_PSYCHOLOGICAL', name: 'Psychological Drama', parent: 'Drama' },
+    { key: 'DRAMA_ARTHOUSE', name: 'Art House Drama', parent: 'Drama' },
+    { key: 'DRAMA_SLOW_BURN', name: 'Slow Burn Drama', parent: 'Drama' },
+    { key: 'DRAMA_HISTORICAL', name: 'Historical Drama', parent: 'Drama' },
+    { key: 'DRAMA_FAMILY', name: 'Family Drama', parent: 'Drama' },
+    { key: 'DRAMA_COMING_OF_AGE', name: 'Coming-of-Age', parent: 'Drama' },
+    { key: 'DRAMA_COURTROOM', name: 'Courtroom Drama', parent: 'Drama' },
+    { key: 'DRAMA_SPORTS', name: 'Sports Drama', parent: 'Drama' },
+    { key: 'DRAMA_WAR', name: 'War Drama', parent: 'Drama' },
+    { key: 'DRAMA_BIOGRAPHICAL', name: 'Biographical Drama', parent: 'Drama' },
+    { key: 'DRAMA_PRISON', name: 'Prison Drama', parent: 'Drama' },
+
+    // COMEDY subgenres
+    { key: 'COMEDY_ROMANTIC', name: 'Romantic Comedy', parent: 'Comedy' },
+    { key: 'COMEDY_DARK', name: 'Dark Comedy', parent: 'Comedy' },
+    { key: 'COMEDY_SATIRE', name: 'Satire', parent: 'Comedy' },
+    { key: 'COMEDY_PARODY', name: 'Parody', parent: 'Comedy' },
+    { key: 'COMEDY_SLAPSTICK', name: 'Slapstick Comedy', parent: 'Comedy' },
+    { key: 'COMEDY_BUDDY', name: 'Buddy Comedy', parent: 'Comedy' },
+    { key: 'COMEDY_STONER', name: 'Stoner Comedy', parent: 'Comedy' },
+    { key: 'COMEDY_TEEN', name: 'Teen Comedy', parent: 'Comedy' },
+
+    // ACTION subgenres
+    { key: 'ACTION_MARTIAL_ARTS', name: 'Martial Arts', parent: 'Action' },
+    { key: 'ACTION_SUPERHERO', name: 'Superhero Action', parent: 'Action' },
+    { key: 'ACTION_MILITARY', name: 'Military Action', parent: 'Action' },
+    { key: 'ACTION_SPY', name: 'Spy Action', parent: 'Action' },
+    { key: 'ACTION_HEIST', name: 'Heist Films', parent: 'Action' },
+    { key: 'ACTION_CAR', name: 'Car Chase Films', parent: 'Action' },
+
+    // FANTASY subgenres
+    { key: 'FANTASY_EPIC', name: 'Epic Fantasy', parent: 'Fantasy' },
+    { key: 'FANTASY_DARK', name: 'Dark Fantasy', parent: 'Fantasy' },
+    { key: 'FANTASY_URBAN', name: 'Urban Fantasy', parent: 'Fantasy' },
+    { key: 'FANTASY_FAIRY_TALE', name: 'Fairy Tale', parent: 'Fantasy' },
+    { key: 'FANTASY_SWORD_SORCERY', name: 'Sword & Sorcery', parent: 'Fantasy' },
+
+    // DOCUMENTARY subgenres
+    { key: 'DOC_TRUE_CRIME', name: 'True Crime Documentary', parent: 'Documentary' },
+    { key: 'DOC_NATURE', name: 'Nature Documentary', parent: 'Documentary' },
+    { key: 'DOC_MUSIC', name: 'Music Documentary', parent: 'Documentary' },
+    { key: 'DOC_SPORTS', name: 'Sports Documentary', parent: 'Documentary' },
+    { key: 'DOC_POLITICAL', name: 'Political Documentary', parent: 'Documentary' },
+    { key: 'DOC_FOOD', name: 'Food Documentary', parent: 'Documentary' },
+];
+
+// ==== ERA/DECADE PREFERENCES ====
+const QUIZ_ERAS = [
+    { decade: 1920, name: '1920s', description: 'Silent film era, German Expressionism' },
+    { decade: 1930, name: '1930s', description: 'Golden Age of Hollywood, Universal Monsters' },
+    { decade: 1940, name: '1940s', description: 'Film noir, wartime cinema' },
+    { decade: 1950, name: '1950s', description: 'Technicolor musicals, sci-fi B-movies' },
+    { decade: 1960, name: '1960s', description: 'French New Wave, British Invasion' },
+    { decade: 1970, name: '1970s', description: 'New Hollywood, gritty realism' },
+    { decade: 1980, name: '1980s', description: 'Blockbusters, practical effects, synth scores' },
+    { decade: 1990, name: '1990s', description: 'Indie boom, digital filmmaking begins' },
+    { decade: 2000, name: '2000s', description: 'CGI revolution, franchise era' },
+    { decade: 2010, name: '2010s', description: 'Streaming era, superhero dominance' },
+    { decade: 2020, name: '2020s', description: 'Pandemic era, streaming originals' },
+];
+
+// ==== POPULAR ACTORS FOR QUESTIONS ====
+// These will be supplemented by dynamic discovery from user's watched films
+const QUIZ_ACTORS = [
+    { id: 500, name: 'Tom Cruise', knownFor: 'Mission: Impossible, Top Gun' },
+    { id: 6193, name: 'Leonardo DiCaprio', knownFor: 'Inception, The Revenant' },
+    { id: 1892, name: 'Matt Damon', knownFor: 'The Bourne Identity, Good Will Hunting' },
+    { id: 3223, name: 'Robert Downey Jr.', knownFor: 'Iron Man, Sherlock Holmes' },
+    { id: 17419, name: 'Bryan Cranston', knownFor: 'Breaking Bad, Trumbo' },
+    { id: 2888, name: 'Will Smith', knownFor: 'Men in Black, I Am Legend' },
+    { id: 31, name: 'Tom Hanks', knownFor: 'Forrest Gump, Cast Away' },
+    { id: 85, name: 'Johnny Depp', knownFor: 'Pirates of the Caribbean, Edward Scissorhands' },
+    { id: 287, name: 'Brad Pitt', knownFor: 'Fight Club, Once Upon a Time in Hollywood' },
+    { id: 6384, name: 'Keanu Reeves', knownFor: 'The Matrix, John Wick' },
+    { id: 17052, name: 'Christian Bale', knownFor: 'The Dark Knight, American Psycho' },
+    { id: 2963, name: 'Nicolas Cage', knownFor: 'Face/Off, National Treasure' },
+    { id: 2524, name: 'Tom Hardy', knownFor: 'Mad Max: Fury Road, Inception' },
+    { id: 976, name: 'Jason Statham', knownFor: 'The Transporter, The Expendables' },
+    { id: 1136406, name: 'Tom Holland', knownFor: 'Spider-Man, Uncharted' },
+    { id: 1245, name: 'Scarlett Johansson', knownFor: 'Black Widow, Lost in Translation' },
+    { id: 90633, name: 'Gal Gadot', knownFor: 'Wonder Woman, Fast & Furious' },
+    { id: 1373737, name: 'Florence Pugh', knownFor: 'Midsommar, Little Women' },
+    { id: 224513, name: 'Ana de Armas', knownFor: 'Knives Out, Blade Runner 2049' },
+    { id: 6885, name: 'Charlize Theron', knownFor: 'Mad Max: Fury Road, Atomic Blonde' },
+    { id: 8784, name: 'Daniel Craig', knownFor: 'James Bond series, Knives Out' },
+    { id: 17288, name: 'Michael B. Jordan', knownFor: 'Creed, Black Panther' },
+    { id: 73457, name: 'Chris Hemsworth', knownFor: 'Thor, Extraction' },
+    { id: 16828, name: 'Chris Evans', knownFor: 'Captain America, Knives Out' },
+    { id: 1231, name: 'Julianne Moore', knownFor: 'Still Alice, The Hours' },
+    { id: 10990, name: 'Emma Stone', knownFor: 'La La Land, Easy A' },
+    { id: 72129, name: 'Jennifer Lawrence', knownFor: 'The Hunger Games, Silver Linings Playbook' },
+    { id: 112, name: 'Cate Blanchett', knownFor: 'Carol, Blue Jasmine' },
+    { id: 1813, name: 'Anne Hathaway', knownFor: 'The Dark Knight Rises, Les Misérables' },
+    { id: 6161, name: 'Jennifer Aniston', knownFor: 'Friends, Horrible Bosses' },
+    { id: 17647, name: 'Michelle Yeoh', knownFor: 'Everything Everywhere All at Once, Crouching Tiger' },
+    { id: 17288, name: 'Denzel Washington', knownFor: 'Training Day, The Equalizer' },
+    { id: 3896, name: 'Liam Neeson', knownFor: 'Taken, Schindler\'s List' },
+    { id: 192, name: 'Morgan Freeman', knownFor: 'The Shawshank Redemption, Se7en' },
+    { id: 2176, name: 'Samuel L. Jackson', knownFor: 'Pulp Fiction, The Avengers' },
+];
+
+// ==== POPULAR DIRECTORS FOR QUESTIONS ====
+const QUIZ_DIRECTORS = [
+    { id: 525, name: 'Christopher Nolan', knownFor: 'Inception, The Dark Knight, Interstellar' },
+    { id: 138, name: 'Quentin Tarantino', knownFor: 'Pulp Fiction, Kill Bill, Django Unchained' },
+    { id: 578, name: 'Ridley Scott', knownFor: 'Blade Runner, Gladiator, Alien' },
+    { id: 488, name: 'Steven Spielberg', knownFor: 'Jurassic Park, Schindler\'s List, E.T.' },
+    { id: 1032, name: 'Martin Scorsese', knownFor: 'Goodfellas, The Departed, Taxi Driver' },
+    { id: 5655, name: 'David Fincher', knownFor: 'Fight Club, Se7en, Gone Girl' },
+    { id: 7467, name: 'Denis Villeneuve', knownFor: 'Dune, Blade Runner 2049, Arrival' },
+    { id: 5281, name: 'Wes Anderson', knownFor: 'The Grand Budapest Hotel, Moonrise Kingdom' },
+    { id: 4578, name: 'Guillermo del Toro', knownFor: 'Pan\'s Labyrinth, The Shape of Water' },
+    { id: 16847, name: 'Jordan Peele', knownFor: 'Get Out, Us, Nope' },
+    { id: 7624, name: 'Rian Johnson', knownFor: 'Knives Out, Looper, The Last Jedi' },
+    { id: 24, name: 'James Cameron', knownFor: 'Avatar, Titanic, Terminator 2' },
+    { id: 510, name: 'Tim Burton', knownFor: 'Edward Scissorhands, Beetlejuice, Batman' },
+    { id: 217, name: 'David Lynch', knownFor: 'Mulholland Drive, Twin Peaks, Blue Velvet' },
+    { id: 95, name: 'Stanley Kubrick', knownFor: '2001, The Shining, A Clockwork Orange' },
+    { id: 6043, name: 'Edgar Wright', knownFor: 'Baby Driver, Shaun of the Dead, Hot Fuzz' },
+    { id: 17625, name: 'Bong Joon-ho', knownFor: 'Parasite, Snowpiercer, The Host' },
+    { id: 21684, name: 'Park Chan-wook', knownFor: 'Oldboy, The Handmaiden, Decision to Leave' },
+    { id: 139, name: 'Coen Brothers', knownFor: 'Fargo, No Country for Old Men, The Big Lebowski' },
+    { id: 1776, name: 'Francis Ford Coppola', knownFor: 'The Godfather, Apocalypse Now' },
+    { id: 1884, name: 'Darren Aronofsky', knownFor: 'Black Swan, Requiem for a Dream, The Whale' },
+    { id: 5174, name: 'Ari Aster', knownFor: 'Hereditary, Midsommar, Beau Is Afraid' },
+    { id: 608, name: 'Guy Ritchie', knownFor: 'Snatch, Lock Stock, The Gentlemen' },
+    { id: 1032, name: 'Greta Gerwig', knownFor: 'Barbie, Lady Bird, Little Women' },
+    { id: 21684, name: 'Robert Eggers', knownFor: 'The Witch, The Lighthouse, The Northman' },
+];
+
+
 
 /**
  * Get questions already answered by user to avoid repeats
@@ -129,14 +502,22 @@ async function getAnsweredQuestions(userId: string): Promise<Set<string>> {
     const answered = new Set<string>();
     for (const row of data || []) {
         const type = row.question_type;
-        const data = row.question_data as Record<string, unknown>;
+        const qData = row.question_data as Record<string, unknown>;
 
-        if (type === 'genre_rating' && data.genreId) {
-            answered.add(`genre:${data.genreId}`);
-        } else if (type === 'theme_preference' && data.keywordId) {
-            answered.add(`keyword:${data.keywordId}`);
-        } else if (type === 'movie_rating' && data.tmdbId) {
-            answered.add(`movie:${data.tmdbId}`);
+        if (type === 'genre_rating' && qData.genreId) {
+            answered.add(`genre:${qData.genreId}`);
+        } else if (type === 'theme_preference' && qData.keywordId) {
+            answered.add(`keyword:${qData.keywordId}`);
+        } else if (type === 'movie_rating' && qData.tmdbId) {
+            answered.add(`movie:${qData.tmdbId}`);
+        } else if (type === 'subgenre_preference' && qData.subgenreKey) {
+            answered.add(`subgenre:${qData.subgenreKey}`);
+        } else if (type === 'actor_preference' && qData.actorId) {
+            answered.add(`actor:${qData.actorId}`);
+        } else if (type === 'director_preference' && qData.directorId) {
+            answered.add(`director:${qData.directorId}`);
+        } else if (type === 'era_preference' && qData.decade) {
+            answered.add(`era:${qData.decade}`);
         }
     }
 
@@ -357,6 +738,15 @@ function scoreFeaturePriority(feedback: Map<string, { positive: number; negative
 
 /**
  * Generate a batch of quiz questions for a session
+ * NOW WITH MASSIVE QUESTION POOL:
+ * - 18 Genres
+ * - 150+ Keywords/Themes
+ * - 75+ Subgenres
+ * - 35+ Actors
+ * - 25+ Directors
+ * - 11 Eras
+ * - Unlimited Movie questions
+ * 
  * SMART PRIORITIZATION:
  * 1. First, ask about features with NO existing data (cold start)
  * 2. Then, ask about features with LOW sample counts (<3)
@@ -371,76 +761,165 @@ export async function generateQuizQuestions(
     const feedback = await getFeatureFeedback(userId);
     const questions: QuizQuestion[] = [];
 
-    // Get unanswered genres with priority scores
+    // === Build all question pools with priority scores ===
+
+    // Genres (18)
     const unansweredGenres = QUIZ_GENRES
         .filter(g => !answered.has(`genre:${g.id}`))
         .map(g => ({ ...g, priority: scoreFeaturePriority(feedback, 'genre', g.id) }))
-        .sort((a, b) => a.priority - b.priority); // Lower = higher priority
+        .sort((a, b) => a.priority - b.priority);
 
-    // Get unanswered keywords with priority scores
+    // Keywords/Themes (150+)
     const unansweredKeywords = QUIZ_KEYWORDS
         .filter(k => !answered.has(`keyword:${k.id}`))
         .map(k => ({ ...k, priority: scoreFeaturePriority(feedback, 'keyword', k.id) }))
         .sort((a, b) => a.priority - b.priority);
 
-    // Get candidate movies (these are already filtered for unwatched)
+    // Subgenres (75+) - using stringHash for ID
+    const unansweredSubgenres = QUIZ_SUBGENRES
+        .filter(s => !answered.has(`subgenre:${s.key}`))
+        .map(s => ({ ...s, priority: scoreFeaturePriority(feedback, 'subgenre', stringHash(s.key)) }))
+        .sort((a, b) => a.priority - b.priority);
+
+    // Actors (35+)
+    const unansweredActors = QUIZ_ACTORS
+        .filter(a => !answered.has(`actor:${a.id}`))
+        .map(a => ({ ...a, priority: scoreFeaturePriority(feedback, 'actor', a.id) }))
+        .sort((a, b) => a.priority - b.priority);
+
+    // Directors (25+)
+    const unansweredDirectors = QUIZ_DIRECTORS
+        .filter(d => !answered.has(`director:${d.id}`))
+        .map(d => ({ ...d, priority: scoreFeaturePriority(feedback, 'director', d.id) }))
+        .sort((a, b) => a.priority - b.priority);
+
+    // Eras (11)
+    const unansweredEras = QUIZ_ERAS
+        .filter(e => !answered.has(`era:${e.decade}`))
+        .map(e => ({ ...e, priority: scoreFeaturePriority(feedback, 'decade', e.decade) }))
+        .sort((a, b) => a.priority - b.priority);
+
+    // Movies (unlimited from DB)
     const candidateMovies = await getCandidateMovies(userId, answered);
-    // Shuffle movies since we can't easily score them
     const shuffledMovies = [...candidateMovies].sort(() => Math.random() - 0.5);
 
-    // Log prioritization info
-    const hasData = feedback.size > 0;
-    const topGenrePriority = unansweredGenres[0]?.priority ?? 999;
-    const topKeywordPriority = unansweredKeywords[0]?.priority ?? 999;
+    // Calculate pool sizes
+    const totalStaticPool = unansweredGenres.length + unansweredKeywords.length +
+        unansweredSubgenres.length + unansweredActors.length +
+        unansweredDirectors.length + unansweredEras.length;
 
-    console.log('[QuizLearning] Prioritization', {
-        hasExistingData: hasData,
-        feedbackCount: feedback.size,
-        topGenre: unansweredGenres[0]?.name,
-        topGenrePriority,
-        topKeyword: unansweredKeywords[0]?.name,
-        topKeywordPriority,
+    console.log('[QuizLearning] Question pool sizes', {
+        genres: unansweredGenres.length,
+        keywords: unansweredKeywords.length,
+        subgenres: unansweredSubgenres.length,
+        actors: unansweredActors.length,
+        directors: unansweredDirectors.length,
+        eras: unansweredEras.length,
+        movies: shuffledMovies.length,
+        totalStatic: totalStaticPool,
     });
 
-    // Build question list - prioritize by combined score
-    let genreIdx = 0, keywordIdx = 0, movieIdx = 0;
-
-    // For 10 questions: ~4 genres, ~3 keywords, ~3 movies
+    // === Build question list with balanced distribution ===
+    // New rotation includes ALL question types for variety
+    // Pattern: Genre, Subgenre, Keyword, Movie, Actor, Director, Era, Keyword, Movie, Subgenre
     const typeRotation: QuizQuestionType[] = [
-        'genre_rating', 'theme_preference', 'movie_rating',
-        'genre_rating', 'theme_preference', 'movie_rating',
-        'genre_rating', 'theme_preference', 'movie_rating',
         'genre_rating',
+        'subgenre_preference',
+        'theme_preference',
+        'movie_rating',
+        'actor_preference',
+        'theme_preference',
+        'director_preference',
+        'subgenre_preference',
+        'era_preference',
+        'movie_rating',
     ];
 
-    for (let i = 0; i < count && i < typeRotation.length; i++) {
-        const type = typeRotation[i];
+    // Indices for each pool
+    let genreIdx = 0, keywordIdx = 0, movieIdx = 0;
+    let subgenreIdx = 0, actorIdx = 0, directorIdx = 0, eraIdx = 0;
 
-        if (type === 'genre_rating' && genreIdx < unansweredGenres.length) {
+    // Helper to find next available question
+    const getNextAvailable = (): QuizQuestion | null => {
+        // Try in order of pool size (biggest pools first for sustainability)
+        if (keywordIdx < unansweredKeywords.length) {
+            const kw = unansweredKeywords[keywordIdx++];
+            return { type: 'theme_preference', keywordId: kw.id, keywordName: kw.name };
+        }
+        if (subgenreIdx < unansweredSubgenres.length) {
+            const sg = unansweredSubgenres[subgenreIdx++];
+            return { type: 'subgenre_preference', subgenreKey: sg.key, subgenreName: sg.name, parentGenreName: sg.parent };
+        }
+        if (movieIdx < shuffledMovies.length) {
+            return shuffledMovies[movieIdx++];
+        }
+        if (actorIdx < unansweredActors.length) {
+            const actor = unansweredActors[actorIdx++];
+            return { type: 'actor_preference', actorId: actor.id, actorName: actor.name, knownFor: actor.knownFor };
+        }
+        if (directorIdx < unansweredDirectors.length) {
+            const dir = unansweredDirectors[directorIdx++];
+            return { type: 'director_preference', directorId: dir.id, directorName: dir.name, knownFor: dir.knownFor };
+        }
+        if (genreIdx < unansweredGenres.length) {
             const genre = unansweredGenres[genreIdx++];
-            questions.push({ type: 'genre_rating', genreId: genre.id, genreName: genre.name });
-        } else if (type === 'theme_preference' && keywordIdx < unansweredKeywords.length) {
-            const keyword = unansweredKeywords[keywordIdx++];
-            questions.push({ type: 'theme_preference', keywordId: keyword.id, keywordName: keyword.name });
-        } else if (type === 'movie_rating' && movieIdx < shuffledMovies.length) {
-            questions.push(shuffledMovies[movieIdx++]);
+            return { type: 'genre_rating', genreId: genre.id, genreName: genre.name };
+        }
+        if (eraIdx < unansweredEras.length) {
+            const era = unansweredEras[eraIdx++];
+            return { type: 'era_preference', decade: era.decade, eraName: era.name, eraDescription: era.description };
+        }
+        return null;
+    };
+
+    for (let i = 0; i < count; i++) {
+        const targetType = typeRotation[i % typeRotation.length];
+        let question: QuizQuestion | null = null;
+
+        // Try to get the target type first
+        if (targetType === 'genre_rating' && genreIdx < unansweredGenres.length) {
+            const genre = unansweredGenres[genreIdx++];
+            question = { type: 'genre_rating', genreId: genre.id, genreName: genre.name };
+        } else if (targetType === 'theme_preference' && keywordIdx < unansweredKeywords.length) {
+            const kw = unansweredKeywords[keywordIdx++];
+            question = { type: 'theme_preference', keywordId: kw.id, keywordName: kw.name };
+        } else if (targetType === 'movie_rating' && movieIdx < shuffledMovies.length) {
+            question = shuffledMovies[movieIdx++];
+        } else if (targetType === 'subgenre_preference' && subgenreIdx < unansweredSubgenres.length) {
+            const sg = unansweredSubgenres[subgenreIdx++];
+            question = { type: 'subgenre_preference', subgenreKey: sg.key, subgenreName: sg.name, parentGenreName: sg.parent };
+        } else if (targetType === 'actor_preference' && actorIdx < unansweredActors.length) {
+            const actor = unansweredActors[actorIdx++];
+            question = { type: 'actor_preference', actorId: actor.id, actorName: actor.name, knownFor: actor.knownFor };
+        } else if (targetType === 'director_preference' && directorIdx < unansweredDirectors.length) {
+            const dir = unansweredDirectors[directorIdx++];
+            question = { type: 'director_preference', directorId: dir.id, directorName: dir.name, knownFor: dir.knownFor };
+        } else if (targetType === 'era_preference' && eraIdx < unansweredEras.length) {
+            const era = unansweredEras[eraIdx++];
+            question = { type: 'era_preference', decade: era.decade, eraName: era.name, eraDescription: era.description };
+        }
+
+        // Fallback if target type exhausted
+        if (!question) {
+            question = getNextAvailable();
+        }
+
+        if (question) {
+            questions.push(question);
         } else {
-            // Fallback: try other types
-            if (genreIdx < unansweredGenres.length) {
-                const genre = unansweredGenres[genreIdx++];
-                questions.push({ type: 'genre_rating', genreId: genre.id, genreName: genre.name });
-            } else if (keywordIdx < unansweredKeywords.length) {
-                const keyword = unansweredKeywords[keywordIdx++];
-                questions.push({ type: 'theme_preference', keywordId: keyword.id, keywordName: keyword.name });
-            } else if (movieIdx < shuffledMovies.length) {
-                questions.push(shuffledMovies[movieIdx++]);
-            }
+            // Truly exhausted all pools
+            break;
         }
     }
 
+    const hasData = feedback.size > 0;
     console.log('[QuizLearning] Generated questions', {
-        count: questions.length,
-        types: questions.map(q => q.type),
+        requested: count,
+        generated: questions.length,
+        types: questions.reduce((acc, q) => {
+            acc[q.type] = (acc[q.type] || 0) + 1;
+            return acc;
+        }, {} as Record<string, number>),
         strategy: hasData ? 'smart-prioritized' : 'cold-start',
     });
 
@@ -479,6 +958,14 @@ export async function recordQuizAnswer(
         await updateKeywordPreference(userId, question, answer as ThemePreferenceAnswer);
     } else if (question.type === 'movie_rating') {
         await updateMoviePreference(userId, question, answer as MovieRatingAnswer);
+    } else if (question.type === 'subgenre_preference') {
+        await updateSubgenrePreference(userId, question, answer as SubgenrePreferenceAnswer);
+    } else if (question.type === 'actor_preference') {
+        await updateActorPreference(userId, question, answer as PersonPreferenceAnswer);
+    } else if (question.type === 'director_preference') {
+        await updateDirectorPreference(userId, question, answer as PersonPreferenceAnswer);
+    } else if (question.type === 'era_preference') {
+        await updateEraPreference(userId, question, answer as EraPreferenceAnswer);
     }
 
     console.log('[QuizLearning] Recorded answer', {
@@ -486,6 +973,193 @@ export async function recordQuizAnswer(
         type: question.type,
         answer
     });
+}
+
+/**
+ * Update subgenre preference based on quiz answer
+ */
+async function updateSubgenrePreference(
+    userId: string,
+    question: SubgenrePreferenceQuestion,
+    answer: SubgenrePreferenceAnswer
+): Promise<void> {
+    if (!supabase) return;
+
+    // Map preference to positive/negative counts
+    // love: +3 pos, +0 neg | like: +2 pos, +0 neg | neutral: +1 pos, +1 neg | dislike: +0 pos, +3 neg
+    const prefMap: Record<string, { pos: number; neg: number }> = {
+        love: { pos: 3, neg: 0 },
+        like: { pos: 2, neg: 0 },
+        neutral: { pos: 1, neg: 1 },
+        dislike: { pos: 0, neg: 3 },
+    };
+
+    const delta = prefMap[answer.preference] || { pos: 1, neg: 1 };
+    const subgenreId = stringHash(question.subgenreKey);
+
+    const { data: existing } = await supabase
+        .from('user_feature_feedback')
+        .select('positive_count, negative_count')
+        .eq('user_id', userId)
+        .eq('feature_type', 'subgenre')
+        .eq('feature_id', subgenreId)
+        .maybeSingle();
+
+    const positiveCount = (existing?.positive_count || 0) + delta.pos;
+    const negativeCount = (existing?.negative_count || 0) + delta.neg;
+    const total = positiveCount + negativeCount;
+    const inferredPreference = (positiveCount + 1) / (total + 2);
+
+    await supabase
+        .from('user_feature_feedback')
+        .upsert({
+            user_id: userId,
+            feature_type: 'subgenre',
+            feature_id: subgenreId,
+            feature_name: question.subgenreKey,
+            positive_count: positiveCount,
+            negative_count: negativeCount,
+            inferred_preference: inferredPreference,
+            last_updated: new Date().toISOString(),
+        }, { onConflict: 'user_id,feature_type,feature_id' });
+}
+
+/**
+ * Update actor preference based on quiz answer
+ */
+async function updateActorPreference(
+    userId: string,
+    question: ActorPreferenceQuestion,
+    answer: PersonPreferenceAnswer
+): Promise<void> {
+    if (!supabase) return;
+
+    // Map preference to positive/negative counts
+    // fan: +3 pos, +0 neg | neutral: +1 pos, +1 neg | avoid: +0 pos, +3 neg
+    const prefMap: Record<string, { pos: number; neg: number }> = {
+        fan: { pos: 3, neg: 0 },
+        neutral: { pos: 1, neg: 1 },
+        avoid: { pos: 0, neg: 3 },
+    };
+
+    const delta = prefMap[answer.preference] || { pos: 1, neg: 1 };
+
+    const { data: existing } = await supabase
+        .from('user_feature_feedback')
+        .select('positive_count, negative_count')
+        .eq('user_id', userId)
+        .eq('feature_type', 'actor')
+        .eq('feature_id', question.actorId)
+        .maybeSingle();
+
+    const positiveCount = (existing?.positive_count || 0) + delta.pos;
+    const negativeCount = (existing?.negative_count || 0) + delta.neg;
+    const total = positiveCount + negativeCount;
+    const inferredPreference = (positiveCount + 1) / (total + 2);
+
+    await supabase
+        .from('user_feature_feedback')
+        .upsert({
+            user_id: userId,
+            feature_type: 'actor',
+            feature_id: question.actorId,
+            feature_name: question.actorName,
+            positive_count: positiveCount,
+            negative_count: negativeCount,
+            inferred_preference: inferredPreference,
+            last_updated: new Date().toISOString(),
+        }, { onConflict: 'user_id,feature_type,feature_id' });
+}
+
+/**
+ * Update director preference based on quiz answer
+ */
+async function updateDirectorPreference(
+    userId: string,
+    question: DirectorPreferenceQuestion,
+    answer: PersonPreferenceAnswer
+): Promise<void> {
+    if (!supabase) return;
+
+    const prefMap: Record<string, { pos: number; neg: number }> = {
+        fan: { pos: 3, neg: 0 },
+        neutral: { pos: 1, neg: 1 },
+        avoid: { pos: 0, neg: 3 },
+    };
+
+    const delta = prefMap[answer.preference] || { pos: 1, neg: 1 };
+
+    const { data: existing } = await supabase
+        .from('user_feature_feedback')
+        .select('positive_count, negative_count')
+        .eq('user_id', userId)
+        .eq('feature_type', 'director')
+        .eq('feature_id', question.directorId)
+        .maybeSingle();
+
+    const positiveCount = (existing?.positive_count || 0) + delta.pos;
+    const negativeCount = (existing?.negative_count || 0) + delta.neg;
+    const total = positiveCount + negativeCount;
+    const inferredPreference = (positiveCount + 1) / (total + 2);
+
+    await supabase
+        .from('user_feature_feedback')
+        .upsert({
+            user_id: userId,
+            feature_type: 'director',
+            feature_id: question.directorId,
+            feature_name: question.directorName,
+            positive_count: positiveCount,
+            negative_count: negativeCount,
+            inferred_preference: inferredPreference,
+            last_updated: new Date().toISOString(),
+        }, { onConflict: 'user_id,feature_type,feature_id' });
+}
+
+/**
+ * Update era/decade preference based on quiz answer
+ */
+async function updateEraPreference(
+    userId: string,
+    question: EraPreferenceQuestion,
+    answer: EraPreferenceAnswer
+): Promise<void> {
+    if (!supabase) return;
+
+    const prefMap: Record<string, { pos: number; neg: number }> = {
+        love: { pos: 3, neg: 0 },
+        like: { pos: 2, neg: 0 },
+        neutral: { pos: 1, neg: 1 },
+        dislike: { pos: 0, neg: 3 },
+    };
+
+    const delta = prefMap[answer.preference] || { pos: 1, neg: 1 };
+
+    const { data: existing } = await supabase
+        .from('user_feature_feedback')
+        .select('positive_count, negative_count')
+        .eq('user_id', userId)
+        .eq('feature_type', 'decade')
+        .eq('feature_id', question.decade)
+        .maybeSingle();
+
+    const positiveCount = (existing?.positive_count || 0) + delta.pos;
+    const negativeCount = (existing?.negative_count || 0) + delta.neg;
+    const total = positiveCount + negativeCount;
+    const inferredPreference = (positiveCount + 1) / (total + 2);
+
+    await supabase
+        .from('user_feature_feedback')
+        .upsert({
+            user_id: userId,
+            feature_type: 'decade',
+            feature_id: question.decade,
+            feature_name: question.eraName,
+            positive_count: positiveCount,
+            negative_count: negativeCount,
+            inferred_preference: inferredPreference,
+            last_updated: new Date().toISOString(),
+        }, { onConflict: 'user_id,feature_type,feature_id' });
 }
 
 /**
@@ -704,8 +1378,18 @@ export async function getQuizStats(userId: string): Promise<{
     byType: Record<QuizQuestionType, number>;
     lastQuizDate: string | null;
 }> {
+    const emptyStats: Record<QuizQuestionType, number> = {
+        genre_rating: 0,
+        theme_preference: 0,
+        movie_rating: 0,
+        subgenre_preference: 0,
+        actor_preference: 0,
+        director_preference: 0,
+        era_preference: 0,
+    };
+
     if (!supabase) {
-        return { totalAnswered: 0, byType: { genre_rating: 0, theme_preference: 0, movie_rating: 0 }, lastQuizDate: null };
+        return { totalAnswered: 0, byType: emptyStats, lastQuizDate: null };
     }
 
     const { data, error } = await supabase
@@ -716,14 +1400,10 @@ export async function getQuizStats(userId: string): Promise<{
 
     if (error) {
         console.error('[QuizLearning] Failed to get quiz stats', error);
-        return { totalAnswered: 0, byType: { genre_rating: 0, theme_preference: 0, movie_rating: 0 }, lastQuizDate: null };
+        return { totalAnswered: 0, byType: emptyStats, lastQuizDate: null };
     }
 
-    const byType: Record<QuizQuestionType, number> = {
-        genre_rating: 0,
-        theme_preference: 0,
-        movie_rating: 0,
-    };
+    const byType: Record<QuizQuestionType, number> = { ...emptyStats };
 
     for (const row of data || []) {
         const type = row.question_type as QuizQuestionType;
@@ -738,6 +1418,7 @@ export async function getQuizStats(userId: string): Promise<{
         lastQuizDate: data?.[0]?.created_at || null,
     };
 }
+
 
 /**
  * Seed user preferences from import history

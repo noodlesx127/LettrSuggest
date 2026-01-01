@@ -2218,6 +2218,7 @@ export async function buildTasteProfile(params: {
   negativeFeedbackIds?: number[]; // IDs of movies explicitly dismissed/disliked
   tmdbDetails?: Map<number, any>; // Pre-fetched details to avoid API calls
   watchlistFilms?: Array<{ uri: string; watchlistAddedAt?: string }>; // Watchlist films - show user INTENT
+  userId?: string; // NEW: For fetching explicit preferences (Quiz, etc.)
 }): Promise<{
   topGenres: Array<{ id: number; name: string; weight: number }>;
   topKeywords: Array<{ id: number; name: string; weight: number }>;
@@ -2247,6 +2248,7 @@ export async function buildTasteProfile(params: {
   preferredSubgenreKeywordIds: number[];
 }> {
   const { detectNicheGenres } = await import('./genreEnhancement');
+  const { SUBGENRE_TO_KEYWORD_IDS } = await import('./subgenreData'); // Import mapping
 
   // Prepare films for niche detection
   const nicheFilms = params.films.map(f => ({
@@ -2926,6 +2928,56 @@ export async function buildTasteProfile(params: {
 
     const subgenrePatterns = analyzeSubgenrePatterns(subgenreFilms);
     preferredSubgenreKeywordIds = getPreferredSubgenreKeywordIds(subgenrePatterns);
+
+    // NEW: Merge explicit user preferences from Quiz/Feedback (the "Gap Fix")
+    if (params.userId && supabase) {
+      try {
+        const { data: explicitPrefs } = await supabase
+          .from('user_feature_feedback')
+          .select('feature_type, feature_id, feature_name, inferred_preference, positive_count, negative_count')
+          .eq('user_id', params.userId)
+          .in('feature_type', ['subgenre', 'keyword'])
+          .gt('inferred_preference', 0.65); // Only strong preferences
+
+        if (explicitPrefs && explicitPrefs.length > 0) {
+          const explicitIds: number[] = [];
+
+          for (const p of explicitPrefs) {
+            // If it's a subgenre, map to TMDB keywords
+            if (p.feature_type === 'subgenre') {
+              // We need to match subgenre name/key to our mapping
+              // The feature_name might be the Key (HORROR_FOLK) or Name (Folk Horror)
+              // We stored stringHash(Key) as ID.
+              // Let's try to find it by ID if possible, or iterate our map.
+              // Actually, subgenreData exports SUBGENRE_TO_KEYWORD_IDS keyed by Key.
+              // We stored the Key in feature_name?
+              // recordQuizAnswer stores: feature_id: stringHash(subKey), feature_name: subKey
+              // So p.feature_name is the Key (e.g. 'HORROR_FOLK')
+              const ids = SUBGENRE_TO_KEYWORD_IDS[p.feature_name];
+              if (ids) explicitIds.push(...ids);
+            }
+            // If it's a keyword, add it directly
+            else if (p.feature_type === 'keyword') {
+              explicitIds.push(p.feature_id);
+            }
+          }
+
+          // Add unique new IDs
+          for (const id of explicitIds) {
+            if (!preferredSubgenreKeywordIds.includes(id)) {
+              preferredSubgenreKeywordIds.push(id);
+            }
+          }
+
+          console.log('[TasteProfile] Added explicit Quiz/Feedback preferences:', {
+            count: explicitIds.length,
+            types: explicitPrefs.map(ep => ep.feature_type).reduce((acc, t) => ({ ...acc, [t]: (acc[t] || 0) + 1 }), {} as Record<string, number>)
+          });
+        }
+      } catch (err) {
+        console.error('[TasteProfile] Failed to fetch explicit preferences', err);
+      }
+    }
 
     console.log('[TasteProfile] Preferred subgenre keywords for discovery:', {
       keywordIds: preferredSubgenreKeywordIds.slice(0, 10),
@@ -5383,7 +5435,8 @@ export async function learnFromHistoricalData(userId: string) {
       })),
       mappings: mappingsMap,
       topN: 10,
-      tmdbDetails: tmdbDetails // Pass pre-fetched details
+      tmdbDetails: tmdbDetails, // Pass pre-fetched details
+      userId: userId
     });
 
 
