@@ -44,6 +44,7 @@ export default function NavBar() {
             <a href="/library" className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">Library</a>
             <a href="/watchlist" className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">Watchlist</a>
             <a href="/suggest" className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">Suggestions</a>
+            <a href="/genre-suggest" className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">Genre Picks</a>
             <a href="/lists" className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">Lists</a>
             <a href="/stats" className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">Stats</a>
           </>
@@ -54,8 +55,8 @@ export default function NavBar() {
           ) : user ? (
             <>
               {/* Settings Link - Prominent with icon */}
-              <a 
-                href="/settings" 
+              <a
+                href="/settings"
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
                 title="Settings"
               >
@@ -66,8 +67,8 @@ export default function NavBar() {
                 <span className="hidden sm:inline">Settings</span>
               </a>
               {/* User Email - Now links to profile */}
-              <a 
-                href="/profile" 
+              <a
+                href="/profile"
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors font-medium"
                 title="View Profile"
               >
