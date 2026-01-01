@@ -11,6 +11,7 @@ import { generateSmartCandidates, discoverMoviesByProfile } from '@/lib/trending
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { TMDB_GENRE_MAP } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
+import { getKeywordIdsForSubgenres } from '@/lib/subgenreData';
 import type { FilmEvent } from '@/lib/normalize';
 
 function getBaseUrl(): string {
@@ -63,6 +64,7 @@ const PROGRESS_STAGES = [
 ];
 
 const STORAGE_KEY = 'lettrsuggest_genre_selection';
+const SUBGENRE_STORAGE_KEY = 'lettrsuggest_subgenre_selection';
 
 export default function GenreSuggestPage() {
     const { films, loading: loadingFilms } = useImportData();
@@ -85,6 +87,7 @@ export default function GenreSuggestPage() {
     const [undoToast, setUndoToast] = useState<{ id: number; title: string } | null>(null);
     const [savedMovieIds, setSavedMovieIds] = useState<Set<number>>(new Set());
     const [selectedGenres, setSelectedGenres] = useState<number[]>([]);
+    const [selectedSubgenres, setSelectedSubgenres] = useState<string[]>([]);
     const [featureEvidence, setFeatureEvidence] = useState<Record<string, FeatureEvidenceSummary>>({});
 
     // Load selected genres from localStorage
@@ -112,6 +115,30 @@ export default function GenreSuggestPage() {
             }
         }
     }, [selectedGenres]);
+
+    // Load selected subgenres from localStorage
+    useEffect(() => {
+        try {
+            const stored = localStorage.getItem(SUBGENRE_STORAGE_KEY);
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                if (Array.isArray(parsed)) {
+                    setSelectedSubgenres(parsed);
+                }
+            }
+        } catch (e) {
+            console.error('[GenreSuggest] Failed to restore subgenre selection', e);
+        }
+    }, []);
+
+    // Save selected subgenres to localStorage
+    useEffect(() => {
+        try {
+            localStorage.setItem(SUBGENRE_STORAGE_KEY, JSON.stringify(selectedSubgenres));
+        } catch (e) {
+            console.error('[GenreSuggest] Failed to save subgenre selection', e);
+        }
+    }, [selectedSubgenres]);
 
     // Load shownIds from localStorage on mount (7-day TTL)
     useEffect(() => {
@@ -324,6 +351,43 @@ export default function GenreSuggestPage() {
                 }
             }
 
+            // NEW: Add sub-genre discovery using TMDB keywords
+            // This targets specific sub-genres like "Supernatural Horror" or "Cyberpunk Sci-Fi"
+            if (selectedSubgenres.length > 0) {
+                const subgenreKeywordIds = getKeywordIdsForSubgenres(selectedSubgenres);
+                console.log('[GenreSuggest] Running sub-genre discovery with keywords:', {
+                    subgenres: selectedSubgenres,
+                    keywordIds: subgenreKeywordIds
+                });
+
+                if (subgenreKeywordIds.length > 0) {
+                    // Discover by sub-genre keywords with multiple strategies
+                    for (const sortBy of ['vote_average.desc', 'popularity.desc'] as const) {
+                        const subgenreDiscovered = await discoverMoviesByProfile({
+                            keywords: subgenreKeywordIds,
+                            genres: tmdbGenreIds.length > 0 ? tmdbGenreIds : undefined,
+                            genreMode: 'OR',
+                            sortBy,
+                            minVotes: 20,
+                            limit: 100
+                        });
+                        candidatesRaw.push(...subgenreDiscovered);
+                        console.log(`[GenreSuggest] Sub-genre discovery (${sortBy}):`, subgenreDiscovered.length);
+                    }
+
+                    // Also do individual keyword discovery for each selected subgenre
+                    for (const keywordId of subgenreKeywordIds.slice(0, 8)) { // Limit to avoid too many API calls
+                        const keywordDiscovered = await discoverMoviesByProfile({
+                            keywords: [keywordId],
+                            sortBy: 'popularity.desc',
+                            minVotes: 10,
+                            limit: 40
+                        });
+                        candidatesRaw.push(...keywordDiscovered);
+                    }
+                }
+            }
+
             // Deduplicate and filter
             const candidatesFiltered = candidatesRaw
                 .filter((id, idx, arr) => arr.indexOf(id) === idx)
@@ -473,7 +537,7 @@ export default function GenreSuggestPage() {
             setError(e instanceof Error ? e.message : 'An error occurred');
             setLoading(false);
         }
-    }, [selectedGenres, sourceFilms, uid, blockedIds, shownIds]);
+    }, [selectedGenres, selectedSubgenres, sourceFilms, uid, blockedIds, shownIds]);
 
     const handleSave = async (tmdbId: number, title: string) => {
         if (!uid) return;
@@ -585,6 +649,9 @@ export default function GenreSuggestPage() {
                             selectedGenres={selectedGenres}
                             onChange={setSelectedGenres}
                             disabled={loading}
+                            selectedSubgenres={selectedSubgenres}
+                            onSubgenreChange={setSelectedSubgenres}
+                            showSubgenres={true}
                         />
                     </div>
 
