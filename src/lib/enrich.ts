@@ -4489,8 +4489,23 @@ export async function suggestByOverlap(params: {
     if (params.featureFeedback) {
       const ff = params.featureFeedback;
       const confidenceFromCount = (count: number) => {
-        // Smoothly approaches 1.0; count 1 => ~0.5, count 3 => ~0.8, count 6+ => ~1.0
-        return Math.min(1, Math.log1p(count) / Math.log(7));
+        // Base confidence: Smoothly approaches 1.0
+        // count 1 => ~0.5, count 3 => ~0.8, count 6+ => ~1.0
+        const baseConfidence = Math.min(1, Math.log1p(count) / Math.log(7));
+
+        // SOURCE-AWARE ADJUSTMENT (P3 enhancement):
+        // - Low counts (1-2) = likely intentional quiz/feedback = boost by 1.1x
+        // - Medium counts (3-9) = mix of sources = normal 1.0x
+        // - High counts (10+) = likely bulk seeded from history = slight skepticism 0.95x
+        // This ensures intentional signals carry more weight than inferred patterns
+        let sourceMultiplier = 1.0;
+        if (count <= 2) {
+          sourceMultiplier = 1.1; // Intentional signals (quiz answer, direct feedback)
+        } else if (count >= 10) {
+          sourceMultiplier = 0.95; // Seeded from history (less intentional)
+        }
+
+        return baseConfidence * sourceMultiplier;
       };
 
       const applySoftCap = (value: number, cap: number) => {
