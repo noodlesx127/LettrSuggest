@@ -1737,7 +1737,7 @@ export async function getFeedback(userId: string): Promise<Map<number, 'negative
   return map;
 }
 
-export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
+export async function fetchTmdbMovie(id: number): Promise<TMDBMovie | null> {
   // Fetch from TMDB (primary source)
   console.log('[UnifiedAPI] fetch movie from TMDB', { id });
   const u = new URL('/api/tmdb/movie', getBaseUrl());
@@ -1750,6 +1750,7 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie> {
     const j = await r.json();
     if (!r.ok || !j.ok) {
       console.error('[UnifiedAPI] TMDB fetch movie error', { id, status: r.status, body: j });
+      if (r.status === 404) return null; // Handle 404 gracefully
       throw new Error(j.error || 'Movie fetch failed');
     }
     console.log('[UnifiedAPI] TMDB fetch movie ok', { id });
@@ -1979,6 +1980,7 @@ export async function fetchTmdbMovieCached(id: number): Promise<TMDBMovie | null
 
     const response = await fetch(apiUrl.toString());
     if (!response.ok) {
+      if (response.status === 404) return null;
       console.warn('[Enrich] API route failed, falling back to direct TMDB fetch');
       const fresh = await withTimeout(fetchTmdbMovie(id));
       return fresh;
@@ -2010,10 +2012,12 @@ export async function refreshTmdbCacheForIds(ids: number[]): Promise<void> {
   for (const id of distinct) {
     try {
       const fresh = await withTimeout(fetchTmdbMovie(id));
-      try {
-        await upsertTmdbCache(fresh);
-      } catch {
-        // ignore individual upsert failures
+      if (fresh) {
+        try {
+          await upsertTmdbCache(fresh);
+        } catch {
+          // ignore individual upsert failures
+        }
       }
     } catch {
       // ignore individual fetch failures
@@ -3513,8 +3517,22 @@ export async function suggestByOverlap(params: {
     filmPreferenceMap.set(f.uri, { rating: f.rating, liked: f.liked });
   }
 
-  const likedMovies = await mapLimit(likedIds, 10, (id) => fetchTmdbMovieCached(id));
-  const dislikedMovies = await mapLimit(dislikedIds, 10, (id) => fetchTmdbMovieCached(id));
+  const likedMovies = await mapLimit(likedIds, 10, async (id) => {
+    try {
+      return await fetchTmdbMovieCached(id);
+    } catch (e) {
+      console.error(`[SuggestByOverlap] Failed to fetch liked movie ${id}`, e);
+      return null;
+    }
+  });
+  const dislikedMovies = await mapLimit(dislikedIds, 10, async (id) => {
+    try {
+      return await fetchTmdbMovieCached(id);
+    } catch (e) {
+      console.error(`[SuggestByOverlap] Failed to fetch disliked movie ${id}`, e);
+      return null;
+    }
+  });
 
   const likedFeats = likedMovies.filter(Boolean).map((m) => extractFeatures(m as TMDBMovie));
   const dislikedFeats = dislikedMovies.filter(Boolean).map((m) => extractFeatures(m as TMDBMovie));
@@ -3749,7 +3767,14 @@ export async function suggestByOverlap(params: {
     .slice(-400); // Cap at 400 most recent to avoid excessive fetches
 
   const mappedIds = mappedFilmsForAnalysis.map(f => params.mappings.get(f.uri)!);
-  const moviesForAnalysis = await mapLimit(mappedIds, 10, (id) => fetchTmdbMovieCached(id));
+  const moviesForAnalysis = await mapLimit(mappedIds, 10, async (id) => {
+    try {
+      return await fetchTmdbMovieCached(id);
+    } catch (e) {
+      console.error(`[SuggestByOverlap] Analysis fetch failed for ${id}`, e);
+      return null;
+    }
+  });
 
   const filmsForSubgenreAnalysis = mappedFilmsForAnalysis.map((f, idx) => {
     const cached = moviesForAnalysis[idx];
