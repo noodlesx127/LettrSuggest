@@ -92,6 +92,22 @@ const QUIZ_KEYWORDS = [
     { id: 1430, name: 'conspiracy' },
     { id: 11332, name: 'martial arts' },
     { id: 1454, name: 'world war ii' },
+    // Additional themes for more variety
+    { id: 4379, name: 'remake' },
+    { id: 9748, name: 'revenge' },
+    { id: 207317, name: 'christmas' },
+    { id: 10714, name: 'road trip' },
+    { id: 3799, name: 'spy' },
+    { id: 1328, name: 'haunted house' },
+    { id: 158718, name: 'found footage' },
+    { id: 9672, name: 'based on true story' },
+    { id: 9986, name: 'solo mission' },
+    { id: 1562, name: 'disaster' },
+    { id: 6054, name: 'father son relationship' },
+    { id: 10235, name: 'ensemble cast' },
+    { id: 3929, name: 'independent film' },
+    { id: 1299, name: 'monster' },
+    { id: 157430, name: 'dark comedy' },
 ];
 
 /**
@@ -191,31 +207,38 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
             }
         }
 
-        // 4. Source A: Get trending/popular movies (Recent Bias)
-        const { data: trendingData } = await supabase
-            .from('tmdb_trending')
-            .select('tmdb_id')
-            .eq('period', 'week')
-            .limit(100);
+        // 4. Source A: Get trending/popular movies (week + month for more variety)
+        const [{ data: weeklyTrending }, { data: monthlyTrending }] = await Promise.all([
+            supabase.from('tmdb_trending').select('tmdb_id').eq('period', 'week').limit(200),
+            supabase.from('tmdb_trending').select('tmdb_id').eq('period', 'month').limit(200),
+        ]);
 
-        // 5. Source B: Get RANDOM library movies (Old/Classic Bias)
-        // We use a random offset to pick deep cuts from the cache
+        // 5. Source B: Get RANDOM library movies from multiple offsets (Classic/Deep Cuts)
+        // Sample from 3 different random positions to increase variety
         const { count } = await supabase
             .from('tmdb_movies')
             .select('*', { count: 'exact', head: true });
 
-        const totalMovies = count || 1000;
-        const randomOffset = Math.floor(Math.random() * Math.max(0, totalMovies - 100));
+        const totalMovies = count || 5000;
+        const batchSize = 150;
+        const numBatches = 3;
+        const libraryPromises = [];
 
-        const { data: libraryData } = await supabase
-            .from('tmdb_movies')
-            .select('tmdb_id')
-            .range(randomOffset, randomOffset + 100);
+        for (let i = 0; i < numBatches; i++) {
+            const randomOffset = Math.floor(Math.random() * Math.max(0, totalMovies - batchSize));
+            libraryPromises.push(
+                supabase.from('tmdb_movies').select('tmdb_id').range(randomOffset, randomOffset + batchSize - 1)
+            );
+        }
 
-        // Combine sources
+        const libraryResults = await Promise.all(libraryPromises);
+        const libraryIds = libraryResults.flatMap(r => (r.data || []).map(row => row.tmdb_id));
+
+        // Combine all sources (~400 trending + ~450 library = ~850 candidates)
         const allCandidates = [
-            ...(trendingData || []).map(r => r.tmdb_id),
-            ...(libraryData || []).map(r => r.tmdb_id)
+            ...(weeklyTrending || []).map(r => r.tmdb_id),
+            ...(monthlyTrending || []).map(r => r.tmdb_id),
+            ...libraryIds
         ];
 
         // 6. Filter IDs by watched/blocked/answered
