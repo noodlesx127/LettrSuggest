@@ -311,3 +311,36 @@ export function hasSubgenres(genreId: number): boolean {
 export function getSubgenresForGenre(genreId: number): SubgenreInfo[] {
     return SUBGENRES_BY_PARENT[genreId] || [];
 }
+
+/**
+ * Extract preferred subgenre keyword IDs from learned SubgenrePatterns
+ * This converts the preferredSubgenres Set from subgenreDetection into TMDB keyword IDs
+ * for use in discovery queries
+ */
+export function getPreferredSubgenreKeywordIds(
+    subgenrePatterns: Map<string, { preferredSubgenres: Set<string>; subgenres: Map<string, { weight: number; liked: number; watched: number }> }>
+): number[] {
+    const keywordIds: number[] = [];
+
+    for (const [_genre, pattern] of subgenrePatterns.entries()) {
+        // Add keyword IDs for explicitly preferred subgenres
+        for (const subgenreKey of pattern.preferredSubgenres) {
+            const ids = SUBGENRE_TO_KEYWORD_IDS[subgenreKey];
+            if (ids) {
+                keywordIds.push(...ids);
+            }
+        }
+
+        // Also add keyword IDs for subgenres with high positive weight (liked more than disliked)
+        for (const [subgenreKey, stats] of pattern.subgenres.entries()) {
+            if (stats.weight > 2.0 && stats.liked > (stats.watched - stats.liked)) {
+                const ids = SUBGENRE_TO_KEYWORD_IDS[subgenreKey];
+                if (ids && !keywordIds.includes(ids[0])) {
+                    keywordIds.push(...ids);
+                }
+            }
+        }
+    }
+
+    return [...new Set(keywordIds)]; // Deduplicate
+}

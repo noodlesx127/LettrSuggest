@@ -301,6 +301,9 @@ export async function generateSmartCandidates(profile: {
     likesFoodDocs: boolean;
     likesTravelDocs: boolean;
   };
+  // NEW: Preferred subgenre keyword IDs from learned patterns
+  // These are TMDB keyword IDs corresponding to subgenres the user loves
+  preferredSubgenreKeywordIds?: number[];
 }): Promise<{
   trending: number[];
   similar: number[];
@@ -540,6 +543,43 @@ export async function generateSmartCandidates(profile: {
     }
   } catch (e) {
     console.error('[SmartCandidates] Niche discovery failed', e);
+  }
+
+  // 5b. NEW: Preferred Subgenre Discovery (using learned subgenre preferences)
+  // This uses keyword IDs from the user's preferred subgenres to find targeted movies
+  try {
+    if (profile.preferredSubgenreKeywordIds && profile.preferredSubgenreKeywordIds.length > 0 && results.discovered.length < 300) {
+      const subgenreKeywords = profile.preferredSubgenreKeywordIds;
+      console.log('[SmartCandidates] Running preferred subgenre discovery', {
+        keywordIds: subgenreKeywords.slice(0, 10),
+        totalKeywords: subgenreKeywords.length
+      });
+
+      // Discover with subgenre keywords using multiple strategies
+      for (const sortBy of ['vote_average.desc', 'popularity.desc'] as const) {
+        const subgenreDiscovered = await discoverMoviesByProfile({
+          keywords: subgenreKeywords.slice(0, 5), // Use top 5 subgenre keywords
+          sortBy,
+          minVotes: 20,
+          limit: 100
+        });
+        results.discovered.push(...subgenreDiscovered);
+        console.log(`[SmartCandidates] Subgenre discovery (${sortBy}):`, subgenreDiscovered.length);
+      }
+
+      // Also discover by individual subgenre keywords for variety
+      for (const keywordId of subgenreKeywords.slice(0, 8)) { // Top 8 individual keywords
+        const singleKeywordDiscovered = await discoverMoviesByProfile({
+          keywords: [keywordId],
+          sortBy: 'popularity.desc',
+          minVotes: 10,
+          limit: 30
+        });
+        results.discovered.push(...singleKeywordDiscovered);
+      }
+    }
+  } catch (e) {
+    console.error('[SmartCandidates] Preferred subgenre discovery failed', e);
   }
 
   // 6. Add pure genre-based discovery with varied temporal ranges

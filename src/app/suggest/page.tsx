@@ -1213,7 +1213,8 @@ export default function SuggestPage() {
         topActors: tasteProfile.topActors,
         topStudios: tasteProfile.topStudios,
         tmdbDetailsMap, // Pass details for TasteDive to use titles
-        nichePreferences: tasteProfile.nichePreferences // Issue #7 implementation
+        nichePreferences: tasteProfile.nichePreferences, // Issue #7 implementation
+        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds // NEW: Sub-genre discovery
       });
 
       // Fetch decade candidates
@@ -1729,7 +1730,8 @@ export default function SuggestPage() {
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors,
-        nichePreferences: tasteProfile.nichePreferences
+        nichePreferences: tasteProfile.nichePreferences,
+        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds // NEW: Sub-genre discovery
       });
 
       let candidatesRaw: number[] = [];
@@ -1907,7 +1909,8 @@ export default function SuggestPage() {
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors,
-        nichePreferences: tasteProfile.nichePreferences
+        nichePreferences: tasteProfile.nichePreferences,
+        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds // NEW: Sub-genre discovery
       });
 
       let candidatesRaw: number[] = [];

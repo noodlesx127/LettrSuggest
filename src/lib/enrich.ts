@@ -10,6 +10,7 @@ import {
   type SubgenrePattern,
   type CrossGenrePattern
 } from './subgenreDetection';
+import { getPreferredSubgenreKeywordIds } from './subgenreData';
 import { checkNicheCompatibility } from './advancedFiltering';
 import { getTuiMDBMovie, type TuiMDBMovie } from './tuimdb';
 import { mergeEnhancedGenres, getCurrentSeasonalGenres, boostSeasonalGenres } from './genreEnhancement';
@@ -80,7 +81,7 @@ export async function fetchMovieById(id: number, mediaType: 'movie' | 'tv' = 'mo
     if (!apiKey) {
       // Try fetching via API route instead
       const baseUrl = getBaseUrl();
-      const url = new URL(`/api/tmdb/movie`, baseUrl);
+      const url = new URL(`/ api / tmdb / movie`, baseUrl);
       url.searchParams.set('id', String(id));
       url.searchParams.set('mediaType', mediaType);
 
@@ -2242,6 +2243,8 @@ export async function buildTasteProfile(params: {
     likesFoodDocs: boolean;
     likesTravelDocs: boolean;
   };
+  // NEW: Preferred subgenre keyword IDs for discovery
+  preferredSubgenreKeywordIds: number[];
 }> {
   const { detectNicheGenres } = await import('./genreEnhancement');
 
@@ -2904,6 +2907,35 @@ export async function buildTasteProfile(params: {
 
   const nichePreferences = detectNicheGenres(nicheFilmsForDetection);
 
+  // NEW: Analyze subgenre patterns and extract preferred subgenre keyword IDs
+  // This enables sub-genre aware discovery (not just filtering)
+  let preferredSubgenreKeywordIds: number[] = [];
+  try {
+    const subgenreFilms = likedFilms.map(f => {
+      const tmdbId = params.mappings.get(f.uri);
+      const details = tmdbId ? params.tmdbDetails?.get(tmdbId) : null;
+      return {
+        title: details?.title || '',
+        genres: details?.genres?.map((g: any) => g.name) || [],
+        keywords: details?.keywords?.keywords?.map((k: any) => k.name) ||
+          details?.keywords?.results?.map((k: any) => k.name) || [],
+        rating: f.rating,
+        liked: f.liked
+      };
+    });
+
+    const subgenrePatterns = analyzeSubgenrePatterns(subgenreFilms);
+    preferredSubgenreKeywordIds = getPreferredSubgenreKeywordIds(subgenrePatterns);
+
+    console.log('[TasteProfile] Preferred subgenre keywords for discovery:', {
+      keywordIds: preferredSubgenreKeywordIds.slice(0, 10),
+      totalKeywords: preferredSubgenreKeywordIds.length,
+      patternsAnalyzed: subgenrePatterns.size
+    });
+  } catch (e) {
+    console.error('[TasteProfile] Failed to analyze subgenre patterns:', e);
+  }
+
   return {
     topGenres,
     topKeywords,
@@ -2918,7 +2950,8 @@ export async function buildTasteProfile(params: {
     watchlistKeywords: Array.from(watchlistKeywordNames),
     watchlistDirectors: Array.from(watchlistDirectorNames),
     userStats,
-    nichePreferences
+    nichePreferences,
+    preferredSubgenreKeywordIds
   };
 }
 

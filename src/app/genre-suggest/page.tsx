@@ -306,7 +306,8 @@ export default function GenreSuggestPage() {
                 topGenres: tasteProfile.topGenres,
                 topKeywords: tasteProfile.topKeywords,
                 topDirectors: tasteProfile.topDirectors,
-                nichePreferences: tasteProfile.nichePreferences
+                nichePreferences: tasteProfile.nichePreferences,
+                preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds // NEW: Sub-genre discovery
             });
 
             let candidatesRaw: number[] = [];
