@@ -1448,9 +1448,10 @@ export async function seedPreferencesFromHistory(
     actorsSeeded: number;
     directorsSeeded: number;
     subgenresSeeded: number;
+    erasSeeded: number;
 }> {
     if (!supabase) {
-        return { success: false, genresSeeded: 0, keywordsSeeded: 0, actorsSeeded: 0, directorsSeeded: 0, subgenresSeeded: 0 };
+        return { success: false, genresSeeded: 0, keywordsSeeded: 0, actorsSeeded: 0, directorsSeeded: 0, subgenresSeeded: 0, erasSeeded: 0 };
     }
 
     console.log('[SeedPreferences] Starting preference seeding', { userId: userId.slice(0, 8), filmCount: films.length });
@@ -1461,6 +1462,7 @@ export async function seedPreferencesFromHistory(
     const actorWeights = new Map<number, { name: string; positive: number; negative: number }>();
     const directorWeights = new Map<number, { name: string; positive: number; negative: number }>();
     const subgenreWeights = new Map<number, { name: string; positive: number; negative: number }>();
+    const eraWeights = new Map<number, { name: string; positive: number; negative: number }>(); // NEW: Decade preferences
 
     // Helper to generate a stable numeric ID from a string key (for subgenres)
     // We define it here to avoid polluting module scope if only used here
@@ -1573,6 +1575,22 @@ export async function seedPreferencesFromHistory(
             directorWeights.set(director.id, existing);
         }
 
+        // Extract ERA/DECADE preferences (NEW)
+        const releaseDate = movie.release_date as string | undefined;
+        if (releaseDate && releaseDate.length >= 4) {
+            const year = parseInt(releaseDate.substring(0, 4));
+            if (!isNaN(year) && year >= 1920) {
+                const decade = Math.floor(year / 10) * 10;
+                const eraLabel = `${decade}s`;
+                const eraId = decade; // Use decade (1980, 1990, etc.) as ID
+
+                const existing = eraWeights.get(eraId) || { name: eraLabel, positive: 0, negative: 0 };
+                existing.positive += delta.pos;
+                existing.negative += delta.neg;
+                eraWeights.set(eraId, existing);
+            }
+        }
+
         processed++;
         if (onProgress && processed % 50 === 0) {
             onProgress(processed, films.length);
@@ -1585,6 +1603,7 @@ export async function seedPreferencesFromHistory(
         actors: actorWeights.size,
         directors: directorWeights.size,
         subgenres: subgenreWeights.size,
+        eras: eraWeights.size,
     });
 
     // Upsert to user_feature_feedback
@@ -1633,6 +1652,7 @@ export async function seedPreferencesFromHistory(
     const actorsSeeded = await upsertFeatures('actor', actorWeights);
     const directorsSeeded = await upsertFeatures('director', directorWeights);
     const subgenresSeeded = await upsertFeatures('subgenre', subgenreWeights);
+    const erasSeeded = await upsertFeatures('era', eraWeights);
 
     console.log('[SeedPreferences] Seeding complete', {
         userId: userId.slice(0, 8),
@@ -1640,8 +1660,9 @@ export async function seedPreferencesFromHistory(
         keywordsSeeded,
         actorsSeeded,
         directorsSeeded,
-        subgenresSeeded
+        subgenresSeeded,
+        erasSeeded
     });
 
-    return { success: true, genresSeeded, keywordsSeeded, actorsSeeded, directorsSeeded, subgenresSeeded };
+    return { success: true, genresSeeded, keywordsSeeded, actorsSeeded, directorsSeeded, subgenresSeeded, erasSeeded };
 }
