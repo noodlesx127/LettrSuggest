@@ -95,7 +95,7 @@ export default function GenreSelector({ selectedGenres, onChange, disabled }: Ge
                     const isSelected = selectedGenres.includes(genre.id);
                     return (
                         <button
-                            key={genre.id}
+                            key={genre.source ? `${genre.source}-${genre.id}` : genre.id}
                             onClick={() => toggleGenre(genre.id)}
                             disabled={disabled}
                             className={`
