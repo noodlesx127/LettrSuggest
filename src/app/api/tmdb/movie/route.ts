@@ -32,7 +32,8 @@ export async function GET(req: Request) {
 
     if (!r.ok) {
       const text = await r.text().catch(() => '');
-      return NextResponse.json({ error: 'TMDB request failed', status: r.status, body: text }, { status: 502 });
+      const status = r.status === 404 ? 404 : 502;
+      return NextResponse.json({ error: 'TMDB request failed', status: r.status, body: text }, { status });
     }
 
     let tmdbData = await r.json();

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, getBulkTmdbDetails, suggestByOverlap, buildTasteProfile, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, getFeatureEvidenceSummary, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
-import { generateSmartCandidates } from '@/lib/trending';
+import { generateSmartCandidates, discoverMoviesByProfile } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { TMDB_GENRE_MAP } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
@@ -287,6 +287,44 @@ export default function GenreSuggestPage() {
             candidatesRaw.push(...smartCandidates.similar);
             candidatesRaw.push(...smartCandidates.discovered);
 
+            // NEW: Add genre-specific discovery for each selected genre
+            // This ensures we get plenty of candidates for each genre the user selected
+            const tmdbGenreIds = selectedGenres.filter(id => {
+                const genreInfo = ALL_GENRES.find(g => g.id === id);
+                return genreInfo && genreInfo.source !== 'tuimdb'; // Only TMDB genres
+            });
+
+            if (tmdbGenreIds.length > 0) {
+                console.log('[GenreSuggest] Running genre-specific discovery for:', tmdbGenreIds);
+
+                // Discover by selected genres with multiple sort strategies
+                const sortStrategies = ['vote_average.desc', 'popularity.desc', 'primary_release_date.desc'] as const;
+
+                for (const sortBy of sortStrategies) {
+                    const genreDiscovered = await discoverMoviesByProfile({
+                        genres: tmdbGenreIds,
+                        genreMode: 'OR', // Match ANY of the selected genres
+                        sortBy,
+                        minVotes: 50,
+                        limit: 100
+                    });
+                    candidatesRaw.push(...genreDiscovered);
+                    console.log(`[GenreSuggest] Genre discovery (${sortBy}):`, genreDiscovered.length);
+                }
+
+                // Also do individual genre discovery for better coverage
+                for (const genreId of tmdbGenreIds.slice(0, 5)) { // Limit to first 5 to avoid too many API calls
+                    const singleGenreDiscovered = await discoverMoviesByProfile({
+                        genres: [genreId],
+                        sortBy: 'popularity.desc',
+                        minVotes: 30,
+                        limit: 50
+                    });
+                    candidatesRaw.push(...singleGenreDiscovered);
+                }
+            }
+
+            // Deduplicate and filter
             const candidatesFiltered = candidatesRaw
                 .filter((id, idx, arr) => arr.indexOf(id) === idx)
                 .filter((id) => !watchedIds.has(id))
@@ -314,12 +352,12 @@ export default function GenreSuggestPage() {
                 userId: uid,
                 films: lite,
                 mappings,
-                candidates: candidatesFiltered.slice(0, 500),
+                candidates: candidatesFiltered.slice(0, 1000),
                 excludeGenres: undefined,
-                maxCandidates: 500,
-                concurrency: 5,
+                maxCandidates: 1000,
+                concurrency: 8,
                 excludeWatchedIds: watchedIds,
-                desiredResults: 200,
+                desiredResults: 400,
                 context: { mode: 'auto', localHour: new Date().getHours() },
                 watchlistEntries,
                 enhancedProfile: {
@@ -342,7 +380,7 @@ export default function GenreSuggestPage() {
             setProgress({ current: 6, total: 7, stage: 'details', details: `Loading details for ${suggestions.length} movies...` });
 
             const movieItems: MovieItem[] = [];
-            const detailPromises = suggestions.slice(0, 100).map(async (s) => {
+            const detailPromises = suggestions.slice(0, 300).map(async (s) => {
                 try {
                     const u = new URL('/api/tmdb/movie', getBaseUrl());
                     u.searchParams.set('id', String(s.tmdbId));
@@ -416,9 +454,9 @@ export default function GenreSuggestPage() {
                     matchingMovies = validMovies.filter(m => (m as any).genre_ids?.includes(genreId));
                 }
 
-                // Sort by score and take top 12
+                // Sort by score and take top 18 per genre
                 matchingMovies.sort((a, b) => b.score - a.score);
-                genreMap[genreId] = matchingMovies.slice(0, 12);
+                genreMap[genreId] = matchingMovies.slice(0, 18);
             }
 
             // Update shownIds
