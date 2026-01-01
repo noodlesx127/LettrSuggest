@@ -142,12 +142,32 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
     if (!supabase) return [];
 
     try {
-        // 1. Get watched movies
-        const { data: watchedData } = await supabase
-            .from('film_tmdb_map')
-            .select('tmdb_id')
-            .eq('user_id', userId);
-        const watchedIds = new Set((watchedData || []).map(r => r.tmdb_id));
+        // 1. Get watched movies (paginated - PostgREST defaults to 1000 max per request)
+        const pageSize = 1000;
+        let from = 0;
+        const allWatchedIds: number[] = [];
+
+        while (true) {
+            const { data: pageData, error: pageError } = await supabase
+                .from('film_tmdb_map')
+                .select('tmdb_id')
+                .eq('user_id', userId)
+                .range(from, from + pageSize - 1);
+
+            if (pageError) {
+                console.warn('[QuizLearning] Error fetching watched movies page', { from, error: pageError });
+                break;
+            }
+
+            const rows = pageData ?? [];
+            allWatchedIds.push(...rows.map(r => r.tmdb_id));
+
+            // If we got fewer than pageSize, we've fetched all rows
+            if (rows.length < pageSize) break;
+            from += pageSize;
+        }
+
+        const watchedIds = new Set(allWatchedIds);
 
         // 2. Get blocked suggestions (thumbs down)
         const { data: blockedData } = await supabase
