@@ -11,7 +11,7 @@ import { generateSmartCandidates, discoverMoviesByProfile } from '@/lib/trending
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { TMDB_GENRE_MAP } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
-import { getKeywordIdsForSubgenres } from '@/lib/subgenreData';
+import { getKeywordIdsForSubgenres, SUBGENRE_TO_KEYWORD_IDS, SUBGENRES_BY_PARENT } from '@/lib/subgenreData';
 import type { FilmEvent } from '@/lib/normalize';
 
 function getBaseUrl(): string {
@@ -47,10 +47,16 @@ type MovieItem = {
     runtime?: number;
     original_language?: string;
     streamingSources?: Array<{ name: string; type: 'sub' | 'buy' | 'rent' | 'free'; url?: string }>;
+    keyword_ids?: number[]; // TMDB keyword IDs for sub-genre filtering
 };
 
 type GenreSuggestions = {
     [genreId: number]: MovieItem[];
+};
+
+// Sub-genre suggestions keyed by subgenre key (e.g., 'THRILLER_SPY')
+type SubgenreSuggestions = {
+    [subgenreKey: string]: MovieItem[];
 };
 
 const PROGRESS_STAGES = [
@@ -72,6 +78,7 @@ export default function GenreSuggestPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [genreSuggestions, setGenreSuggestions] = useState<GenreSuggestions>({});
+    const [subgenreSuggestions, setSubgenreSuggestions] = useState<SubgenreSuggestions>({});
     const [fallbackFilms, setFallbackFilms] = useState<FilmEvent[] | null>(null);
     const [watchlistTmdbIds, setWatchlistTmdbIds] = useState<Set<number>>(new Set());
     const [blockedIds, setBlockedIds] = useState<Set<number>>(new Set());
@@ -177,11 +184,16 @@ export default function GenreSuggestPage() {
     // Get all movie IDs for poster fetching
     const allMovieIds = useMemo(() => {
         const ids: number[] = [];
+        // Include movies from genre suggestions
         Object.values(genreSuggestions).forEach(movies => {
             movies.forEach(m => ids.push(m.id));
         });
+        // Include movies from subgenre suggestions
+        Object.values(subgenreSuggestions).forEach(movies => {
+            movies.forEach(m => ids.push(m.id));
+        });
         return [...new Set(ids)];
-    }, [genreSuggestions]);
+    }, [genreSuggestions, subgenreSuggestions]);
 
     const { posters, mutate: refreshPosters } = usePostersSWR(allMovieIds);
 
@@ -479,8 +491,10 @@ export default function GenreSuggestPage() {
                             original_language: movie.original_language,
                             sources: s.sources,
                             consensusLevel: s.consensusLevel,
-                            genre_ids: (movie.genres || []).map((g: any) => g.id)
-                        } as MovieItem & { genre_ids: number[] };
+                            genre_ids: (movie.genres || []).map((g: any) => g.id),
+                            // Extract keyword IDs for sub-genre filtering
+                            keyword_ids: (movie.keywords?.keywords || movie.keywords?.results || []).map((k: any) => k.id)
+                        } as MovieItem & { genre_ids: number[]; keyword_ids: number[] };
                     }
                     return null;
                 } catch (e) {
@@ -490,34 +504,72 @@ export default function GenreSuggestPage() {
             });
 
             const detailResults = await Promise.all(detailPromises);
-            const validMovies = detailResults.filter((m): m is MovieItem & { genre_ids: number[] } => m !== null);
+            const validMovies = detailResults.filter((m): m is MovieItem & { genre_ids: number[]; keyword_ids: number[] } => m !== null);
 
-            // Categorize by selected genres
-            setProgress({ current: 7, total: 7, stage: 'details', details: 'Organizing by genre...' });
+            // Categorize by selected genres and subgenres
+            setProgress({ current: 7, total: 7, stage: 'details', details: 'Organizing by genre and sub-genre...' });
 
             const genreMap: GenreSuggestions = {};
+            const subgenreMap: SubgenreSuggestions = {};
 
+            // Track movies assigned to subgenres to avoid duplicating them in parent genre sections
+            const assignedToSubgenre = new Set<number>();
+
+            // STEP 1: Create sub-genre sections FIRST
+            // For each selected subgenre, find movies that match its keyword IDs
+            if (selectedSubgenres.length > 0) {
+                console.log('[GenreSuggest] Creating sub-genre sections for:', selectedSubgenres);
+
+                for (const subgenreKey of selectedSubgenres) {
+                    const keywordIds = SUBGENRE_TO_KEYWORD_IDS[subgenreKey] || [];
+                    if (keywordIds.length === 0) continue;
+
+                    // Find movies that have any of this subgenre's keyword IDs
+                    const matchingMovies = validMovies.filter(m => {
+                        const movieKeywordIds = m.keyword_ids || [];
+                        return keywordIds.some(kwId => movieKeywordIds.includes(kwId));
+                    });
+
+                    // Sort by score and take top 18
+                    matchingMovies.sort((a, b) => b.score - a.score);
+                    const topMatches = matchingMovies.slice(0, 18);
+
+                    if (topMatches.length > 0) {
+                        subgenreMap[subgenreKey] = topMatches;
+                        // Mark these movies as assigned to a subgenre
+                        topMatches.forEach(m => assignedToSubgenre.add(m.id));
+                        console.log(`[GenreSuggest] Sub-genre ${subgenreKey}: ${topMatches.length} movies (keywords: ${keywordIds.join(',')})`);
+                    }
+                }
+            }
+
+            // STEP 2: Create parent genre sections
+            // Movies already assigned to a subgenre are excluded from parent genre sections
             for (const genreId of selectedGenres) {
                 const genreInfo = ALL_GENRES.find(g => g.id === genreId);
                 if (!genreInfo) continue;
 
                 // For TMDB genres, filter by genre_ids
                 // For TuiMDB niche genres, filter by genre name in genres array
-                let matchingMovies: MovieItem[];
+                let matchingMovies: (MovieItem & { genre_ids: number[]; keyword_ids: number[] })[];
 
                 if (genreInfo.source === 'tuimdb') {
                     // Niche genre - match by name in genres array
                     const genreName = genreInfo.name.toLowerCase();
                     matchingMovies = validMovies.filter(m =>
-                        m.genres?.some(g => g.toLowerCase().includes(genreName)) ||
-                        (genreName === 'anime' && m.genres?.includes('Animation')) ||
-                        (genreName === 'stand up' && m.title.toLowerCase().includes('stand-up')) ||
-                        (genreName === 'food' && m.genres?.includes('Documentary') && m.title.toLowerCase().match(/food|chef|cook|restaurant/)) ||
-                        (genreName === 'travel' && m.genres?.includes('Documentary') && m.title.toLowerCase().match(/travel|journey|world/))
+                        !assignedToSubgenre.has(m.id) && (
+                            m.genres?.some(g => g.toLowerCase().includes(genreName)) ||
+                            (genreName === 'anime' && m.genres?.includes('Animation')) ||
+                            (genreName === 'stand up' && m.title.toLowerCase().includes('stand-up')) ||
+                            (genreName === 'food' && m.genres?.includes('Documentary') && m.title.toLowerCase().match(/food|chef|cook|restaurant/)) ||
+                            (genreName === 'travel' && m.genres?.includes('Documentary') && m.title.toLowerCase().match(/travel|journey|world/))
+                        )
                     );
                 } else {
-                    // TMDB genre - match by ID
-                    matchingMovies = validMovies.filter(m => (m as any).genre_ids?.includes(genreId));
+                    // TMDB genre - match by ID, excluding movies already in subgenre sections
+                    matchingMovies = validMovies.filter(m =>
+                        !assignedToSubgenre.has(m.id) && m.genre_ids?.includes(genreId)
+                    );
                 }
 
                 // Sort by score and take top 18 per genre
@@ -530,9 +582,14 @@ export default function GenreSuggestPage() {
             validMovies.forEach(m => newShownIds.add(m.id));
             setShownIds(newShownIds);
 
+            setSubgenreSuggestions(subgenreMap);
             setGenreSuggestions(genreMap);
             setLoading(false);
-            console.log('[GenreSuggest] Complete', { genres: Object.keys(genreMap).length });
+            console.log('[GenreSuggest] Complete', {
+                genres: Object.keys(genreMap).length,
+                subgenres: Object.keys(subgenreMap).length,
+                subgenreAssigned: assignedToSubgenre.size
+            });
 
         } catch (e) {
             console.error('[GenreSuggest] Error:', e);
@@ -624,7 +681,19 @@ export default function GenreSuggestPage() {
         }
     };
 
-    const hasResults = Object.values(genreSuggestions).some(arr => arr.length > 0);
+    // Check if we have any results (genre or subgenre)
+    const hasResults = Object.values(genreSuggestions).some(arr => arr.length > 0) ||
+        Object.values(subgenreSuggestions).some(arr => arr.length > 0);
+
+    // Helper to get subgenre display info
+    const getSubgenreInfo = (subgenreKey: string) => {
+        for (const genreId of Object.keys(SUBGENRES_BY_PARENT)) {
+            const subgenres = SUBGENRES_BY_PARENT[Number(genreId)];
+            const found = subgenres?.find(s => s.key === subgenreKey);
+            if (found) return found;
+        }
+        return null;
+    };
 
     return (
         <AuthGate>
@@ -727,9 +796,67 @@ export default function GenreSuggestPage() {
                         </div>
                     )}
 
-                    {/* Genre Sections */}
+                    {/* Sub-Genre Sections (rendered BEFORE parent genre sections) */}
                     {hasResults && (
                         <div className="space-y-8">
+                            {/* Sub-genre sections first */}
+                            {selectedSubgenres.map(subgenreKey => {
+                                const movies = subgenreSuggestions[subgenreKey];
+                                if (!movies || movies.filter(m => !m.dismissed).length === 0) return null;
+
+                                const subgenreInfo = getSubgenreInfo(subgenreKey);
+                                if (!subgenreInfo) return null;
+
+                                const visibleMovies = movies.filter(m => !m.dismissed);
+
+                                return (
+                                    <section key={subgenreKey}>
+                                        <div className="flex items-center gap-2 mb-4">
+                                            <span className="text-2xl">{subgenreInfo.emoji}</span>
+                                            <div>
+                                                <h2 className="text-lg font-semibold text-gray-900">{subgenreInfo.name} Suggestions</h2>
+                                                <p className="text-xs text-gray-600">{visibleMovies.length} movies matching this sub-genre</p>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                                            {visibleMovies.map((item) => (
+                                                <MovieCard
+                                                    key={item.id}
+                                                    id={item.id}
+                                                    title={item.title}
+                                                    year={item.year}
+                                                    posterPath={posters[item.id]}
+                                                    trailerKey={item.trailerKey}
+                                                    isInWatchlist={watchlistTmdbIds.has(item.id)}
+                                                    reasons={item.reasons}
+                                                    score={item.score}
+                                                    voteCategory={item.voteCategory}
+                                                    collectionName={item.collectionName}
+                                                    onFeedback={handleFeedback}
+                                                    onSave={handleSave}
+                                                    isSaved={savedMovieIds.has(item.id)}
+                                                    vote_average={item.vote_average}
+                                                    vote_count={item.vote_count}
+                                                    overview={item.overview}
+                                                    contributingFilms={item.contributingFilms}
+                                                    dismissed={item.dismissed}
+                                                    imdb_rating={item.imdb_rating}
+                                                    rotten_tomatoes={item.rotten_tomatoes}
+                                                    metacritic={item.metacritic}
+                                                    awards={item.awards}
+                                                    genres={item.genres}
+                                                    sources={item.sources}
+                                                    consensusLevel={item.consensusLevel}
+                                                    reliabilityMultiplier={item.reliabilityMultiplier}
+                                                    onUndoDismiss={handleUndoDismiss}
+                                                />
+                                            ))}
+                                        </div>
+                                    </section>
+                                );
+                            })}
+
+                            {/* Parent genre sections */}
                             {selectedGenres.map(genreId => {
                                 const movies = genreSuggestions[genreId];
                                 if (!movies || movies.filter(m => !m.dismissed).length === 0) return null;
