@@ -3992,12 +3992,14 @@ export async function suggestByOverlap(params: {
 
     // QUALITY FILTER: Exclude low-quality movies
     // Filter out "B" movies and low-rated content to ensure quality suggestions
-    const minVoteAverage = 6.0;  // Minimum rating of 6.0/10
+    // Low-consensus movies (single source) require higher rating threshold
     const minVoteCount = 50;      // Minimum 50 votes for statistical relevance
+    const minVoteAverage = strongConsensus ? 6.5 : 7.0;  // Higher bar for low-consensus movies
 
     if (feats.voteAverage < minVoteAverage || feats.voteCount < minVoteCount) {
       return null; // Skip low-quality or unrated movies
     }
+
 
     // Apply negative filters: exclude animation/family/children's if user avoids them
     if (avoidsAnimation && feats.isAnimation) return null;
@@ -4052,6 +4054,22 @@ export async function suggestByOverlap(params: {
 
     let score = 0;
     const reasons: string[] = [];
+
+    // QUALITY BOOST: Reward highly-rated movies with scoring boosts
+    // Higher-rated movies should surface more prominently in suggestions
+    let qualityBoost = 0;
+    if (feats.voteAverage >= 8.0) {
+      qualityBoost = 3.0;
+      reasons.push(`Exceptional rating (${feats.voteAverage.toFixed(1)}/10)`);
+    } else if (feats.voteAverage >= 7.5) {
+      qualityBoost = 2.0;
+      reasons.push(`Highly rated (${feats.voteAverage.toFixed(1)}/10)`);
+    } else if (feats.voteAverage >= 7.0) {
+      qualityBoost = 1.0;
+      reasons.push(`Well-reviewed (${feats.voteAverage.toFixed(1)}/10)`);
+    }
+    score += qualityBoost;
+
 
     /**
      * Compute metadata completeness as a normalized 0-1 score
