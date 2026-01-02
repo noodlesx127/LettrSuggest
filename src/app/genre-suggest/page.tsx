@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, getBulkTmdbDetails, suggestByOverlap, buildTasteProfile, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, getFeatureEvidenceSummary, refreshTmdbCacheForIds, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
-import { generateSmartCandidates, discoverMoviesByProfile, getWeightedSeedIds, type FilmForSeeding } from '@/lib/trending';
+import { generateSmartCandidates, discoverMoviesByProfile, getWeightedSeedIdsByGenre, type FilmForSeeding } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { TMDB_GENRE_MAP } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
@@ -312,7 +312,9 @@ export default function GenreSuggestPage() {
                     lastDate: f.lastDate,
                     genreIds: tmdbDetailsMap.get(mappings.get(f.uri)!)?.genres?.map((g: any) => g.id) || []
                 }));
-            const highlyRated = getWeightedSeedIds(filmsForSeeding, 30, true);
+            // Use genre-filtered seeds: only include user's highly-rated films in the selected genres
+            // This ensures Horror selections seed with the user's top Horror films, not top Comedies
+            const highlyRated = getWeightedSeedIdsByGenre(filmsForSeeding, selectedGenres, 30);
 
             const watchlistIdArray = sourceFilms
                 .filter(f => f.onWatchlist === true)
