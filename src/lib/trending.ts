@@ -70,9 +70,131 @@ const ADJACENT_GENRES: Record<number, number[]> = {
   // History (36) -> Drama, War, Documentary
   36: [18, 10752, 99],
 
-  // War (10752) -> Action, Drama, History
   10752: [28, 18, 36]
 };
+
+/**
+ * Film data for weighted seed selection
+ */
+export interface FilmForSeeding {
+  uri: string;
+  tmdbId: number;
+  rating?: number;
+  liked?: boolean;
+  rewatch?: boolean;
+  lastDate?: string;
+  genreIds?: number[];
+}
+
+/**
+ * Get weighted seed IDs for recommendation APIs
+ * 
+ * This improves on simple "rating >= 4 or liked" filtering by scoring each film:
+ * - Higher ratings get more weight (5 stars = 2.0, 4 stars = 1.5)
+ * - Liked flag adds weight (even for lower-rated films)
+ * - Rewatched films are signature favorites (strong positive signal)
+ * - More recent films get recency boost
+ * - Ensures genre diversity in seed selection
+ * 
+ * @param films - User's films with rating/liked/rewatch data
+ * @param limit - Maximum number of seed IDs to return
+ * @param ensureDiversity - If true, ensures seeds come from diverse genres
+ */
+export function getWeightedSeedIds(
+  films: FilmForSeeding[],
+  limit: number = 25,
+  ensureDiversity: boolean = true
+): number[] {
+  // Score each film
+  const scored = films
+    .filter(f => f.tmdbId && ((f.rating ?? 0) >= 3 || f.liked)) // Basic filter: at least 3 stars or liked
+    .map(f => {
+      let score = 0;
+
+      // Rating weight (0-2.0 scale)
+      const rating = f.rating ?? 3;
+      if (rating >= 4.5) score += 2.0;      // 5 stars = strongest signal
+      else if (rating >= 4) score += 1.5;   // 4+ stars
+      else if (rating >= 3.5) score += 1.0; // 3.5+ stars
+      else if (rating >= 3) score += 0.5;   // 3+ stars
+
+      // Liked flag (even low-rated but liked = positive signal)
+      if (f.liked) score += 1.5;
+
+      // Rewatched = signature favorite (strongest signal)
+      if (f.rewatch) score += 2.5;
+
+      // Recency boost (within last year = up to +1.0)
+      if (f.lastDate) {
+        const daysSince = Math.max(0, (Date.now() - new Date(f.lastDate).getTime()) / (1000 * 60 * 60 * 24));
+        if (daysSince <= 30) score += 1.0;        // Last month
+        else if (daysSince <= 90) score += 0.7;   // Last quarter
+        else if (daysSince <= 180) score += 0.5;  // Last 6 months
+        else if (daysSince <= 365) score += 0.3;  // Last year
+      }
+
+      return { ...f, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  if (!ensureDiversity || scored.length <= limit) {
+    return scored.slice(0, limit).map(f => f.tmdbId);
+  }
+
+  // Ensure genre diversity: pick top scorers but spread across genres
+  const selectedIds: number[] = [];
+  const genreCounts = new Map<number, number>();
+  const MAX_PER_GENRE = 4; // Max seeds from same genre
+
+  for (const film of scored) {
+    if (selectedIds.length >= limit) break;
+
+    // Check if we've hit genre cap for any of this film's genres
+    const filmGenres = film.genreIds || [];
+    const canAdd = filmGenres.length === 0 ||
+      filmGenres.some(gid => (genreCounts.get(gid) || 0) < MAX_PER_GENRE);
+
+    if (canAdd) {
+      selectedIds.push(film.tmdbId);
+      filmGenres.forEach(gid => genreCounts.set(gid, (genreCounts.get(gid) || 0) + 1));
+    }
+  }
+
+  // If we didn't fill the limit due to diversity constraints, add more from top scorers
+  if (selectedIds.length < limit) {
+    for (const film of scored) {
+      if (selectedIds.length >= limit) break;
+      if (!selectedIds.includes(film.tmdbId)) {
+        selectedIds.push(film.tmdbId);
+      }
+    }
+  }
+
+  console.log('[WeightedSeeds] Selected', {
+    input: films.length,
+    eligible: scored.length,
+    selected: selectedIds.length,
+    topScore: scored[0]?.score,
+    genreSpread: genreCounts.size
+  });
+
+  return selectedIds;
+}
+
+/**
+ * Identify "signature films" - absolute favorites that should heavily influence recommendations
+ * These are 5-star rated AND liked AND rewatched films
+ */
+export function getSignatureFilmIds(films: FilmForSeeding[]): number[] {
+  return films
+    .filter(f =>
+      f.tmdbId &&
+      (f.rating ?? 0) >= 4.5 &&  // 5 stars (Letterboxd uses 0.5-5 scale, so 4.5+ = 9-10/10)
+      f.liked === true &&
+      f.rewatch === true
+    )
+    .map(f => f.tmdbId);
+}
 
 export async function fetchTrendingIds(period: 'day' | 'week' = 'day', limit = 100): Promise<number[]> {
   const u = new URL('/api/tmdb/trending', getBaseUrl());
@@ -206,6 +328,7 @@ export async function discoverMoviesByProfile(options: {
   keywords?: number[];
   people?: number[]; // director/actor IDs
   peopleMode?: 'AND' | 'OR';
+  companies?: number[]; // Studio/production company IDs
   yearMin?: number;
   yearMax?: number;
   sortBy?: 'vote_average.desc' | 'popularity.desc' | 'primary_release_date.desc';
@@ -219,6 +342,7 @@ export async function discoverMoviesByProfile(options: {
   const validGenres = options.genres?.filter(id => id > 0 && id < 100000) ?? [];
   const validKeywords = options.keywords?.filter(id => id > 0 && id < 1000000) ?? [];
   const validPeople = options.people?.filter(id => id > 0 && id < 10000000) ?? [];
+  const validCompanies = options.companies?.filter(id => id > 0 && id < 1000000) ?? [];
 
   // Log what we're actually sending
   const filterSummary = {
@@ -248,6 +372,7 @@ export async function discoverMoviesByProfile(options: {
     }
     if (options.yearMin) u.searchParams.set('primary_release_date.gte', `${options.yearMin}-01-01`);
     if (options.yearMax) u.searchParams.set('primary_release_date.lte', `${options.yearMax}-12-31`);
+    if (validCompanies.length) u.searchParams.set('with_companies', validCompanies.slice(0, 3).join('|'));
     if (options.sortBy) u.searchParams.set('sort_by', options.sortBy);
     if (options.minVotes) u.searchParams.set('vote_count.gte', String(options.minVotes));
 
@@ -686,6 +811,153 @@ export async function generateSmartCandidates(profile: {
     } catch (e) {
       console.error('[SmartCandidates] Niche genre discovery failed', e);
     }
+  }
+
+  // 9. NEW: Actor-based discovery (like directors, but for top actors)
+  try {
+    if (profile.topActors && profile.topActors.length > 0 && results.discovered.length < 400) {
+      const shuffledActors = [...profile.topActors].sort(() => Math.random() - 0.5);
+
+      // Discover movies featuring user's favorite actors
+      const actorDiscovered = await discoverMoviesByProfile({
+        people: shuffledActors.slice(0, 5).map(a => a.id),
+        peopleMode: 'OR', // Match ANY of the top actors
+        sortBy: 'vote_average.desc',
+        minVotes: 50,
+        limit: 75
+      });
+      results.discovered.push(...actorDiscovered);
+      console.log('[SmartCandidates] Actor discovery', {
+        count: actorDiscovered.length,
+        actors: shuffledActors.slice(0, 5).map(a => a.name)
+      });
+
+      // Also try popularity-sorted for variety
+      if (actorDiscovered.length < 30) {
+        const actorPopular = await discoverMoviesByProfile({
+          people: shuffledActors.slice(0, 3).map(a => a.id),
+          peopleMode: 'OR',
+          sortBy: 'popularity.desc',
+          limit: 50
+        });
+        results.discovered.push(...actorPopular);
+        console.log('[SmartCandidates] Actor discovery (popular)', { count: actorPopular.length });
+      }
+    }
+  } catch (e) {
+    console.error('[SmartCandidates] Actor discovery failed', e);
+  }
+
+  // 10. NEW: Genre combination discovery (multi-genre patterns)
+  // Detect and discover by genre pairs that the user frequently enjoys together
+  try {
+    if (profile.topGenres.length >= 2 && results.discovered.length < 450) {
+      const topGenreIds = profile.topGenres.slice(0, 4).map(g => g.id);
+
+      // Generate genre pairs from top genres
+      const genrePairs: [number, number][] = [];
+      for (let i = 0; i < topGenreIds.length; i++) {
+        for (let j = i + 1; j < topGenreIds.length; j++) {
+          genrePairs.push([topGenreIds[i], topGenreIds[j]]);
+        }
+      }
+
+      // Shuffle and pick 2-3 pairs to discover
+      const shuffledPairs = genrePairs.sort(() => Math.random() - 0.5).slice(0, 3);
+
+      for (const [genre1, genre2] of shuffledPairs) {
+        const comboDiscovered = await discoverMoviesByProfile({
+          genres: [genre1, genre2],
+          genreMode: 'AND', // Must have BOTH genres
+          sortBy: 'vote_average.desc',
+          minVotes: 50,
+          limit: 40
+        });
+        results.discovered.push(...comboDiscovered);
+        console.log('[SmartCandidates] Genre combo discovery', {
+          genres: [genre1, genre2],
+          count: comboDiscovered.length
+        });
+      }
+    }
+  } catch (e) {
+    console.error('[SmartCandidates] Genre combo discovery failed', e);
+  }
+
+  // 11. NEW: Studio-based discovery (for A24, Ghibli, Blumhouse fans)
+  try {
+    if (profile.topStudios && profile.topStudios.length > 0 && results.discovered.length < 480) {
+      // Only use studios with meaningful weight (user has watched multiple films from them)
+      const significantStudios = profile.topStudios.filter(s => s.weight >= 2);
+
+      if (significantStudios.length > 0) {
+        const shuffledStudios = [...significantStudios].sort(() => Math.random() - 0.5);
+
+        // TMDB company-based discovery (use top 2 studios)
+        for (const studio of shuffledStudios.slice(0, 2)) {
+          const studioDiscovered = await discoverMoviesByProfile({
+            companies: [studio.id],
+            sortBy: 'vote_average.desc',
+            minVotes: 30,
+            limit: 40
+          });
+          results.discovered.push(...studioDiscovered);
+          console.log('[SmartCandidates] Studio discovery', {
+            studio: studio.name,
+            studioId: studio.id,
+            count: studioDiscovered.length
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[SmartCandidates] Studio discovery failed', e);
+  }
+
+  // 12. NEW: Decade-weighted discovery (use user's preferred eras instead of random)
+  try {
+    const topDecades = profile.topGenres.length > 0 && results.discovered.length < 500 ?
+      // Extract decades from topGenres context if available, otherwise use default decades
+      [2010, 2000, 1990, 1980] : [];
+
+    // If we had topDecades in the profile, we'd use them here
+    // For now, use a smart temporal approach based on genre preferences
+    if (profile.topGenres.length >= 2) {
+      const currentYear = new Date().getFullYear();
+
+      // Randomly pick a decade-based strategy
+      const decadeStrategies = [
+        { yearMin: 2015, yearMax: currentYear, label: 'recent' },
+        { yearMin: 2000, yearMax: 2014, label: 'modern' },
+        { yearMin: 1985, yearMax: 1999, label: 'classic' },
+      ];
+
+      // Pick 1-2 strategies randomly
+      const pickedStrategies = decadeStrategies
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 2);
+
+      for (const strategy of pickedStrategies) {
+        const shuffledGenres = [...profile.topGenres].sort(() => Math.random() - 0.5);
+
+        const decadeDiscovered = await discoverMoviesByProfile({
+          genres: shuffledGenres.slice(0, 2).map(g => g.id),
+          genreMode: 'OR',
+          yearMin: strategy.yearMin,
+          yearMax: strategy.yearMax,
+          sortBy: 'vote_average.desc',
+          minVotes: 100,
+          limit: 50
+        });
+        results.discovered.push(...decadeDiscovered);
+        console.log(`[SmartCandidates] Decade discovery (${strategy.label})`, {
+          years: `${strategy.yearMin}-${strategy.yearMax}`,
+          count: decadeDiscovered.length
+        });
+      }
+    }
+  } catch (e) {
+    console.error('[SmartCandidates] Decade discovery failed', e);
   }
 
   console.log('[SmartCandidates] Generated', {

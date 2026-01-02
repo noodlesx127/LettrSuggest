@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, getFeatureEvidenceSummary, neutralizeFeedback, logSuggestionExposure, getRecentExposures, findPairwiseCandidate, makePairId, reasonTypeTags, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
-import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
+import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks, getWeightedSeedIds, type FilmForSeeding } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
@@ -1149,10 +1149,19 @@ export default function SuggestPage() {
       }
 
       // Get highly-rated film IDs for similar movie recommendations
-      const highlyRated = filteredFilms
-        .filter(f => (f.rating ?? 0) >= 4 || f.liked)
-        .map(f => mappings.get(f.uri))
-        .filter((id): id is number => id != null);
+      // Uses weighted scoring based on rating, liked, rewatch, recency, and genre diversity
+      const filmsForSeeding: FilmForSeeding[] = filteredFilms
+        .filter(f => mappings.has(f.uri))
+        .map(f => ({
+          uri: f.uri,
+          tmdbId: mappings.get(f.uri)!,
+          rating: f.rating,
+          liked: f.liked,
+          rewatch: f.rewatch,
+          lastDate: f.lastDate,
+          genreIds: tmdbDetailsMap.get(mappings.get(f.uri)!)?.genres?.map((g: any) => g.id) || []
+        }));
+      const highlyRated = getWeightedSeedIds(filmsForSeeding, 30, true);
 
       // Get watchlist film IDs for intent-based discovery (P1.3 improvement)
       const watchlistIdArray = filteredFilms

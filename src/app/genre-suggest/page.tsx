@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
 import { getFilmMappings, getBulkTmdbDetails, suggestByOverlap, buildTasteProfile, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, getFeatureEvidenceSummary, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
-import { generateSmartCandidates, discoverMoviesByProfile } from '@/lib/trending';
+import { generateSmartCandidates, discoverMoviesByProfile, getWeightedSeedIds, type FilmForSeeding } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { TMDB_GENRE_MAP } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
@@ -299,11 +299,20 @@ export default function GenreSuggestPage() {
                 userId: uid
             });
 
-            // Get highly-rated film IDs
-            const highlyRated = sourceFilms
-                .filter(f => (f.rating ?? 0) >= 4 || f.liked)
-                .map(f => mappings.get(f.uri))
-                .filter((id): id is number => id != null);
+            // Get highly-rated film IDs using weighted scoring
+            // Factors: rating, liked flag, rewatch status, recency, and genre diversity
+            const filmsForSeeding: FilmForSeeding[] = sourceFilms
+                .filter(f => mappings.has(f.uri))
+                .map(f => ({
+                    uri: f.uri,
+                    tmdbId: mappings.get(f.uri)!,
+                    rating: f.rating,
+                    liked: f.liked,
+                    rewatch: f.rewatch,
+                    lastDate: f.lastDate,
+                    genreIds: tmdbDetailsMap.get(mappings.get(f.uri)!)?.genres?.map((g: any) => g.id) || []
+                }));
+            const highlyRated = getWeightedSeedIds(filmsForSeeding, 30, true);
 
             const watchlistIdArray = sourceFilms
                 .filter(f => f.onWatchlist === true)
