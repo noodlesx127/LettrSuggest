@@ -5,7 +5,7 @@ import ProgressIndicator from '@/components/ProgressIndicator';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, getFeatureEvidenceSummary, neutralizeFeedback, logSuggestionExposure, getRecentExposures, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
+import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, getFeatureEvidenceSummary, neutralizeFeedback, logSuggestionExposure, getRecentExposures, findPairwiseCandidate, makePairId, reasonTypeTags, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
 import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
@@ -134,7 +134,7 @@ export default function SuggestPage() {
   const [pairHistory, setPairHistory] = useState<Set<string>>(new Set());
   const [pairwisePair, setPairwisePair] = useState<{ a: MovieItem; b: MovieItem } | null>(null);
   const [pairwiseCount, setPairwiseCount] = useState<number>(0);
-  const PAIRWISE_SESSION_LIMIT = 3;
+  const PAIRWISE_SESSION_LIMIT = 5;
   const [contextMode, setContextMode] = useState<'auto' | 'weeknight' | 'short' | 'immersive' | 'family' | 'background'>('auto');
   const [localHour, setLocalHour] = useState<number | null>(null);
   const [featureEvidence, setFeatureEvidence] = useState<Record<string, FeatureEvidenceSummary>>({});
@@ -744,21 +744,7 @@ export default function SuggestPage() {
     return filters[sectionName] || (() => true);
   }, [topDecade]);
 
-  const makePairId = useCallback((a: number, b: number) => [a, b].sort((x, y) => x - y).join('-'), []);
 
-  const reasonTypeTags = useCallback((reasons: string[]) => {
-    const tags = new Set<string>();
-    for (const r of reasons) {
-      const lower = r.toLowerCase();
-      if (lower.includes('director')) tags.add('director');
-      if (lower.includes('star') || lower.includes('cast')) tags.add('actor');
-      if (lower.includes('genre') || lower.includes('taste in')) tags.add('genre');
-      if (lower.includes('theme') || lower.includes('keyword')) tags.add('theme');
-      if (lower.includes('recent')) tags.add('recent');
-      if (lower.includes('watchlist')) tags.add('watchlist');
-    }
-    return tags;
-  }, []);
 
   const extractFeaturesFromReason = useCallback((reason: string): Array<{ type: FeatureType; name: string }> => {
     const features: Array<{ type: FeatureType; name: string }> = [];
@@ -831,34 +817,7 @@ export default function SuggestPage() {
     }
   }, [uid, mergeFeatureEvidence]);
 
-  const findPairwiseCandidate = useCallback(
-    (list: MovieItem[], history: Set<string>): { a: MovieItem; b: MovieItem } | null => {
-      if (!list || list.length < 2) return null;
-      const sorted = [...list].sort((a, b) => b.score - a.score);
-      const maxPairsToConsider = Math.min(sorted.length - 1, 12);
 
-      for (let i = 0; i < maxPairsToConsider; i++) {
-        const first = sorted[i];
-        const second = sorted[i + 1];
-        const pairKey = makePairId(first.id, second.id);
-        if (history.has(pairKey)) continue;
-
-        const delta = Math.abs(first.score - second.score);
-        if (delta > 0.6) continue; // Only prompt on near-ties
-
-        const tagsA = reasonTypeTags(first.reasons);
-        const tagsB = reasonTypeTags(second.reasons);
-        const shared = Array.from(tagsA).some((t) => tagsB.has(t));
-        if (!shared) continue; // Only when reasons overlap (reduces noise)
-
-        return { a: first, b: second };
-      }
-
-      // Fallback: none found
-      return null;
-    },
-    [makePairId, reasonTypeTags]
-  );
 
   const computeContext = useCallback(() => {
     const hour = localHour ?? new Date().getHours();
@@ -1619,22 +1578,20 @@ export default function SuggestPage() {
 
   // Build a pairwise comparison candidate whenever items change (but only on initial load)
   useEffect(() => {
-    // Only set initial pair when we don't have one yet and count is 0
-    // Let handlePairwiseVote/Skip manage subsequent pairs to avoid race conditions
-    if (pairwisePair !== null || pairwiseCount > 0) {
+    // Resume pairwise session if limit not reached, even if reloaded
+    if (pairwisePair !== null) return;
+    if (pairwiseCount >= PAIRWISE_SESSION_LIMIT) {
       return;
     }
     if (!items || items.length < 2) {
       setPairwisePair(null);
       return;
     }
-    if (pairwiseCount >= PAIRWISE_SESSION_LIMIT) {
-      setPairwisePair(null);
-      return;
-    }
+
     const candidate = findPairwiseCandidate(items.filter((i) => !i.dismissed), pairHistory);
-    setPairwisePair(candidate);
-  }, [items, pairHistory, findPairwiseCandidate, pairwiseCount, pairwisePair, PAIRWISE_SESSION_LIMIT]);
+    // TypeScript check: specific casting might be needed if generic inference fails, but MovieItem matches PairwiseCandidate structure
+    setPairwisePair(candidate as { a: MovieItem; b: MovieItem } | null);
+  }, [items, pairHistory, pairwiseCount, pairwisePair, PAIRWISE_SESSION_LIMIT]);
 
   useEffect(() => {
     const loadEvidence = async () => {

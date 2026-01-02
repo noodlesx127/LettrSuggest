@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.80.0",
+    "@supabase/supabase-js": "^2.89.0",
     "clsx": "^2.1.0",
     "dexie": "^4.0.8",
     "echarts": "^5.5.0",

@@ -14,7 +14,8 @@ export type QuizQuestionType =
     | 'subgenre_preference'
     | 'actor_preference'
     | 'director_preference'
-    | 'era_preference';
+    | 'era_preference'
+    | 'pairwise';
 
 export interface GenreRatingQuestion {
     type: 'genre_rating';
@@ -37,6 +38,7 @@ export interface MovieRatingQuestion {
     overview?: string;
     genres?: string[];
     trailerKey?: string | null;
+    consensusLevel?: string;
 }
 
 // NEW: Subgenre preference question
@@ -71,6 +73,13 @@ export interface EraPreferenceQuestion {
     eraDescription: string;  // e.g., "Practical effects, synth soundtracks"
 }
 
+// NEW: Pairwise comparison question
+export interface PairwiseQuestion {
+    type: 'pairwise';
+    movieA: MovieRatingQuestion;
+    movieB: MovieRatingQuestion;
+}
+
 export type QuizQuestion =
     | GenreRatingQuestion
     | ThemePreferenceQuestion
@@ -78,7 +87,8 @@ export type QuizQuestion =
     | SubgenrePreferenceQuestion
     | ActorPreferenceQuestion
     | DirectorPreferenceQuestion
-    | EraPreferenceQuestion;
+    | EraPreferenceQuestion
+    | PairwiseQuestion;
 
 export interface GenreRatingAnswer {
     rating: 1 | 2 | 3 | 4 | 5; // 1=Never, 2=Rarely, 3=Sometimes, 4=Often, 5=Love it
@@ -107,13 +117,20 @@ export interface EraPreferenceAnswer {
     preference: 'love' | 'like' | 'neutral' | 'dislike';
 }
 
+// NEW: Pairwise answer
+export interface PairwiseAnswer {
+    winnerId: number;
+    loserId: number;
+}
+
 export type QuizAnswer =
     | GenreRatingAnswer
     | ThemePreferenceAnswer
     | MovieRatingAnswer
     | SubgenrePreferenceAnswer
     | PersonPreferenceAnswer
-    | EraPreferenceAnswer;
+    | EraPreferenceAnswer
+    | PairwiseAnswer;
 
 // Genre list for quiz questions (TMDB genre IDs)
 const QUIZ_GENRES = [
@@ -673,6 +690,7 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
                 overview: movie.overview as string || undefined,
                 genres: genres.map(g => g.name),
                 trailerKey: trailer?.key || null,
+                consensusLevel: 'low', // Default for quiz/trending candidates
             });
         }
 
@@ -803,6 +821,25 @@ export async function generateQuizQuestions(
     const candidateMovies = await getCandidateMovies(userId, answered);
     const shuffledMovies = [...candidateMovies].sort(() => Math.random() - 0.5);
 
+    // Try to find a good pairwise match (movies sharing genres)
+    let pairwiseQuestion: PairwiseQuestion | null = null;
+    if (shuffledMovies.length >= 2) {
+        const m1 = shuffledMovies[0];
+        // Look for a match in the next 10 candidates
+        for (let i = 1; i < Math.min(shuffledMovies.length, 12); i++) {
+            const m2 = shuffledMovies[i];
+            const sharedGenre = m1.genres?.some(g => m2.genres?.includes(g));
+            if (sharedGenre) {
+                // Found a match!
+                pairwiseQuestion = { type: 'pairwise', movieA: m1, movieB: m2 };
+                // Remove both from pool
+                shuffledMovies.splice(i, 1);
+                shuffledMovies.splice(0, 1);
+                break;
+            }
+        }
+    }
+
     // Calculate pool sizes
     const totalStaticPool = unansweredGenres.length + unansweredKeywords.length +
         unansweredSubgenres.length + unansweredActors.length +
@@ -833,11 +870,14 @@ export async function generateQuizQuestions(
         'subgenre_preference',
         'era_preference',
         'movie_rating',
+        'movie_rating',
+        'pairwise', // Inject pairwise here
     ];
 
     // Indices for each pool
     let genreIdx = 0, keywordIdx = 0, movieIdx = 0;
     let subgenreIdx = 0, actorIdx = 0, directorIdx = 0, eraIdx = 0;
+    let pairwiseUsed = false;
 
     // Helper to find next available question
     const getNextAvailable = (): QuizQuestion | null => {
@@ -897,6 +937,9 @@ export async function generateQuizQuestions(
         } else if (targetType === 'era_preference' && eraIdx < unansweredEras.length) {
             const era = unansweredEras[eraIdx++];
             question = { type: 'era_preference', decade: era.decade, eraName: era.name, eraDescription: era.description };
+        } else if (targetType === 'pairwise' && pairwiseQuestion && !pairwiseUsed) {
+            question = pairwiseQuestion;
+            pairwiseUsed = true;
         }
 
         // Fallback if target type exhausted
@@ -966,6 +1009,32 @@ export async function recordQuizAnswer(
         await updateDirectorPreference(userId, question, answer as PersonPreferenceAnswer);
     } else if (question.type === 'era_preference') {
         await updateEraPreference(userId, question, answer as EraPreferenceAnswer);
+    } else if (question.type === 'pairwise') {
+        const pAnswer = answer as PairwiseAnswer;
+        // Treat winner as positive rating, loser as negative (mild)
+        // We reuse the updateMoviePreference logic but mocking the question/answer
+        // Winner
+        const pQuestion = question as PairwiseQuestion;
+        const winner = pQuestion.movieA.tmdbId === pAnswer.winnerId ? pQuestion.movieA : pQuestion.movieB;
+        const loser = pQuestion.movieA.tmdbId === pAnswer.loserId ? pQuestion.movieA : pQuestion.movieB;
+
+        await updateMoviePreference(userId, winner, { thumbsUp: true });
+        // Award mild negative feedback for the loser
+        await updateMoviePreference(userId, loser, { thumbsUp: false });
+
+        // Also add to pairwise_events table directly if possible
+        if (supabase) {
+            const { error: pwError } = await supabase.from('pairwise_events').insert({
+                user_id: userId,
+                winner_tmdb_id: pAnswer.winnerId,
+                loser_tmdb_id: pAnswer.loserId,
+                // Note: session_id might be missing in schema, check if we need to add it or skip
+                winner_consensus: winner.consensusLevel || 'low',
+                loser_consensus: loser.consensusLevel || 'low',
+                shared_reason_tags: ['quiz_match']
+            });
+            if (pwError) console.error('[QuizLearning] Failed to insert pairwise event', pwError);
+        }
     }
 
     console.log('[QuizLearning] Recorded answer', {
@@ -1386,6 +1455,7 @@ export async function getQuizStats(userId: string): Promise<{
         actor_preference: 0,
         director_preference: 0,
         era_preference: 0,
+        pairwise: 0,
     };
 
     if (!supabase) {

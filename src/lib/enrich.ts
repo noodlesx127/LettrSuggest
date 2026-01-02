@@ -2220,18 +2220,18 @@ export async function buildTasteProfile(params: {
   watchlistFilms?: Array<{ uri: string; watchlistAddedAt?: string }>; // Watchlist films - show user INTENT
   userId?: string; // NEW: For fetching explicit preferences (Quiz, etc.)
 }): Promise<{
-  topGenres: Array<{ id: number; name: string; weight: number }>;
-  topKeywords: Array<{ id: number; name: string; weight: number }>;
-  topDirectors: Array<{ id: number; name: string; weight: number }>;
+  topGenres: Array<{ id: number; name: string; weight: number; count: number }>;
+  topKeywords: Array<{ id: number; name: string; weight: number; count: number }>;
+  topDirectors: Array<{ id: number; name: string; weight: number; count: number; profile?: string | null }>;
   topDecades: Array<{ decade: number; weight: number }>;
-  topActors: Array<{ id: number; name: string; weight: number }>;
-  topStudios: Array<{ id: number; name: string; weight: number }>;
+  topActors: Array<{ id: number; name: string; weight: number; count: number; profile?: string | null }>;
+  topStudios: Array<{ id: number; name: string; weight: number; count: number }>;
   avoidGenres: Array<{ id: number; name: string; weight: number }>;
   avoidKeywords: Array<{ id: number; name: string; weight: number }>;
   avoidDirectors: Array<{ id: number; name: string; weight: number }>;
-  watchlistGenres: string[];
-  watchlistKeywords: string[];
-  watchlistDirectors: string[];
+  watchlistGenres: Array<{ name: string; count: number }>;
+  watchlistKeywords: Array<{ name: string; count: number }>;
+  watchlistDirectors: Array<{ name: string; count: number }>;
   userStats: {
     avgRating: number;
     stdDevRating: number;
@@ -2246,6 +2246,17 @@ export async function buildTasteProfile(params: {
   };
   // NEW: Preferred subgenre keyword IDs for discovery
   preferredSubgenreKeywordIds: number[];
+  // Stats for visualization
+  tasteBins: {
+    absoluteFavorites: number;
+    highlyRated: number;
+    liked: number;
+    guiltyPleasures: number;
+  };
+  mixedGenres: Array<{ id: number; name: string; liked: number; disliked: number }>;
+  mixedKeywords: Array<{ id: number; name: string; liked: number; disliked: number }>;
+  mixedDirectors: Array<{ id: number; name: string; liked: number; disliked: number }>;
+  topSubgenres: Array<{ name: string; weight: number; count: number; parent: string }>;
 }> {
   const { detectNicheGenres } = await import('./genreEnhancement');
   const { SUBGENRE_TO_KEYWORD_IDS } = await import('./subgenreData'); // Import mapping
@@ -2447,11 +2458,13 @@ export async function buildTasteProfile(params: {
   }
 
   // Positive profile weights
-  const genreWeights = new Map<number, { name: string; weight: number }>();
-  const keywordWeights = new Map<number, { name: string; weight: number }>();
-  const directorWeights = new Map<number, { name: string; weight: number }>();
-  const actorWeights = new Map<number, { name: string; weight: number }>();
-  const studioWeights = new Map<number, { name: string; weight: number }>();
+  const genreWeights = new Map<number, { name: string; weight: number; count: number }>();
+  const keywordWeights = new Map<number, { name: string; weight: number; count: number }>();
+  const directorWeights = new Map<number, { name: string; weight: number; count: number }>();
+  const actorWeights = new Map<number, { name: string; weight: number; count: number }>();
+  const studioWeights = new Map<number, { name: string; weight: number; count: number }>();
+  const directorProfiles = new Map<number, string | null>();
+  const actorProfiles = new Map<number, string | null>();
   const decadeWeights = new Map<number, number>();
 
   // Negative profile weights
@@ -2492,8 +2505,8 @@ export async function buildTasteProfile(params: {
     const genreFraction = genreCount > 0 ? 1 / Math.sqrt(genreCount) : 1; // Use sqrt for moderate dampening
     feats.genreIds.forEach((id, idx) => {
       const name = feats.genres[idx];
-      const current = genreWeights.get(id) || { name, weight: 0 };
-      genreWeights.set(id, { name, weight: current.weight + (weight * genreFraction) });
+      const current = genreWeights.get(id) || { name, weight: 0, count: 0 };
+      genreWeights.set(id, { name, weight: current.weight + (weight * genreFraction), count: current.count + 1 });
       // Track count for ratio-based avoidance
       genreLikedCounts.set(id, (genreLikedCounts.get(id) || 0) + 1);
     });
@@ -2503,37 +2516,44 @@ export async function buildTasteProfile(params: {
     const keywordFraction = keywordCount > 0 ? 1 / Math.sqrt(Math.min(keywordCount, 10)) : 1;
     feats.keywordIds.forEach((id, idx) => {
       const name = feats.keywords[idx];
-      const current = keywordWeights.get(id) || { name, weight: 0 };
-      keywordWeights.set(id, { name, weight: current.weight + (weight * keywordFraction) });
+      const current = keywordWeights.get(id) || { name, weight: 0, count: 0 };
+      keywordWeights.set(id, { name, weight: current.weight + (weight * keywordFraction), count: current.count + 1 });
       // Track count for ratio-based avoidance
       keywordLikedCounts.set(id, (keywordLikedCounts.get(id) || 0) + 1);
     });
 
     // Directors with IDs
+    // Capture profiles from raw movie data
+    movie.credits?.crew?.forEach((c: any) => {
+      if (c.job === 'Director' && c.profile_path) directorProfiles.set(c.id, c.profile_path);
+    });
+
     feats.directorIds.forEach((id, idx) => {
       const name = feats.directors[idx];
-      const current = directorWeights.get(id) || { name, weight: 0 };
-      directorWeights.set(id, { name, weight: current.weight + weight });
+      const current = directorWeights.get(id) || { name, weight: 0, count: 0 };
+      directorWeights.set(id, { name, weight: current.weight + weight, count: current.count + 1 });
       // Track count for ratio-based avoidance
       directorLikedCounts.set(id, (directorLikedCounts.get(id) || 0) + 1);
     });
 
     // Actors with IDs (top 5 billed, with billing position weighting)
     const castData = movie.credits?.cast || [];
-    castData.slice(0, 5).forEach((actor: { id: number; name: string }, idx: number) => {
+    castData.slice(0, 5).forEach((actor: any, idx: number) => {
+      if (actor.profile_path) actorProfiles.set(actor.id, actor.profile_path);
       const billingWeight = 1 / (idx + 1); // Lead = 1.0, 2nd = 0.5, 3rd = 0.33, etc.
-      const current = actorWeights.get(actor.id) || { name: actor.name, weight: 0 };
+      const current = actorWeights.get(actor.id) || { name: actor.name, weight: 0, count: 0 };
       actorWeights.set(actor.id, {
         name: actor.name,
-        weight: current.weight + (weight * billingWeight)
+        weight: current.weight + (weight * billingWeight),
+        count: current.count + 1
       });
     });
 
     // Production companies/studios with IDs
     feats.productionCompanyIds.forEach((id, idx) => {
       const name = feats.productionCompanies[idx];
-      const current = studioWeights.get(id) || { name, weight: 0 };
-      studioWeights.set(id, { name, weight: current.weight + weight });
+      const current = studioWeights.get(id) || { name, weight: 0, count: 0 };
+      studioWeights.set(id, { name, weight: current.weight + weight, count: current.count + 1 });
     });
   }
 
@@ -2622,9 +2642,9 @@ export async function buildTasteProfile(params: {
   const watchlistGenreIds = new Set<number>();
   const watchlistKeywordIds = new Set<number>();
   const watchlistDirectorIds = new Set<number>();
-  const watchlistGenreNames = new Set<string>();
-  const watchlistKeywordNames = new Set<string>();
-  const watchlistDirectorNames = new Set<string>();
+  const watchlistGenreCounts = new Map<string, number>();
+  const watchlistKeywordCounts = new Map<string, number>();
+  const watchlistDirectorCounts = new Map<string, number>();
 
   if (params.watchlistFilms && params.watchlistFilms.length > 0) {
     console.log('[TasteProfile] Processing watchlist for intent signals:', {
@@ -2695,9 +2715,9 @@ export async function buildTasteProfile(params: {
         // Boost with recency/repetition intent
         const name = feats.genres[idx];
         watchlistGenreIds.add(id);
-        if (name) watchlistGenreNames.add(name);
-        const current = genreWeights.get(id) || { name, weight: 0 };
-        genreWeights.set(id, { name, weight: current.weight + totalBoost });
+        if (name) watchlistGenreCounts.set(name, (watchlistGenreCounts.get(name) || 0) + 1);
+        const current = genreWeights.get(id) || { name, weight: 0, count: 0 };
+        genreWeights.set(id, { name, weight: current.weight + totalBoost, count: current.count + 1 });
         // Count as "liked" for ratio calculation
         genreLikedCounts.set(id, (genreLikedCounts.get(id) || 0) + 1);
       });
@@ -2706,9 +2726,9 @@ export async function buildTasteProfile(params: {
       feats.keywordIds.forEach((id, idx) => {
         const name = feats.keywords[idx];
         watchlistKeywordIds.add(id);
-        if (name) watchlistKeywordNames.add(name);
-        const current = keywordWeights.get(id) || { name, weight: 0 };
-        keywordWeights.set(id, { name, weight: current.weight + totalBoost });
+        if (name) watchlistKeywordCounts.set(name, (watchlistKeywordCounts.get(name) || 0) + 1);
+        const current = keywordWeights.get(id) || { name, weight: 0, count: 0 };
+        keywordWeights.set(id, { name, weight: current.weight + totalBoost, count: current.count + 1 });
         keywordLikedCounts.set(id, (keywordLikedCounts.get(id) || 0) + 1);
       });
 
@@ -2716,9 +2736,9 @@ export async function buildTasteProfile(params: {
       feats.directorIds.forEach((id, idx) => {
         const name = feats.directors[idx];
         watchlistDirectorIds.add(id);
-        if (name) watchlistDirectorNames.add(name);
-        const current = directorWeights.get(id) || { name, weight: 0 };
-        directorWeights.set(id, { name, weight: current.weight + totalBoost });
+        if (name) watchlistDirectorCounts.set(name, (watchlistDirectorCounts.get(name) || 0) + 1);
+        const current = directorWeights.get(id) || { name, weight: 0, count: 0 };
+        directorWeights.set(id, { name, weight: current.weight + totalBoost, count: current.count + 1 });
         directorLikedCounts.set(id, (directorLikedCounts.get(id) || 0) + 1);
       });
     }
@@ -2735,12 +2755,12 @@ export async function buildTasteProfile(params: {
   const topGenres = Array.from(genreWeights.entries())
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, topN)
-    .map(([id, { name, weight }]) => ({ id, name, weight }));
+    .map(([id, { name, weight, count }]) => ({ id, name, weight, count }));
 
   const topKeywords = Array.from(keywordWeights.entries())
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, topN)
-    .map(([id, { name, weight }]) => ({ id, name, weight }));
+    .map(([id, { name, weight, count }]) => ({ id, name, weight, count }));
 
   // Source reliability is calculated later when enriching suggestions; placeholder here for parity
   const sourceReliability: Array<{ source: string; reliability: number }> = [];
@@ -2748,17 +2768,17 @@ export async function buildTasteProfile(params: {
   const topDirectors = Array.from(directorWeights.entries())
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, topN)
-    .map(([id, { name, weight }]) => ({ id, name, weight }));
+    .map(([id, { name, weight, count }]) => ({ id, name, weight, count, profile: directorProfiles.get(id) }));
 
   const topActors = Array.from(actorWeights.entries())
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, topN)
-    .map(([id, { name, weight }]) => ({ id, name, weight }));
+    .map(([id, { name, weight, count }]) => ({ id, name, weight, count, profile: actorProfiles.get(id) }));
 
   const topStudios = Array.from(studioWeights.entries())
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, topN)
-    .map(([id, { name, weight }]) => ({ id, name, weight }));
+    .map(([id, { name, weight, count }]) => ({ id, name, weight, count }));
 
   const topDecades = Array.from(decadeWeights.entries())
     .sort((a, b) => b[1] - a[1])
@@ -2781,8 +2801,10 @@ export async function buildTasteProfile(params: {
     return dislikeRatio >= MIN_DISLIKE_RATIO;
   };
 
-  // Log items that WON'T be avoided because user likes them more than dislikes
-  const protectedByRatio: string[] = [];
+  // Collect items that are nominally "disliked" (high negative count) but PROTECTED because user likes them more
+  const mixedGenres: Array<{ id: number; name: string; liked: number; disliked: number }> = [];
+  const mixedKeywords: Array<{ id: number; name: string; liked: number; disliked: number }> = [];
+  const mixedDirectors: Array<{ id: number; name: string; liked: number; disliked: number }> = [];
   const protectedByWatchlist: string[] = [];
 
   // Filter genres by ratio - only avoid if dislike ratio >= 60% AND not on watchlist
@@ -2796,7 +2818,7 @@ export async function buildTasteProfile(params: {
       const liked = genreLikedCounts.get(id) || 0;
       const disliked = genreDislikedCounts.get(id) || 0;
       if (disliked >= MIN_DISLIKED_FOR_AVOIDANCE && !shouldAvoid(liked, disliked, MIN_DISLIKED_FOR_AVOIDANCE)) {
-        protectedByRatio.push(`${name}(${liked}👍/${disliked}👎)`);
+        mixedGenres.push({ id, name, liked, disliked });
         return false;
       }
       return shouldAvoid(liked, disliked, MIN_DISLIKED_FOR_AVOIDANCE);
@@ -2805,8 +2827,8 @@ export async function buildTasteProfile(params: {
     .slice(0, 5)
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
-  if (protectedByRatio.length > 0) {
-    console.log('[TasteProfile] Genres NOT avoided because user likes them more:', protectedByRatio);
+  if (mixedGenres.length > 0) {
+    console.log('[TasteProfile] Genres NOT avoided because user likes them more:', mixedGenres.map(g => `${g.name}(${g.liked}👍/${g.disliked}👎)`));
   }
   if (protectedByWatchlist.length > 0) {
     console.log('[TasteProfile] Items NOT avoided due to watchlist interest:', protectedByWatchlist);
@@ -2835,7 +2857,7 @@ export async function buildTasteProfile(params: {
       const liked = keywordLikedCounts.get(id) || 0;
       const disliked = keywordDislikedCounts.get(id) || 0;
       if (disliked >= 2 && !shouldAvoid(liked, disliked, 2)) {
-        protectedKeywordsByRatio.push(`${name}(${liked}👍/${disliked}👎)`);
+        mixedKeywords.push({ id, name, liked, disliked });
         return false;
       }
       return shouldAvoid(liked, disliked, 2);
@@ -2844,13 +2866,12 @@ export async function buildTasteProfile(params: {
     .slice(0, 5)
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
-  if (protectedKeywordsByRatio.length > 0) {
+  if (mixedKeywords.length > 0) {
     console.log('[TasteProfile] Keywords NOT avoided because user likes them more:',
-      protectedKeywordsByRatio.slice(0, 10));
+      mixedKeywords.map(k => `${k.name}(${k.liked}👍/${k.disliked}👎)`).slice(0, 10));
   }
 
   // Filter directors by ratio - also check watchlist override
-  const protectedDirectorsByRatio: string[] = [];
   const avoidDirectors = Array.from(avoidDirectorWeights.entries())
     .filter(([id, { name }]) => {
       // Check watchlist override first
@@ -2861,7 +2882,7 @@ export async function buildTasteProfile(params: {
       const liked = directorLikedCounts.get(id) || 0;
       const disliked = directorDislikedCounts.get(id) || 0;
       if (disliked >= 2 && !shouldAvoid(liked, disliked, 2)) {
-        protectedDirectorsByRatio.push(`${name}(${liked}👍/${disliked}👎)`);
+        mixedDirectors.push({ id, name, liked, disliked });
         return false;
       }
       return shouldAvoid(liked, disliked, 2);
@@ -2870,9 +2891,9 @@ export async function buildTasteProfile(params: {
     .slice(0, 3)
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
-  if (protectedDirectorsByRatio.length > 0) {
+  if (mixedDirectors.length > 0) {
     console.log('[TasteProfile] Directors NOT avoided because user likes them more:',
-      protectedDirectorsByRatio);
+      mixedDirectors.map(d => `${d.name}(${d.liked}👍/${d.disliked}👎)`));
   }
 
   console.log('[TasteProfile] Enhanced profile built', {
@@ -2909,6 +2930,9 @@ export async function buildTasteProfile(params: {
 
   const nichePreferences = detectNicheGenres(nicheFilmsForDetection);
 
+  // Subgenre stats for visualization
+  const topSubgenres: Array<{ name: string; weight: number; count: number; parent: string }> = [];
+
   // NEW: Analyze subgenre patterns and extract preferred subgenre keyword IDs
   // This enables sub-genre aware discovery (not just filtering)
   let preferredSubgenreKeywordIds: number[] = [];
@@ -2928,6 +2952,18 @@ export async function buildTasteProfile(params: {
 
     const subgenrePatterns = analyzeSubgenrePatterns(subgenreFilms);
     preferredSubgenreKeywordIds = getPreferredSubgenreKeywordIds(subgenrePatterns);
+
+    // Extract for visualization
+    for (const [parent, pattern] of subgenrePatterns) {
+      for (const [sub, info] of pattern.subgenres) {
+        topSubgenres.push({
+          name: sub,
+          weight: info.weight,
+          count: info.watched,
+          parent
+        });
+      }
+    }
 
     // NEW: Merge explicit user preferences from Quiz/Feedback (the "Gap Fix")
     if (params.userId && supabase) {
@@ -2998,12 +3034,23 @@ export async function buildTasteProfile(params: {
     avoidGenres,
     avoidKeywords,
     avoidDirectors,
-    watchlistGenres: Array.from(watchlistGenreNames),
-    watchlistKeywords: Array.from(watchlistKeywordNames),
-    watchlistDirectors: Array.from(watchlistDirectorNames),
+    watchlistGenres: Array.from(watchlistGenreCounts.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+    watchlistKeywords: Array.from(watchlistKeywordCounts.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+    watchlistDirectors: Array.from(watchlistDirectorCounts.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
     userStats,
     nichePreferences,
-    preferredSubgenreKeywordIds
+    preferredSubgenreKeywordIds,
+    // Visualization Data
+    tasteBins: {
+      absoluteFavorites: ratings.filter(r => r >= 4.5 && params.films.find(f => f.rating === r)?.liked).length, // approx
+      highlyRated: ratings.filter(r => r >= 4).length,
+      liked: likedFilms.length,
+      guiltyPleasures: guiltyPleasures.length
+    },
+    mixedGenres,
+    mixedKeywords,
+    mixedDirectors: mixedDirectors, // Need to implement director loop for mixed
+    topSubgenres: topSubgenres.sort((a, b) => b.weight - a.weight).slice(0, 10)
   };
 }
 
@@ -5869,4 +5916,55 @@ export async function getCounterfactualReplayData(params: {
     console.error('[CounterfactualReplay] Exception fetching data:', e);
     return [];
   }
+}
+
+// Pairwise Comparison Helpers
+// ==========================================
+
+export interface PairwiseCandidate {
+  id: number;
+  score: number;
+  reasons: string[];
+}
+
+export const makePairId = (a: number, b: number) => [a, b].sort((x, y) => x - y).join('-');
+
+export const reasonTypeTags = (reasons: string[]) => {
+  const tags = new Set<string>();
+  for (const r of reasons) {
+    const lower = r.toLowerCase();
+    if (lower.includes('director')) tags.add('director');
+    if (lower.includes('star') || lower.includes('cast')) tags.add('actor');
+    if (lower.includes('genre') || lower.includes('taste in')) tags.add('genre');
+    if (lower.includes('theme') || lower.includes('keyword')) tags.add('theme');
+    if (lower.includes('recent')) tags.add('recent');
+    if (lower.includes('watchlist')) tags.add('watchlist');
+  }
+  return tags;
+};
+
+export function findPairwiseCandidate<T extends PairwiseCandidate>(list: T[], history: Set<string>): { a: T; b: T } | null {
+  if (!list || list.length < 2) return null;
+  const sorted = [...list].sort((a, b) => b.score - a.score);
+  const maxPairsToConsider = Math.min(sorted.length - 1, 12);
+
+  for (let i = 0; i < maxPairsToConsider; i++) {
+    const first = sorted[i];
+    const second = sorted[i + 1];
+    const pairKey = makePairId(first.id, second.id);
+    if (history.has(pairKey)) continue;
+
+    const delta = Math.abs(first.score - second.score);
+    if (delta > 0.6) continue; // Only prompt on near-ties
+
+    const tagsA = reasonTypeTags(first.reasons);
+    const tagsB = reasonTypeTags(second.reasons);
+    const shared = Array.from(tagsA).some((t) => tagsB.has(t));
+    if (!shared) continue; // Only when reasons overlap (reduces noise)
+
+    return { a: first, b: second };
+  }
+
+  // Fallback: none found
+  return null;
 }
