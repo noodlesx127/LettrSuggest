@@ -433,9 +433,9 @@ export default function GenreSuggestPage() {
                     avoidKeywords: tasteProfile.avoidKeywords,
                     avoidDirectors: tasteProfile.avoidDirectors,
                     topDecades: tasteProfile.topDecades,
-                    watchlistGenres: tasteProfile.watchlistGenres,
-                    watchlistKeywords: tasteProfile.watchlistKeywords,
-                    watchlistDirectors: tasteProfile.watchlistDirectors
+                    watchlistGenres: tasteProfile.watchlistGenres?.map(w => w.name),
+                    watchlistKeywords: tasteProfile.watchlistKeywords?.map(w => w.name),
+                    watchlistDirectors: tasteProfile.watchlistDirectors?.map(w => w.name)
                 },
                 featureFeedback
             });
