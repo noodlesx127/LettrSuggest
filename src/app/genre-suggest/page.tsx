@@ -333,9 +333,43 @@ export default function GenreSuggestPage() {
             });
 
             let candidatesRaw: number[] = [];
-            candidatesRaw.push(...smartCandidates.trending);
-            candidatesRaw.push(...smartCandidates.similar);
-            candidatesRaw.push(...smartCandidates.discovered);
+
+            // QUALITY FIX: Pre-filter smartCandidates to only include movies in selected genres
+            // This prevents trending/similar movies from polluting genre-specific sections
+            const selectedGenreSet = new Set(selectedGenres);
+            const filterBySelectedGenres = async (ids: number[]): Promise<number[]> => {
+                if (selectedGenres.length === 0) return ids; // No filter if no genres selected
+
+                const filtered: number[] = [];
+                for (const id of ids) {
+                    // Check if we have cached details
+                    const cachedDetails = tmdbDetailsMap.get(id);
+                    if (cachedDetails) {
+                        const movieGenreIds = cachedDetails.genres?.map((g: any) => g.id) || [];
+                        if (movieGenreIds.some((gid: number) => selectedGenreSet.has(gid))) {
+                            filtered.push(id);
+                        }
+                    } else {
+                        // No cached details - include it and let categorization filter later
+                        filtered.push(id);
+                    }
+                }
+                return filtered;
+            };
+
+            // Apply genre filter to smart candidates
+            const filteredTrending = await filterBySelectedGenres(smartCandidates.trending);
+            const filteredSimilar = await filterBySelectedGenres(smartCandidates.similar);
+            const filteredDiscovered = await filterBySelectedGenres(smartCandidates.discovered);
+
+            candidatesRaw.push(...filteredTrending);
+            candidatesRaw.push(...filteredSimilar);
+            candidatesRaw.push(...filteredDiscovered);
+            console.log('[GenreSuggest] Smart candidates after genre filter:', {
+                trending: `${filteredTrending.length}/${smartCandidates.trending.length}`,
+                similar: `${filteredSimilar.length}/${smartCandidates.similar.length}`,
+                discovered: `${filteredDiscovered.length}/${smartCandidates.discovered.length}`
+            });
 
             // NEW: Add genre-specific discovery for each selected genre
             // This ensures we get plenty of candidates for each genre the user selected
@@ -391,7 +425,7 @@ export default function GenreSuggestPage() {
                             genres: tmdbGenreIds.length > 0 ? tmdbGenreIds : undefined,
                             genreMode: 'OR',
                             sortBy,
-                            minVotes: 20,
+                            minVotes: 100,
                             limit: 100
                         });
                         candidatesRaw.push(...subgenreDiscovered);
@@ -403,7 +437,7 @@ export default function GenreSuggestPage() {
                         const keywordDiscovered = await discoverMoviesByProfile({
                             keywords: [keywordId],
                             sortBy: 'popularity.desc',
-                            minVotes: 10,
+                            minVotes: 50,
                             limit: 40
                         });
                         candidatesRaw.push(...keywordDiscovered);
@@ -553,7 +587,10 @@ export default function GenreSuggestPage() {
             }
 
             // STEP 2: Create parent genre sections
-            // Movies already assigned to a subgenre are excluded from parent genre sections
+            // Movies already assigned to a subgenre OR another parent genre are excluded
+            // This prevents cross-genre duplication (e.g., "Carrie" appearing in both Horror and Thriller)
+            const assignedToGenre = new Set<number>();
+
             for (const genreId of selectedGenres) {
                 const genreInfo = ALL_GENRES.find(g => g.id === genreId);
                 if (!genreInfo) continue;
@@ -566,7 +603,7 @@ export default function GenreSuggestPage() {
                     // Niche genre - match by name in genres array
                     const genreName = genreInfo.name.toLowerCase();
                     matchingMovies = validMovies.filter(m =>
-                        !assignedToSubgenre.has(m.id) && (
+                        !assignedToSubgenre.has(m.id) && !assignedToGenre.has(m.id) && (
                             m.genres?.some(g => g.toLowerCase().includes(genreName)) ||
                             (genreName === 'anime' && m.genres?.includes('Animation')) ||
                             (genreName === 'stand up' && m.title.toLowerCase().includes('stand-up')) ||
@@ -575,15 +612,19 @@ export default function GenreSuggestPage() {
                         )
                     );
                 } else {
-                    // TMDB genre - match by ID, excluding movies already in subgenre sections
+                    // TMDB genre - match by ID, excluding movies already assigned
                     matchingMovies = validMovies.filter(m =>
-                        !assignedToSubgenre.has(m.id) && m.genre_ids?.includes(genreId)
+                        !assignedToSubgenre.has(m.id) && !assignedToGenre.has(m.id) && m.genre_ids?.includes(genreId)
                     );
                 }
 
                 // Sort by score and take top 18 per genre
                 matchingMovies.sort((a, b) => b.score - a.score);
-                genreMap[genreId] = matchingMovies.slice(0, 18);
+                const topMatches = matchingMovies.slice(0, 18);
+                genreMap[genreId] = topMatches;
+
+                // Mark these movies as assigned to prevent duplication in later genre sections
+                topMatches.forEach(m => assignedToGenre.add(m.id));
             }
 
             // Update shownIds
