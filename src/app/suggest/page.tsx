@@ -1344,9 +1344,9 @@ export default function SuggestPage() {
           adjacentGenres,
           recentGenres: recentGenreNames,
           topDecades: tasteProfile.topDecades,
-          watchlistGenres: tasteProfile.watchlistGenres,
-          watchlistKeywords: tasteProfile.watchlistKeywords,
-          watchlistDirectors: tasteProfile.watchlistDirectors
+          watchlistGenres: tasteProfile.watchlistGenres?.map(w => w.name),
+          watchlistKeywords: tasteProfile.watchlistKeywords?.map(w => w.name),
+          watchlistDirectors: tasteProfile.watchlistDirectors?.map(w => w.name)
         }
       });
       // Best-effort: ensure posters/backdrops exist for suggested ids.
@@ -1732,9 +1732,9 @@ export default function SuggestPage() {
           avoidKeywords: tasteProfile.avoidKeywords,
           avoidDirectors: tasteProfile.avoidDirectors,
           topDecades: tasteProfile.topDecades,
-          watchlistGenres: tasteProfile.watchlistGenres,
-          watchlistKeywords: tasteProfile.watchlistKeywords,
-          watchlistDirectors: tasteProfile.watchlistDirectors
+          watchlistGenres: tasteProfile.watchlistGenres?.map(w => w.name),
+          watchlistKeywords: tasteProfile.watchlistKeywords?.map(w => w.name),
+          watchlistDirectors: tasteProfile.watchlistDirectors?.map(w => w.name)
         },
         featureFeedback
       });
@@ -1915,9 +1915,9 @@ export default function SuggestPage() {
           avoidKeywords: tasteProfile.avoidKeywords,
           avoidDirectors: tasteProfile.avoidDirectors,
           topDecades: tasteProfile.topDecades,
-          watchlistGenres: tasteProfile.watchlistGenres,
-          watchlistKeywords: tasteProfile.watchlistKeywords,
-          watchlistDirectors: tasteProfile.watchlistDirectors
+          watchlistGenres: tasteProfile.watchlistGenres?.map(w => w.name),
+          watchlistKeywords: tasteProfile.watchlistKeywords?.map(w => w.name),
+          watchlistDirectors: tasteProfile.watchlistDirectors?.map(w => w.name)
         },
         featureFeedback
       });
