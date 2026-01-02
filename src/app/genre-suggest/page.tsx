@@ -6,7 +6,7 @@ import GenreSelector, { ALL_GENRES } from '@/components/GenreSelector';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useImportData } from '@/lib/importStore';
 import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, getBulkTmdbDetails, suggestByOverlap, buildTasteProfile, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, getFeatureEvidenceSummary, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
+import { getFilmMappings, getBulkTmdbDetails, suggestByOverlap, buildTasteProfile, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, getFeatureEvidenceSummary, refreshTmdbCacheForIds, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
 import { generateSmartCandidates, discoverMoviesByProfile, getWeightedSeedIds, type FilmForSeeding } from '@/lib/trending';
 import { usePostersSWR } from '@/lib/usePostersSWR';
 import { TMDB_GENRE_MAP } from '@/lib/genreEnhancement';
@@ -593,6 +593,18 @@ export default function GenreSuggestPage() {
 
             setSubgenreSuggestions(subgenreMap);
             setGenreSuggestions(genreMap);
+
+            // Best-effort: refresh TMDB cache for all suggested movies to ensure posters are available
+            try {
+                const allSuggestedIds = validMovies.map(m => m.id);
+                console.log('[GenreSuggest] Refreshing TMDB cache for posters', allSuggestedIds.length);
+                await refreshTmdbCacheForIds(allSuggestedIds);
+                await refreshPosters();
+            } catch (e) {
+                console.error('[GenreSuggest] Failed to refresh poster cache', e);
+                // Continue anyway - suggestions still work without posters
+            }
+
             setLoading(false);
             console.log('[GenreSuggest] Complete', {
                 genres: Object.keys(genreMap).length,
