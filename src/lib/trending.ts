@@ -182,6 +182,55 @@ export function getWeightedSeedIds(
 }
 
 /**
+ * Get weighted seed IDs filtered to specific genres
+ * 
+ * Same scoring as getWeightedSeedIds but pre-filters films to only include
+ * those that match at least one of the specified genre IDs.
+ * Falls back to global seeds if filtered set is too small.
+ * 
+ * @param films - User's films with rating/liked/rewatch/genreIds data
+ * @param genreIds - Only include films that have at least one of these genres
+ * @param limit - Maximum number of seed IDs to return
+ * @param minSeeds - Minimum seeds required before falling back to global (default: 5)
+ */
+export function getWeightedSeedIdsByGenre(
+  films: FilmForSeeding[],
+  genreIds: number[],
+  limit: number = 25,
+  minSeeds: number = 5
+): number[] {
+  // If no genre filter, use standard function
+  if (!genreIds || genreIds.length === 0) {
+    return getWeightedSeedIds(films, limit, true);
+  }
+
+  const genreSet = new Set(genreIds);
+
+  // Filter films to only those matching the genre(s)
+  const genreFilteredFilms = films.filter(f => {
+    const filmGenres = f.genreIds || [];
+    return filmGenres.some(gid => genreSet.has(gid));
+  });
+
+  console.log('[WeightedSeedsByGenre] Filtering for genres:', {
+    requestedGenres: genreIds,
+    totalFilms: films.length,
+    matchingFilms: genreFilteredFilms.length
+  });
+
+  // If we have enough genre-specific films, use them
+  if (genreFilteredFilms.length >= minSeeds) {
+    const result = getWeightedSeedIds(genreFilteredFilms, limit, false); // No diversity needed within genre
+    console.log('[WeightedSeedsByGenre] Using genre-filtered seeds:', result.length);
+    return result;
+  }
+
+  // Fallback: not enough genre-specific films, use global seeds
+  console.log('[WeightedSeedsByGenre] Insufficient genre matches, falling back to global seeds');
+  return getWeightedSeedIds(films, limit, true);
+}
+
+/**
  * Identify "signature films" - absolute favorites that should heavily influence recommendations
  * These are 5-star rated AND liked AND rewatched films
  */
