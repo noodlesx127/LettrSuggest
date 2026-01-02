@@ -463,10 +463,11 @@ const QUIZ_ACTORS = [
     { id: 1813, name: 'Anne Hathaway', knownFor: 'The Dark Knight Rises, Les Misérables' },
     { id: 6161, name: 'Jennifer Aniston', knownFor: 'Friends, Horrible Bosses' },
     { id: 17647, name: 'Michelle Yeoh', knownFor: 'Everything Everywhere All at Once, Crouching Tiger' },
-    { id: 17288, name: 'Denzel Washington', knownFor: 'Training Day, The Equalizer' },
+    { id: 5292, name: 'Denzel Washington', knownFor: 'Training Day, The Equalizer' },
     { id: 3896, name: 'Liam Neeson', knownFor: 'Taken, Schindler\'s List' },
     { id: 192, name: 'Morgan Freeman', knownFor: 'The Shawshank Redemption, Se7en' },
     { id: 2176, name: 'Samuel L. Jackson', knownFor: 'Pulp Fiction, The Avengers' },
+    { id: 135651, name: 'Michael B. Jordan', knownFor: 'Creed, Black Panther' },
 ];
 
 // ==== POPULAR DIRECTORS FOR QUESTIONS ====
@@ -488,14 +489,14 @@ const QUIZ_DIRECTORS = [
     { id: 95, name: 'Stanley Kubrick', knownFor: '2001, The Shining, A Clockwork Orange' },
     { id: 6043, name: 'Edgar Wright', knownFor: 'Baby Driver, Shaun of the Dead, Hot Fuzz' },
     { id: 17625, name: 'Bong Joon-ho', knownFor: 'Parasite, Snowpiercer, The Host' },
-    { id: 21684, name: 'Park Chan-wook', knownFor: 'Oldboy, The Handmaiden, Decision to Leave' },
+    { id: 10099, name: 'Park Chan-wook', knownFor: 'Oldboy, The Handmaiden, Decision to Leave' },
     { id: 139, name: 'Coen Brothers', knownFor: 'Fargo, No Country for Old Men, The Big Lebowski' },
     { id: 1776, name: 'Francis Ford Coppola', knownFor: 'The Godfather, Apocalypse Now' },
     { id: 1884, name: 'Darren Aronofsky', knownFor: 'Black Swan, Requiem for a Dream, The Whale' },
     { id: 5174, name: 'Ari Aster', knownFor: 'Hereditary, Midsommar, Beau Is Afraid' },
     { id: 608, name: 'Guy Ritchie', knownFor: 'Snatch, Lock Stock, The Gentlemen' },
-    { id: 1032, name: 'Greta Gerwig', knownFor: 'Barbie, Lady Bird, Little Women' },
-    { id: 21684, name: 'Robert Eggers', knownFor: 'The Witch, The Lighthouse, The Northman' },
+    { id: 59325, name: 'Greta Gerwig', knownFor: 'Barbie, Lady Bird, Little Women' },
+    { id: 138781, name: 'Robert Eggers', knownFor: 'The Witch, The Lighthouse, The Northman' },
 ];
 
 
@@ -600,7 +601,9 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
 
         const avoidedGenreIds = new Set<number>();
         for (const f of genreFeedback || []) {
-            if (f.inferred_preference < 0.35 || f.negative_count > (f.positive_count + 1)) {
+            // BE LENIENT FOR QUIZ: Only truly avoid if preference is VERY low (e.g. < 0.2)
+            // We want the quiz to occasionally test if they still hate a genre
+            if (f.inferred_preference < 0.2 || f.negative_count > (f.positive_count + 5)) {
                 avoidedGenreIds.add(f.feature_id);
             }
         }
@@ -658,12 +661,12 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
         // This ensures typically "lower ranked" trending movies get a chance
         candidateIds = candidateIds.sort(() => Math.random() - 0.5);
 
-        // 7. Fetch details for a chunk (e.g. top 30 after shuffle)
-        // We fetch a bit more than we need because some might be filtered by genre
+        // 7. Fetch details for a chunk (e.g. top 100 after shuffle)
+        // We fetch more than we need because some might be filtered by genre
         const { data: movieData } = await supabase
             .from('tmdb_movies')
             .select('tmdb_id, data')
-            .in('tmdb_id', candidateIds.slice(0, 30)); // Take 30 random candidates
+            .in('tmdb_id', candidateIds.slice(0, 100)); // Take 100 random candidates
 
         const questions: MovieRatingQuestion[] = [];
 
@@ -672,9 +675,9 @@ async function getCandidateMovies(userId: string, answered: Set<string>): Promis
             const genres = (movie.genres as Array<{ id: number; name: string }>) || [];
 
             // 8. Filter by AVOIDED GENRES
-            // If movie has ANY avoided genre, skip it
-            const hasAvoidedGenre = genres.some(g => avoidedGenreIds.has(g.id));
-            if (hasAvoidedGenre) continue;
+            // If movie ONLY has avoided genres, skip it. If it has at least one neutral/good one, keep it.
+            const allGenresAvoided = genres.length > 0 && genres.every(g => avoidedGenreIds.has(g.id));
+            if (allGenresAvoided) continue;
 
             // Extract trailer
             const videos = (movie.videos as { results?: Array<{ site: string; type: string; key: string; official?: boolean }> })?.results || [];
@@ -879,36 +882,58 @@ export async function generateQuizQuestions(
     let subgenreIdx = 0, actorIdx = 0, directorIdx = 0, eraIdx = 0;
     let pairwiseUsed = false;
 
-    // Helper to find next available question
+    // Helper to find next available question (balanced fallback)
     const getNextAvailable = (): QuizQuestion | null => {
-        // Try in order of pool size (biggest pools first for sustainability)
-        if (keywordIdx < unansweredKeywords.length) {
+        // Find pool with highest priority item (lowest priority score)
+        const pools = [
+            { type: 'movie_rating', count: shuffledMovies.length - movieIdx },
+            { type: 'theme_preference', count: unansweredKeywords.length - keywordIdx, score: unansweredKeywords[keywordIdx]?.priority ?? 999 },
+            { type: 'subgenre_preference', count: unansweredSubgenres.length - subgenreIdx, score: unansweredSubgenres[subgenreIdx]?.priority ?? 999 },
+            { type: 'actor_preference', count: unansweredActors.length - actorIdx, score: unansweredActors[actorIdx]?.priority ?? 999 },
+            { type: 'director_preference', count: unansweredDirectors.length - directorIdx, score: unansweredDirectors[directorIdx]?.priority ?? 999 },
+            { type: 'genre_rating', count: unansweredGenres.length - genreIdx, score: unansweredGenres[genreIdx]?.priority ?? 999 },
+            { type: 'era_preference', count: unansweredEras.length - eraIdx, score: unansweredEras[eraIdx]?.priority ?? 999 },
+        ];
+
+        // Filter out empty pools
+        const availablePools = pools.filter(p => p.count > 0);
+        if (availablePools.length === 0) return null;
+
+        // Sort by priority score (lowest first)
+        const sorted = availablePools.sort((a, b) => {
+            const scoreA = a.type === 'movie_rating' ? 5 : (a.score ?? 999);
+            const scoreB = b.type === 'movie_rating' ? 5 : (b.score ?? 999);
+            return scoreA - scoreB;
+        });
+
+        const bestPool = sorted[0];
+
+        if (bestPool.type === 'movie_rating') return shuffledMovies[movieIdx++];
+        if (bestPool.type === 'theme_preference') {
             const kw = unansweredKeywords[keywordIdx++];
             return { type: 'theme_preference', keywordId: kw.id, keywordName: kw.name };
         }
-        if (subgenreIdx < unansweredSubgenres.length) {
+        if (bestPool.type === 'subgenre_preference') {
             const sg = unansweredSubgenres[subgenreIdx++];
             return { type: 'subgenre_preference', subgenreKey: sg.key, subgenreName: sg.name, parentGenreName: sg.parent };
         }
-        if (movieIdx < shuffledMovies.length) {
-            return shuffledMovies[movieIdx++];
-        }
-        if (actorIdx < unansweredActors.length) {
+        if (bestPool.type === 'actor_preference') {
             const actor = unansweredActors[actorIdx++];
             return { type: 'actor_preference', actorId: actor.id, actorName: actor.name, knownFor: actor.knownFor };
         }
-        if (directorIdx < unansweredDirectors.length) {
+        if (bestPool.type === 'director_preference') {
             const dir = unansweredDirectors[directorIdx++];
             return { type: 'director_preference', directorId: dir.id, directorName: dir.name, knownFor: dir.knownFor };
         }
-        if (genreIdx < unansweredGenres.length) {
+        if (bestPool.type === 'genre_rating') {
             const genre = unansweredGenres[genreIdx++];
             return { type: 'genre_rating', genreId: genre.id, genreName: genre.name };
         }
-        if (eraIdx < unansweredEras.length) {
+        if (bestPool.type === 'era_preference') {
             const era = unansweredEras[eraIdx++];
             return { type: 'era_preference', decade: era.decade, eraName: era.name, eraDescription: era.description };
         }
+
         return null;
     };
 
