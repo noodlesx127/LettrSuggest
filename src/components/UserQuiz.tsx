@@ -19,6 +19,8 @@ import {
     type SubgenrePreferenceAnswer,
     type PersonPreferenceAnswer,
     type EraPreferenceAnswer,
+    type PairwiseQuestion,
+    type PairwiseAnswer,
 } from '@/lib/quizLearning';
 
 
@@ -62,7 +64,7 @@ export default function UserQuiz({ userId, isOpen, onClose }: UserQuizProps) {
     const currentQuestion = questions[currentIndex];
     const progress = questions.length > 0 ? ((currentIndex) / questions.length) * 100 : 0;
 
-    const handleAnswer = useCallback(async (answer: GenreRatingAnswer | ThemePreferenceAnswer | MovieRatingAnswer | SubgenrePreferenceAnswer | PersonPreferenceAnswer | EraPreferenceAnswer) => {
+    const handleAnswer = useCallback(async (answer: GenreRatingAnswer | ThemePreferenceAnswer | MovieRatingAnswer | SubgenrePreferenceAnswer | PersonPreferenceAnswer | EraPreferenceAnswer | PairwiseAnswer) => {
         if (!currentQuestion || submitting) return;
 
         setSubmitting(true);
@@ -96,7 +98,7 @@ export default function UserQuiz({ userId, isOpen, onClose }: UserQuizProps) {
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full overflow-hidden transition-all ${currentQuestion?.type === 'movie_rating' ? 'max-w-2xl' : 'max-w-lg'}`}>
+            <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full overflow-hidden transition-all ${(currentQuestion?.type === 'movie_rating' || currentQuestion?.type === 'pairwise') ? 'max-w-2xl' : 'max-w-lg'}`}>
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -200,6 +202,13 @@ export default function UserQuiz({ userId, isOpen, onClose }: UserQuizProps) {
                         />
                     ) : currentQuestion?.type === 'era_preference' ? (
                         <EraPreferenceView
+                            question={currentQuestion}
+                            onAnswer={handleAnswer}
+                            onSkip={handleSkip}
+                            submitting={submitting}
+                        />
+                    ) : currentQuestion?.type === 'pairwise' ? (
+                        <PairwiseQuestionView
                             question={currentQuestion}
                             onAnswer={handleAnswer}
                             onSkip={handleSkip}
@@ -729,6 +738,81 @@ function EraPreferenceView({
                     className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
                 >
                     Skip this question
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// Pairwise Comparison Question View
+function PairwiseQuestionView({
+    question,
+    onAnswer,
+    onSkip,
+    submitting,
+}: {
+    question: PairwiseQuestion;
+    onAnswer: (answer: PairwiseAnswer) => void;
+    onSkip: () => void;
+    submitting: boolean;
+}) {
+    return (
+        <div className="flex-1 flex flex-col">
+            <div className="text-center mb-6">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Head-to-Head Comparison</p>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                    Which of these movies would you rather watch?
+                </h3>
+            </div>
+
+            <div className="flex-1 grid grid-cols-2 gap-4 mb-6">
+                {[question.movieA, question.movieB].map((movie, idx) => (
+                    <button
+                        key={movie.tmdbId}
+                        onClick={() => onAnswer({
+                            winnerId: movie.tmdbId,
+                            loserId: idx === 0 ? question.movieB.tmdbId : question.movieA.tmdbId
+                        })}
+                        disabled={submitting}
+                        className={`flex flex-col text-left bg-gray-50 dark:bg-gray-900/40 rounded-xl overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all group ${submitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        {movie.posterPath ? (
+                            <div className="aspect-[2/3] w-full overflow-hidden">
+                                <img
+                                    src={`https://image.tmdb.org/t/p/w342${movie.posterPath}`}
+                                    alt={movie.title}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                />
+                            </div>
+                        ) : (
+                            <div className="aspect-[2/3] w-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center">
+                                <span className="text-4xl opacity-20">🎬</span>
+                            </div>
+                        )}
+                        <div className="p-3">
+                            <h4 className="font-bold text-gray-900 dark:text-gray-100 line-clamp-1">
+                                {movie.title}
+                            </h4>
+                            {movie.year && (
+                                <p className="text-xs text-gray-500 dark:text-gray-400">{movie.year}</p>
+                            )}
+                            {movie.genres && (
+                                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 line-clamp-1">
+                                    {movie.genres.slice(0, 2).join(', ')}
+                                </p>
+                            )}
+                        </div>
+                    </button>
+                ))}
+            </div>
+
+            <div className="mt-auto flex justify-center gap-4">
+                <button
+                    onClick={onSkip}
+                    disabled={submitting}
+                    className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline"
+                >
+                    Can&apos;t decide / Skip
                 </button>
             </div>
         </div>

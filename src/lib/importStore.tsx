@@ -49,7 +49,8 @@ export function ImportDataProvider({ children }: { children: ReactNode }) {
             console.log('[ImportStore] Fetching from Supabase', { uid });
             // IMPORTANT: Supabase/PostgREST commonly defaults to a max of 1000 rows per request.
             // Page through all rows so users with >1000 films get complete data.
-            const pageSize = 1000;
+            // Reduced page size to prevent query timeouts
+            const pageSize = 250;
             let from = 0;
             const allRows: any[] = [];
             let pagingError: any = null;
@@ -59,7 +60,8 @@ export function ImportDataProvider({ children }: { children: ReactNode }) {
                 .from('film_events')
                 .select('*')
                 .eq('user_id', uid)
-                .order('title', { ascending: true })
+                // Ordering by URI is often faster than title if not indexed for text search
+                .order('uri', { ascending: true })
                 .range(from, from + pageSize - 1);
 
               if (error) {
@@ -75,7 +77,14 @@ export function ImportDataProvider({ children }: { children: ReactNode }) {
             }
 
             if (pagingError) {
-              console.error('[ImportStore] Supabase error', { error: pagingError, pageSize, from });
+              console.error('[ImportStore] Supabase error', {
+                message: pagingError.message,
+                code: pagingError.code,
+                hint: pagingError.hint,
+                details: pagingError.details,
+                pageSize,
+                from
+              });
             } else if (allRows.length > 0) {
               console.log('[ImportStore] Loaded from Supabase', { count: allRows.length });
               supabaseFilms = allRows.map(row => ({
@@ -96,15 +105,15 @@ export function ImportDataProvider({ children }: { children: ReactNode }) {
         // Use whichever source has MORE films (indicates more complete data)
         // This handles the case where enrichment was interrupted and localStorage has the full import
         if (localFilms.length > supabaseFilms.length) {
-          console.log('[ImportStore] Using localStorage (more complete)', { 
-            localStorage: localFilms.length, 
-            supabase: supabaseFilms.length 
+          console.log('[ImportStore] Using localStorage (more complete)', {
+            localStorage: localFilms.length,
+            supabase: supabaseFilms.length
           });
           setFilmsState(localFilms);
         } else if (supabaseFilms.length > 0) {
-          console.log('[ImportStore] Using Supabase', { 
-            localStorage: localFilms.length, 
-            supabase: supabaseFilms.length 
+          console.log('[ImportStore] Using Supabase', {
+            localStorage: localFilms.length,
+            supabase: supabaseFilms.length
           });
           setFilmsState(supabaseFilms);
           // Update localStorage with Supabase data

@@ -695,6 +695,16 @@ export async function generateSmartCandidates(profile: {
     total: results.trending.length + results.similar.length + results.discovered.length
   });
 
+  // Ensure all candidates have source metadata (default to TMDB/low if not set by aggregator)
+  // This is critical for pairwise comparisons to have valid consensus data
+  const ensureMetadata = (id: number) => {
+    if (!results.sourceMetadata.has(id)) {
+      results.sourceMetadata.set(id, { sources: ['tmdb'], consensusLevel: 'low' });
+    }
+  };
+  results.trending.forEach(ensureMetadata);
+  results.discovered.forEach(ensureMetadata);
+
   return results;
 }
 
