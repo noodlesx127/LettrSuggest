@@ -4517,11 +4517,22 @@ export async function suggestByOverlap(params: {
 
       // Check detected subgenres against profile
       for (const subgenre of detectedSubgenres) {
+        // 0. PRIORITY: Boost for User-Selected Subgenres (from UI)
+        // If user explicitly selected this subgenre, boost it strongly
+        if (params.allowSubgenres?.includes(subgenre)) {
+          const boost = 5.0; // Strong boost for explicit user selection
+          score += boost;
+          const prettyName = subgenre.replace(/^[A-Z]+_/, '').replace(/_/g, ' ').toLowerCase();
+          reasons.push(`Matches your selected ${prettyName} sub-genre`);
+          console.log(`[UserSelectedSubgenre] Boosted "${m.title}" by ${boost.toFixed(2)} for ${subgenre}`);
+          continue; // Skip further analysis for this subgenre - user wants it!
+        }
+
         // Check all patterns to see if there's an opinion on this subgenre
         for (const [parentGenre, pattern] of subgenrePatterns.entries()) {
           const subInfo = pattern.subgenres.get(subgenre);
 
-          // 1. Boost for Preferred Subgenres
+          // 1. Boost for Preferred Subgenres (from watch history)
           if (pattern.preferredSubgenres.has(subgenre) || (subInfo && subInfo.weight > 2.0 && subInfo.liked > (subInfo.watched - subInfo.liked))) {
             // Boost based on weight, capped
             const weight = subInfo?.weight ?? 2.0;
@@ -4539,8 +4550,10 @@ export async function suggestByOverlap(params: {
           }
 
           // 2. Penalty for Avoided Subgenres
+          // BUT: skip penalty if user explicitly selected this subgenre in the UI
           const dislikedCount = subInfo ? (subInfo.watched - subInfo.liked) : 0;
-          if (pattern.avoidedSubgenres.has(subgenre) || (subInfo && subInfo.weight < -1.0 && dislikedCount > subInfo.liked)) {
+          const isUserSelected = params.allowSubgenres?.includes(subgenre);
+          if (!isUserSelected && (pattern.avoidedSubgenres.has(subgenre) || (subInfo && subInfo.weight < -1.0 && dislikedCount > subInfo.liked))) {
             const weight = subInfo?.weight ?? -2.0;
             const penalty = Math.max(weight * 1.5, -8.0); // massive penalty for specific hatred
             totalPenalty += penalty;
