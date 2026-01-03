@@ -1690,10 +1690,15 @@ export default function SuggestPage() {
         addedAt: f.watchlistAddedAt ?? null,
       }));
 
+      // Fetch TMDB details for seed movie titles (needed for TasteDive/similar recommendations)
+      const allMappedIds = Array.from(mappings.values());
+      const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
+
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
         topN: 10,
+        tmdbDetails: tmdbDetailsMap,
         watchlistFilms: watchlistFilmsForMore,
         userId: uid ?? undefined
       });
@@ -1705,7 +1710,8 @@ export default function SuggestPage() {
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors,
         nichePreferences: tasteProfile.nichePreferences,
-        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds // NEW: Sub-genre discovery
+        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
+        tmdbDetailsMap // Critical: enables seed movie titles for similar recommendations
       });
 
       let candidatesRaw: number[] = [];
@@ -1869,11 +1875,16 @@ export default function SuggestPage() {
         addedAt: f.watchlistAddedAt ?? null,
       }));
 
+      // Fetch TMDB details for seed movie titles (needed for TasteDive/similar recommendations)
+      const allMappedIds = Array.from(mappings.values());
+      const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
+
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
         topN: 10,
         negativeFeedbackIds,
+        tmdbDetails: tmdbDetailsMap,
         watchlistFilms: watchlistFilmsForRefresh,
         userId: uid ?? undefined
       });
@@ -1885,7 +1896,8 @@ export default function SuggestPage() {
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors,
         nichePreferences: tasteProfile.nichePreferences,
-        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds // NEW: Sub-genre discovery
+        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
+        tmdbDetailsMap // Critical: enables seed movie titles for similar recommendations
       });
 
       let candidatesRaw: number[] = [];
