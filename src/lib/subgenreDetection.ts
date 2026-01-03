@@ -54,7 +54,7 @@ export const SUBGENRE_KEYWORDS = {
   HORROR_PSYCHOLOGICAL: ['psychological horror', 'mind games', 'mental breakdown', 'madness', 'insanity', 'unreliable narrator', 'hallucination', 'paranoia'],
   HORROR_SLASHER: ['slasher', 'serial killer', 'masked killer', 'massacre', 'stalker', 'final girl', 'body count'],
   HORROR_ZOMBIE: ['zombie', 'undead', 'living dead', 'walking dead', 'outbreak', 'infection', 'reanimated'],
-  HORROR_BODY: ['body horror', 'body transformation', 'mutation', 'grotesque', 'flesh', 'cronenberg', 'metamorphosis', 'deformity', 'parasite'],
+  HORROR_BODY: ['body horror', 'body transformation', 'grotesque body', 'flesh horror', 'cronenberg', 'metamorphosis', 'deformity', 'body mutation', 'parasitic horror', 'bio-horror'],
   HORROR_FOLK: ['folk horror', 'pagan', 'ritual', 'cult', 'rural horror', 'isolated community', 'wicker man', 'midsommar', 'ancient ritual', 'countryside terror'],
   HORROR_WITCH: ['witch', 'witchcraft', 'coven', 'black magic', 'salem', 'witches', 'sorceress', 'dark magic', 'curse'],
   HORROR_COSMIC: ['cosmic horror', 'lovecraft', 'lovecraftian', 'eldritch', 'cthulhu', 'unknowable', 'existential horror', 'cosmic dread', 'ancient evil', 'elder gods'],

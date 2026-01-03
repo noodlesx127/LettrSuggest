@@ -602,6 +602,11 @@ export default function GenreSuggestPage() {
                         const detected = detectSubgenres(parentGenreName, movieText, [], movieKeywordIds);
                         const textMatch = detected.has(subgenreKey);
 
+                        // Log matches for debugging
+                        if (keywordMatch || textMatch) {
+                            console.log(`[SubgenreCateg] ${m.title}: keywordMatch=${keywordMatch}, textMatch=${textMatch}, subgenre=${subgenreKey}`);
+                        }
+
                         return keywordMatch || textMatch;
                     });
 
