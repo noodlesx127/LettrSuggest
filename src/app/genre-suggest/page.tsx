@@ -411,40 +411,42 @@ export default function GenreSuggestPage() {
                 }
             }
 
-            // NEW: Add sub-genre discovery using TMDB keywords
-            // This targets specific sub-genres like "Supernatural Horror" or "Cyberpunk Sci-Fi"
+            // CROSS-API COMPATIBLE: Enhanced genre-based discovery instead of sparse TMDB keywords
+            // Text-based detectSubgenres() will filter for specific subgenres regardless of API source
+            // This approach works with Trakt, TasteDive, and any other recommendation source
             if (selectedSubgenres.length > 0) {
-                const subgenreKeywordIds = getKeywordIdsForSubgenres(selectedSubgenres);
-                console.log('[GenreSuggest] Running sub-genre discovery with keywords:', {
+                console.log('[GenreSuggest] Running enhanced genre discovery for subgenre filtering:', {
                     subgenres: selectedSubgenres,
-                    keywordIds: subgenreKeywordIds
+                    approach: 'genre-based discovery + text filtering (cross-API compatible)'
                 });
 
-                if (subgenreKeywordIds.length > 0) {
-                    // Discover by sub-genre keywords with multiple strategies
-                    for (const sortBy of ['vote_average.desc', 'popularity.desc'] as const) {
-                        const subgenreDiscovered = await discoverMoviesByProfile({
-                            keywords: subgenreKeywordIds,
-                            genres: tmdbGenreIds.length > 0 ? tmdbGenreIds : undefined,
-                            genreMode: 'OR',
-                            sortBy,
-                            minVotes: 20,  // Lower threshold for sparse subgenre keywords (e.g., 283085 body horror)
-                            limit: 100
-                        });
-                        candidatesRaw.push(...subgenreDiscovered);
-                        console.log(`[GenreSuggest] Sub-genre discovery (${sortBy}):`, subgenreDiscovered.length);
-                    }
+                // Fetch MORE genre candidates to maximize chance of finding subgenre matches
+                // Text detection will filter these down to matching subgenres
+                for (const sortBy of ['vote_average.desc', 'popularity.desc', 'primary_release_date.desc'] as const) {
+                    const genreDiscovered = await discoverMoviesByProfile({
+                        genres: tmdbGenreIds.length > 0 ? tmdbGenreIds : undefined,
+                        genreMode: 'OR',
+                        sortBy,
+                        minVotes: sortBy === 'primary_release_date.desc' ? 30 : 50,
+                        limit: 150 // Increased to get more candidates for text filtering
+                    });
+                    candidatesRaw.push(...genreDiscovered);
+                    console.log(`[GenreSuggest] Enhanced genre discovery (${sortBy}):`, genreDiscovered.length);
+                }
 
-                    // Also do individual keyword discovery for each selected subgenre
-                    for (const keywordId of subgenreKeywordIds.slice(0, 8)) { // Limit to avoid too many API calls
-                        const keywordDiscovered = await discoverMoviesByProfile({
-                            keywords: [keywordId],
-                            sortBy: 'popularity.desc',
-                            minVotes: 50,
-                            limit: 40
-                        });
-                        candidatesRaw.push(...keywordDiscovered);
-                    }
+                // Also fetch from different decades to increase diversity  
+                const decades = [[2015, 2026], [2000, 2014], [1985, 1999]];
+                for (const [yearMin, yearMax] of decades) {
+                    const decadeDiscovered = await discoverMoviesByProfile({
+                        genres: tmdbGenreIds.length > 0 ? tmdbGenreIds : undefined,
+                        genreMode: 'OR',
+                        sortBy: 'vote_average.desc',
+                        minVotes: 50,
+                        yearMin,
+                        yearMax,
+                        limit: 75
+                    });
+                    candidatesRaw.push(...decadeDiscovered);
                 }
             }
 

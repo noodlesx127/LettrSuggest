@@ -719,41 +719,32 @@ export async function generateSmartCandidates(profile: {
     console.error('[SmartCandidates] Niche discovery failed', e);
   }
 
-  // 5b. NEW: Preferred Subgenre Discovery (using learned subgenre preferences)
-  // This uses keyword IDs from the user's preferred subgenres to find targeted movies
+  // 5b. CROSS-API COMPATIBLE: Enhanced preferred genre discovery
+  // Instead of relying on sparse TMDB keyword IDs, we fetch more genre candidates
+  // Text-based detectSubgenres() will filter these to matching subgenres later
+  // This approach works with Trakt, TasteDive, and any other recommendation source
   try {
-    if (profile.preferredSubgenreKeywordIds && profile.preferredSubgenreKeywordIds.length > 0 && results.discovered.length < 300) {
-      const subgenreKeywords = profile.preferredSubgenreKeywordIds;
-      console.log('[SmartCandidates] Running preferred subgenre discovery', {
-        keywordIds: subgenreKeywords.slice(0, 10),
-        totalKeywords: subgenreKeywords.length
+    if (profile.topGenres.length > 0 && results.discovered.length < 300) {
+      console.log('[SmartCandidates] Running enhanced genre discovery (cross-API compatible)', {
+        topGenres: profile.topGenres,
+        approach: 'genre-based discovery + text filtering'
       });
 
-      // Discover with subgenre keywords using multiple strategies
+      // Fetch more candidates from top genres for subgenre text filtering
       for (const sortBy of ['vote_average.desc', 'popularity.desc'] as const) {
-        const subgenreDiscovered = await discoverMoviesByProfile({
-          keywords: subgenreKeywords.slice(0, 5), // Use top 5 subgenre keywords
+        const enhancedDiscovered = await discoverMoviesByProfile({
+          genres: profile.topGenres.slice(0, 3).map(g => g.id),
+          genreMode: 'OR',
           sortBy,
-          minVotes: 20,
-          limit: 100
+          minVotes: 50,
+          limit: 150 // Increased to get more candidates for text-based subgenre detection
         });
-        results.discovered.push(...subgenreDiscovered);
-        console.log(`[SmartCandidates] Subgenre discovery (${sortBy}):`, subgenreDiscovered.length);
-      }
-
-      // Also discover by individual subgenre keywords for variety
-      for (const keywordId of subgenreKeywords.slice(0, 8)) { // Top 8 individual keywords
-        const singleKeywordDiscovered = await discoverMoviesByProfile({
-          keywords: [keywordId],
-          sortBy: 'popularity.desc',
-          minVotes: 10,
-          limit: 30
-        });
-        results.discovered.push(...singleKeywordDiscovered);
+        results.discovered.push(...enhancedDiscovered);
+        console.log(`[SmartCandidates] Enhanced genre discovery (${sortBy}):`, enhancedDiscovered.length);
       }
     }
   } catch (e) {
-    console.error('[SmartCandidates] Preferred subgenre discovery failed', e);
+    console.error('[SmartCandidates] Enhanced genre discovery failed', e);
   }
 
   // 6. Add pure genre-based discovery with varied temporal ranges
