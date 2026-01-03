@@ -1,0 +1,1681 @@
+[Suggest] Restored shown IDs from localStorage 129 page-59f496611a7ae1ed.js:1:29012
+[ImportStore] Loading films layout-a29db4951c3b30b5.js:1:5164
+[ImportStore] Found localStorage data 
+Object { count: 1188 }
+layout-a29db4951c3b30b5.js:1:5287
+[ImportStore] Fetching from Supabase 
+Object { uid: "30cfd130-a342-4a7c-b8ad-6175db17e298" }
+layout-a29db4951c3b30b5.js:1:5598
+[Suggest] Saved shown IDs to localStorage 129 page-59f496611a7ae1ed.js:1:29455
+[Suggest] runSuggest start 
+Object { uid: "30cfd130-a342-4a7c-b8ad-6175db17e298", hasSourceFilms: 1000, excludeGenres: "", yearMin: "", yearMax: "", mode: "quick", cacheKey: 1767398069781 }
+page-59f496611a7ae1ed.js:1:40112
+[Suggest] fetching mappings for 1000 films page-59f496611a7ae1ed.js:1:40674
+[Mappings] Auth verified 
+Object { uid: "30cfd130-a342-4a7c-b8ad-6175db17e298" }
+335-3c926a86fd435cf1.js:1:4500
+[Mappings] fetching all mappings for user 
+Object { userId: "30cfd130-a342-4a7c-b8ad-6175db17e298", uriCount: 1000 }
+335-3c926a86fd435cf1.js:1:4636
+[ImportStore] Loaded from Supabase 
+Object { count: 1188 }
+layout-a29db4951c3b30b5.js:1:6029
+[ImportStore] Using Supabase 
+Object { localStorage: 1188, supabase: 1188 }
+layout-a29db4951c3b30b5.js:1:6600
+[Mappings] all mappings loaded 
+Object { totalRows: 1188 }
+335-3c926a86fd435cf1.js:1:5059
+[Mappings] finished getFilmMappings 
+Object { totalMappings: 1000, requestedUris: 1000 }
+335-3c926a86fd435cf1.js:1:5469
+[Suggest] mappings loaded 
+Object { mappingCount: 1000, totalFilms: 1000 }
+page-59f496611a7ae1ed.js:1:40873
+[Suggest] watchlist IDs 
+Object { count: 83 }
+page-59f496611a7ae1ed.js:1:41093
+[Suggest] Pre-fetching TMDB details from cache page-59f496611a7ae1ed.js:1:41147
+[BulkTmdb] Fetching cached details 
+Object { count: 1000 }
+335-3c926a86fd435cf1.js:1:5633
+TypeError: can't access property "isCheckout", e is undefined content-script.js:1:5698
+Error: Promised response from onMessage listener went out of scope service-worker.min.js:35:31729
+[BulkTmdb] Fetched details 
+Object { requested: 1000, found: 708 }
+335-3c926a86fd435cf1.js:1:6001
+[Suggest] TMDB details loaded from cache 
+Object { requested: 1000, found: 708, coverage: "70.8%" }
+page-59f496611a7ae1ed.js:1:41397
+[Suggest] Building taste profile for smart discovery page-59f496611a7ae1ed.js:1:41640
+[Suggest] Found negative feedback 
+Object { count: 55 }
+page-59f496611a7ae1ed.js:1:41907
+[PandoraLearning] Loaded graduated preferences 
+Object { avoidActors: (3) […], avoidKeywords: (5) […], avoidFranchises: (10) […], avoidDirectors: (3) […], avoidGenres: (3) […], avoidSubgenres: [], preferActors: (3) […], preferKeywords: (5) […], preferDirectors: (3) […], preferGenres: (3) […], … }
+335-3c926a86fd435cf1.js:1:28467
+[Suggest] Loaded feature feedback 
+Object { avoidActors: (3) […], avoidKeywords: (5) […], avoidFranchises: (10) […], preferActors: (3) […], preferKeywords: (5) […] }
+page-59f496611a7ae1ed.js:1:42071
+[Suggest] Watchlist films for taste profile: 83 page-59f496611a7ae1ed.js:1:42615
+=== BUILD TASTE PROFILE START === 335-3c926a86fd435cf1.js:1:38349
+[TasteProfile] Input params: 
+Object { filmsCount: 1000, mappingsCount: 1000, topN: 10, negativeFeedbackCount: 55, tmdbDetailsCount: 708, watchlistCount: 83 }
+335-3c926a86fd435cf1.js:1:38398
+[TasteProfile] Film filtering: 
+Object { totalFilms: 1000, filmsWithMappings: 1000, likedFilmsCount: 222, dislikedFilmsCount: 0, guiltyPleasuresCount: 0, neutralFilmsCount: 778, dislikeThreshold: 1.5, filmsWithRating0: 0, rewatchFilms: 51, likedByLikeFlag: 92, … }
+335-3c926a86fd435cf1.js:1:39780
+[TasteProfile] TMDB IDs to fetch: 
+Object { likedIdsCount: 222, dislikedIdsCount: 0, limit: 2000 }
+335-3c926a86fd435cf1.js:1:40421
+[TasteProfile] Movie details fetched: 
+Object { likedMoviesTotal: 222, likedMoviesWithData: 222, likedMoviesWithGenres: 221, likedMoviesWithKeywords: 217, likedMoviesWithCredits: 221, dislikedMoviesTotal: 0, dislikedMoviesWithData: 0, negativeFeedbackMovies: 55 }
+335-3c926a86fd435cf1.js:1:41221
+[TasteProfile] Sample movie data: 
+Object { title: "Moon", genres: (2) […], keywordCount: 13, castCount: 10, crewCount: 146, directors: (1) […] }
+335-3c926a86fd435cf1.js:1:41563
+[TasteProfile] Processing watchlist for intent signals: 
+Object { watchlistCount: 83 }
+335-3c926a86fd435cf1.js:1:44933
+[TasteProfile] Watchlist TMDB IDs found: 83 335-3c926a86fd435cf1.js:1:45237
+[TasteProfile] Watchlist signals extracted: 
+Object { genresOnWatchlist: 19, keywordsOnWatchlist: 883, directorsOnWatchlist: 80 }
+335-3c926a86fd435cf1.js:1:46419
+[TasteProfile] Genre avoidance analysis: 
+Object { genresWithBothLikedAndDisliked: [], finalAvoidGenres: [] }
+335-3c926a86fd435cf1.js:1:48197
+[TasteProfile] Enhanced profile built 
+Object { topGenres: (3) […], topKeywords: (3) […], topDirectors: (3) […], topActors: (3) […], topStudios: (3) […], topDecades: (3) […], avoidGenres: [], avoidKeywords: [], avoidDirectors: [], watchlistOverrides: 139, … }
+335-3c926a86fd435cf1.js:1:49676
+=== BUILD TASTE PROFILE END === 335-3c926a86fd435cf1.js:1:50460
+[TasteProfile] Added explicit Quiz/Feedback preferences: 
+Object { count: 116, types: {…} }
+335-3c926a86fd435cf1.js:1:52032
+[TasteProfile] Preferred subgenre keywords for discovery: 
+Object { keywordIds: (10) […], totalKeywords: 158, patternsAnalyzed: 15 }
+335-3c926a86fd435cf1.js:1:52276
+[Suggest] Unwatched watchlist films: 83 page-59f496611a7ae1ed.js:1:43168
+[Suggest] Top watchlist picks: 5 page-59f496611a7ae1ed.js:1:44494
+[Suggest] Watchlist picks ready: 5 page-59f496611a7ae1ed.js:1:45568
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 10536 }
+335-3c926a86fd435cf1.js:1:31550
+[usePostersSWR] Fetching posters 
+Object { idsCount: 5 }
+859-5c4db588528751c9.js:1:61368
+[usePostersSWR] Chunk fetched 
+Object { requested: 5, received: 5 }
+859-5c4db588528751c9.js:1:61700
+[usePostersSWR] Fetch complete 
+Object { posterCount: 5 }
+859-5c4db588528751c9.js:1:62067
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 10536 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 10536, title: "The Italian Job" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 10536 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 2322 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 2322 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 2322, title: "Sneakers" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 2322 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 4105 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 4105 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 4105, title: "Black Rain" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 4105 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 16246 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 16246 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 16246, title: "Gone in 60 Seconds" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 16246 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 718930 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 718930 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 718930, title: "Bullet Train" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 718930 }
+335-3c926a86fd435cf1.js:1:33094
+[AdaptiveLearning] Updating exploration stats 
+Object { userId: "30cfd130-a342-4a7c-b8ad-6175db17e298", filmCount: 1000 }
+page-59f496611a7ae1ed.js:1:1242
+[WeightedSeeds] Selected 
+Object { input: 1000, eligible: 222, selected: 30, topScore: 5, genreSpread: 14 }
+859-5c4db588528751c9.js:1:43807
+[Suggest] Watchlist IDs for discovery: 83 page-59f496611a7ae1ed.js:1:46295
+[Suggest] Generating smart candidates page-59f496611a7ae1ed.js:1:46359
+[SmartCandidates] Generating with enhanced profile 
+Object { highlyRatedCount: 30, watchlistCount: 83, topGenresCount: 10, topKeywordsCount: 10, topDirectorsCount: 10, topActorsCount: 10, topStudiosCount: 10, hasTmdbDetails: true }
+859-5c4db588528751c9.js:1:48855
+[TMDB] trending start 
+Object { period: "week", limit: 100 }
+859-5c4db588528751c9.js:1:44873
+[TMDB] trending ok 
+Object { count: 20 }
+859-5c4db588528751c9.js:1:45094
+[SmartCandidates] Running multi-source aggregation (primary similar source) 859-5c4db588528751c9.js:1:49616
+[SmartCandidates] Seed movies with titles: 
+Object { fromHighlyRated: 20, fromWatchlist: 10, combined: 25, withTitles: 25, sampleTitles: (5) […] }
+859-5c4db588528751c9.js:1:50156
+[AdaptiveLearning] No recent exploratory films found to update stats page-59f496611a7ae1ed.js:1:2464
+[usePostersSWR] Fetching posters 
+Object { idsCount: 5 }
+859-5c4db588528751c9.js:1:61368
+[usePostersSWR] Chunk fetched 
+Object { requested: 5, received: 5 }
+859-5c4db588528751c9.js:1:61700
+[usePostersSWR] Fetch complete 
+Object { posterCount: 5 }
+859-5c4db588528751c9.js:1:62067
+[SmartCandidates] Aggregated recommendations added: 20 with source tracking: 20 859-5c4db588528751c9.js:1:50630
+[TMDB] discover start 
+Object { genres: (3) […], genreMode: "OR", keywords: (4) […], people: [], peopleMode: "AND", yearMin: 2000, yearMax: 2009, sortBy: "vote_average.desc", minVotes: 100, limit: 150 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[SmartCandidates] Genre+keyword discovery 
+Object { count: 60, genreCount: 3, keywordCount: 4, sortBy: "vote_average.desc", temporal: {…} }
+859-5c4db588528751c9.js:1:51752
+[TMDB] discover start 
+Object { genres: (3) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: 2020, yearMax: 2026, sortBy: "popularity.desc", minVotes: 20, limit: 150 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[SmartCandidates] Popular fallback 
+Object { count: 60 }
+859-5c4db588528751c9.js:1:52423
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: (3) […], peopleMode: "OR", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: undefined, limit: 100 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 7, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[SmartCandidates] Director discovery 
+Object { count: 7, directors: (8) […] }
+859-5c4db588528751c9.js:1:52780
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (2) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 30, limit: 100 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[SmartCandidates] Niche keyword discovery 
+Object { count: 60, keywords: (2) […] }
+859-5c4db588528751c9.js:1:53398
+[SmartCandidates] Running preferred subgenre discovery 
+Object { keywordIds: (10) […], totalKeywords: 158 }
+859-5c4db588528751c9.js:1:53748
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (5) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 20, limit: 100 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[SmartCandidates] Subgenre discovery (vote_average.desc): 60 859-5c4db588528751c9.js:1:54004
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (5) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 20, limit: 100 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[SmartCandidates] Subgenre discovery (popularity.desc): 60 859-5c4db588528751c9.js:1:54004
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (1) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 10, limit: 30 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 30, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (1) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 10, limit: 30 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 0, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (1) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 10, limit: 30 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 30, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (1) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 10, limit: 30 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 30, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (1) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 10, limit: 30 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 30, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (1) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 10, limit: 30 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 30, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (1) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 10, limit: 30 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 30, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (1) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 10, limit: 30 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 30, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[TMDB] discover start 
+Object { genres: (2) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: 2000, yearMax: 2014, sortBy: "vote_average.desc", minVotes: 100, limit: 50 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 50, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[SmartCandidates] Decade discovery (modern) 
+Object { years: "2000-2014", count: 50 }
+859-5c4db588528751c9.js:1:58196
+[TMDB] discover start 
+Object { genres: (2) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: 2015, yearMax: 2026, sortBy: "vote_average.desc", minVotes: 100, limit: 50 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 50, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[SmartCandidates] Decade discovery (recent) 
+Object { years: "2015-2026", count: 50 }
+859-5c4db588528751c9.js:1:58196
+[SmartCandidates] Generated 
+Object { trending: 20, similar: 20, discovered: 617, total: 657 }
+859-5c4db588528751c9.js:1:58406
+[DecadeCandidates] Fetching for 1970s (1970-1979) 859-5c4db588528751c9.js:1:58847
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: 1970, yearMax: 1979, sortBy: "popularity.desc", minVotes: 50, limit: 20 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 20, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[SmartDiscovery] Fetching hidden gems 859-5c4db588528751c9.js:1:59093
+[TMDB] discover start 
+Object { genres: (3) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 50, limit: 40 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 40, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: 1970, yearMax: 1979, sortBy: "vote_average.desc", minVotes: 50, limit: 20 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 20, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[Lists] Discovering from curated lists 
+Object { seedCount: 10 }
+335-3c926a86fd435cf1.js:1:37085
+[Lists] Found relevant lists 
+Object { count: 0 }
+335-3c926a86fd435cf1.js:1:37561
+[Lists] Discovered films from lists 
+Object { count: 0 }
+335-3c926a86fd435cf1.js:1:37992
+[Suggest] List candidates: 0 page-59f496611a7ae1ed.js:1:47152
+[Suggest][Phase5+] Using adaptive exploration 
+Object { rate: 0.15, count: 22, message: "Using default rate (will adjust after rating exploratory picks)" }
+page-59f496611a7ae1ed.js:1:47304
+[Exploration] Exploring adjacent genre 
+Object { genreId: 10752, fromTopGenres: (3) […], availableAdjacent: 2 }
+859-5c4db588528751c9.js:1:60192
+[TMDB] discover start 
+Object { genres: (1) […], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 500, limit: 30 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 30, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[Exploration] Exploring acclaimed films in new genre 
+Object { genreId: 10402, availableGenres: 9 }
+859-5c4db588528751c9.js:1:60875
+[TMDB] discover start 
+Object { genres: (1) […], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 500, limit: 14 }
+859-5c4db588528751c9.js:1:48418
+[TMDB] discover ok 
+Object { count: 14, filters: {…} }
+859-5c4db588528751c9.js:1:48584
+[Exploration] Generated exploratory picks 
+Object { total: 22, adjacent: 15, acclaimed: 7, targetCount: 22 }
+859-5c4db588528751c9.js:1:59663
+[Suggest] Smart candidates breakdown 
+Object { trending: 20, similar: 20, discovered: 617, decade: 20, discovery: 20, lists: 0, exploratory: 22, totalRaw: 719 }
+page-59f496611a7ae1ed.js:1:48017
+[Suggest] candidate pool 
+Object { blockedCount: 53, mode: "quick", totalCandidates: 719, afterFilter: 500, watchedCount: 708 }
+page-59f496611a7ae1ed.js:1:48419
+[Suggest] Loaded genre transitions 
+Object { count: 11 }
+page-59f496611a7ae1ed.js:1:48670
+[RecentExposures] Loaded exposure data 
+Object { uniqueMovies: 243, lookbackDays: 14 }
+335-3c926a86fd435cf1.js:1:96403
+[Suggest] Recent exposures for repeat prevention: 243 page-59f496611a7ae1ed.js:1:48948
+[Suggest] calling suggestByOverlap 
+Object { liteCount: 1000, candidatesCount: 500 }
+page-59f496611a7ae1ed.js:1:49181
+[AdaptiveLearning] Loaded reason preferences 
+Object { count: 7, preferences: (7) […] }
+335-3c926a86fd435cf1.js:1:57022
+[SuggestByOverlap] Excluded watchlist movies from main suggestions: 
+Object { watchlistCount: 83, originalCandidates: 500, filteredCandidates: 500 }
+335-3c926a86fd435cf1.js:1:58008
+[usePostersSWR] Fetching posters 
+Object { idsCount: 5 }
+859-5c4db588528751c9.js:1:61368
+[usePostersSWR] Chunk fetched 
+Object { requested: 5, received: 5 }
+859-5c4db588528751c9.js:1:61700
+[usePostersSWR] Fetch complete 
+Object { posterCount: 5 }
+859-5c4db588528751c9.js:1:62067
+[Suggest] User profile analysis 
+Object { totalLiked: 199, likedAnimationCount: 1, likedFamilyCount: 1, likedChildrensCount: 4, avoidsAnimation: true, avoidsFamily: true, avoidsChildrens: true, topKeywords: (10) […], topGenreCombos: (5) […], topDirectors: (5) […], … }
+335-3c926a86fd435cf1.js:1:61747
+[Suggest] Subgenre analysis complete 
+Object { patternsDetected: 15, crossPatternsDetected: 67, exampleAvoidances: (3) […] }
+335-3c926a86fd435cf1.js:1:63230
+[SubgenreFilter] Filtered "The Reader" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Along with the Gods: The Two Worlds" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Genre penalty for "The Secret Agent": Drama, Thriller (-3.0) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "The Secret Agent": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[NegativePenalty] Penalized "The Secret Agent" by 3.00 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "The Secret Agent" score: 21.52 -> 19.43 (0.90x) based on keyword, decade, genre, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Secret Agent" score: 19.43 -> 18.22 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[DecadeBoost] Boosted "When the Last Sword Is Drawn" (2003) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "When the Last Sword Is Drawn": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "When the Last Sword Is Drawn" by 1.64 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "When the Last Sword Is Drawn" score: 15.77 -> 14.14 (0.90x) based on recent, keyword, decade preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "When the Last Sword Is Drawn" score: 14.14 -> 13.26 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Portrait of a Lady on Fire" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Genre penalty for "5Gang: A Different Kind of Christmas": Comedy (-1.2) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "5Gang: A Different Kind of Christmas" by 1.23 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "5Gang: A Different Kind of Christmas" score: 4.37 -> 4.02 (0.92x) based on recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "5Gang: A Different Kind of Christmas" score: 4.02 -> 3.77 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenrePenalty] Penalized "The Given Word" by 4.50 for DRAMA_MEDICAL 335-3c926a86fd435cf1.js:1:77669
+[PandoraLearning] Genre penalty for "The Given Word": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[ReasonPreference] Adjusted "The Given Word" score: 25.90 -> 23.86 (0.92x) based on recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SubgenreFilter] Filtered "A.I. Artificial Intelligence" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Stalker" - User avoids scifi alien within Science Fiction 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Murder on the Orient Express" (1974) by 2.00 for 1970s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Murder on the Orient Express": Drama, Thriller (-3.0) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Murder on the Orient Express" by 3.00 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Murder on the Orient Express" score: 17.36 -> 15.87 (0.91x) based on director, actor, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SubgenreFilter] Filtered "A Taxi Driver" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Genre penalty for "10DANCE": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "10DANCE" by 2.87 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "10DANCE" score: 6.46 -> 5.94 (0.92x) based on keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "10DANCE" score: 5.94 -> 5.77 (0.97x) 335-3c926a86fd435cf1.js:1:87119
+[DecadeBoost] Boosted "Into the Woods" (1991) by 2.00 for 1990s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Into the Woods": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Into the Woods" by 1.64 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Into the Woods" score: 123.88 -> 111.88 (0.90x) based on genre, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[PandoraLearning] Keyword boost for "Incendies": 2 matches (+0.7) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "Incendies": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Incendies" by 1.64 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Incendies" score: 163.30 -> 149.51 (0.92x) based on genre, director, keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SubgenreFilter] Filtered "The Human Condition I: No Greater Love" - User avoids drama war within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenrePenalty] Penalized "Let Me Be with You" by 4.50 for DRAMA_MEDICAL 335-3c926a86fd435cf1.js:1:77669
+[PandoraLearning] Genre penalty for "Let Me Be with You": Drama, Comedy, Romance (-3.0) 335-3c926a86fd435cf1.js:1:82287
+[ReasonPreference] Adjusted "Let Me Be with You" score: 14.73 -> 13.57 (0.92x) based on recent preferences 335-3c926a86fd435cf1.js:1:85302
+[DecadeBoost] Boosted "The Bourne Identity" (2002) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[SubgenrePenalty] Penalized "The Bourne Identity" by 5.25 for THRILLER_PSYCHOLOGICAL 335-3c926a86fd435cf1.js:1:77669
+[SubgenreBoost] Boosted "The Bourne Identity" by 4.00 for THRILLER_ACTION 335-3c926a86fd435cf1.js:1:77258
+[PandoraLearning] Actor boost for "The Bourne Identity": Matt Damon (+0.4) 335-3c926a86fd435cf1.js:1:80352
+[PandoraLearning] Keyword boost for "The Bourne Identity": 1 matches (+0.3) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "The Bourne Identity": Drama, Thriller (-3.0) 335-3c926a86fd435cf1.js:1:82287
+[ReasonPreference] Adjusted "The Bourne Identity" score: 343.90 -> 314.81 (0.92x) based on genre, director, actor, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Bourne Identity" score: 314.81 -> 295.18 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[RepeatPenalty] "The Bourne Identity" penalized: 295.18 -> 206.63 (1.1d ago, 0.7x) 335-3c926a86fd435cf1.js:1:87413
+[PandoraLearning] Genre penalty for "Mission «Sky»": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Mission «Sky»" by 1.64 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Mission «Sky»" score: 4.90 -> 4.51 (0.92x) based on keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SubgenrePenalty] Penalized "Better Days" by 17.25 for CRIME_POLICE 335-3c926a86fd435cf1.js:1:77669
+[PandoraLearning] Genre penalty for "Better Days": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "Better Days": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[ReasonPreference] Adjusted "Better Days" score: 10.78 -> 9.93 (0.92x) based on keyword, genre, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[DecadeBoost] Boosted "Fantozzi: White Collar Blues" (1975) by 2.00 for 1970s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Fantozzi: White Collar Blues": Comedy (-1.2) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Fantozzi: White Collar Blues" by 1.23 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Fantozzi: White Collar Blues" score: 16.31 -> 14.44 (0.89x) based on decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SubgenreFilter] Filtered "Ford v Ferrari" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Cyborg She" (2008) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Cyborg She": Comedy, Romance (-2.5) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Cyborg She" by 2.47 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Cyborg She" score: 206.13 -> 186.16 (0.90x) based on genre, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Cyborg She" score: 186.16 -> 174.56 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[DecadeBoost] Boosted "Nashville" (1975) by 2.00 for 1970s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Nashville": Drama, Comedy (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Nashville" by 2.87 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Nashville" score: 174.54 -> 159.77 (0.92x) based on genre, director, actor, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[DecadeBoost] Boosted "Jeremiah Johnson" (1972) by 2.00 for 1970s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Jeremiah Johnson": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "Jeremiah Johnson": Western (+0.2) 335-3c926a86fd435cf1.js:1:82779
+[NegativePenalty] Penalized "Jeremiah Johnson" by 1.64 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Jeremiah Johnson" score: 254.56 -> 233.82 (0.92x) based on genre, keyword, actor, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[DecadeBoost] Boosted "Sin City" (2005) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[SubgenrePenalty] Penalized "Sin City" by 17.25 for CRIME_POLICE 335-3c926a86fd435cf1.js:1:77669
+[PandoraLearning] Keyword penalty for "Sin City": 1 matches (-1.2) 335-3c926a86fd435cf1.js:1:79233
+[PandoraLearning] Keyword boost for "Sin City": 1 matches (+0.7) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "Sin City": Thriller (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "Sin City": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[ReasonPreference] Adjusted "Sin City" score: 23.35 -> 21.45 (0.92x) based on keyword, actor, decade, genre, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Sin City" score: 21.45 -> 20.11 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[DecadeBoost] Boosted "The Magic Flute" (1975) by 2.00 for 1970s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "The Magic Flute": Romance (-1.2) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "The Magic Flute" by 1.23 - Contains Romance — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "The Magic Flute" score: 46.76 -> 41.99 (0.90x) based on genre, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[DecadeBoost] Boosted "The Rocky Horror Picture Show" (1975) by 2.00 for 1970s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "The Rocky Horror Picture Show": Comedy (-1.2) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "The Rocky Horror Picture Show" by 1.23 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "The Rocky Horror Picture Show" score: 162.28 -> 146.56 (0.90x) based on genre, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SubgenreFilter] Filtered "Nise: The Heart of Madness" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Red Beard" - User avoids drama medical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "The Housemaid" - User avoids thriller psychological within Thriller 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Keyword penalty for "Spider-Man: No Way Home": 1 matches (-1.7) 335-3c926a86fd435cf1.js:1:79233
+[NegativePenalty] Penalized "Spider-Man: No Way Home" by 1.72 - Contains "new york city" — hard avoid; you've skipped this 9 times 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Spider-Man: No Way Home" score: 20.72 -> 19.37 (0.93x) based on director, keyword, collection, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Spider-Man: No Way Home" score: 19.37 -> 18.16 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Nuremberg" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Marty Supreme" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Genre penalty for "Our Fault": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Our Fault" by 2.87 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Our Fault" score: 8.70 -> 8.23 (0.95x) based on keyword, collection, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Our Fault" score: 8.23 -> 7.72 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Frankenstein" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Prayers for Bobby" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[usePostersSWR] Fetching posters 
+Object { idsCount: 5 }
+859-5c4db588528751c9.js:1:61368
+[CrossGenreBoost] Boosted "Fast X" by 1.70 - Matches your taste in Action+Crime+Thriller with themes: bold (like Ronin, The Getaway) 335-3c926a86fd435cf1.js:1:69359
+[PandoraLearning] Genre penalty for "Fast X": Thriller (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "Fast X": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[NegativePenalty] Penalized "Fast X" by 1.64 - Contains Thriller — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Fast X" score: 42.63 -> 40.10 (0.94x) based on genre, keyword, collection, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Fast X" score: 40.10 -> 37.60 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Pride & Prejudice" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[usePostersSWR] Chunk fetched 
+Object { requested: 5, received: 5 }
+859-5c4db588528751c9.js:1:61700
+[usePostersSWR] Fetch complete 
+Object { posterCount: 5 }
+859-5c4db588528751c9.js:1:62067
+[DecadeBoost] Boosted "The Lord of the Rings: The Two Towers" (2002) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[ReasonPreference] Adjusted "The Lord of the Rings: The Two Towers" score: 14.67 -> 13.70 (0.93x) based on keyword, actor, decade, collection, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Lord of the Rings: The Two Towers" score: 13.70 -> 12.84 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "The Great Escape" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "She Rides Shotgun" - User avoids crime prison within Crime 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Memories of Murder" - User avoids crime police within Crime 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Dear Zachary: A Letter to a Son About His Father" (2008) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Keyword boost for "Dear Zachary: A Letter to a Son About His Father": 1 matches (+0.4) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "Dear Zachary: A Letter to a Son About His Father": Documentary (-1.7) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "Dear Zachary: A Letter to a Son About His Father": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[NegativePenalty] Penalized "Dear Zachary: A Letter to a Son About His Father" by 1.72 - Contains Documentary — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Dear Zachary: A Letter to a Son About His Father" score: 96.54 -> 87.18 (0.90x) based on genre, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Dear Zachary: A Letter to a Son About His Father" score: 87.18 -> 81.75 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "3-Iron" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "The Secret in Their Eyes" (2009) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Keyword boost for "The Secret in Their Eyes": 2 matches (+0.8) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "The Secret in Their Eyes": Thriller, Drama (-3.0) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "The Secret in Their Eyes" by 3.00 - Contains Thriller — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "The Secret in Their Eyes" score: 14.43 -> 12.94 (0.90x) based on keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Secret in Their Eyes" score: 12.94 -> 12.13 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[PandoraLearning] Keyword penalty for "Thunderbolts*": 2 matches (-2.9) 335-3c926a86fd435cf1.js:1:79233
+[NegativePenalty] Penalized "Thunderbolts*" by 2.95 - Contains "new york city" — hard avoid; you've skipped this 9 times 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Thunderbolts*" score: 8.38 -> 7.71 (0.92x) based on keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Thunderbolts*" score: 7.71 -> 7.23 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[PandoraLearning] Genre penalty for "A Time for Bravery": Comedy (-1.2) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "A Time for Bravery" by 1.23 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "A Time for Bravery" score: 4.97 -> 4.58 (0.92x) based on recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "A Time for Bravery" score: 4.58 -> 4.44 (0.97x) 335-3c926a86fd435cf1.js:1:87119
+[DecadeBoost] Boosted "Infernal Affairs" (2002) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[SubgenrePenalty] Penalized "Infernal Affairs" by 18.00 for CRIME_GANGSTER 335-3c926a86fd435cf1.js:1:77669
+[PandoraLearning] Genre penalty for "Infernal Affairs": Drama, Thriller (-3.0) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "Infernal Affairs": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[ReasonPreference] Adjusted "Infernal Affairs" score: 394.52 -> 356.29 (0.90x) based on genre, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Infernal Affairs" score: 356.29 -> 334.08 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[CrossGenreBoost] Boosted "Ballerina" by 1.98 - Matches your taste in Action+Crime+Thriller with themes: defiant, aggressive (like Ronin, The Getaway) 335-3c926a86fd435cf1.js:1:69359
+[PandoraLearning] Genre penalty for "Ballerina": Thriller (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "Ballerina": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[NegativePenalty] Penalized "Ballerina" by 1.64 - Contains Thriller — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Ballerina" score: 29.82 -> 27.90 (0.94x) based on genre, keyword, actor, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Ballerina" score: 27.90 -> 26.16 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Freedom Writers" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Regretting You" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Elite Squad: The Enemy Within" - User avoids crime prison within Crime 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "It Was Just an Accident" - User avoids crime prison within Crime 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Train Dreams" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "The Lord of the Rings: The Return of the King" (2003) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[ReasonPreference] Adjusted "The Lord of the Rings: The Return of the King" score: 14.84 -> 13.86 (0.93x) based on keyword, actor, decade, collection, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Lord of the Rings: The Return of the King" score: 13.86 -> 13.00 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[PandoraLearning] Genre penalty for "Anaconda": Thriller (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Anaconda" by 1.64 - Contains Thriller — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Anaconda" score: 170.03 -> 156.57 (0.92x) based on genre, keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Anaconda" score: 156.57 -> 146.81 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "A Beautiful Mind" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Sentimental Value" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Dancer in the Dark" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Downfall" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "The Ugly Stepsister" - User avoids horror body within Horror 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Keyword penalty for "Black Widow": 1 matches (-1.2) 335-3c926a86fd435cf1.js:1:79233
+[PandoraLearning] Keyword boost for "Black Widow": 1 matches (+0.3) 335-3c926a86fd435cf1.js:1:80850
+[NegativePenalty] Penalized "Black Widow" by 1.22 - Contains "based on comic" — hard avoid; you've skipped this 13 times 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Black Widow" score: 11.34 -> 10.54 (0.93x) based on director, keyword, actor, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Black Widow" score: 10.54 -> 9.89 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "The Twilight Samurai" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "A Walk to Remember" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Werckmeister Harmonies" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Sky of Love" (2007) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Sky of Love": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Sky of Love" by 2.87 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Sky of Love" score: 14.34 -> 12.85 (0.90x) based on keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Sky of Love" score: 12.85 -> 12.05 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Mother" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "The Count of Monte Cristo" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[CrossGenreBoost] Boosted "V.I.P." by 1.70 - Matches your taste in Action+Crime+Thriller with themes: neo-noir (like Ronin, The Getaway) 335-3c926a86fd435cf1.js:1:69359
+[PandoraLearning] Keyword boost for "V.I.P.": 1 matches (+0.3) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "V.I.P.": Thriller (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "V.I.P.": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[NegativePenalty] Penalized "V.I.P." by 1.64 - Contains Thriller — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "V.I.P." score: 30.51 -> 28.10 (0.92x) based on genre, keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "V.I.P." score: 28.10 -> 26.34 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[DecadeBoost] Boosted "Slumdog Millionaire" (2008) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Slumdog Millionaire": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Slumdog Millionaire" by 2.87 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Slumdog Millionaire" score: 14.68 -> 13.16 (0.90x) based on keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Slumdog Millionaire" score: 13.16 -> 12.34 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenrePenalty] Penalized "The Best Offer" by 5.25 for DRAMA_ROMANTIC 335-3c926a86fd435cf1.js:1:77669
+[SubgenrePenalty] Penalized "The Best Offer" by 2.25 for CRIME_PRISON 335-3c926a86fd435cf1.js:1:77669
+[PandoraLearning] Genre penalty for "The Best Offer": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "The Best Offer": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[ReasonPreference] Adjusted "The Best Offer" score: 6.57 -> 6.19 (0.94x) based on actor, genre, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Best Offer" score: 6.19 -> 5.80 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "District 9" - User avoids scifi alien within Science Fiction 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Glass Onion: A Knives Out Mystery" - User avoids crime police within Crime 335-3c926a86fd435cf1.js:1:65584
+[ReasonPreference] Adjusted "Godzilla x Kong: The New Empire" score: 7.91 -> 7.49 (0.95x) based on keyword, collection, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Godzilla x Kong: The New Empire" score: 7.49 -> 7.02 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreBoost] Boosted "My Fault: London" by 4.00 for DRAMA_SURREAL 335-3c926a86fd435cf1.js:1:77258
+[PandoraLearning] Genre penalty for "My Fault: London": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "My Fault: London" by 2.87 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "My Fault: London" score: 11.69 -> 10.75 (0.92x) based on keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "My Fault: London" score: 10.75 -> 10.08 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[PandoraLearning] Keyword penalty for "Karate Kid: Legends": 1 matches (-1.7) 335-3c926a86fd435cf1.js:1:79233
+[PandoraLearning] Genre penalty for "Karate Kid: Legends": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Karate Kid: Legends" by 3.36 - Contains "new york city" — hard avoid; you've skipped this 9 times; Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Karate Kid: Legends" score: 15.91 -> 14.63 (0.92x) based on keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Karate Kid: Legends" score: 14.63 -> 13.72 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Mysterious Skin" - User avoids drama war within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Hotel Rwanda" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Atonement" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "The Diving Bell and the Butterfly" - User avoids drama medical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Nine Queens" - User avoids thriller psychological within Thriller 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Changeling" - User avoids crime police within Crime 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Tess" (1979) by 2.00 for 1970s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Keyword boost for "Tess": 1 matches (+0.4) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "Tess": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Tess" by 2.87 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Tess" score: 15.67 -> 14.05 (0.90x) based on keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Tess" score: 14.05 -> 13.17 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "A Prophet" - User avoids crime gangster within Crime 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Suspect X" (2008) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[SubgenrePenalty] Penalized "Suspect X" by 17.25 for CRIME_POLICE 335-3c926a86fd435cf1.js:1:77669
+[SubgenreBoost] Boosted "Suspect X" by 4.00 for DRAMA_SURREAL 335-3c926a86fd435cf1.js:1:77258
+[PandoraLearning] Genre penalty for "Suspect X": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "Suspect X": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[ReasonPreference] Adjusted "Suspect X" score: 26.83 -> 24.23 (0.90x) based on keyword, decade, genre, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Suspect X" score: 24.23 -> 22.72 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[RepeatPenalty] "Suspect X" penalized: 22.72 -> 13.63 (0.9d ago, 0.6x) 335-3c926a86fd435cf1.js:1:87413
+[SubgenreFilter] Filtered "Desert Flower" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Touching the Void" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Bramayugam" - User avoids thriller psychological within Thriller 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Dolls" (2002) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[SubgenrePenalty] Penalized "Dolls" by 5.25 for DRAMA_ROMANTIC 335-3c926a86fd435cf1.js:1:77669
+[PandoraLearning] Genre penalty for "Dolls": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[ReasonPreference] Adjusted "Dolls" score: 18.15 -> 16.27 (0.90x) based on keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Dolls" score: 16.27 -> 15.26 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[DecadeBoost] Boosted "Let the Right One In" (2008) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Let the Right One In": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Let the Right One In" by 1.64 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Let the Right One In" score: 160.48 -> 144.93 (0.90x) based on genre, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Let the Right One In" score: 144.93 -> 135.89 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "The Flyboys" - User avoids crime gangster within Crime 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Devdas" (2002) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Devdas": Drama, Romance (-2.9) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Devdas" by 2.87 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Devdas" score: 12.57 -> 11.27 (0.90x) based on keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Devdas" score: 11.27 -> 10.57 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[PandoraLearning] Actor boost for "Brazil": Robert De Niro (+1.7) 335-3c926a86fd435cf1.js:1:80352
+[PandoraLearning] Keyword boost for "Brazil": 2 matches (+0.9) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "Brazil": Comedy (-1.2) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Brazil" by 1.23 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Brazil" score: 109.38 -> 102.34 (0.94x) based on genre, keyword, actor, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Brazil" score: 102.34 -> 95.96 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[RepeatPenalty] "Brazil" penalized: 95.96 -> 57.58 (0.9d ago, 0.6x) 335-3c926a86fd435cf1.js:1:87413
+[SubgenreFilter] Filtered "Gangs of Wasseypur - Part 2" - User avoids crime gangster within Crime 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Training Day" - User avoids crime gangster within Crime 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Ip Man" (2008) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "Ip Man": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Ip Man" by 1.64 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Ip Man" score: 14.28 -> 12.80 (0.90x) based on recent, keyword, decade preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Ip Man" score: 12.80 -> 12.01 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[DecadeBoost] Boosted "The Man Who Wasn't There" (2001) by 2.00 for 2000s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Keyword penalty for "The Man Who Wasn't There": 1 matches (-1.2) 335-3c926a86fd435cf1.js:1:79233
+[PandoraLearning] Genre penalty for "The Man Who Wasn't There": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[PandoraLearning] Genre boost for "The Man Who Wasn't There": Crime (+0.5) 335-3c926a86fd435cf1.js:1:82779
+[NegativePenalty] Penalized "The Man Who Wasn't There" by 2.87 - Contains "california" — hard avoid; you've skipped this 10 times; Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "The Man Who Wasn't There" score: 16.56 -> 14.94 (0.90x) based on director, keyword, decade, genre, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Man Who Wasn't There" score: 14.94 -> 14.01 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Dogville" - User avoids crime gangster within Crime 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Mom" - User avoids crime police within Crime 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "The Six Triple Eight" - User avoids drama historical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Polisse" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "Dogman" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Keyword boost for "The Body": 1 matches (+0.3) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "The Body": Thriller (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "The Body" by 1.64 - Contains Thriller — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "The Body" score: 16.34 -> 15.03 (0.92x) based on keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Body" score: 15.03 -> 14.10 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[DecadeBoost] Boosted "A Chinese Odyssey Part One: Pandora's Box" (1995) by 2.00 for 1990s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Genre penalty for "A Chinese Odyssey Part One: Pandora's Box": Comedy, Romance (-2.5) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "A Chinese Odyssey Part One: Pandora's Box" by 2.47 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "A Chinese Odyssey Part One: Pandora's Box" score: 194.53 -> 178.68 (0.92x) based on genre, actor, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "A Chinese Odyssey Part One: Pandora's Box" score: 178.68 -> 167.55 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[PandoraLearning] Director boost for "Poor Things": Yorgos Lanthimos (+0.2) 335-3c926a86fd435cf1.js:1:81818
+[PandoraLearning] Genre penalty for "Poor Things": Comedy, Romance (-2.5) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Poor Things" by 2.47 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Poor Things" score: 137.97 -> 128.10 (0.93x) based on genre, director, actor, keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Poor Things" score: 128.10 -> 120.12 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Little Women" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Genre penalty for "The Count of Monte Cristo": Drama (-1.6) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "The Count of Monte Cristo" by 1.64 - Contains Drama — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "The Count of Monte Cristo" score: 7.88 -> 7.25 (0.92x) based on keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Count of Monte Cristo" score: 7.25 -> 6.80 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[PandoraLearning] Keyword boost for "The Hunger Games: Catching Fire": 2 matches (+1.1) 335-3c926a86fd435cf1.js:1:80850
+[ReasonPreference] Adjusted "The Hunger Games: Catching Fire" score: 13.90 -> 13.06 (0.94x) based on keyword, actor, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "The Hunger Games: Catching Fire" score: 13.06 -> 12.25 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenrePenalty] Penalized "5 Fingers" by 5.25 for DRAMA_ROMANTIC 335-3c926a86fd435cf1.js:1:77669
+[PandoraLearning] Keyword boost for "5 Fingers": 1 matches (+0.3) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "5 Fingers": Thriller, Drama (-3.0) 335-3c926a86fd435cf1.js:1:82287
+[ReasonPreference] Adjusted "5 Fingers" score: 23.12 -> 20.73 (0.90x) based on keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "5 Fingers" score: 20.73 -> 19.44 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[RepeatPenalty] "5 Fingers" penalized: 19.44 -> 13.61 (1.1d ago, 0.7x) 335-3c926a86fd435cf1.js:1:87413
+[SubgenreFilter] Filtered "The Old Gun" - User avoids drama medical within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "The Chaser" - User avoids crime police within Crime 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Genre penalty for "Red, White & Royal Blue": Comedy, Romance (-2.5) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Red, White & Royal Blue" by 2.47 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Red, White & Royal Blue" score: 7.31 -> 6.72 (0.92x) based on keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Red, White & Royal Blue" score: 6.72 -> 6.30 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "Edge of Tomorrow" - User avoids scifi alien within Science Fiction 335-3c926a86fd435cf1.js:1:65584
+[PandoraLearning] Keyword boost for "Big Time Movie": 1 matches (+0.3) 335-3c926a86fd435cf1.js:1:80850
+[PandoraLearning] Genre penalty for "Big Time Movie": Comedy (-1.2) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Big Time Movie" by 1.23 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Big Time Movie" score: 100.30 -> 92.36 (0.92x) based on genre, keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Big Time Movie" score: 92.36 -> 86.60 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[PandoraLearning] Genre penalty for "Let the Bullets Fly": Comedy (-1.2) 335-3c926a86fd435cf1.js:1:82287
+[NegativePenalty] Penalized "Let the Bullets Fly" by 1.23 - Contains Comedy — a genre you've been skipping 335-3c926a86fd435cf1.js:1:84135
+[ReasonPreference] Adjusted "Let the Bullets Fly" score: 5.89 -> 5.53 (0.94x) based on actor, keyword, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Let the Bullets Fly" score: 5.53 -> 5.19 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[SubgenreFilter] Filtered "The Lobster" - User avoids drama romantic within Drama 335-3c926a86fd435cf1.js:1:65584
+[SubgenreFilter] Filtered "New Police Story" - User avoids crime gangster within Crime 335-3c926a86fd435cf1.js:1:65584
+[DecadeBoost] Boosted "Enter the Dragon" (1973) by 2.00 for 1970s era preference 335-3c926a86fd435cf1.js:1:75473
+[PandoraLearning] Keyword boost for "Enter the Dragon": 1 matches (+0.3) 335-3c926a86fd435cf1.js:1:80850
+[ReasonPreference] Adjusted "Enter the Dragon" score: 101.59 -> 91.75 (0.90x) based on genre, keyword, decade, recent preferences 335-3c926a86fd435cf1.js:1:85302
+[SourceReliability] Adjusted "Enter the Dragon" score: 91.75 -> 86.03 (0.94x) 335-3c926a86fd435cf1.js:1:87119
+[RepeatPenalty] "Enter the Dragon" penalized: 86.03 -> 51.62 (0.9d ago, 0.6x) 335-3c926a86fd435cf1.js:1:87413
+[DiversityFilter] Applied diversity filtering 
+Object { original: 57, filtered: 42, skipped: 15, directorCounts: [], genreCounts: (5) […] }
+335-3c926a86fd435cf1.js:1:89524
+[Suggest] refreshing TMDB cache for suggested ids 42 page-59f496611a7ae1ed.js:1:50243
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 10775 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 10775 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 10775, title: "Infernal Affairs" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 10775 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 11943 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 11943 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 11943, title: "Jeremiah Johnson" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 11943 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 792307 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 792307 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 792307, title: "Poor Things" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 792307 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1252428 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1252428 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1252428, title: "Anaconda" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1252428 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 3121 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 3121 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 3121, title: "Nashville" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 3121 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 13345 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 13345 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 13345, title: "A Chinese Odyssey Part One: Pandora's Box" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 13345 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 46738 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 46738 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 46738, title: "Incendies" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 46738 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 13310 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 13310 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 13310, title: "Let the Right One In" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 13310 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 36685 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 36685 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 36685, title: "The Rocky Horror Picture Show" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 36685 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 23378 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 23378 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 23378, title: "Into the Woods" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 23378 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 15584 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 15584 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 15584, title: "Dear Zachary: A Letter to a Son About His Father" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 15584 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 95754 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 95754 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 95754, title: "Big Time Movie" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 95754 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 19486 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 19486 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 19486, title: "Cyborg She" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 19486 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 2501 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 2501 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 2501, title: "The Bourne Identity" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 2501 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 9461 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 9461 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 9461, title: "Enter the Dragon" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 9461 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 44864 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 44864 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 44864, title: "The Magic Flute" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 44864 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 575813 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 575813 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 575813, title: "Better Days" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 575813 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 634649 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 634649 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 634649, title: "Spider-Man: No Way Home" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 634649 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 25606 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 25606 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 25606, title: "Fantozzi: White Collar Blues" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 25606 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 59990 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 59990 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 59990, title: "The Given Word" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 59990 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 111083 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 111083 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 111083, title: "The Body" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 111083 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 59087 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 59087 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 59087, title: "5 Fingers" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 59087 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 187 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 187 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 187, title: "Sin City" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 187 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 68 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 68 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 68, title: "Brazil" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 68 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 14455 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 14455 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 14455, title: "When the Last Sword Is Drawn" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 14455 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 51533 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 51533 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 51533, title: "Let the Bullets Fly" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 51533 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 385687 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 385687 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 385687, title: "Fast X" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 385687 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 122 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 122 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 122, title: "The Lord of the Rings: The Return of the King" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 122 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1294947 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1294947 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1294947, title: "Let Me Be with You" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1294947 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1220564 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1220564 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1220564, title: "The Secret Agent" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1220564 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 870 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 870 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 870, title: "Dolls" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 870 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 10778 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 10778 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 10778, title: "The Man Who Wasn't There" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 10778 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 818415 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 818415 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 818415, title: "Mission «Sky»" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 818415 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 4176 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 4176 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 4176, title: "Murder on the Orient Express" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 4176 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1011477 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1011477 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1011477, title: "Karate Kid: Legends" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1011477 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 930094 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 930094 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 930094, title: "Red, White & Royal Blue" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 930094 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 435601 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 435601 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 435601, title: "V.I.P." }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 435601 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 11121 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 11121 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 11121, title: "Tess" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 11121 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 101299 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 101299 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 101299, title: "The Hunger Games: Catching Fire" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 101299 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1294203 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1294203 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1294203, title: "My Fault: London" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1294203 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 152742 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 152742 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 152742, title: "The Best Offer" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 152742 }
+335-3c926a86fd435cf1.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 659153 }
+335-3c926a86fd435cf1.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 659153 }
+335-3c926a86fd435cf1.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 659153, title: "5Gang: A Different Kind of Christmas" }
+335-3c926a86fd435cf1.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 659153 }
+335-3c926a86fd435cf1.js:1:33094
+[usePostersSWR] Fetching posters 
+Object { idsCount: 5 }
+859-5c4db588528751c9.js:1:61368
+[usePostersSWR] Chunk fetched 
+Object { requested: 5, received: 5 }
+859-5c4db588528751c9.js:1:61700
+[usePostersSWR] Fetch complete 
+Object { posterCount: 5 }
+859-5c4db588528751c9.js:1:62067
+[Suggest] Tracking shown IDs 
+Object { total: 171, newThisRound: 42, limited: false }
+page-59f496611a7ae1ed.js:1:50448
+[Watchmode] API key not configured 6 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 10775 585.b8243b404102b006.js:1:1622
+[Watchmode] No match found for TMDB ID: 1252428 585.b8243b404102b006.js:1:1622
+[Watchmode] No match found for TMDB ID: 10778 585.b8243b404102b006.js:1:1622
+[Watchmode] No match found for TMDB ID: 25606 585.b8243b404102b006.js:1:1622
+[Watchmode] No match found for TMDB ID: 13310 585.b8243b404102b006.js:1:1622
+[Watchmode] No match found for TMDB ID: 11121 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 575813 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 152742 585.b8243b404102b006.js:1:1622
+[Suggest] Saved shown IDs to localStorage 171 page-59f496611a7ae1ed.js:1:29455
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 659153 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 101299 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 818415 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 46738 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 19486 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 385687 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 4176 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 634649 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 930094 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 9461 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 1294947 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 1294203 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 51533 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 870 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 68 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 1011477 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 435601 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 11943 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 3121 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 13345 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 36685 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 23378 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 95754 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 2501 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 44864 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 111083 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 59087 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 187 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 122 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 14455 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 792307 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 15584 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 1220564 585.b8243b404102b006.js:1:1622
+[Watchmode] API key not configured 585.b8243b404102b006.js:1:240
+[Watchmode] No match found for TMDB ID: 59990 585.b8243b404102b006.js:1:1622
+[Suggest] suggestions ready with full details 
+Object { count: 42 }
+page-59f496611a7ae1ed.js:1:52833
+[usePostersSWR] Fetching posters 
+Object { idsCount: 47 }
+859-5c4db588528751c9.js:1:61368
+[Suggest] Seasonal picks result 
+Object { configGenres: (1) […], configKeywords: (1) […], seasonalPicksCount: 0 }
+page-59f496611a7ae1ed.js:1:32206
+[Suggest] Categorization complete 
+Object { seasonalPicks: 0, perfectMatches: 0, recentWatchMatches: 3, studioMatches: 0, directorMatches: 0, actorMatches: 0, genreMatches: 0, documentaries: 1, hiddenGems: 0, cultClassics: 6, … }
+page-59f496611a7ae1ed.js:1:33692
+[ExposureLog] Logged 42 suggestion exposures 335-3c926a86fd435cf1.js:1:95671
+[Suggest] runSuggest end page-59f496611a7ae1ed.js:1:53784
+[Suggest] Saved shown IDs to localStorage 171 page-59f496611a7ae1ed.js:1:29455
+[usePostersSWR] Chunk fetched 
+Object { requested: 47, received: 47 }
+859-5c4db588528751c9.js:1:61700
+[usePostersSWR] Fetch complete 
+Object { posterCount: 47 }
+859-5c4db588528751c9.js:1:62067
+TypeError: can't access property "isCheckout", e is undefined content-script.js:1:5698
+[usePostersSWR] Fetching posters 
+Object { idsCount: 47 }
+859-5c4db588528751c9.js:1:61368
+[usePostersSWR] Chunk fetched 
+Object { requested: 47, received: 47 }
+859-5c4db588528751c9.js:1:61700
+[usePostersSWR] Fetch complete 
+Object { posterCount: 47 }
+859-5c4db588528751c9.js:1:62067
+[Pairwise] Vote received: 
+Object { winnerId: 1252428, loserId: 36685, currentCount: 0 }
+page-59f496611a7ae1ed.js:1:68691
+[AdaptiveLearning] Updated reason preferences 
+Object { userId: "30cfd130-a342-4a7c-b8ad-6175db17e298", reasonTypes: (3) […], isPositive: true }
+335-3c926a86fd435cf1.js:1:30539
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  101ms]
+
+[AdaptiveLearning] Updated reason preferences 
+Object { userId: "30cfd130-a342-4a7c-b8ad-6175db17e298", reasonTypes: (4) […], isPositive: false }
+335-3c926a86fd435cf1.js:1:30539
+[SubgenreFeedback] Detected subgenres for feedback learning: 
+Array [ "SCIFI_CLONE", "HORROR_GOTHIC" ]
+335-3c926a86fd435cf1.js:1:22033
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  90ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  92ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  100ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  97ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  83ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  92ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  99ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  104ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  92ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  84ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  96ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  101ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  98ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  101ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  105ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  92ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  83ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  84ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  111ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  100ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  96ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  83ms]
+
+[FeaturePreference] Updated feature preferences 
+Object { userId: "30cfd130", isPositive: true, featuresUpdated: 12 }
+335-3c926a86fd435cf1.js:1:22809
+[FeedbackLearning] Processed positive feedback for movie 1252428 
+Object { reasonTypes: (3) […], features: {…}, insights: {…} }
+335-3c926a86fd435cf1.js:1:13153
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  74ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  97ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  82ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  68ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  78ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  109ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  100ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  95ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  83ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  87ms]
+
+[FeaturePreference] Updated feature preferences 
+Object { userId: "30cfd130", isPositive: false, featuresUpdated: 21 }
+335-3c926a86fd435cf1.js:1:22809
+[PatternDetection] Detected avoidance patterns: 
+Array(5) [ {…}, {…}, {…}, {…}, {…} ]
+335-3c926a86fd435cf1.js:1:23432
+[PatternDetection] Strong actor avoidance detected: 
+Array(3) [ "Fan Bingbing(13👎/0👍)", "Liam Neeson(13👎/0👍)", "Marcus Thomas(13👎/0👍)" ]
+335-3c926a86fd435cf1.js:1:23948
+[PatternDetection] Franchise fatigue detected: 
+Array [ "Ice Road Collection" ]
+335-3c926a86fd435cf1.js:1:24263
+[PatternDetection] Content avoidance detected: 
+Array(10) [ "based on novel or book(18👎)", "superhero(15👎)", "hero(14👎)", "sequel(13👎)", "mercenary(13👎)", "based on comic(13👎)", "audacious(13👎)", "suspenseful(13👎)", "mount everest(13👎)", "california(10👎)" ]
+335-3c926a86fd435cf1.js:1:24511
+[FeedbackLearning] Processed negative feedback for movie 36685 
+Object { reasonTypes: (4) […], features: {…}, insights: {…} }
+335-3c926a86fd435cf1.js:1:13153
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  97ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  119ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  93ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  121ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  77ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  86ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  87ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  113ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  104ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  99ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  96ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  104ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  91ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  87ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  93ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  111ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  81ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  82ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  83ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  125ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  90ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  104ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  73ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  93ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  95ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  86ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  99ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  92ms]
+
+XHRPOST
+https://xtcsekftikdsauttlcin.supabase.co/rest/v1/user_feature_feedback?on_conflict=user_id,feature_type,feature_id
+[HTTP/3 400  100ms]
+
+[PairwiseLearning] Applied feature deltas 
+Object { userId: "30cfd130", updates: 29 }
+335-3c926a86fd435cf1.js:1:16385
+[Pairwise] Finding next pair: 
+Object { availableCount: 40, found: false, nextCount: 1, limit: 5 }
+page-59f496611a7ae1ed.js:1:69983
