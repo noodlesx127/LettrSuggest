@@ -12,6 +12,7 @@ import { usePostersSWR } from '@/lib/usePostersSWR';
 import { TMDB_GENRE_MAP } from '@/lib/genreEnhancement';
 import { saveMovie, getSavedMovies } from '@/lib/lists';
 import { getKeywordIdsForSubgenres, SUBGENRE_TO_KEYWORD_IDS, SUBGENRES_BY_PARENT } from '@/lib/subgenreData';
+import { detectSubgenres } from '@/lib/subgenreDetection';
 import type { FilmEvent } from '@/lib/normalize';
 
 function getBaseUrl(): string {
@@ -564,18 +565,30 @@ export default function GenreSuggestPage() {
             const assignedToSubgenre = new Set<number>();
 
             // STEP 1: Create sub-genre sections FIRST
-            // For each selected subgenre, find movies that match its keyword IDs
+            // For each selected subgenre, find movies that match its keyword IDs OR text-based detection
             if (selectedSubgenres.length > 0) {
                 console.log('[GenreSuggest] Creating sub-genre sections for:', selectedSubgenres);
 
                 for (const subgenreKey of selectedSubgenres) {
                     const keywordIds = SUBGENRE_TO_KEYWORD_IDS[subgenreKey] || [];
-                    if (keywordIds.length === 0) continue;
+                    // Extract parent genre from subgenre key (e.g., HORROR_BODY -> Horror)
+                    const parentGenreName = subgenreKey.split('_')[0].charAt(0) + subgenreKey.split('_')[0].slice(1).toLowerCase();
 
-                    // Find movies that have any of this subgenre's keyword IDs
+                    // Find movies that match via keyword IDs OR text-based detection
                     const matchingMovies = validMovies.filter(m => {
                         const movieKeywordIds = m.keyword_ids || [];
-                        return keywordIds.some(kwId => movieKeywordIds.includes(kwId));
+
+                        // Method 1: Direct keyword ID match
+                        const keywordMatch = keywordIds.length > 0 && keywordIds.some(kwId => movieKeywordIds.includes(kwId));
+
+                        // Method 2: Text-based detection (same as scoring uses)
+                        // Build text from title and overview, and keywords from movie
+                        const movieText = `${m.title} ${m.overview || ''}`.toLowerCase();
+                        // Get keyword names from the movie (we have keyword_ids, so we check via detection)
+                        const detected = detectSubgenres(parentGenreName, movieText, [], movieKeywordIds);
+                        const textMatch = detected.has(subgenreKey);
+
+                        return keywordMatch || textMatch;
                     });
 
                     // Sort by score and take top 18
@@ -586,7 +599,7 @@ export default function GenreSuggestPage() {
                         subgenreMap[subgenreKey] = topMatches;
                         // Mark these movies as assigned to a subgenre
                         topMatches.forEach(m => assignedToSubgenre.add(m.id));
-                        console.log(`[GenreSuggest] Sub-genre ${subgenreKey}: ${topMatches.length} movies (keywords: ${keywordIds.join(',')})`);
+                        console.log(`[GenreSuggest] Sub-genre ${subgenreKey}: ${topMatches.length} movies (keywords: ${keywordIds.join(',')}, detection: keyword+text)`);
                     }
                 }
             }
