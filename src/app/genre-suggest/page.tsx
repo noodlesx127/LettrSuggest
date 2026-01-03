@@ -428,7 +428,7 @@ export default function GenreSuggestPage() {
                             genres: tmdbGenreIds.length > 0 ? tmdbGenreIds : undefined,
                             genreMode: 'OR',
                             sortBy,
-                            minVotes: 100,
+                            minVotes: 20,  // Lower threshold for sparse subgenre keywords (e.g., 283085 body horror)
                             limit: 100
                         });
                         candidatesRaw.push(...subgenreDiscovered);
