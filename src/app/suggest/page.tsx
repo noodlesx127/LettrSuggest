@@ -1421,14 +1421,20 @@ export default function SuggestPage() {
             const spoken_languages = (movie.spoken_languages || []).map((l: any) => l.iso_639_1);
             const production_countries = (movie.production_countries || []).map((c: any) => c.iso_3166_1);
 
-            // P2.3: Fetch streaming availability from Watchmode
+            // P2.3: Fetch streaming availability from Watchmode via API route
             let streamingSources: any[] = [];
             try {
-              const { getStreamingSourcesByTMDB } = await import('@/lib/watchmode');
-              streamingSources = await getStreamingSourcesByTMDB(s.tmdbId);
+              const watchmodeUrl = new URL('/api/watchmode/streaming', getBaseUrl());
+              watchmodeUrl.searchParams.set('tmdbId', String(s.tmdbId));
+              const watchmodeRes = await fetch(watchmodeUrl.toString(), { cache: 'no-store' });
+              const watchmodeData = await watchmodeRes.json();
+              if (watchmodeData.ok && watchmodeData.sources) {
+                streamingSources = watchmodeData.sources;
+              }
             } catch (e) {
               console.warn(`[Suggest] Failed to fetch streaming sources for ${s.tmdbId}`, e);
             }
+
 
             return {
               id: s.tmdbId,
