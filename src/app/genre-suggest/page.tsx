@@ -498,7 +498,19 @@ export default function GenreSuggestPage() {
                 featureFeedback,
                 // Pass selected subgenres so they are NEVER filtered out
                 // (overrides historical avoidance patterns for explicit user selection)
-                allowSubgenres: selectedSubgenres
+                // ALSO include ALL subgenres of selected parent genres to prevent over-filtering
+                // e.g., if user selects Horror genre, HORROR_MONSTER, HORROR_SLASHER etc. should not be filtered
+                allowSubgenres: (() => {
+                    const allowed = new Set<string>(selectedSubgenres);
+                    // Add all subgenres of selected parent genres
+                    for (const genreId of selectedGenres) {
+                        const genreSubgenres = SUBGENRES_BY_PARENT[genreId] || [];
+                        for (const sub of genreSubgenres) {
+                            allowed.add(sub.key);
+                        }
+                    }
+                    return Array.from(allowed);
+                })()
             });
 
             console.log('[GenreSuggest] Suggestions scored:', suggestions.length);
