@@ -332,7 +332,8 @@ export default function GenreSuggestPage() {
                 topKeywords: tasteProfile.topKeywords,
                 topDirectors: tasteProfile.topDirectors,
                 nichePreferences: tasteProfile.nichePreferences,
-                preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds // NEW: Sub-genre discovery
+                preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
+                tmdbDetailsMap: tmdbDetailsMap // Critical: enables seed movie titles for similar recommendations
             });
 
             let candidatesRaw: number[] = [];
