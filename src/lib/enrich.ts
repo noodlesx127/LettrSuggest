@@ -3330,6 +3330,9 @@ export async function suggestByOverlap(params: {
   };
   // Recent exposures for repeat penalty (Map of tmdbId -> days since exposure)
   recentExposures?: Map<number, number>;
+  // Subgenres that user explicitly selected - these should NEVER be filtered out
+  // even if user's historical patterns suggest they avoid them
+  allowSubgenres?: string[];
 }): Promise<Array<{
   tmdbId: number;
   score: number;
@@ -4023,12 +4026,14 @@ export async function suggestByOverlap(params: {
 
     // ADVANCED FILTERING: Apply subgenre-level filtering
     // E.g., filter "Superhero Action" if user avoids that subgenre within Action
+    // BUT: never filter subgenres the user explicitly selected in the UI
     const subgenreCheck = shouldFilterBySubgenre(
       feats.genres,
       feats.keywords,
       feats.keywordIds, // Added keywordIds
       m.title || '',
-      subgenrePatterns
+      subgenrePatterns,
+      params.allowSubgenres // User-selected subgenres are never filtered
     );
 
     if (subgenreCheck.shouldFilter) {

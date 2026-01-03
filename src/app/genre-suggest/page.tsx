@@ -494,7 +494,10 @@ export default function GenreSuggestPage() {
                     watchlistKeywords: tasteProfile.watchlistKeywords?.map(w => w.name),
                     watchlistDirectors: tasteProfile.watchlistDirectors?.map(w => w.name)
                 },
-                featureFeedback
+                featureFeedback,
+                // Pass selected subgenres so they are NEVER filtered out
+                // (overrides historical avoidance patterns for explicit user selection)
+                allowSubgenres: selectedSubgenres
             });
 
             console.log('[GenreSuggest] Suggestions scored:', suggestions.length);

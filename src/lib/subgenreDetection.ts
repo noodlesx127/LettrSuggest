@@ -517,13 +517,20 @@ export function analyzeCrossGenrePatterns(films: Array<{
 
 /**
  * Check if a candidate movie should be filtered based on subgenre patterns
+ * @param candidateGenres - Genres of the candidate movie
+ * @param candidateKeywords - Keywords of the candidate movie
+ * @param candidateKeywordIds - TMDB keyword IDs of the candidate movie
+ * @param candidateTitle - Title of the candidate movie
+ * @param subgenrePatterns - User's subgenre patterns from history analysis
+ * @param allowSubgenres - Optional list of subgenre keys to ALLOW (user explicitly selected these)
  */
 export function shouldFilterBySubgenre(
   candidateGenres: string[],
   candidateKeywords: string[],
   candidateKeywordIds: number[], // NEW
   candidateTitle: string,
-  subgenrePatterns: Map<string, SubgenrePattern>
+  subgenrePatterns: Map<string, SubgenrePattern>,
+  allowSubgenres?: string[] // NEW: user-selected subgenres to never filter
 ): { shouldFilter: boolean; reason?: string } {
 
   // Defensive checks
@@ -531,6 +538,9 @@ export function shouldFilterBySubgenre(
     console.warn('[SubgenreFilter] Invalid input: genres or keywords not arrays', { candidateGenres, candidateKeywords });
     return { shouldFilter: false };
   }
+
+  // Convert allowSubgenres to a Set for O(1) lookup
+  const allowSet = new Set(allowSubgenres || []);
 
   const allText = [candidateTitle.toLowerCase(), ...candidateKeywords.map((k: string) => k.toLowerCase())].join(' ');
 
@@ -543,6 +553,11 @@ export function shouldFilterBySubgenre(
 
     // Check if any detected subgenre is avoided
     for (const subgenre of candidateSubgenres) {
+      // SKIP filtering if user explicitly selected this subgenre in the UI
+      if (allowSet.has(subgenre)) {
+        continue; // User wants this subgenre!
+      }
+
       if (pattern.avoidedSubgenres.has(subgenre)) {
         const subgenreName = subgenre.replace(/_/g, ' ').toLowerCase();
         return {
