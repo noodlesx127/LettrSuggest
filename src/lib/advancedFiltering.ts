@@ -120,22 +120,9 @@ export function checkNicheCompatibility(
   const keywords = Array.isArray(keywordsList) ? keywordsList.map((k: any) => k.name || k).filter(Boolean) : [];
   const allText = [candidate.title?.toLowerCase() || '', ...keywords.map((k: string) => String(k).toLowerCase())].join(' ');
 
-  // Check Anime
-  const isAnime = genres.some(g => g.toLowerCase().includes('anime')) ||
-    allText.includes('anime') ||
-    allText.includes('japanese animation');
-
-  if (isAnime && !profile.nichePreferences.likesAnime) {
-    return {
-      compatible: false,
-      reason: 'User has not shown interest in anime'
-    };
-  }
-
   // Check Stand-Up Comedy
   const isStandUp = allText.includes('stand-up') ||
-    allText.includes('stand up comedy') ||
-    allText.includes('comedian');
+    allText.includes('stand up comedy');
 
   if (isStandUp && !profile.nichePreferences.likesStandUp) {
     return {

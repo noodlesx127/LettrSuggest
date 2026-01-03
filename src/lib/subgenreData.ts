@@ -7,11 +7,11 @@
 export const SUBGENRE_TO_KEYWORD_IDS: Record<string, number[]> = {
     // HORROR
     HORROR_SUPERNATURAL: [6152],
-    HORROR_PSYCHOLOGICAL: [295907],
+    HORROR_PSYCHOLOGICAL: [295907, 3970, 167922], // psychological horror, mind games, paranoia
     HORROR_SLASHER: [12339],
     HORROR_ZOMBIE: [12377],
-    HORROR_BODY: [283085],
-    HORROR_FOLK: [209568],
+    HORROR_BODY: [283085, 4021, 226037, 193183], // body horror, gore, body parts, gruesome
+    HORROR_FOLK: [209568, 8185, 9963], // folk horror, pagan, rural
     HORROR_WITCH: [616],
     HORROR_COSMIC: [215959],
     HORROR_OCCULT: [156174],
@@ -34,14 +34,14 @@ export const SUBGENRE_TO_KEYWORD_IDS: Record<string, number[]> = {
     HORROR_ANALOG: [319324],
 
     // THRILLER
-    THRILLER_PSYCHOLOGICAL: [12565],
+    THRILLER_PSYCHOLOGICAL: [12565, 3970, 167922], // psychological, mind games, paranoia
     THRILLER_CONSPIRACY: [10410],
-    THRILLER_CRIME: [355372],
+    THRILLER_CRIME: [355372, 549, 10214], // crime thriller, detective, investigation
     THRILLER_NEO_NOIR: [207268],
     THRILLER_LEGAL: [254459],
     THRILLER_POLITICAL: [209817],
     THRILLER_EROTIC: [207767],
-    THRILLER_SPY: [217282],
+    THRILLER_SPY: [217282, 470, 237835], // spy thriller, espionage, secret agent
     THRILLER_MEDICAL: [289673],
     THRILLER_TECH: [298605],
     THRILLER_REVENGE: [252204],
@@ -71,10 +71,10 @@ export const SUBGENRE_TO_KEYWORD_IDS: Record<string, number[]> = {
     DRAMA_PRISON: [355148],
 
     // SCI-FI
-    SCIFI_SPACE: [9882],
-    SCIFI_CYBERPUNK: [12190],
+    SCIFI_SPACE: [9882, 161176, 305], // space, space opera, spaceship
+    SCIFI_CYBERPUNK: [12190, 8352, 178657], // cyberpunk, futuristic, tech noir
     SCIFI_TIME_TRAVEL: [4379],
-    SCIFI_ALIEN: [9951],
+    SCIFI_ALIEN: [9951, 14909, 215456], // alien, invasion, extraterrestrial
     SCIFI_POST_APOCALYPTIC: [359337],
     SCIFI_DYSTOPIA: [4565],
     SCIFI_UTOPIA: [3469],
@@ -110,8 +110,8 @@ export const SUBGENRE_TO_KEYWORD_IDS: Record<string, number[]> = {
     ACTION_SPY: [470],
     ACTION_MILITARY: [162365],
     ACTION_MARTIAL_ARTS: [779],
-    ACTION_HEIST: [10051],
-    ACTION_CAR_CHASE: [357378],
+    ACTION_HEIST: [10051, 192801, 155462], // heist, robbery, bank robbery
+    ACTION_CAR_CHASE: [357378, 156320, 240830], // car chase, racing, fast cars
     ACTION_DISASTER: [10617],
     ACTION_BUDDY_COP: [167316],
     ACTION_REVENGE: [9748],
@@ -170,11 +170,11 @@ export const SUBGENRES_BY_PARENT: Record<number, SubgenreInfo[]> = {
     // Horror (27)
     27: [
         { key: 'HORROR_SUPERNATURAL', name: 'Supernatural', emoji: '👻', parentGenreId: 27, keywordIds: [6152] },
-        { key: 'HORROR_PSYCHOLOGICAL', name: 'Psychological', emoji: '🧠', parentGenreId: 27, keywordIds: [295907] },
+        { key: 'HORROR_PSYCHOLOGICAL', name: 'Psychological', emoji: '🧠', parentGenreId: 27, keywordIds: [295907, 3970, 167922] },
         { key: 'HORROR_SLASHER', name: 'Slasher', emoji: '🔪', parentGenreId: 27, keywordIds: [12339] },
         { key: 'HORROR_ZOMBIE', name: 'Zombie', emoji: '🧟', parentGenreId: 27, keywordIds: [12377] },
-        { key: 'HORROR_BODY', name: 'Body Horror', emoji: '🦠', parentGenreId: 27, keywordIds: [283085] },
-        { key: 'HORROR_FOLK', name: 'Folk Horror', emoji: '🌾', parentGenreId: 27, keywordIds: [209568] },
+        { key: 'HORROR_BODY', name: 'Body Horror', emoji: '🦠', parentGenreId: 27, keywordIds: [283085, 4021, 226037, 193183] },
+        { key: 'HORROR_FOLK', name: 'Folk Horror', emoji: '🌾', parentGenreId: 27, keywordIds: [209568, 8185, 9963] },
         { key: 'HORROR_COSMIC', name: 'Cosmic/Lovecraft', emoji: '🌌', parentGenreId: 27, keywordIds: [215959] },
         { key: 'HORROR_GOTHIC', name: 'Gothic', emoji: '🏰', parentGenreId: 27, keywordIds: [15032] },
         { key: 'HORROR_FOUND_FOOTAGE', name: 'Found Footage', emoji: '📹', parentGenreId: 27, keywordIds: [163053] },
@@ -186,23 +186,23 @@ export const SUBGENRES_BY_PARENT: Record<number, SubgenreInfo[]> = {
 
     // Thriller (53)
     53: [
-        { key: 'THRILLER_PSYCHOLOGICAL', name: 'Psychological', emoji: '🧠', parentGenreId: 53, keywordIds: [12565] },
+        { key: 'THRILLER_PSYCHOLOGICAL', name: 'Psychological', emoji: '🧠', parentGenreId: 53, keywordIds: [12565, 3970, 167922] },
         { key: 'THRILLER_CONSPIRACY', name: 'Conspiracy', emoji: '🕵️', parentGenreId: 53, keywordIds: [10410] },
-        { key: 'THRILLER_CRIME', name: 'Crime', emoji: '🚔', parentGenreId: 53, keywordIds: [355372] },
+        { key: 'THRILLER_CRIME', name: 'Crime', emoji: '🚔', parentGenreId: 53, keywordIds: [355372, 549, 10214] },
         { key: 'THRILLER_NEO_NOIR', name: 'Neo-Noir', emoji: '🌃', parentGenreId: 53, keywordIds: [207268] },
         { key: 'THRILLER_LEGAL', name: 'Legal', emoji: '⚖️', parentGenreId: 53, keywordIds: [254459] },
         { key: 'THRILLER_POLITICAL', name: 'Political', emoji: '🏛️', parentGenreId: 53, keywordIds: [209817] },
-        { key: 'THRILLER_SPY', name: 'Spy/Espionage', emoji: '🕶️', parentGenreId: 53, keywordIds: [217282] },
+        { key: 'THRILLER_SPY', name: 'Spy/Espionage', emoji: '🕶️', parentGenreId: 53, keywordIds: [217282, 470, 237835] },
         { key: 'THRILLER_REVENGE', name: 'Revenge', emoji: '💢', parentGenreId: 53, keywordIds: [252204] },
         { key: 'THRILLER_ACTION', name: 'Action Thriller', emoji: '💥', parentGenreId: 53, keywordIds: [302132] },
     ],
 
     // Science Fiction (878)
     878: [
-        { key: 'SCIFI_SPACE', name: 'Space', emoji: '🚀', parentGenreId: 878, keywordIds: [9882] },
-        { key: 'SCIFI_CYBERPUNK', name: 'Cyberpunk', emoji: '🤖', parentGenreId: 878, keywordIds: [12190] },
+        { key: 'SCIFI_SPACE', name: 'Space', emoji: '🚀', parentGenreId: 878, keywordIds: [9882, 161176, 305] },
+        { key: 'SCIFI_CYBERPUNK', name: 'Cyberpunk', emoji: '🤖', parentGenreId: 878, keywordIds: [12190, 8352, 178657] },
         { key: 'SCIFI_TIME_TRAVEL', name: 'Time Travel', emoji: '⏰', parentGenreId: 878, keywordIds: [4379] },
-        { key: 'SCIFI_ALIEN', name: 'Alien', emoji: '👽', parentGenreId: 878, keywordIds: [9951] },
+        { key: 'SCIFI_ALIEN', name: 'Alien', emoji: '👽', parentGenreId: 878, keywordIds: [9951, 14909, 215456] },
         { key: 'SCIFI_POST_APOCALYPTIC', name: 'Post-Apocalyptic', emoji: '☢️', parentGenreId: 878, keywordIds: [359337] },
         { key: 'SCIFI_DYSTOPIA', name: 'Dystopia', emoji: '🏚️', parentGenreId: 878, keywordIds: [4565] },
         { key: 'SCIFI_SPACE_OPERA', name: 'Space Opera', emoji: '⭐', parentGenreId: 878, keywordIds: [161176] },
@@ -229,8 +229,8 @@ export const SUBGENRES_BY_PARENT: Record<number, SubgenreInfo[]> = {
         { key: 'ACTION_SPY', name: 'Spy/Espionage', emoji: '🕵️', parentGenreId: 28, keywordIds: [470] },
         { key: 'ACTION_MILITARY', name: 'Military', emoji: '🎖️', parentGenreId: 28, keywordIds: [162365] },
         { key: 'ACTION_MARTIAL_ARTS', name: 'Martial Arts', emoji: '🥋', parentGenreId: 28, keywordIds: [779] },
-        { key: 'ACTION_HEIST', name: 'Heist', emoji: '💰', parentGenreId: 28, keywordIds: [10051] },
-        { key: 'ACTION_CAR_CHASE', name: 'Car Chase/Racing', emoji: '🏎️', parentGenreId: 28, keywordIds: [357378] },
+        { key: 'ACTION_HEIST', name: 'Heist', emoji: '💰', parentGenreId: 28, keywordIds: [10051, 192801, 155462] },
+        { key: 'ACTION_CAR_CHASE', name: 'Car Chase/Racing', emoji: '🏎️', parentGenreId: 28, keywordIds: [357378, 156320, 240830] },
         { key: 'ACTION_DISASTER', name: 'Disaster', emoji: '🌋', parentGenreId: 28, keywordIds: [10617] },
         { key: 'ACTION_BUDDY_COP', name: 'Buddy Cop', emoji: '👮👮', parentGenreId: 28, keywordIds: [167316] },
         { key: 'ACTION_REVENGE', name: 'Revenge', emoji: '💢', parentGenreId: 28, keywordIds: [9748] },
