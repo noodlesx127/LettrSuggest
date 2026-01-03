@@ -3874,10 +3874,11 @@ export async function suggestByOverlap(params: {
   }
 
   // Detect if user avoids animation/family/children's content
-  // Relaxed: only avoid if they have liked ZERO and have at least 20 total likes
-  const avoidsAnimation = totalLiked >= 20 && likedAnimationCount === 0;
-  const avoidsFamily = totalLiked >= 20 && likedFamilyCount === 0;
-  const avoidsChildrens = totalLiked >= 20 && likedChildrensCount === 0;
+  // If less than 10% of liked films are in these categories, consider them avoided
+  const animationThreshold = 0.1;
+  const avoidsAnimation = totalLiked > 10 && (likedAnimationCount / totalLiked) < animationThreshold;
+  const avoidsFamily = totalLiked > 10 && (likedFamilyCount / totalLiked) < animationThreshold;
+  const avoidsChildrens = totalLiked > 10 && (likedChildrensCount / totalLiked) < animationThreshold;
 
   console.log('[Suggest] User profile analysis', {
     totalLiked,
@@ -4040,9 +4041,10 @@ export async function suggestByOverlap(params: {
       return null;
     }
 
-    // Check niche compatibility (stand-up, food/travel docs)
+    // Check niche compatibility (anime, stand-up, food/travel docs)
     const nicheProfile = {
       nichePreferences: {
+        likesAnime: (likedAnimationCount / totalLiked) >= 0.1,
         likesStandUp: Array.from(pref.keywords.keys()).some(k => k.toLowerCase().includes('stand-up') || k.toLowerCase().includes('stand up')),
         likesFoodDocs: Array.from(pref.keywords.keys()).some(k => k.toLowerCase().includes('food') || k.toLowerCase().includes('cooking')),
         likesTravelDocs: Array.from(pref.keywords.keys()).some(k => k.toLowerCase().includes('travel') || k.toLowerCase().includes('journey'))
