@@ -1794,18 +1794,18 @@ export default function SuggestPage() {
         }
       }
 
-      // Track these IDs as shown for next refresh, but limit to last 200 to prevent indefinite accumulation
+      // Track these IDs as shown for next refresh, but limit to last 500 to prevent indefinite accumulation
       const newShownIds = new Set([
         ...shownIds,
         ...suggestions.map((s) => s.tmdbId),
       ]);
-      // Keep only the most recent 200 shown IDs for variety
-      const recentShownIds = Array.from(newShownIds).slice(-200);
+      // Keep only the most recent 500 shown IDs for variety
+      const recentShownIds = Array.from(newShownIds).slice(-500);
       setShownIds(new Set(recentShownIds));
       console.log("[Suggest] Tracking shown IDs", {
         total: recentShownIds.length,
         newThisRound: suggestions.length,
-        limited: newShownIds.size > 200,
+        limited: newShownIds.size > 500,
       });
 
       // Fetch full movie data for each suggestion to get videos, collections, etc.
@@ -3314,8 +3314,8 @@ export default function SuggestPage() {
       setShownIds((prev) => {
         const updated = new Set(prev);
         replacements.forEach((m) => updated.add(m.id));
-        // Keep only last 200
-        const recentShownIds = Array.from(updated).slice(-200);
+        // Keep only last 500
+        const recentShownIds = Array.from(updated).slice(-500);
         return new Set(recentShownIds);
       });
     } catch (e) {
