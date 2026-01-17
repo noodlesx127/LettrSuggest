@@ -123,7 +123,7 @@ export function scoreSignatureFilm(
   const reasons: string[] = [];
   const title = film.title || `Film ${film.tmdbId}`;
 
-  // 1. High user rating (up to 2.0 points)
+  // 1. High user rating (up to 2.0 points) + Liked bonus (1.0 points)
   if (film.rating !== undefined) {
     if (film.rating >= 4.5) {
       score += 2.0;
@@ -131,6 +131,9 @@ export function scoreSignatureFilm(
     } else if (film.rating >= 4.0) {
       score += 1.5;
       reasons.push("4+ star rating");
+    } else if (film.rating >= 3.5) {
+      score += 0.5;
+      reasons.push("3.5+ star rating");
     }
   }
 
@@ -157,7 +160,6 @@ export function scoreSignatureFilm(
   }
 
   // 3. Genre alignment (up to 1.5 points)
-  const topGenreNames = profile.topGenres.slice(0, 5).map((g) => g.name);
   const topGenreIds = new Set(profile.topGenres.slice(0, 5).map((g) => g.id));
   const filmGenres = film.genreIds || [];
   const matchingGenres = filmGenres.filter((gid) => topGenreIds.has(gid));
@@ -265,17 +267,18 @@ function getSignatureSeedIds(
   const selectedIds = [...signatureIds, ...varietyIds];
 
   // Apply genre diversity if requested
-  if (ensureDiversity && selectedIds.length > limit) {
+  if (ensureDiversity && selectedIds.length > 0) {
     return applyGenreDiversity(films, selectedIds, limit);
   }
 
-  console.log("[SignatureSeeds] Selected seeds:", {
-    signature: signatureIds.length,
-    variety: varietyIds.length,
+  console.log("[Seeds] Selected:", {
+    signatureSeeds: signatureIds.length,
+    varietySeeds: varietyIds.length,
     total: selectedIds.length,
-    topSignatureScores: signatureScored
-      .slice(0, 5)
-      .map((f) => f.signatureScore.toFixed(2)),
+    topSignatureScores: signatureScored.slice(0, 3).map((f) => ({
+      title: f.title || `Film ${f.tmdbId}`,
+      score: f.signatureScore.toFixed(2),
+    })),
   });
 
   return selectedIds.slice(0, limit);
@@ -436,12 +439,14 @@ export function getWeightedSeedIds(
     }
   }
 
-  console.log("[WeightedSeeds] Selected", {
-    input: films.length,
-    eligible: scored.length,
-    selected: selectedIds.length,
-    topScore: scored[0]?.score,
-    genreSpread: genreCounts.size,
+  console.log("[Seeds] Selected:", {
+    signatureSeeds: 0, // N/A for weighted scoring
+    varietySeeds: selectedIds.length,
+    total: selectedIds.length,
+    topSignatureScores: scored.slice(0, 3).map((f) => ({
+      title: f.title || `Film ${f.tmdbId}`,
+      score: f.score.toFixed(2),
+    })),
   });
 
   return selectedIds;

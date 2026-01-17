@@ -1,0 +1,1388 @@
+[Suggest] Restored items from session storage 52 page-7e72cfc6ebf76dc5.js:1:28251
+[Suggest] Restored shown IDs from localStorage 200 page-7e72cfc6ebf76dc5.js:1:29011
+[ImportStore] Loading films layout-a29db4951c3b30b5.js:1:5164
+[ImportStore] Found localStorage data 
+Object { count: 1188 }
+layout-a29db4951c3b30b5.js:1:5287
+[usePostersSWR] Fetching posters 
+Object { idsCount: 52 }
+859-5d3f2506f72e8bcb.js:1:61235
+[Suggest] Seasonal picks result 
+Object { configGenres: (1) […], configKeywords: (1) […], seasonalPicksCount: 0 }
+page-7e72cfc6ebf76dc5.js:1:32204
+[Suggest] Categorization complete 
+Object { seasonalPicks: 0, perfectMatches: 0, recentWatchMatches: 5, studioMatches: 0, directorMatches: 1, actorMatches: 0, genreMatches: 0, documentaries: 2, hiddenGems: 0, cultClassics: 11, … }
+page-7e72cfc6ebf76dc5.js:1:33690
+[ImportStore] Fetching from Supabase 
+Object { uid: "30cfd130-a342-4a7c-b8ad-6175db17e298" }
+layout-a29db4951c3b30b5.js:1:5598
+[Suggest] Saved shown IDs to localStorage 200 page-7e72cfc6ebf76dc5.js:1:29453
+[usePostersSWR] Chunk fetched 
+Object { requested: 52, received: 52 }
+859-5d3f2506f72e8bcb.js:1:61567
+[usePostersSWR] Fetch complete 
+Object { posterCount: 52 }
+859-5d3f2506f72e8bcb.js:1:61934
+[ImportStore] Loaded from Supabase 
+Object { count: 1188 }
+layout-a29db4951c3b30b5.js:1:6029
+[ImportStore] Using Supabase 
+Object { localStorage: 1188, supabase: 1188 }
+layout-a29db4951c3b30b5.js:1:6600
+[Suggest] runSuggest start 
+Object { uid: "30cfd130-a342-4a7c-b8ad-6175db17e298", hasSourceFilms: 1188, excludeGenres: "", yearMin: "", yearMax: "", mode: "quick", cacheKey: 1767758853435 }
+page-7e72cfc6ebf76dc5.js:1:40110
+[Suggest] fetching mappings for 1188 films page-7e72cfc6ebf76dc5.js:1:40672
+[Mappings] Auth verified 
+Object { uid: "30cfd130-a342-4a7c-b8ad-6175db17e298" }
+335-8d73c8779fb4e70e.js:1:4500
+[Mappings] fetching all mappings for user 
+Object { userId: "30cfd130-a342-4a7c-b8ad-6175db17e298", uriCount: 1188 }
+335-8d73c8779fb4e70e.js:1:4636
+[Mappings] all mappings loaded 
+Object { totalRows: 1188 }
+335-8d73c8779fb4e70e.js:1:5059
+[Mappings] finished getFilmMappings 
+Object { totalMappings: 1188, requestedUris: 1188 }
+335-8d73c8779fb4e70e.js:1:5469
+[Suggest] mappings loaded 
+Object { mappingCount: 1188, totalFilms: 1188 }
+page-7e72cfc6ebf76dc5.js:1:40871
+[Suggest] watchlist IDs 
+Object { count: 230 }
+page-7e72cfc6ebf76dc5.js:1:41091
+[Suggest] Pre-fetching TMDB details from cache page-7e72cfc6ebf76dc5.js:1:41145
+[BulkTmdb] Fetching cached details 
+Object { count: 1188 }
+335-8d73c8779fb4e70e.js:1:5633
+[BulkTmdb] Fetched details 
+Object { requested: 1188, found: 857 }
+335-8d73c8779fb4e70e.js:1:6001
+[Suggest] TMDB details loaded from cache 
+Object { requested: 1188, found: 857, coverage: "72.1%" }
+page-7e72cfc6ebf76dc5.js:1:41395
+[Suggest] Building taste profile for smart discovery page-7e72cfc6ebf76dc5.js:1:41638
+[Suggest] Found negative feedback 
+Object { count: 60 }
+page-7e72cfc6ebf76dc5.js:1:41905
+[PandoraLearning] Loaded graduated preferences 
+Object { avoidActors: (3) […], avoidKeywords: (5) […], avoidFranchises: (10) […], avoidDirectors: (3) […], avoidGenres: (3) […], avoidSubgenres: [], preferActors: (3) […], preferKeywords: (5) […], preferDirectors: (3) […], preferGenres: (2) […], … }
+335-8d73c8779fb4e70e.js:1:28467
+[Suggest] Loaded feature feedback 
+Object { avoidActors: (3) […], avoidKeywords: (5) […], avoidFranchises: (10) […], preferActors: (3) […], preferKeywords: (5) […] }
+page-7e72cfc6ebf76dc5.js:1:42069
+[Suggest] Watchlist films for taste profile: 230 page-7e72cfc6ebf76dc5.js:1:42613
+=== BUILD TASTE PROFILE START === 335-8d73c8779fb4e70e.js:1:38349
+[TasteProfile] Input params: 
+Object { filmsCount: 1188, mappingsCount: 1188, topN: 10, negativeFeedbackCount: 60, tmdbDetailsCount: 857, watchlistCount: 230 }
+335-8d73c8779fb4e70e.js:1:38398
+[TasteProfile] Film filtering: 
+Object { totalFilms: 1188, filmsWithMappings: 1188, likedFilmsCount: 247, dislikedFilmsCount: 0, guiltyPleasuresCount: 0, neutralFilmsCount: 941, dislikeThreshold: 1.5, filmsWithRating0: 0, rewatchFilms: 57, likedByLikeFlag: 95, … }
+335-8d73c8779fb4e70e.js:1:39780
+[TasteProfile] TMDB IDs to fetch: 
+Object { likedIdsCount: 247, dislikedIdsCount: 0, limit: 2000 }
+335-8d73c8779fb4e70e.js:1:40421
+[TasteProfile] Movie details fetched: 
+Object { likedMoviesTotal: 247, likedMoviesWithData: 247, likedMoviesWithGenres: 246, likedMoviesWithKeywords: 242, likedMoviesWithCredits: 246, dislikedMoviesTotal: 0, dislikedMoviesWithData: 0, negativeFeedbackMovies: 60 }
+335-8d73c8779fb4e70e.js:1:41221
+[TasteProfile] Sample movie data: 
+Object { title: "Sorcerer", genres: (3) […], keywordCount: 31, castCount: 26, crewCount: 87, directors: (1) […] }
+335-8d73c8779fb4e70e.js:1:41563
+[TasteProfile] Processing watchlist for intent signals: 
+Object { watchlistCount: 230 }
+335-8d73c8779fb4e70e.js:1:44933
+[TasteProfile] Watchlist TMDB IDs found: 200 335-8d73c8779fb4e70e.js:1:45237
+[TasteProfile] Watchlist signals extracted: 
+Object { genresOnWatchlist: 19, keywordsOnWatchlist: 1879, directorsOnWatchlist: 185 }
+335-8d73c8779fb4e70e.js:1:46419
+[TasteProfile] Genre avoidance analysis: 
+Object { genresWithBothLikedAndDisliked: [], finalAvoidGenres: [] }
+335-8d73c8779fb4e70e.js:1:48197
+[TasteProfile] Enhanced profile built 
+Object { topGenres: (3) […], topKeywords: (3) […], topDirectors: (3) […], topActors: (3) […], topStudios: (3) […], topDecades: (3) […], avoidGenres: [], avoidKeywords: [], avoidDirectors: [], watchlistOverrides: 254, … }
+335-8d73c8779fb4e70e.js:1:49676
+=== BUILD TASTE PROFILE END === 335-8d73c8779fb4e70e.js:1:50460
+[TasteProfile] Added explicit Quiz/Feedback preferences: 
+Object { count: 111, types: {…} }
+335-8d73c8779fb4e70e.js:1:52032
+[TasteProfile] Preferred subgenre keywords for discovery: 
+Object { keywordIds: (10) […], totalKeywords: 158, patternsAnalyzed: 15 }
+335-8d73c8779fb4e70e.js:1:52276
+[Suggest] Unwatched watchlist films: 228 page-7e72cfc6ebf76dc5.js:1:43166
+[Suggest] Top watchlist picks: 5 page-7e72cfc6ebf76dc5.js:1:44492
+[Suggest] Watchlist picks ready: 5 page-7e72cfc6ebf76dc5.js:1:45566
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 10851 }
+335-8d73c8779fb4e70e.js:1:31550
+[usePostersSWR] Fetching posters 
+Object { idsCount: 5 }
+859-5d3f2506f72e8bcb.js:1:61235
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 10851 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 10851, title: "Revolver" }
+335-8d73c8779fb4e70e.js:1:32136
+[usePostersSWR] Chunk fetched 
+Object { requested: 5, received: 5 }
+859-5d3f2506f72e8bcb.js:1:61567
+[usePostersSWR] Fetch complete 
+Object { posterCount: 5 }
+859-5d3f2506f72e8bcb.js:1:61934
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 10851 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1073 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1073 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1073, title: "Arlington Road" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1073 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 21781 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 21781 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 21781, title: "Spider Forest" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 21781 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 474764 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 474764 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 474764, title: "The Lodge" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 474764 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 800815 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 800815 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 800815, title: "The Pale Blue Eye" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 800815 }
+335-8d73c8779fb4e70e.js:1:33094
+[AdaptiveLearning] Updating exploration stats 
+Object { userId: "30cfd130-a342-4a7c-b8ad-6175db17e298", filmCount: 1188 }
+page-7e72cfc6ebf76dc5.js:1:1242
+[WeightedSeeds] Selected 
+Object { input: 1188, eligible: 247, selected: 30, topScore: 5, genreSpread: 17 }
+859-5d3f2506f72e8bcb.js:1:43807
+[Suggest] Watchlist IDs for discovery: 230 page-7e72cfc6ebf76dc5.js:1:46293
+[Suggest] Generating smart candidates page-7e72cfc6ebf76dc5.js:1:46357
+[SmartCandidates] Generating with enhanced profile 
+Object { highlyRatedCount: 30, watchlistCount: 230, topGenresCount: 10, topKeywordsCount: 10, topDirectorsCount: 10, topActorsCount: 10, topStudiosCount: 10, hasTmdbDetails: true }
+859-5d3f2506f72e8bcb.js:1:48855
+[TMDB] trending start 
+Object { period: "day", limit: 100 }
+859-5d3f2506f72e8bcb.js:1:44873
+[TMDB] trending ok 
+Object { count: 20 }
+859-5d3f2506f72e8bcb.js:1:45094
+[SmartCandidates] Running multi-source aggregation (primary similar source) 859-5d3f2506f72e8bcb.js:1:49616
+[SmartCandidates] Seed movies with titles: 
+Object { fromHighlyRated: 20, fromWatchlist: 10, combined: 25, withTitles: 25, sampleTitles: (5) […] }
+859-5d3f2506f72e8bcb.js:1:50156
+[AdaptiveLearning] No recent exploratory films found to update stats page-7e72cfc6ebf76dc5.js:1:2464
+TypeError: can't access property "isCheckout", e is undefined content-script.js:1:5698
+Error: Promised response from onMessage listener went out of scope service-worker.min.js:35:31729
+[SmartCandidates] Aggregated recommendations added: 20 with source tracking: 20 859-5d3f2506f72e8bcb.js:1:50630
+[TMDB] discover start 
+Object { genres: (3) […], genreMode: "OR", keywords: (4) […], people: [], peopleMode: "AND", yearMin: 1990, yearMax: 1999, sortBy: "popularity.desc", minVotes: 100, limit: 150 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Genre+keyword discovery 
+Object { count: 60, genreCount: 3, keywordCount: 4, sortBy: "popularity.desc", temporal: {…} }
+859-5d3f2506f72e8bcb.js:1:51752
+[TMDB] discover start 
+Object { genres: (2) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: 2010, yearMax: 2019, sortBy: "popularity.desc", minVotes: 20, limit: 150 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Popular fallback 
+Object { count: 60 }
+859-5d3f2506f72e8bcb.js:1:52423
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: (3) […], peopleMode: "OR", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: undefined, limit: 100 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 0, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Director discovery 
+Object { count: 0, directors: (8) […] }
+859-5d3f2506f72e8bcb.js:1:52780
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: (1) […], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: undefined, limit: 50 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 0, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Single director fallback 
+Object { count: 0 }
+859-5d3f2506f72e8bcb.js:1:53022
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: (2) […], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 30, limit: 100 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Niche keyword discovery 
+Object { count: 60, keywords: (2) […] }
+859-5d3f2506f72e8bcb.js:1:53398
+[SmartCandidates] Running enhanced genre discovery (cross-API compatible) 
+Object { topGenres: (10) […], approach: "genre-based discovery + text filtering" }
+859-5d3f2506f72e8bcb.js:1:53662
+[TMDB] discover start 
+Object { genres: (3) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 50, limit: 150 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Enhanced genre discovery (vote_average.desc): 60 859-5d3f2506f72e8bcb.js:1:53997
+[TMDB] discover start 
+Object { genres: (3) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "popularity.desc", minVotes: 50, limit: 150 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 60, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Enhanced genre discovery (popularity.desc): 60 859-5d3f2506f72e8bcb.js:1:53997
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: (3) […], peopleMode: "OR", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 50, limit: 75 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 46, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Actor discovery 
+Object { count: 46, actors: (5) […] }
+859-5d3f2506f72e8bcb.js:1:56206
+[TMDB] discover start 
+Object { genres: (2) […], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 50, limit: 40 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 40, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Genre combo discovery 
+Object { genres: (2) […], count: 40 }
+859-5d3f2506f72e8bcb.js:1:56943
+[TMDB] discover start 
+Object { genres: (2) […], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 50, limit: 40 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 40, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Genre combo discovery 
+Object { genres: (2) […], count: 40 }
+859-5d3f2506f72e8bcb.js:1:56943
+[TMDB] discover start 
+Object { genres: (2) […], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 50, limit: 40 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 40, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Genre combo discovery 
+Object { genres: (2) […], count: 40 }
+859-5d3f2506f72e8bcb.js:1:56943
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 30, limit: 40 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 40, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Studio discovery 
+Object { studio: "Carolco Pictures", studioId: 275, count: 40 }
+859-5d3f2506f72e8bcb.js:1:57394
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 30, limit: 40 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 40, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Studio discovery 
+Object { studio: "Regency Enterprises", studioId: 508, count: 40 }
+859-5d3f2506f72e8bcb.js:1:57394
+[TMDB] discover start 
+Object { genres: (2) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: 2015, yearMax: 2026, sortBy: "vote_average.desc", minVotes: 100, limit: 50 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 50, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Decade discovery (recent) 
+Object { years: "2015-2026", count: 50 }
+859-5d3f2506f72e8bcb.js:1:58063
+[TMDB] discover start 
+Object { genres: (2) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: 2000, yearMax: 2014, sortBy: "vote_average.desc", minVotes: 100, limit: 50 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 50, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartCandidates] Decade discovery (modern) 
+Object { years: "2000-2014", count: 50 }
+859-5d3f2506f72e8bcb.js:1:58063
+[SmartCandidates] Generated 
+Object { trending: 20, similar: 20, discovered: 646, total: 686 }
+859-5d3f2506f72e8bcb.js:1:58273
+[DecadeCandidates] Fetching for 1970s (1970-1979) 859-5d3f2506f72e8bcb.js:1:58714
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: 1970, yearMax: 1979, sortBy: "popularity.desc", minVotes: 50, limit: 20 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 20, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[SmartDiscovery] Fetching hidden gems 859-5d3f2506f72e8bcb.js:1:58960
+[TMDB] discover start 
+Object { genres: (3) […], genreMode: "OR", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 50, limit: 40 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 40, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[TMDB] discover start 
+Object { genres: [], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: 1970, yearMax: 1979, sortBy: "vote_average.desc", minVotes: 50, limit: 20 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 20, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[Lists] Discovering from curated lists 
+Object { seedCount: 10 }
+335-8d73c8779fb4e70e.js:1:37085
+[Lists] Found relevant lists 
+Object { count: 0 }
+335-8d73c8779fb4e70e.js:1:37561
+[Lists] Discovered films from lists 
+Object { count: 0 }
+335-8d73c8779fb4e70e.js:1:37992
+[Suggest] List candidates: 0 page-7e72cfc6ebf76dc5.js:1:47150
+[Suggest][Phase5+] Using adaptive exploration 
+Object { rate: 0.15, count: 22, message: "Using default rate (will adjust after rating exploratory picks)" }
+page-7e72cfc6ebf76dc5.js:1:47302
+[Exploration] Exploring adjacent genre 
+Object { genreId: 10752, fromTopGenres: (3) […], availableAdjacent: 2 }
+859-5d3f2506f72e8bcb.js:1:60059
+[TMDB] discover start 
+Object { genres: (1) […], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 500, limit: 30 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 30, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[Exploration] Exploring acclaimed films in new genre 
+Object { genreId: 10770, availableGenres: 9 }
+859-5d3f2506f72e8bcb.js:1:60742
+[TMDB] discover start 
+Object { genres: (1) […], genreMode: "AND", keywords: [], people: [], peopleMode: "AND", yearMin: undefined, yearMax: undefined, sortBy: "vote_average.desc", minVotes: 500, limit: 14 }
+859-5d3f2506f72e8bcb.js:1:48418
+[TMDB] discover ok 
+Object { count: 0, filters: {…} }
+859-5d3f2506f72e8bcb.js:1:48584
+[Exploration] Generated exploratory picks 
+Object { total: 15, adjacent: 15, acclaimed: 0, targetCount: 22 }
+859-5d3f2506f72e8bcb.js:1:59530
+[Suggest] Smart candidates breakdown 
+Object { trending: 20, similar: 20, discovered: 646, decade: 20, discovery: 20, lists: 0, exploratory: 15, totalRaw: 741 }
+page-7e72cfc6ebf76dc5.js:1:48015
+[Suggest] candidate pool 
+Object { blockedCount: 58, mode: "quick", totalCandidates: 741, afterFilter: 500, watchedCount: 857 }
+page-7e72cfc6ebf76dc5.js:1:48417
+[Suggest] Loaded genre transitions 
+Object { count: 11 }
+page-7e72cfc6ebf76dc5.js:1:48668
+[RecentExposures] Loaded exposure data 
+Object { uniqueMovies: 360, lookbackDays: 14 }
+335-8d73c8779fb4e70e.js:1:96800
+[Suggest] Recent exposures for repeat prevention: 360 page-7e72cfc6ebf76dc5.js:1:48946
+[Suggest] calling suggestByOverlap 
+Object { liteCount: 1188, candidatesCount: 500 }
+page-7e72cfc6ebf76dc5.js:1:49179
+[AdaptiveLearning] Loaded reason preferences 
+Object { count: 7, preferences: (7) […] }
+335-8d73c8779fb4e70e.js:1:57022
+[SuggestByOverlap] Excluded watchlist movies from main suggestions: 
+Object { watchlistCount: 230, originalCandidates: 500, filteredCandidates: 500 }
+335-8d73c8779fb4e70e.js:1:58008
+[Suggest] User profile analysis 
+Object { totalLiked: 216, likedAnimationCount: 1, likedFamilyCount: 1, likedChildrensCount: 5, avoidsAnimation: true, avoidsFamily: true, avoidsChildrens: true, topKeywords: (10) […], topGenreCombos: (5) […], topDirectors: (5) […], … }
+335-8d73c8779fb4e70e.js:1:61747
+XHRGET
+https://lettrsuggest.netlify.app/api/tmdb/movie?id=30715&_t=1767758924172
+[HTTP/2 404  258ms]
+
+[Suggest] Subgenre analysis complete 
+Object { patternsDetected: 15, crossPatternsDetected: 44, exampleAvoidances: (3) […] }
+335-8d73c8779fb4e70e.js:1:63230
+[SubgenreFilter] Filtered "Parasite" - User avoids comedy dark within Comedy 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "A Moment to Remember" - User avoids drama medical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Ikiru" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "To Be or Not to Be" - User avoids comedy dark within Comedy 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "Rocky" (1976) by 2.00 for 1970s era preference 335-8d73c8779fb4e70e.js:1:75498
+[SubgenrePenalty] Penalized "Rocky" by 4.50 for DRAMA_TRAGEDY 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Keyword penalty for "Rocky": 1 matches (-1.3) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Keyword boost for "Rocky": 1 matches (+0.4) 335-8d73c8779fb4e70e.js:1:81247
+[PandoraLearning] Genre penalty for "Rocky": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[ReasonPreference] Adjusted "Rocky" score: 32.71 -> 29.79 (0.91x) based on keyword, actor, decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SubgenreFilter] Filtered "The Housemaid" - User avoids thriller psychological within Thriller 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Dilwale Dulhania Le Jayenge" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[PandoraLearning] Keyword penalty for "The Bridge on the River Kwai": 1 matches (-1.6) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "The Bridge on the River Kwai": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "The Bridge on the River Kwai" by 3.28 - Contains "based on novel or book" — hard avoid; you've skipped this 21 times; Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "The Bridge on the River Kwai" score: 136.34 -> 126.63 (0.93x) based on recent, genre, keyword, actor preferences 335-8d73c8779fb4e70e.js:1:85699
+[RepeatPenalty] "The Bridge on the River Kwai" penalized: 126.63 -> 107.63 (5d ago, 0.85x) 335-8d73c8779fb4e70e.js:1:87810
+[PandoraLearning] Genre penalty for "Radical": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Radical" by 1.64 - Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Radical" score: 24.69 -> 22.57 (0.91x) based on keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[PandoraLearning] Genre penalty for "BTS: Permission to Dance on Stage - LA": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "BTS: Permission to Dance on Stage - LA" by 1.72 - Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "BTS: Permission to Dance on Stage - LA" score: 14.96 -> 13.69 (0.92x) based on genre preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "BTS: Permission to Dance on Stage - LA" score: 13.69 -> 12.32 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Keyword boost for "Tangerines": 1 matches (+0.2) 335-8d73c8779fb4e70e.js:1:81247
+[PandoraLearning] Genre penalty for "Tangerines": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Tangerines" by 1.64 - Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Tangerines" score: 6.25 -> 5.57 (0.89x) based on keyword, decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SubgenreFilter] Filtered "A Bag of Marbles" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "Mediterraneo" (1991) by 2.00 for 1990s era preference 335-8d73c8779fb4e70e.js:1:75498
+[ReasonPreference] Adjusted "Mediterraneo" score: 101.42 -> 90.95 (0.90x) based on genre, keyword, decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SubgenreFilter] Filtered "Land of Mine" - User avoids drama war within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "All Quiet on the Western Front" - User avoids drama war within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Emancipation" - User avoids drama historical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Léon: The Professional" - User avoids crime noir within Crime 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "Nirvana: Unplugged In New York" (1993) by 2.00 for 1990s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Keyword penalty for "Nirvana: Unplugged In New York": 1 matches (-1.2) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "Nirvana: Unplugged In New York": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Nirvana: Unplugged In New York" by 2.97 - Contains "woman director" — hard avoid; you've skipped this 6 times; Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Nirvana: Unplugged In New York" score: 17.78 -> 15.80 (0.89x) based on genre, director, keyword, decade preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Nirvana: Unplugged In New York" score: 15.80 -> 14.22 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre boost for "The King of the Neighborhood": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[ReasonPreference] Adjusted "The King of the Neighborhood" score: 12.67 -> 11.59 (0.91x) based on keyword, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SubgenreFilter] Filtered "Simón" - User avoids drama political within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Red Dawn" - User avoids drama historical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[ReasonPreference] Adjusted "Zübük" score: 16.74 -> 15.33 (0.92x) based on recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Zübük" score: 15.33 -> 13.80 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "The Three Deaths of Marisela Escobedo": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "The Three Deaths of Marisela Escobedo": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "The Three Deaths of Marisela Escobedo" by 1.72 - Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "The Three Deaths of Marisela Escobedo" score: 96.87 -> 88.60 (0.91x) based on genre, keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "The Three Deaths of Marisela Escobedo" score: 88.60 -> 79.74 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Rubius X": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Rubius X" by 1.72 - Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[SourceReliability] Adjusted "Rubius X" score: 11.65 -> 10.48 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[DecadeBoost] Boosted "Bound by Honor" (1993) by 2.00 for 1990s era preference 335-8d73c8779fb4e70e.js:1:75498
+[SubgenrePenalty] Penalized "Bound by Honor" by 5.25 for CRIME_POLICE 335-8d73c8779fb4e70e.js:1:78065
+[SubgenrePenalty] Penalized "Bound by Honor" by 7.50 for ACTION_SPY 335-8d73c8779fb4e70e.js:1:78065
+[SubgenrePenalty] Penalized "Bound by Honor" by 4.50 for DRAMA_TRAGEDY 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "Bound by Honor": Action, Drama, Thriller (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Bound by Honor": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[ReasonPreference] Adjusted "Bound by Honor" score: 10.64 -> 9.55 (0.90x) based on keyword, decade, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Bound by Honor" score: 9.55 -> 8.59 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Le Trou" - User avoids crime noir within Crime 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Train Dreams" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "Christmas at the Cupiello Household" (1977) by 2.00 for 1970s era preference 335-8d73c8779fb4e70e.js:1:75498
+[SubgenrePenalty] Penalized "Christmas at the Cupiello Household" by 5.25 for DRAMA_MUSICAL 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "Christmas at the Cupiello Household": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[ReasonPreference] Adjusted "Christmas at the Cupiello Household" score: 171.21 -> 153.54 (0.90x) based on genre, keyword, decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Christmas at the Cupiello Household" score: 153.54 -> 138.18 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Memories of Murder" - User avoids crime noir within Crime 335-8d73c8779fb4e70e.js:1:65605
+[PandoraLearning] Genre penalty for "Divaldo Franco": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Divaldo Franco" by 1.64 - Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Divaldo Franco" score: 23.56 -> 21.58 (0.92x) based on recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Divaldo Franco" score: 21.58 -> 19.42 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Rite Here Rite Now": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Rite Here Rite Now" by 1.72 - Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Rite Here Rite Now" score: 17.98 -> 16.43 (0.91x) based on genre, keyword preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Rite Here Rite Now" score: 16.43 -> 14.79 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Nuremberg" - User avoids drama historical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[PandoraLearning] Keyword penalty for "Wake Up Dead Man: A Knives Out Mystery": 1 matches (-1.2) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "Wake Up Dead Man: A Knives Out Mystery": Thriller (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Wake Up Dead Man: A Knives Out Mystery" by 2.82 - Contains "sequel" — hard avoid; you've skipped this 13 times; Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Wake Up Dead Man: A Knives Out Mystery" score: 219.00 -> 203.40 (0.93x) based on genre, keyword, actor, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Wake Up Dead Man: A Knives Out Mystery" score: 203.40 -> 197.30 (0.97x) 335-8d73c8779fb4e70e.js:1:87516
+[RepeatPenalty] "Wake Up Dead Man: A Knives Out Mystery" penalized: 197.30 -> 167.70 (5.2d ago, 0.85x) 335-8d73c8779fb4e70e.js:1:87810
+[PandoraLearning] Genre penalty for "Drishyam 2": Thriller, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Drishyam 2" by 3.00 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Drishyam 2" score: 4.86 -> 4.45 (0.92x) based on recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Drishyam 2" score: 4.45 -> 4.01 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Frankenstein" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "A Brighter Summer Day" - User avoids drama historical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenrePenalty] Penalized "Visaranai" by 5.25 for CRIME_POLICE 335-8d73c8779fb4e70e.js:1:78065
+[SubgenrePenalty] Penalized "Visaranai" by 0.00 for DRAMA_POLITICAL 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "Visaranai": Thriller, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Visaranai": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[ReasonPreference] Adjusted "Visaranai" score: 30.35 -> 27.75 (0.91x) based on keyword, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Visaranai" score: 27.75 -> 24.98 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Keyword penalty for "Undisputed III: Redemption": 2 matches (-2.4) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Keyword boost for "Undisputed III: Redemption": 1 matches (+0.3) 335-8d73c8779fb4e70e.js:1:81247
+[PandoraLearning] Genre penalty for "Undisputed III: Redemption": Action, Thriller, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Undisputed III: Redemption": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "Undisputed III: Redemption" by 5.44 - Contains "fight" — hard avoid; you've skipped this 7 times; Contains Action — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Undisputed III: Redemption" score: 6.73 -> 6.13 (0.91x) based on keyword, genre, collection, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Undisputed III: Redemption" score: 6.13 -> 5.51 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Along with the Gods: The Two Worlds" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[ReasonPreference] Adjusted "Mesa de regalos" score: 16.74 -> 15.33 (0.92x) based on recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Mesa de regalos" score: 15.33 -> 13.80 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Mission: Impossible - Ghost Protocol" - User avoids action spy within Action 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "After" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "The Lives of Others" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "El Cementerio de los Elefantes" (2009) by 2.00 for 2000s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Genre penalty for "El Cementerio de los Elefantes": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "El Cementerio de los Elefantes" by 1.64 - Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "El Cementerio de los Elefantes" score: 24.81 -> 21.83 (0.88x) based on decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "El Cementerio de los Elefantes" score: 21.83 -> 19.64 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Dawn of the Planet of the Apes" - User avoids scifi post apocalyptic within Science Fiction 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "The Cabinet of Dr. Caligari" - User avoids horror psychological within Horror 335-8d73c8779fb4e70e.js:1:65605
+[ReasonPreference] Adjusted "¿Quieres ser mi hijo?" score: 6.80 -> 6.23 (0.92x) based on recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "¿Quieres ser mi hijo?" score: 6.23 -> 5.61 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "The Imitation Game" - User avoids drama biographical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Crazy, Stupid, Love." - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "Linkin Park: Live in Texas" (2003) by 2.00 for 2000s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Genre penalty for "Linkin Park: Live in Texas": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Linkin Park: Live in Texas" by 1.72 - Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Linkin Park: Live in Texas" score: 17.85 -> 15.70 (0.88x) based on genre, decade preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Linkin Park: Live in Texas" score: 15.70 -> 14.13 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Morat: Balas Perdidas": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Morat: Balas Perdidas" by 1.72 - Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Morat: Balas Perdidas" score: 15.06 -> 13.78 (0.92x) based on genre preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Morat: Balas Perdidas" score: 13.78 -> 12.40 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Break the Silence: The Movie": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Break the Silence: The Movie" by 1.72 - Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Break the Silence: The Movie" score: 16.76 -> 15.32 (0.91x) based on genre, keyword preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Break the Silence: The Movie" score: 15.32 -> 13.78 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "The Accountant" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[PandoraLearning] Keyword penalty for "Love, Rosie": 1 matches (-1.6) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "Love, Rosie": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Love, Rosie" by 3.28 - Contains "based on novel or book" — hard avoid; you've skipped this 21 times; Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Love, Rosie" score: 15.74 -> 14.39 (0.91x) based on keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Love, Rosie" score: 14.39 -> 12.95 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Legends of the Fall" - User avoids drama tragedy within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Little Women" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Bohemian Rhapsody" - User avoids drama biographical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "The King" - User avoids drama biographical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[PandoraLearning] Genre penalty for "Tatami": Thriller, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Tatami" by 3.00 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Tatami" score: 6.35 -> 5.80 (0.91x) based on keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Tatami" score: 5.80 -> 5.22 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Maharaja": Action, Thriller (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Maharaja" by 3.00 - Contains Action — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Maharaja" score: 237.96 -> 217.90 (0.92x) based on genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Maharaja" score: 217.90 -> 196.11 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Amaran" - User avoids action military within Action 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "The Silence of the Lambs" - User avoids crime noir within Crime 335-8d73c8779fb4e70e.js:1:65605
+[PandoraLearning] Genre penalty for "No Mercy": Action, Drama, Thriller (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "No Mercy": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "No Mercy" by 3.00 - Contains Action — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "No Mercy" score: 4.43 -> 4.05 (0.91x) based on keyword, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "No Mercy" score: 4.05 -> 3.65 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[RepeatPenalty] "No Mercy" penalized: 3.65 -> 3.10 (5d ago, 0.85x) 335-8d73c8779fb4e70e.js:1:87810
+[PandoraLearning] Genre penalty for "The Secret Life of Walter Mitty": Adventure, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "The Secret Life of Walter Mitty" by 3.00 - Contains Adventure — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "The Secret Life of Walter Mitty" score: 225.25 -> 206.01 (0.91x) based on genre, keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "The Secret Life of Walter Mitty" score: 206.01 -> 185.41 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenrePenalty] Penalized "Big Brother" by 3.00 for ACTION_MILITARY 335-8d73c8779fb4e70e.js:1:78065
+[SubgenrePenalty] Penalized "Big Brother" by 0.00 for DRAMA_WAR 335-8d73c8779fb4e70e.js:1:78065
+[SubgenrePenalty] Penalized "Big Brother" by 0.00 for DRAMA_POLITICAL 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "Big Brother": Action, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[ReasonPreference] Adjusted "Big Brother" score: 244.88 -> 224.24 (0.92x) based on genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Big Brother" score: 224.24 -> 201.81 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Gone Mom: The Disappearance of Jennifer Dulos": Thriller (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Gone Mom: The Disappearance of Jennifer Dulos": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "Gone Mom: The Disappearance of Jennifer Dulos" by 1.64 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Gone Mom: The Disappearance of Jennifer Dulos" score: 248.42 -> 227.47 (0.92x) based on genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Gone Mom: The Disappearance of Jennifer Dulos" score: 227.47 -> 204.73 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "The Match Factory Girl" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Legend" - User avoids crime gangster within Crime 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Rise of the Planet of the Apes" - User avoids action spy within Action 335-8d73c8779fb4e70e.js:1:65605
+[PandoraLearning] Genre penalty for "A Day": Thriller, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "A Day" by 3.00 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "A Day" score: 5.89 -> 5.39 (0.91x) based on keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "A Day" score: 5.39 -> 4.85 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "In the Name of the Father" - User avoids drama biographical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "What Happened to Monday" - User avoids scifi clone within Science Fiction 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "Thesis" (1996) by 2.00 for 1990s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Genre penalty for "Thesis": Thriller (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Thesis" by 1.64 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Thesis" score: 11.14 -> 9.93 (0.89x) based on keyword, decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Thesis" score: 9.93 -> 8.93 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[DecadeBoost] Boosted "La bicicleta de los Huanca" (2007) by 2.00 for 2000s era preference 335-8d73c8779fb4e70e.js:1:75498
+[ReasonPreference] Adjusted "La bicicleta de los Huanca" score: 17.14 -> 15.08 (0.88x) based on decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "La bicicleta de los Huanca" score: 15.08 -> 13.57 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Nude": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Nude" by 1.72 - Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Nude" score: 11.99 -> 10.94 (0.91x) based on keyword preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Nude" score: 10.94 -> 9.85 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Shershaah" - User avoids drama biographical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[PandoraLearning] Keyword penalty for "Why Don't You Play in Hell?": 1 matches (-1.3) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Keyword boost for "Why Don't You Play in Hell?": 1 matches (+0.2) 335-8d73c8779fb4e70e.js:1:81247
+[PandoraLearning] Genre penalty for "Why Don't You Play in Hell?": Drama, Action (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Why Don't You Play in Hell?" by 4.26 - Contains "fight" — hard avoid; you've skipped this 7 times; Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Why Don't You Play in Hell?" score: 246.94 -> 229.35 (0.93x) based on genre, keyword, actor, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Why Don't You Play in Hell?" score: 229.35 -> 206.41 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Prey" - User avoids scifi alien within Science Fiction 335-8d73c8779fb4e70e.js:1:65605
+[SubgenrePenalty] Penalized "Limitless" by 18.00 for SCIFI_ROBOT 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Keyword penalty for "Limitless": 1 matches (-1.6) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Actor boost for "Limitless": Robert De Niro (+1.7) 335-8d73c8779fb4e70e.js:1:80749
+[PandoraLearning] Genre penalty for "Limitless": Thriller (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[ReasonPreference] Adjusted "Limitless" score: 219.67 -> 204.02 (0.93x) based on genre, actor, keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Limitless" score: 204.02 -> 183.61 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Bacurau": Thriller (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Bacurau": Western (+0.2) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "Bacurau" by 1.64 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Bacurau" score: 180.27 -> 164.87 (0.91x) based on genre, keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Bacurau" score: 164.87 -> 148.39 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[DecadeBoost] Boosted "Undisputed II: Last Man Standing" (2006) by 2.00 for 2000s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Genre penalty for "Undisputed II: Last Man Standing": Action, Thriller, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Undisputed II: Last Man Standing": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "Undisputed II: Last Man Standing" by 3.00 - Contains Action — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Undisputed II: Last Man Standing" score: 3.96 -> 3.53 (0.89x) based on decade, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Undisputed II: Last Man Standing" score: 3.53 -> 3.18 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Charley Varrick" - User avoids crime gangster within Crime 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Samurai Assassin" - User avoids drama historical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Anniyan" - User avoids action spy within Action 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Hidden Figures" - User avoids drama biographical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Zulu" - User avoids action military within Action 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Blood and Bone" - User avoids action spy within Action 335-8d73c8779fb4e70e.js:1:65605
+[SubgenrePenalty] Penalized "Extraction 2" by 10.50 for CRIME_GANGSTER 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Keyword penalty for "Extraction 2": 3 matches (-4.0) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "Extraction 2": Action, Thriller (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Extraction 2": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[ReasonPreference] Adjusted "Extraction 2" score: 31.37 -> 28.58 (0.91x) based on keyword, genre, collection, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Extraction 2" score: 28.58 -> 25.72 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Sheep Without a Shepherd": Thriller (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Sheep Without a Shepherd": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "Sheep Without a Shepherd" by 1.64 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Sheep Without a Shepherd" score: 10.47 -> 9.57 (0.91x) based on keyword, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Sheep Without a Shepherd" score: 9.57 -> 8.62 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[ReasonPreference] Adjusted "Franco Escamilla: RPM" score: 15.44 -> 14.14 (0.92x) based on recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Franco Escamilla: RPM" score: 14.14 -> 12.73 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Malcolm X" - User avoids drama biographical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "Following" (1999) by 2.00 for 1990s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Keyword boost for "Following": 1 matches (+0.3) 335-8d73c8779fb4e70e.js:1:81247
+[PandoraLearning] Genre penalty for "Following": Drama, Thriller (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Following" by 3.00 - Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Following" score: 16.78 -> 14.92 (0.89x) based on director, keyword, decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Following" score: 14.92 -> 13.43 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "A Better Tomorrow" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenrePenalty] Penalized "Inuyashiki" by 0.00 for SCIFI_ALIEN 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "Inuyashiki": Action, Adventure (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Inuyashiki" by 3.00 - Contains alien elements match a subgenre you avoid; Contains Action — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Inuyashiki" score: 175.67 -> 160.67 (0.91x) based on genre, keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Inuyashiki" score: 160.67 -> 144.60 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[DecadeBoost] Boosted "Iron Monkey" (1993) by 2.00 for 1990s era preference 335-8d73c8779fb4e70e.js:1:75498
+[SubgenrePenalty] Penalized "Iron Monkey" by 7.50 for ACTION_SPY 335-8d73c8779fb4e70e.js:1:78065
+[SubgenrePenalty] Penalized "Iron Monkey" by 5.25 for DRAMA_MUSICAL 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "Iron Monkey": Action, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Iron Monkey": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[ReasonPreference] Adjusted "Iron Monkey" score: 14.68 -> 13.16 (0.90x) based on keyword, decade, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Iron Monkey" score: 13.16 -> 11.85 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[RepeatPenalty] "Iron Monkey" penalized: 11.85 -> 10.07 (5d ago, 0.85x) 335-8d73c8779fb4e70e.js:1:87810
+[SubgenreFilter] Filtered "Hwayi: A Monster Boy" - User avoids crime gangster within Crime 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "Lone Wolf and Cub: Baby Cart at the River Styx" (1972) by 2.00 for 1970s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Keyword penalty for "Lone Wolf and Cub: Baby Cart at the River Styx": 2 matches (-2.4) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "Lone Wolf and Cub: Baby Cart at the River Styx": Action, Drama, Adventure (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Lone Wolf and Cub: Baby Cart at the River Styx" by 5.36 - Contains "based on comic" — hard avoid; you've skipped this 13 times; Contains Action — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Lone Wolf and Cub: Baby Cart at the River Styx" score: 9.43 -> 8.53 (0.90x) based on director, actor, keyword, decade, collection, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Lone Wolf and Cub: Baby Cart at the River Styx" score: 8.53 -> 7.68 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenrePenalty] Penalized "The Raid" by 10.50 for CRIME_GANGSTER 335-8d73c8779fb4e70e.js:1:78065
+[SubgenrePenalty] Penalized "The Raid" by 2.25 for CRIME_SERIAL_KILLER 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "The Raid": Action, Thriller (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "The Raid": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[ReasonPreference] Adjusted "The Raid" score: 26.55 -> 24.28 (0.91x) based on keyword, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "The Raid" score: 24.28 -> 21.86 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "Children of Paradise": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Children of Paradise" by 1.64 - Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Children of Paradise" score: 14.70 -> 13.44 (0.91x) based on keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Children of Paradise" score: 13.44 -> 12.09 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[DecadeBoost] Boosted "The Taking of Pelham One Two Three" (1974) by 2.00 for 1970s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Keyword penalty for "The Taking of Pelham One Two Three": 1 matches (-1.6) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "The Taking of Pelham One Two Three": Thriller, Action (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "The Taking of Pelham One Two Three": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "The Taking of Pelham One Two Three" by 4.64 - Contains "new york city" — hard avoid; you've skipped this 12 times; Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "The Taking of Pelham One Two Three" score: 31.52 -> 28.59 (0.91x) based on director, actor, keyword, decade, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "The Taking of Pelham One Two Three" score: 28.59 -> 25.73 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[DecadeBoost] Boosted "Metallica and San Francisco Symphony: S&M" (1999) by 2.00 for 1990s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Genre penalty for "Metallica and San Francisco Symphony: S&M": Documentary (-1.7) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Metallica and San Francisco Symphony: S&M" by 1.72 - Contains Documentary — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Metallica and San Francisco Symphony: S&M" score: 16.42 -> 14.62 (0.89x) based on genre, keyword, decade preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Metallica and San Francisco Symphony: S&M" score: 14.62 -> 13.16 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Keyword boost for "The Stronghold": 1 matches (+0.4) 335-8d73c8779fb4e70e.js:1:81247
+[PandoraLearning] Genre penalty for "The Stronghold": Thriller, Action (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "The Stronghold": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "The Stronghold" by 3.00 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "The Stronghold" score: 24.33 -> 22.25 (0.91x) based on keyword, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "The Stronghold" score: 22.25 -> 20.02 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Heavenly Creatures" - User avoids drama historical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenrePenalty] Penalized "Deadpool & Wolverine" by 18.00 for SCIFI_ROBOT 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Keyword penalty for "Deadpool & Wolverine": 2 matches (-2.8) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "Deadpool & Wolverine": Action (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[ReasonPreference] Adjusted "Deadpool & Wolverine" score: 184.51 -> 168.76 (0.91x) based on genre, keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Deadpool & Wolverine" score: 168.76 -> 151.88 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "M" - User avoids crime gangster within Crime 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Searching" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Die Hard" - User avoids action military within Action 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "A Bittersweet Life" (2005) by 2.00 for 2000s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Genre penalty for "A Bittersweet Life": Action, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "A Bittersweet Life": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "A Bittersweet Life" by 3.00 - Contains Action — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "A Bittersweet Life" score: 12.74 -> 11.43 (0.90x) based on keyword, decade, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "A Bittersweet Life" score: 11.43 -> 10.28 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "November" - User avoids horror witch within Horror 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Knives Out" - User avoids crime noir within Crime 335-8d73c8779fb4e70e.js:1:65605
+[PandoraLearning] Genre penalty for "Andhadhun": Thriller (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Andhadhun": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "Andhadhun" by 1.64 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Andhadhun" score: 304.39 -> 278.39 (0.91x) based on genre, keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Andhadhun" score: 278.39 -> 250.55 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Glass Onion: A Knives Out Mystery" - User avoids comedy dark within Comedy 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Me Before You" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenrePenalty] Penalized "Mr. Long" by 2.25 for CRIME_SERIAL_KILLER 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "Mr. Long": Drama, Action (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Mr. Long": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "Mr. Long" by 0.75 - Contains serial killer elements match a subgenre you avoid; Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Mr. Long" score: 9.92 -> 9.08 (0.91x) based on keyword, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Mr. Long" score: 9.08 -> 8.17 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Get Out" - User avoids thriller psychological within Thriller 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "On Probation" (2005) by 2.00 for 2000s era preference 335-8d73c8779fb4e70e.js:1:75498
+[SubgenrePenalty] Penalized "On Probation" by 5.25 for CRIME_POLICE 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "On Probation": Action, Drama, Thriller (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "On Probation": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[ReasonPreference] Adjusted "On Probation" score: 453.82 -> 406.99 (0.90x) based on genre, keyword, decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "On Probation" score: 406.99 -> 366.29 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Keyword boost for "Drishyam": 1 matches (+0.4) 335-8d73c8779fb4e70e.js:1:81247
+[PandoraLearning] Genre penalty for "Drishyam": Thriller, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Drishyam" by 3.00 - Contains Thriller — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Drishyam" score: 12.27 -> 11.22 (0.91x) based on keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Drishyam" score: 11.22 -> 10.10 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Genre penalty for "13 Assassins": Adventure, Drama, Action (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "13 Assassins" by 3.00 - Contains Adventure — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "13 Assassins" score: 13.49 -> 12.59 (0.93x) based on keyword, actor, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "13 Assassins" score: 12.59 -> 11.33 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Keyword penalty for "The Hobbit: The Desolation of Smaug": 2 matches (-2.8) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "The Hobbit: The Desolation of Smaug": Adventure, Action (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "The Hobbit: The Desolation of Smaug" by 5.82 - Contains "based on novel or book" — hard avoid; you've skipped this 21 times; Contains Adventure — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "The Hobbit: The Desolation of Smaug" score: 4.90 -> 4.48 (0.91x) based on keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "The Hobbit: The Desolation of Smaug" score: 4.48 -> 4.03 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "A Dog's Will" - User avoids drama musical within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenrePenalty] Penalized "Diablo" by 10.50 for CRIME_GANGSTER 335-8d73c8779fb4e70e.js:1:78065
+[SubgenrePenalty] Penalized "Diablo" by 2.25 for CRIME_SERIAL_KILLER 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "Diablo": Action, Thriller (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "Diablo": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[ReasonPreference] Adjusted "Diablo" score: 24.89 -> 22.76 (0.91x) based on keyword, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Diablo" score: 22.76 -> 20.49 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[DecadeBoost] Boosted "Persuasion" (1995) by 2.00 for 1990s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Keyword penalty for "Persuasion": 1 matches (-1.6) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "Persuasion": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Persuasion" by 3.28 - Contains "based on novel or book" — hard avoid; you've skipped this 21 times; Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Persuasion" score: 11.23 -> 10.22 (0.91x) based on actor, keyword, decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Persuasion" score: 10.22 -> 9.20 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenrePenalty] Penalized "Marco Polo: One Hundred Eyes" by 4.50 for DRAMA_TRAGEDY 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Genre penalty for "Marco Polo: One Hundred Eyes": Action, Drama (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[ReasonPreference] Adjusted "Marco Polo: One Hundred Eyes" score: 10.49 -> 9.79 (0.93x) based on recent, actor, keyword preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Marco Polo: One Hundred Eyes" score: 9.79 -> 8.81 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[PandoraLearning] Keyword penalty for "She Rides Shotgun": 1 matches (-1.6) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "She Rides Shotgun": Action, Thriller (-3.0) 335-8d73c8779fb4e70e.js:1:82684
+[PandoraLearning] Genre boost for "She Rides Shotgun": Crime (+0.5) 335-8d73c8779fb4e70e.js:1:83176
+[NegativePenalty] Penalized "She Rides Shotgun" by 4.64 - Contains "based on novel or book" — hard avoid; you've skipped this 21 times; Contains Action — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "She Rides Shotgun" score: 26.30 -> 24.06 (0.91x) based on keyword, genre, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "She Rides Shotgun" score: 24.06 -> 21.65 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "M3GAN 2.0" - User avoids action spy within Action 335-8d73c8779fb4e70e.js:1:65605
+[DecadeBoost] Boosted "La Haine" (1995) by 2.00 for 1990s era preference 335-8d73c8779fb4e70e.js:1:75498
+[PandoraLearning] Genre penalty for "La Haine": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "La Haine" by 1.64 - Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "La Haine" score: 34.23 -> 31.18 (0.91x) based on keyword, actor, decade, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "La Haine" score: 31.18 -> 28.06 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[NicheFilter] Filtered "Franco Escamilla: por la anécdota" - User has not shown interest in stand-up comedy 335-8d73c8779fb4e70e.js:1:67405
+[PandoraLearning] Keyword penalty for "Call Me by Your Name": 1 matches (-1.6) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "Call Me by Your Name": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[NegativePenalty] Penalized "Call Me by Your Name" by 3.28 - Contains "based on novel or book" — hard avoid; you've skipped this 21 times; Contains Drama — a genre you've been skipping 335-8d73c8779fb4e70e.js:1:84532
+[ReasonPreference] Adjusted "Call Me by Your Name" score: 13.35 -> 12.21 (0.91x) based on keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Call Me by Your Name" score: 12.21 -> 10.99 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenrePenalty] Penalized "Great Expectations" by 7.50 for DRAMA_ROMANTIC 335-8d73c8779fb4e70e.js:1:78065
+[PandoraLearning] Keyword penalty for "Great Expectations": 1 matches (-1.6) 335-8d73c8779fb4e70e.js:1:79630
+[PandoraLearning] Genre penalty for "Great Expectations": Drama (-1.6) 335-8d73c8779fb4e70e.js:1:82684
+[ReasonPreference] Adjusted "Great Expectations" score: 12.96 -> 11.85 (0.91x) based on keyword, recent preferences 335-8d73c8779fb4e70e.js:1:85699
+[SourceReliability] Adjusted "Great Expectations" score: 11.85 -> 10.66 (0.90x) 335-8d73c8779fb4e70e.js:1:87516
+[SubgenreFilter] Filtered "Yearning" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Pokiri" - User avoids action spy within Action 335-8d73c8779fb4e70e.js:1:65605
+[SubgenreFilter] Filtered "Pride & Prejudice" - User avoids drama romantic within Drama 335-8d73c8779fb4e70e.js:1:65605
+[DiversityFilter] Applied diversity filtering 
+Object { original: 67, filtered: 44, skipped: 23, directorCounts: (1) […], genreCounts: (5) […] }
+335-8d73c8779fb4e70e.js:1:89921
+[Suggest] refreshing TMDB cache for suggested ids 44 page-7e72cfc6ebf76dc5.js:1:50241
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 78237 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 78237 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 78237, title: "On Probation" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 78237 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 116745 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 116745 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 116745, title: "The Secret Life of Walter Mitty" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 116745 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 534780 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 534780 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 534780, title: "Andhadhun" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 534780 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 533535 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 533535 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 533535, title: "Deadpool & Wolverine" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 533535 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 826 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 826 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 826, title: "The Bridge on the River Kwai" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 826 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 831223 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 831223 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 831223, title: "Gone Mom: The Disappearance of Jennifer Dulos" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 831223 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 134350 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 134350 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 134350, title: "Why Don't You Play in Hell?" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 134350 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 51876 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 51876 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 51876, title: "Limitless" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 51876 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 38251 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 38251 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 38251, title: "Mediterraneo" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 38251 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1118224 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1118224 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1118224, title: "Maharaja" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1118224 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 447743 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 447743 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 447743, title: "Inuyashiki" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 447743 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 486646 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 486646 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 486646, title: "Christmas at the Cupiello Household" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 486646 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 753230 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 753230 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 753230, title: "The Three Deaths of Marisela Escobedo" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 753230 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 812583 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 812583 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 812583, title: "Wake Up Dead Man: A Knives Out Mystery" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 812583 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 446159 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 446159 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 446159, title: "Bacurau" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 446159 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 2457 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 2457 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 2457, title: "Children of Paradise" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 2457 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 9299 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 9299 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 9299, title: "Thesis" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 9299 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 18942 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 18942 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 18942, title: "Nirvana: Unplugged In New York" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 18942 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 157737 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 157737 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 157737, title: "Zübük" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 157737 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1366 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1366 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1366, title: "Rocky" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1366 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 11660 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 11660 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 11660, title: "Following" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 11660 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 504056 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 504056 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 504056, title: "Big Brother" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 504056 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 118003 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 118003 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 118003, title: "The King of the Neighborhood" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 118003 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 484133 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 484133 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 484133, title: "Nude" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 484133 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 17810 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 17810 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 17810, title: "Lone Wolf and Cub: Baby Cart at the River Styx" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 17810 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 8333 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 8333 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 8333, title: "The Taking of Pelham One Two Three" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 8333 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 12780 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 12780 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 12780, title: "Iron Monkey" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 12780 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 372226 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 372226 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 372226, title: "Visaranai" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 372226 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 372981 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 372981 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 372981, title: "Marco Polo: One Hundred Eyes" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 372981 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1181678 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1181678 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1181678, title: "¿Quieres ser mi hijo?" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1181678 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 9702 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 9702 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 9702, title: "Bound by Honor" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 9702 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 406 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 406 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 406, title: "La Haine" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 406 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 697843 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 697843 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 697843, title: "Extraction 2" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 697843 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1058694 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1058694 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1058694, title: "Radical" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1058694 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 373001 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 373001 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 373001, title: "El Cementerio de los Elefantes" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 373001 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1203397 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1203397 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1203397, title: "Rite Here Rite Now" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1203397 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 40444 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 40444 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 40444, title: "Linkin Park: Live in Texas" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 40444 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 1302151 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 1302151 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 1302151, title: "Mesa de regalos" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 1302151 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 628442 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 628442 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 628442, title: "La bicicleta de los Huanca" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 628442 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 11344 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 11344 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 11344, title: "A Bittersweet Life" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 11344 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 17015 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 17015 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 17015, title: "Persuasion" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 17015 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 22724 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 22724 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 22724, title: "Metallica and San Francisco Symphony: S&M" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 22724 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 14320 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 14320 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 14320, title: "Great Expectations" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 14320 }
+335-8d73c8779fb4e70e.js:1:33094
+[UnifiedAPI] fetch movie from TMDB 
+Object { id: 15255 }
+335-8d73c8779fb4e70e.js:1:31550
+[UnifiedAPI] TMDB fetch movie ok 
+Object { id: 15255 }
+335-8d73c8779fb4e70e.js:1:31968
+[UnifiedAPI] searching TuiMDB for UID 
+Object { tmdbId: 15255, title: "Undisputed II: Last Man Standing" }
+335-8d73c8779fb4e70e.js:1:32136
+[UnifiedAPI] TuiMDB UID not found 
+Object { tmdbId: 15255 }
+335-8d73c8779fb4e70e.js:1:33094
+[usePostersSWR] Fetching posters 
+Object { idsCount: 5 }
+859-5d3f2506f72e8bcb.js:1:61235
+[usePostersSWR] Chunk fetched 
+Object { requested: 5, received: 5 }
+859-5d3f2506f72e8bcb.js:1:61567
+[usePostersSWR] Fetch complete 
+Object { posterCount: 5 }
+859-5d3f2506f72e8bcb.js:1:61934
+[Suggest] Tracking shown IDs 
+Object { total: 200, newThisRound: 44, limited: true }
+page-7e72cfc6ebf76dc5.js:1:50445
+[Suggest] Saved shown IDs to localStorage 200 page-7e72cfc6ebf76dc5.js:1:29453
+[Suggest] suggestions ready with full details 
+Object { count: 44 }
+page-7e72cfc6ebf76dc5.js:1:52932
+[usePostersSWR] Fetching posters 
+Object { idsCount: 49 }
+859-5d3f2506f72e8bcb.js:1:61235
+[Suggest] Seasonal picks result 
+Object { configGenres: (1) […], configKeywords: (1) […], seasonalPicksCount: 0 }
+page-7e72cfc6ebf76dc5.js:1:32204
+[Suggest] Categorization complete 
+Object { seasonalPicks: 0, perfectMatches: 0, recentWatchMatches: 5, studioMatches: 0, directorMatches: 0, actorMatches: 0, genreMatches: 0, documentaries: 6, hiddenGems: 0, cultClassics: 0, … }
+page-7e72cfc6ebf76dc5.js:1:33690
+[ExposureLog] Logged 44 suggestion exposures 335-8d73c8779fb4e70e.js:1:96068
+[Suggest] runSuggest end page-7e72cfc6ebf76dc5.js:1:53882
+[Suggest] Saved shown IDs to localStorage 200 page-7e72cfc6ebf76dc5.js:1:29453
+[usePostersSWR] Chunk fetched 
+Object { requested: 49, received: 49 }
+859-5d3f2506f72e8bcb.js:1:61567
+[usePostersSWR] Fetch complete 
+Object { posterCount: 49 }
+859-5d3f2506f72e8bcb.js:1:61934
+TypeError: can't access property "isCheckout", e is undefined content-script.js:1:5698

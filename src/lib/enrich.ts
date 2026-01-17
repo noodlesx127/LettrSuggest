@@ -2575,6 +2575,35 @@ function extractFeatures(movie: TMDBMovie) {
   };
 }
 
+/**
+ * Detect niche content that deserves lower quality thresholds
+ * Niche content includes classics, foreign films, documentaries, etc.
+ */
+function isNicheContent(
+  movie: TMDBMovie,
+  genres: string[],
+  releaseDate?: string,
+  runtime?: number,
+): boolean {
+  // Niche genres that deserve lower thresholds
+  const nicheGenres = ["Documentary", "Animation", "Music", "History"];
+  const hasNicheGenre = genres.some((g) => nicheGenres.includes(g));
+
+  // Classic films (pre-1980)
+  const releaseYear = releaseDate ? parseInt(releaseDate.slice(0, 4), 10) : NaN;
+  const isClassic = !isNaN(releaseYear) && releaseYear < 1980;
+
+  // Arthouse indicators (long runtime often indicates arthouse/prestige)
+  const isArthouse = typeof runtime === "number" && runtime > 150;
+
+  // Foreign language films (excluding major markets)
+  const originalLang = (movie as any).original_language;
+  const isForeignLanguage =
+    originalLang && !["en", "es", "fr"].includes(originalLang.toLowerCase());
+
+  return hasNicheGenre || isClassic || isArthouse || isForeignLanguage;
+}
+
 // Basic timeout helper for fetches
 async function withTimeout<T>(p: Promise<T>, ms = 8000): Promise<T> {
   return await Promise.race([
@@ -4202,7 +4231,9 @@ function applyMMRRerank<
 ): T[] {
   if (suggestions.length <= 1) return suggestions;
 
-  const lambda = options?.lambda ?? 0.25;
+  // MMR lambda balances relevance (1.0) vs diversity (0.0)
+  // 0.35 provides better precision than previous 0.25, while maintaining variety
+  const lambda = options?.lambda ?? 0.35;
   const topK = Math.min(
     options?.topK ?? suggestions.length,
     suggestions.length,
@@ -5173,17 +5204,43 @@ export async function suggestByOverlap(params: {
         return null;
       }
 
-      // QUALITY FILTER: Exclude low-quality movies
+      // QUALITY FILTER: Exclude low-quality movies with tiered thresholds for niche content
       // Filter out "B" movies and low-rated content to ensure quality suggestions
-      // Low-consensus movies (single source) require higher rating threshold
-      const minVoteCount = 50; // Minimum 50 votes for statistical relevance
-      const minVoteAverage = strongConsensus ? 6.5 : 7.0; // Higher bar for low-consensus movies
+      // BUT: Lower thresholds for niche content (classics, foreign, documentaries, etc.)
+
+      // Detect niche content that deserves lower thresholds
+      const isNiche = isNicheContent(
+        m,
+        feats.genres,
+        m.release_date,
+        feats.runtime,
+      );
+
+      // Tiered thresholds based on content type and consensus
+      // Niche content: 30 votes, 6.0 rating
+      // Standard content with strong consensus: 50 votes, 6.5 rating
+      // Standard content with low consensus: 50 votes, 7.0 rating
+      const minVoteCount = isNiche ? 30 : 50;
+      const minVoteAverage = isNiche ? 6.0 : strongConsensus ? 6.5 : 7.0;
 
       if (
         feats.voteAverage < minVoteAverage ||
         feats.voteCount < minVoteCount
       ) {
+        // Log when niche content is filtered to help with debugging
+        if (isNiche) {
+          console.log(
+            `[QualityFilter] Filtered niche content "${m.title}" - votes: ${feats.voteCount}/${minVoteCount}, rating: ${feats.voteAverage}/${minVoteAverage}`,
+          );
+        }
         return null; // Skip low-quality or unrated movies
+      }
+
+      // Log when niche thresholds allowed content through
+      if (isNiche && (feats.voteCount < 50 || feats.voteAverage < 6.5)) {
+        console.log(
+          `[QualityFilter] Niche content passed "${m.title}" - votes: ${feats.voteCount}, rating: ${feats.voteAverage}`,
+        );
       }
 
       // Apply negative filters: exclude animation/family/children's if user avoids them
@@ -5258,20 +5315,8 @@ export async function suggestByOverlap(params: {
       let score = 0;
       const reasons: string[] = [];
 
-      // QUALITY BOOST: Reward highly-rated movies with scoring boosts
-      // Higher-rated movies should surface more prominently in suggestions
-      let qualityBoost = 0;
-      if (feats.voteAverage >= 8.0) {
-        qualityBoost = 3.0;
-        reasons.push(`Exceptional rating (${feats.voteAverage.toFixed(1)}/10)`);
-      } else if (feats.voteAverage >= 7.5) {
-        qualityBoost = 2.0;
-        reasons.push(`Highly rated (${feats.voteAverage.toFixed(1)}/10)`);
-      } else if (feats.voteAverage >= 7.0) {
-        qualityBoost = 1.0;
-        reasons.push(`Well-reviewed (${feats.voteAverage.toFixed(1)}/10)`);
-      }
-      score += qualityBoost;
+      // QUALITY BOOST: Previously applied as additive boost, now handled multiplicatively at end of scoring
+      // This ensures quality enhances rather than dominates personalization
 
       /**
        * Compute metadata completeness as a normalized 0-1 score
@@ -6733,6 +6778,24 @@ export async function suggestByOverlap(params: {
         }
       }
 
+      // QUALITY MULTIPLIER: Apply multiplicative quality boost after all additive scoring
+      // This scales the match score rather than dominating it with additive points
+      // Formula: 1 + (rating - 6.0) * 0.05, capped at 1.2x
+      const qualityMultiplier = Math.min(
+        1.2,
+        Math.max(1.0, 1 + (feats.voteAverage - 6.0) * 0.05),
+      );
+      if (qualityMultiplier > 1.0) {
+        const oldScore = score;
+        score = score * qualityMultiplier;
+        reasons.push(
+          `Quality bonus: ${qualityMultiplier.toFixed(2)}x for ${feats.voteAverage.toFixed(1)}/10 rating`,
+        );
+        console.log(
+          `[QualityMultiplier] "${m.title}": ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${qualityMultiplier.toFixed(2)}x for ${feats.voteAverage.toFixed(1)}/10)`,
+        );
+      }
+
       const r = {
         tmdbId: cid,
         score,
@@ -6783,8 +6846,9 @@ export async function suggestByOverlap(params: {
   results.sort((a, b) => b.score - a.score);
 
   // Phase 3: Rerank with MMR for better novelty vs relevance
+  // Default lambda 0.35 balances precision and variety (was 0.25, which over-diversified)
   const mmrReranked = applyMMRRerank(results, {
-    lambda: params.mmrLambda ?? 0.25,
+    lambda: params.mmrLambda ?? 0.35,
     topK: Math.min(
       results.length,
       Math.max(desired * (params.mmrTopKFactor ?? 3), desired + 12),
@@ -7657,7 +7721,7 @@ export async function getCounterfactualReplayData(params: {
         consensusLevel: exp.consensus_level || "low",
         sources: exp.sources || [],
         reasons: exp.reasons || [],
-        mmrLambda: exp.mmr_lambda || 0.25,
+        mmrLambda: exp.mmr_lambda || 0.35,
         diversityRank: exp.diversity_rank || 0,
         metadataCompleteness: exp.metadata_completeness || 0,
         sessionContext: exp.session_context || {},
