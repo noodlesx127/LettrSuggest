@@ -84,6 +84,248 @@ export interface FilmForSeeding {
   rewatch?: boolean;
   lastDate?: string;
   genreIds?: number[];
+  popularity?: number; // TMDB popularity score (lower = more niche)
+  releaseDate?: string; // ISO date string (YYYY-MM-DD)
+  title?: string; // Film title for logging
+}
+
+/**
+ * Signature film score with reasoning
+ */
+export interface SignatureFilmScore {
+  tmdbId: number;
+  title: string;
+  signatureScore: number;
+  reasons: string[];
+}
+
+/**
+ * Score a film based on how well it represents a user's unique taste
+ *
+ * A signature film should be:
+ * 1. Highly rated by the user (4+ stars or liked)
+ * 2. Less mainstream (not in top popularity tiers)
+ * 3. Distinctive genres/subgenres that align with user's top preferences
+ * 4. Preferably from their preferred decades
+ *
+ * @param film - The film to score
+ * @param profile - User's taste profile with top genres and decades
+ * @returns Signature film score with reasoning
+ */
+export function scoreSignatureFilm(
+  film: FilmForSeeding,
+  profile: {
+    topGenres: Array<{ id: number; name: string }>;
+    topDecades?: Array<{ decade: number }>;
+  },
+): SignatureFilmScore {
+  let score = 0;
+  const reasons: string[] = [];
+  const title = film.title || `Film ${film.tmdbId}`;
+
+  // 1. High user rating (up to 2.0 points)
+  if (film.rating !== undefined) {
+    if (film.rating >= 4.5) {
+      score += 2.0;
+      reasons.push("5-star rating");
+    } else if (film.rating >= 4.0) {
+      score += 1.5;
+      reasons.push("4+ star rating");
+    }
+  }
+
+  if (film.liked) {
+    score += 1.0;
+    reasons.push("Liked");
+  }
+
+  // 2. Niche appeal - inverse popularity (up to 2.0 points)
+  // TMDB popularity typically ranges from 0.6 (very obscure) to 5000+ (blockbusters)
+  // We want to reward less popular films that the user loved
+  if (film.popularity !== undefined) {
+    if (film.popularity < 10) {
+      score += 2.0;
+      reasons.push("Hidden gem (very niche)");
+    } else if (film.popularity < 50) {
+      score += 1.5;
+      reasons.push("Under-the-radar");
+    } else if (film.popularity < 200) {
+      score += 0.5;
+      reasons.push("Less mainstream");
+    }
+    // No penalty for mainstream - we just don't reward it as much
+  }
+
+  // 3. Genre alignment (up to 1.5 points)
+  const topGenreNames = profile.topGenres.slice(0, 5).map((g) => g.name);
+  const topGenreIds = new Set(profile.topGenres.slice(0, 5).map((g) => g.id));
+  const filmGenres = film.genreIds || [];
+  const matchingGenres = filmGenres.filter((gid) => topGenreIds.has(gid));
+
+  if (matchingGenres.length >= 2) {
+    score += 1.5;
+    // Map genre IDs back to names for logging
+    const matchedNames = matchingGenres
+      .map(
+        (gid) =>
+          profile.topGenres.find((g) => g.id === gid)?.name || `Genre ${gid}`,
+      )
+      .slice(0, 2);
+    reasons.push(`Multi-genre match: ${matchedNames.join(", ")}`);
+  } else if (matchingGenres.length === 1) {
+    score += 0.5;
+    const genreName =
+      profile.topGenres.find((g) => g.id === matchingGenres[0])?.name ||
+      `Genre ${matchingGenres[0]}`;
+    reasons.push(`Genre: ${genreName}`);
+  }
+
+  // 4. Decade alignment (up to 0.5 points)
+  if (film.releaseDate && profile.topDecades && profile.topDecades.length > 0) {
+    const year = parseInt(film.releaseDate.slice(0, 4));
+    if (!isNaN(year)) {
+      const decade = Math.floor(year / 10) * 10;
+      if (profile.topDecades.some((d) => d.decade === decade)) {
+        score += 0.5;
+        reasons.push(`Preferred decade: ${decade}s`);
+      }
+    }
+  }
+
+  return { tmdbId: film.tmdbId, title, signatureScore: score, reasons };
+}
+
+/**
+ * Get seed IDs using signature film detection
+ *
+ * Identifies films that best represent the user's unique taste by:
+ * - Prioritizing highly-rated but less mainstream films
+ * - Matching user's preferred genres and decades
+ * - Balancing signature picks with some variety
+ *
+ * @param films - User's films with rating/liked/rewatch/popularity data
+ * @param limit - Maximum number of seed IDs to return
+ * @param ensureDiversity - If true, ensures seeds come from diverse genres
+ * @param profile - User's taste profile with top genres and decades
+ * @returns Array of TMDB IDs sorted by signature score
+ */
+function getSignatureSeedIds(
+  films: FilmForSeeding[],
+  limit: number,
+  ensureDiversity: boolean,
+  profile: {
+    topGenres: Array<{ id: number; name: string }>;
+    topDecades?: Array<{ decade: number }>;
+  },
+): number[] {
+  // Filter to highly-rated or liked films
+  const eligibleFilms = films.filter(
+    (f) => f.tmdbId && ((f.rating ?? 0) >= 3.5 || f.liked),
+  );
+
+  // Score each film as a signature film
+  const signatureScored = eligibleFilms
+    .map((f) => {
+      const sigScore = scoreSignatureFilm(f, profile);
+      return {
+        ...f,
+        signatureScore: sigScore.signatureScore,
+        signatureReasons: sigScore.reasons,
+      };
+    })
+    .filter((f) => f.signatureScore > 0) // Only keep films with some signature value
+    .sort((a, b) => b.signatureScore - a.signatureScore);
+
+  console.log("[SignatureSeeds] Top signature films:", {
+    total: signatureScored.length,
+    top10: signatureScored.slice(0, 10).map((f) => ({
+      title: f.title || f.tmdbId,
+      score: f.signatureScore.toFixed(2),
+      reasons: f.signatureReasons.join(", "),
+    })),
+  });
+
+  // Strategy: Mix top signature films with some variety
+  // - 60% from top signature films
+  // - 40% from remaining highly-rated films for variety
+  const signatureCount = Math.ceil(limit * 0.6);
+  const varietyCount = limit - signatureCount;
+
+  const signatureIds = signatureScored
+    .slice(0, signatureCount)
+    .map((f) => f.tmdbId);
+
+  // Add variety picks from remaining films (shuffle for randomness)
+  const remainingFilms = signatureScored.slice(signatureCount);
+  const shuffledRemaining = remainingFilms.sort(() => Math.random() - 0.5);
+  const varietyIds = shuffledRemaining
+    .slice(0, varietyCount)
+    .map((f) => f.tmdbId);
+
+  const selectedIds = [...signatureIds, ...varietyIds];
+
+  // Apply genre diversity if requested
+  if (ensureDiversity && selectedIds.length > limit) {
+    return applyGenreDiversity(films, selectedIds, limit);
+  }
+
+  console.log("[SignatureSeeds] Selected seeds:", {
+    signature: signatureIds.length,
+    variety: varietyIds.length,
+    total: selectedIds.length,
+    topSignatureScores: signatureScored
+      .slice(0, 5)
+      .map((f) => f.signatureScore.toFixed(2)),
+  });
+
+  return selectedIds.slice(0, limit);
+}
+
+/**
+ * Apply genre diversity constraints to seed selection
+ */
+function applyGenreDiversity(
+  films: FilmForSeeding[],
+  candidateIds: number[],
+  limit: number,
+): number[] {
+  const selectedIds: number[] = [];
+  const genreCounts = new Map<number, number>();
+  const MAX_PER_GENRE = 4; // Max seeds from same genre
+
+  const filmMap = new Map(films.map((f) => [f.tmdbId, f]));
+
+  for (const id of candidateIds) {
+    if (selectedIds.length >= limit) break;
+
+    const film = filmMap.get(id);
+    if (!film) continue;
+
+    // Check if we've hit genre cap for any of this film's genres
+    const filmGenres = film.genreIds || [];
+    const canAdd =
+      filmGenres.length === 0 ||
+      filmGenres.some((gid) => (genreCounts.get(gid) || 0) < MAX_PER_GENRE);
+
+    if (canAdd) {
+      selectedIds.push(id);
+      filmGenres.forEach((gid) =>
+        genreCounts.set(gid, (genreCounts.get(gid) || 0) + 1),
+      );
+    }
+  }
+
+  // Fill remaining slots if we didn't reach the limit
+  if (selectedIds.length < limit) {
+    for (const id of candidateIds) {
+      if (selectedIds.length >= limit) break;
+      if (!selectedIds.includes(id)) {
+        selectedIds.push(id);
+      }
+    }
+  }
+
+  return selectedIds;
 }
 
 /**
@@ -95,17 +337,29 @@ export interface FilmForSeeding {
  * - Rewatched films are signature favorites (strong positive signal)
  * - More recent films get recency boost
  * - Ensures genre diversity in seed selection
+ * - Optionally uses signature film detection to identify unique taste markers
  *
  * @param films - User's films with rating/liked/rewatch data
  * @param limit - Maximum number of seed IDs to return
  * @param ensureDiversity - If true, ensures seeds come from diverse genres
+ * @param profile - Optional taste profile for signature film detection
  */
 export function getWeightedSeedIds(
   films: FilmForSeeding[],
   limit: number = 25,
   ensureDiversity: boolean = true,
+  profile?: {
+    topGenres: Array<{ id: number; name: string }>;
+    topDecades?: Array<{ decade: number }>;
+    useSignatureScoring?: boolean; // Enable signature film scoring
+  },
 ): number[] {
-  // Score each film
+  // If signature scoring is enabled and we have profile data, use it
+  if (profile?.useSignatureScoring && profile.topGenres.length > 0) {
+    return getSignatureSeedIds(films, limit, ensureDiversity, profile);
+  }
+
+  // Score each film (original weighted scoring)
   const scored = films
     .filter((f) => f.tmdbId && ((f.rating ?? 0) >= 3 || f.liked)) // Basic filter: at least 3 stars or liked
     .map((f) => {
@@ -204,16 +458,22 @@ export function getWeightedSeedIds(
  * @param genreIds - Only include films that have at least one of these genres
  * @param limit - Maximum number of seed IDs to return
  * @param minSeeds - Minimum seeds required before falling back to global (default: 5)
+ * @param profile - Optional taste profile for signature film detection
  */
 export function getWeightedSeedIdsByGenre(
   films: FilmForSeeding[],
   genreIds: number[],
   limit: number = 25,
   minSeeds: number = 5,
+  profile?: {
+    topGenres: Array<{ id: number; name: string }>;
+    topDecades?: Array<{ decade: number }>;
+    useSignatureScoring?: boolean;
+  },
 ): number[] {
   // If no genre filter, use standard function
   if (!genreIds || genreIds.length === 0) {
-    return getWeightedSeedIds(films, limit, true);
+    return getWeightedSeedIds(films, limit, true, profile);
   }
 
   const genreSet = new Set(genreIds);
@@ -232,7 +492,12 @@ export function getWeightedSeedIdsByGenre(
 
   // If we have enough genre-specific films, use them
   if (genreFilteredFilms.length >= minSeeds) {
-    const result = getWeightedSeedIds(genreFilteredFilms, limit, false); // No diversity needed within genre
+    const result = getWeightedSeedIds(
+      genreFilteredFilms,
+      limit,
+      false,
+      profile,
+    ); // No diversity needed within genre
     console.log(
       "[WeightedSeedsByGenre] Using genre-filtered seeds:",
       result.length,
@@ -244,12 +509,15 @@ export function getWeightedSeedIdsByGenre(
   console.log(
     "[WeightedSeedsByGenre] Insufficient genre matches, falling back to global seeds",
   );
-  return getWeightedSeedIds(films, limit, true);
+  return getWeightedSeedIds(films, limit, true, profile);
 }
 
 /**
  * Identify "signature films" - absolute favorites that should heavily influence recommendations
  * These are 5-star rated AND liked AND rewatched films
+ *
+ * NOTE: For more sophisticated signature detection that considers popularity, genre alignment,
+ * and decade preferences, use getWeightedSeedIds() with useSignatureScoring enabled.
  */
 export function getSignatureFilmIds(films: FilmForSeeding[]): number[] {
   return films
@@ -686,18 +954,18 @@ export async function generateSmartCandidates(profile: {
         () => Math.random() - 0.5,
       );
 
-      // Randomly vary how many genres/keywords we use (1-3 instead of always 2)
-      const genreCount = Math.floor(Math.random() * 3) + 1;
-      const keywordCount = Math.floor(Math.random() * 4) + 1;
+      // Use minimum 2 genres/keywords for better specificity (never just 1)
+      const genreCount = Math.floor(Math.random() * 2) + 2; // 2-3 genres
+      const keywordCount = Math.floor(Math.random() * 3) + 2; // 2-4 keywords
 
-      // Randomly select sort method for variety
-      const sortMethods = [
-        "vote_average.desc",
-        "popularity.desc",
-        "primary_release_date.desc",
-      ] as const;
+      // Weighted sort selection: 60% quality, 25% popularity, 15% recency
+      const sortRand = Math.random();
       const randomSort =
-        sortMethods[Math.floor(Math.random() * sortMethods.length)];
+        sortRand < 0.6
+          ? "vote_average.desc"
+          : sortRand < 0.85
+            ? "popularity.desc"
+            : "primary_release_date.desc";
 
       // Add temporal diversity - randomly pick a year range or none
       const currentYear = new Date().getFullYear();
@@ -729,6 +997,12 @@ export async function generateSmartCandidates(profile: {
         genreCount,
         keywordCount,
         sortBy: randomSort,
+        sortWeight:
+          sortRand < 0.6
+            ? "quality-first (60%)"
+            : sortRand < 0.85
+              ? "popularity (25%)"
+              : "recency (15%)",
         temporal: temporalFilter,
       });
 
@@ -738,12 +1012,22 @@ export async function generateSmartCandidates(profile: {
           temporalStrategies[
             Math.floor(Math.random() * temporalStrategies.length)
           ];
+
+        // Weighted sort selection: 60% quality, 25% popularity, 15% recency
+        const fallbackSortRand = Math.random();
+        const fallbackSort =
+          fallbackSortRand < 0.6
+            ? "vote_average.desc"
+            : fallbackSortRand < 0.85
+              ? "popularity.desc"
+              : "primary_release_date.desc";
+
         const genreOnlyDiscovered = await discoverMoviesByProfile({
           genres: shuffledGenres
-            .slice(0, Math.floor(Math.random() * 3) + 1)
+            .slice(0, Math.floor(Math.random() * 2) + 2) // 2-3 genres (minimum 2)
             .map((g) => g.id),
           genreMode: "OR",
-          sortBy: sortMethods[Math.floor(Math.random() * sortMethods.length)],
+          sortBy: fallbackSort,
           minVotes: 50,
           limit: 150,
           ...altTemporalFilter,
