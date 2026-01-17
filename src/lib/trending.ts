@@ -1289,7 +1289,7 @@ export async function generateSmartCandidates(profile: {
       // Anime discovery (Animation genre + anime-related keywords)
       if (niche.likesAnime && results.discovered.length < 350) {
         const animationGenreId = 16; // TMDB Animation genre
-        const animeKeywords = [210024, 6534, 9715, 1663]; // anime, japanese animation, manga, studio ghibli
+        const animeKeywords = [210024, 9914, 10046]; // anime scifi, slice of life, mecha (verified TMDB keywords)
         const animeDiscovered = await discoverMoviesByProfile({
           genres: [animationGenreId],
           keywords: animeKeywords.slice(0, 2),
@@ -1334,6 +1334,30 @@ export async function generateSmartCandidates(profile: {
         results.discovered.push(...travelDocDiscovered);
         console.log("[SmartCandidates] Travel doc discovery (TuiMDB #7)", {
           count: travelDocDiscovered.length,
+        });
+      }
+
+      // Stand-up comedy discovery (Issue #18)
+      if (niche.likesStandUp && results.discovered.length < 350) {
+        console.log(
+          "[SmartCandidates] User likes stand-up, adding comedy specials",
+        );
+
+        // NOTE: TMDB doesn't have reliable keyword IDs for stand-up comedy
+        // We rely on genre-based discovery (Comedy) + text-based filtering
+        // in other parts of the pipeline (enrich.ts, advancedFiltering.ts)
+        const standUpDiscovered = await discoverMoviesByProfile({
+          genres: [35, 99], // Comedy + Documentary (for comedy specials)
+          genreMode: "OR",
+          sortBy: "vote_average.desc",
+          minVotes: 30,
+          limit: 50,
+        });
+
+        results.discovered.push(...standUpDiscovered);
+        console.log("[SmartCandidates] Stand-up discovery:", {
+          count: standUpDiscovered.length,
+          note: "Text-based stand-up filtering applied later in pipeline",
         });
       }
     } catch (e) {
