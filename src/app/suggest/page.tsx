@@ -1,27 +1,73 @@
-'use client';
-import AuthGate from '@/components/AuthGate';
-import MovieCard, { FeatureEvidenceContext } from '@/components/MovieCard';
-import ProgressIndicator from '@/components/ProgressIndicator';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useImportData } from '@/lib/importStore';
-import { supabase } from '@/lib/supabaseClient';
-import { getFilmMappings, getBulkTmdbDetails, refreshTmdbCacheForIds, suggestByOverlap, buildTasteProfile, findIncompleteCollections, discoverFromLists, getBlockedSuggestions, blockSuggestion, unblockSuggestion, addFeedback, getFeedback, getAvoidedFeatures, getMovieFeaturesForPopup, boostExplicitFeedback, fetchSourceReliability, recordPairwiseEvent, applyPairwiseFeatureLearning, getFeatureEvidenceSummary, neutralizeFeedback, logSuggestionExposure, getRecentExposures, findPairwiseCandidate, makePairId, reasonTypeTags, type FeedbackLearningInsights, type FeatureEvidenceSummary, type FeatureType } from '@/lib/enrich';
-import { fetchTrendingIds, fetchSimilarMovieIds, generateSmartCandidates, getDecadeCandidates, getSmartDiscoveryCandidates, generateExploratoryPicks, getWeightedSeedIds, type FilmForSeeding } from '@/lib/trending';
-import { usePostersSWR } from '@/lib/usePostersSWR';
-import { getCurrentSeasonalGenres, getSeasonalRecommendationConfig } from '@/lib/genreEnhancement';
-import { saveMovie, getSavedMovies } from '@/lib/lists';
-import { updateExplorationStats, getAdaptiveExplorationRate, getGenreTransitions, handleNegativeFeedback } from '@/lib/adaptiveLearning';
-import UserQuiz from '@/components/UserQuiz';
-import type { FilmEvent } from '@/lib/normalize';
+"use client";
+import AuthGate from "@/components/AuthGate";
+import MovieCard, { FeatureEvidenceContext } from "@/components/MovieCard";
+import ProgressIndicator from "@/components/ProgressIndicator";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useImportData } from "@/lib/importStore";
+import { supabase } from "@/lib/supabaseClient";
+import {
+  getFilmMappings,
+  getBulkTmdbDetails,
+  refreshTmdbCacheForIds,
+  suggestByOverlap,
+  buildTasteProfile,
+  findIncompleteCollections,
+  discoverFromLists,
+  getBlockedSuggestions,
+  blockSuggestion,
+  unblockSuggestion,
+  addFeedback,
+  getFeedback,
+  getAvoidedFeatures,
+  getMovieFeaturesForPopup,
+  boostExplicitFeedback,
+  fetchSourceReliability,
+  recordPairwiseEvent,
+  applyPairwiseFeatureLearning,
+  getFeatureEvidenceSummary,
+  neutralizeFeedback,
+  logSuggestionExposure,
+  getRecentExposures,
+  findPairwiseCandidate,
+  makePairId,
+  reasonTypeTags,
+  type FeedbackLearningInsights,
+  type FeatureEvidenceSummary,
+  type FeatureType,
+} from "@/lib/enrich";
+import {
+  fetchTrendingIds,
+  fetchSimilarMovieIds,
+  generateSmartCandidates,
+  getDecadeCandidates,
+  getSmartDiscoveryCandidates,
+  generateExploratoryPicks,
+  getWeightedSeedIds,
+  type FilmForSeeding,
+} from "@/lib/trending";
+import { usePostersSWR } from "@/lib/usePostersSWR";
+import {
+  getCurrentSeasonalGenres,
+  getSeasonalRecommendationConfig,
+} from "@/lib/genreEnhancement";
+import { saveMovie, getSavedMovies } from "@/lib/lists";
+import {
+  updateExplorationStats,
+  getAdaptiveExplorationRate,
+  getGenreTransitions,
+  handleNegativeFeedback,
+} from "@/lib/adaptiveLearning";
+import UserQuiz from "@/components/UserQuiz";
+import type { FilmEvent } from "@/lib/normalize";
 
 /**
  * Helper to get the base URL for internal API calls
  */
 function getBaseUrl(): string {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     return window.location.origin;
   }
-  return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+  return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 }
 
 type MovieItem = {
@@ -32,7 +78,7 @@ type MovieItem = {
   poster_path?: string | null;
   score: number;
   trailerKey?: string | null;
-  voteCategory?: 'hidden-gem' | 'crowd-pleaser' | 'cult-classic' | 'standard';
+  voteCategory?: "hidden-gem" | "crowd-pleaser" | "cult-classic" | "standard";
   collectionName?: string;
   genres?: string[];
   vote_average?: number;
@@ -41,20 +87,24 @@ type MovieItem = {
   contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
   dismissed?: boolean;
   imdb_rating?: string;
-  imdb_source?: 'omdb' | 'tmdb' | 'watchmode' | 'tuimdb'; // Which API provided the rating
+  imdb_source?: "omdb" | "tmdb" | "watchmode" | "tuimdb"; // Which API provided the rating
   rotten_tomatoes?: string;
   metacritic?: string;
   awards?: string;
   // Multi-source recommendation data
   sources?: string[];
-  consensusLevel?: 'high' | 'medium' | 'low';
+  consensusLevel?: "high" | "medium" | "low";
   reliabilityMultiplier?: number;
   // Additional metadata for new sections
   runtime?: number; // in minutes
   original_language?: string;
   spoken_languages?: string[];
   production_countries?: string[];
-  streamingSources?: Array<{ name: string; type: 'sub' | 'buy' | 'rent' | 'free'; url?: string }>;
+  streamingSources?: Array<{
+    name: string;
+    type: "sub" | "buy" | "rent" | "free";
+    url?: string;
+  }>;
 };
 
 type CategorizedSuggestions = {
@@ -88,13 +138,33 @@ type CategorizedSuggestions = {
 
 // Progress stage definitions
 const PROGRESS_STAGES = [
-  { key: 'init', label: 'Initialize', description: 'Setting up recommendation engine' },
-  { key: 'library', label: 'Library', description: 'Loading your watch history' },
-  { key: 'cache', label: 'Cache', description: 'Fetching movie metadata' },
-  { key: 'taste', label: 'Analyze', description: 'Building your taste profile' },
-  { key: 'discover', label: 'Discover', description: 'Finding candidates from multiple sources' },
-  { key: 'score', label: 'Score', description: 'Ranking suggestions' },
-  { key: 'details', label: 'Details', description: 'Loading full movie information' }
+  {
+    key: "init",
+    label: "Initialize",
+    description: "Setting up recommendation engine",
+  },
+  {
+    key: "library",
+    label: "Library",
+    description: "Loading your watch history",
+  },
+  { key: "cache", label: "Cache", description: "Fetching movie metadata" },
+  {
+    key: "taste",
+    label: "Analyze",
+    description: "Building your taste profile",
+  },
+  {
+    key: "discover",
+    label: "Discover",
+    description: "Finding candidates from multiple sources",
+  },
+  { key: "score", label: "Score", description: "Ranking suggestions" },
+  {
+    key: "details",
+    label: "Details",
+    description: "Loading full movie information",
+  },
 ];
 
 export default function SuggestPage() {
@@ -103,41 +173,68 @@ export default function SuggestPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<MovieItem[] | null>(null);
-  const [sourceLabel, setSourceLabel] = useState<string>('');
+  const [sourceLabel, setSourceLabel] = useState<string>("");
   const [fallbackFilms, setFallbackFilms] = useState<FilmEvent[] | null>(null);
-  const [watchlistTmdbIds, setWatchlistTmdbIds] = useState<Set<number>>(new Set());
-  const [excludeGenres, setExcludeGenres] = useState<string>('');
-  const [yearMin, setYearMin] = useState<string>('');
-  const [yearMax, setYearMax] = useState<string>('');
+  const [watchlistTmdbIds, setWatchlistTmdbIds] = useState<Set<number>>(
+    new Set(),
+  );
+  const [excludeGenres, setExcludeGenres] = useState<string>("");
+  const [yearMin, setYearMin] = useState<string>("");
+  const [yearMax, setYearMax] = useState<string>("");
   const [discoveryLevel, setDiscoveryLevel] = useState<number>(50); // 0 = safety, 100 = discovery
   const [refreshTick, setRefreshTick] = useState(0);
-  const [mode, setMode] = useState<'quick' | 'deep'>('quick');
-  const [noCandidatesReason, setNoCandidatesReason] = useState<string | null>(null);
+  const [mode, setMode] = useState<"quick" | "deep">("quick");
+  const [noCandidatesReason, setNoCandidatesReason] = useState<string | null>(
+    null,
+  );
   const [blockedIds, setBlockedIds] = useState<Set<number>>(new Set());
-  const [refreshingSections, setRefreshingSections] = useState<Set<string>>(new Set());
+  const [refreshingSections, setRefreshingSections] = useState<Set<string>>(
+    new Set(),
+  );
   const [shownIds, setShownIds] = useState<Set<number>>(new Set());
   const [cacheKey, setCacheKey] = useState<number>(Date.now());
-  const [progress, setProgress] = useState<{ current: number; total: number; stage: string; details?: string }>({
+  const [progress, setProgress] = useState<{
+    current: number;
+    total: number;
+    stage: string;
+    details?: string;
+  }>({
     current: 0,
     total: 7,
-    stage: '',
-    details: undefined
+    stage: "",
+    details: undefined,
   });
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
-  const [undoToast, setUndoToast] = useState<{ id: number; title: string } | null>(null);
-  const [lastFeedback, setLastFeedback] = useState<{ id: number; title: string } | null>(null);
+  const [undoToast, setUndoToast] = useState<{
+    id: number;
+    title: string;
+  } | null>(null);
+  const [lastFeedback, setLastFeedback] = useState<{
+    id: number;
+    title: string;
+  } | null>(null);
   const [topDecade, setTopDecade] = useState<number | null>(null);
   const [savedMovieIds, setSavedMovieIds] = useState<Set<number>>(new Set());
   const [hasCheckedStorage, setHasCheckedStorage] = useState(false);
-  const [mappingCoverage, setMappingCoverage] = useState<{ mapped: number; total: number } | null>(null);
+  const [mappingCoverage, setMappingCoverage] = useState<{
+    mapped: number;
+    total: number;
+  } | null>(null);
   const [watchlistPicks, setWatchlistPicks] = useState<MovieItem[]>([]); // Picks from user's Letterboxd watchlist
   const [pairHistory, setPairHistory] = useState<Set<string>>(new Set());
-  const [pairwisePair, setPairwisePair] = useState<{ a: MovieItem; b: MovieItem } | null>(null);
+  const [pairwisePair, setPairwisePair] = useState<{
+    a: MovieItem;
+    b: MovieItem;
+  } | null>(null);
   const [pairwiseCount, setPairwiseCount] = useState<number>(0);
   const PAIRWISE_SESSION_LIMIT = 5;
-  const [contextMode, setContextMode] = useState<'auto' | 'weeknight' | 'short' | 'immersive' | 'family' | 'background'>('auto');
+  const [contextMode, setContextMode] = useState<
+    "auto" | "weeknight" | "short" | "immersive" | "family" | "background"
+  >("auto");
   const [localHour, setLocalHour] = useState<number | null>(null);
-  const [featureEvidence, setFeatureEvidence] = useState<Record<string, FeatureEvidenceSummary>>({});
+  const [featureEvidence, setFeatureEvidence] = useState<
+    Record<string, FeatureEvidenceSummary>
+  >({});
   const [microSurveyCount, setMicroSurveyCount] = useState<number>(0);
   const [pairwiseVideoId, setPairwiseVideoId] = useState<number | null>(null); // Track which pairwise option is showing video
   const [quizOpen, setQuizOpen] = useState(false); // Taste quiz modal state
@@ -151,7 +248,7 @@ export default function SuggestPage() {
     franchise?: string;
     topKeywords: string[];
     genres: string[];
-    feedbackType: 'positive' | 'negative'; // NEW: track which type of feedback
+    feedbackType: "positive" | "negative"; // NEW: track which type of feedback
     director?: string; // NEW: for positive feedback
     showMicroSurvey?: boolean;
   } | null>(null);
@@ -160,16 +257,19 @@ export default function SuggestPage() {
   // Load from session storage on mount
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem('lettrsuggest_items');
+      const stored = sessionStorage.getItem("lettrsuggest_items");
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          console.log('[Suggest] Restored items from session storage', parsed.length);
+          console.log(
+            "[Suggest] Restored items from session storage",
+            parsed.length,
+          );
           setItems(parsed);
         }
       }
     } catch (e) {
-      console.error('[Suggest] Failed to restore from session storage', e);
+      console.error("[Suggest] Failed to restore from session storage", e);
     } finally {
       setHasCheckedStorage(true);
     }
@@ -178,7 +278,7 @@ export default function SuggestPage() {
   // Load pairwise history (to avoid repeating the same comparison)
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem('lettrsuggest_pair_history');
+      const stored = sessionStorage.getItem("lettrsuggest_pair_history");
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
@@ -186,42 +286,45 @@ export default function SuggestPage() {
         }
       }
     } catch (e) {
-      console.error('[Suggest] Failed to restore pair history', e);
+      console.error("[Suggest] Failed to restore pair history", e);
     }
   }, []);
 
   // Track how many pairwise prompts have been shown this session
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem('lettrsuggest_pairwise_count');
+      const stored = sessionStorage.getItem("lettrsuggest_pairwise_count");
       if (stored != null) {
         setPairwiseCount(Number(stored) || 0);
       }
     } catch (e) {
-      console.error('[Suggest] Failed to restore pairwise count', e);
+      console.error("[Suggest] Failed to restore pairwise count", e);
     }
   }, []);
 
   // P1.4: Load shownIds from localStorage on mount (7-day TTL to prevent stale data)
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('lettrsuggest_shown_ids');
+      const stored = localStorage.getItem("lettrsuggest_shown_ids");
       if (stored) {
         const { ids, timestamp } = JSON.parse(stored);
         const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-        const isValid = timestamp && (Date.now() - timestamp) < SEVEN_DAYS_MS;
+        const isValid = timestamp && Date.now() - timestamp < SEVEN_DAYS_MS;
 
         if (isValid && Array.isArray(ids) && ids.length > 0) {
-          console.log('[Suggest] Restored shown IDs from localStorage', ids.length);
+          console.log(
+            "[Suggest] Restored shown IDs from localStorage",
+            ids.length,
+          );
           setShownIds(new Set(ids));
         } else if (!isValid) {
           // Clear expired data
-          console.log('[Suggest] Cleared expired shown IDs data');
-          localStorage.removeItem('lettrsuggest_shown_ids');
+          console.log("[Suggest] Cleared expired shown IDs data");
+          localStorage.removeItem("lettrsuggest_shown_ids");
         }
       }
     } catch (e) {
-      console.error('[Suggest] Failed to restore shown IDs', e);
+      console.error("[Suggest] Failed to restore shown IDs", e);
     }
   }, []);
 
@@ -232,12 +335,15 @@ export default function SuggestPage() {
         try {
           const data = {
             ids: Array.from(shownIds),
-            timestamp: Date.now()
+            timestamp: Date.now(),
           };
-          localStorage.setItem('lettrsuggest_shown_ids', JSON.stringify(data));
-          console.log('[Suggest] Saved shown IDs to localStorage', shownIds.size);
+          localStorage.setItem("lettrsuggest_shown_ids", JSON.stringify(data));
+          console.log(
+            "[Suggest] Saved shown IDs to localStorage",
+            shownIds.size,
+          );
         } catch (e) {
-          console.error('[Suggest] Failed to save shown IDs', e);
+          console.error("[Suggest] Failed to save shown IDs", e);
         }
       }, 500); // Debounce to avoid excessive writes
 
@@ -249,31 +355,37 @@ export default function SuggestPage() {
   useEffect(() => {
     if (items && items.length > 0) {
       try {
-        sessionStorage.setItem('lettrsuggest_items', JSON.stringify(items));
+        sessionStorage.setItem("lettrsuggest_items", JSON.stringify(items));
       } catch (e) {
-        console.error('[Suggest] Failed to save to session storage', e);
+        console.error("[Suggest] Failed to save to session storage", e);
       }
     }
   }, [items]);
 
   useEffect(() => {
     try {
-      sessionStorage.setItem('lettrsuggest_pair_history', JSON.stringify(Array.from(pairHistory)));
+      sessionStorage.setItem(
+        "lettrsuggest_pair_history",
+        JSON.stringify(Array.from(pairHistory)),
+      );
     } catch (e) {
-      console.error('[Suggest] Failed to persist pair history', e);
+      console.error("[Suggest] Failed to persist pair history", e);
     }
   }, [pairHistory]);
 
   useEffect(() => {
     try {
-      sessionStorage.setItem('lettrsuggest_pairwise_count', String(pairwiseCount));
+      sessionStorage.setItem(
+        "lettrsuggest_pairwise_count",
+        String(pairwiseCount),
+      );
     } catch (e) {
-      console.error('[Suggest] Failed to persist pairwise count', e);
+      console.error("[Suggest] Failed to persist pairwise count", e);
     }
   }, [pairwiseCount]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
     const now = new Date();
     setLocalHour(now.getHours());
   }, []);
@@ -294,310 +406,367 @@ export default function SuggestPage() {
   const { posters, mutate: refreshPosters } = usePostersSWR(tmdbIds);
 
   // Categorize suggestions into sections
-  const [categorizedSuggestions, setCategorizedSuggestions] = useState<CategorizedSuggestions | null>(null);
+  const [categorizedSuggestions, setCategorizedSuggestions] =
+    useState<CategorizedSuggestions | null>(null);
 
-  const categorizeItems = useCallback((items: MovieItem[]): CategorizedSuggestions | null => {
-    if (!items || items.length === 0) return null;
+  const categorizeItems = useCallback(
+    (items: MovieItem[]): CategorizedSuggestions | null => {
+      if (!items || items.length === 0) return null;
 
-    const currentYear = new Date().getFullYear();
-    const seasonalConfig = getSeasonalRecommendationConfig();
+      const currentYear = new Date().getFullYear();
+      const seasonalConfig = getSeasonalRecommendationConfig();
 
-    // Helper functions to check reason types
-    const hasDirectorMatch = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return lower.includes('directed by') ||
-          lower.includes('director') ||
-          lower.includes('similar to') ||
-          lower.includes('inspired by') ||
-          lower.includes('in the style of');
-      });
+      // Helper functions to check reason types
+      const hasDirectorMatch = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            lower.includes("directed by") ||
+            lower.includes("director") ||
+            lower.includes("similar to") ||
+            lower.includes("inspired by") ||
+            lower.includes("in the style of")
+          );
+        });
 
-    const hasActorMatch = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return lower.includes('stars ') ||
-          lower.includes('starring') ||
-          lower.includes('cast member') ||
-          lower.includes('cast members') ||
-          lower.includes('actor') ||
-          (lower.includes('similar to') && lower.includes('enjoy')) ||
-          lower.includes('works in');
-      });
+      const hasActorMatch = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            lower.includes("stars ") ||
+            lower.includes("starring") ||
+            lower.includes("cast member") ||
+            lower.includes("cast members") ||
+            lower.includes("actor") ||
+            (lower.includes("similar to") && lower.includes("enjoy")) ||
+            lower.includes("works in")
+          );
+        });
 
-    const hasGenreMatch = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return lower.includes('matches your taste in') ||
-          lower.includes('matches your specific taste in') ||
-          lower.includes('genre:') ||
-          lower.includes('similar genre');
-      });
+      const hasGenreMatch = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            lower.includes("matches your taste in") ||
+            lower.includes("matches your specific taste in") ||
+            lower.includes("genre:") ||
+            lower.includes("similar genre")
+          );
+        });
 
-    const hasRecentWatchMatch = (reasons: string[]) =>
-      reasons.some(r => r.toLowerCase().includes('recent') && (r.toLowerCase().includes('watch') || r.toLowerCase().includes('favorite')));
+      const hasRecentWatchMatch = (reasons: string[]) =>
+        reasons.some(
+          (r) =>
+            r.toLowerCase().includes("recent") &&
+            (r.toLowerCase().includes("watch") ||
+              r.toLowerCase().includes("favorite")),
+        );
 
-    const hasStudioMatch = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return (lower.includes('from ') && (lower.includes('studio') || lower.includes('—'))) ||
-          lower.includes('studios you enjoy') ||
-          lower.includes('a24') ||
-          lower.includes('neon') ||
-          lower.includes('annapurna') ||
-          lower.includes('blumhouse') ||
-          lower.includes('ghibli') ||
-          lower.includes('searchlight');
-      });
+      const hasStudioMatch = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            (lower.includes("from ") &&
+              (lower.includes("studio") || lower.includes("—"))) ||
+            lower.includes("studios you enjoy") ||
+            lower.includes("a24") ||
+            lower.includes("neon") ||
+            lower.includes("annapurna") ||
+            lower.includes("blumhouse") ||
+            lower.includes("ghibli") ||
+            lower.includes("searchlight")
+          );
+        });
 
-    const hasDeepCutThemes = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return lower.includes('themes you') ||
-          lower.includes('specific themes') ||
-          lower.includes('keyword:') ||
-          lower.includes('matches specific themes');
-      });
+      const hasDeepCutThemes = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            lower.includes("themes you") ||
+            lower.includes("specific themes") ||
+            lower.includes("keyword:") ||
+            lower.includes("matches specific themes")
+          );
+        });
 
-    const isSeasonalMatch = (item: MovieItem): boolean => {
-      // Check if movie title, genres, or reasons match current seasonal themes
-      const titleLower = item.title.toLowerCase();
-      const titleMatch = seasonalConfig.keywords.some(kw => titleLower.includes(kw.toLowerCase()));
+      const isSeasonalMatch = (item: MovieItem): boolean => {
+        // Check if movie title, genres, or reasons match current seasonal themes
+        const titleLower = item.title.toLowerCase();
+        const titleMatch = seasonalConfig.keywords.some((kw) =>
+          titleLower.includes(kw.toLowerCase()),
+        );
 
-      // Check genres if available
-      const genreMatch = item.genres ? seasonalConfig.keywords.some(kw =>
-        item.genres!.some(g => g.toLowerCase().includes(kw.toLowerCase()))
-      ) : false;
+        // Check genres if available
+        const genreMatch = item.genres
+          ? seasonalConfig.keywords.some((kw) =>
+              item.genres!.some((g) =>
+                g.toLowerCase().includes(kw.toLowerCase()),
+              ),
+            )
+          : false;
 
-      // Also check reasons for genre mentions that match seasonal config
-      const reasonsMatch = item.reasons.some(r => {
-        const lower = r.toLowerCase();
-        return seasonalConfig.keywords.some(kw => lower.includes(kw.toLowerCase()));
-      });
+        // Also check reasons for genre mentions that match seasonal config
+        const reasonsMatch = item.reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return seasonalConfig.keywords.some((kw) =>
+            lower.includes(kw.toLowerCase()),
+          );
+        });
 
-      return titleMatch || genreMatch || reasonsMatch;
-    };
+        return titleMatch || genreMatch || reasonsMatch;
+      };
 
-    // Sort all by score first
-    const sorted = [...items].sort((a, b) => b.score - a.score);
+      // Sort all by score first
+      const sorted = [...items].sort((a, b) => b.score - a.score);
 
-    // Track used IDs to prevent duplicates across sections
-    const usedIds = new Set<number>();
+      // Track used IDs to prevent duplicates across sections
+      const usedIds = new Set<number>();
 
-    // Helper to get next N unused items matching a filter
-    const getNextItems = (filter: (item: MovieItem) => boolean, count: number): MovieItem[] => {
-      const results: MovieItem[] = [];
-      for (const item of sorted) {
-        if (usedIds.has(item.id)) continue;
-        if (filter(item)) {
-          results.push(item);
-          usedIds.add(item.id);
-          if (results.length >= count) break;
+      // Helper to get next N unused items matching a filter
+      const getNextItems = (
+        filter: (item: MovieItem) => boolean,
+        count: number,
+      ): MovieItem[] => {
+        const results: MovieItem[] = [];
+        for (const item of sorted) {
+          if (usedIds.has(item.id)) continue;
+          if (filter(item)) {
+            results.push(item);
+            usedIds.add(item.id);
+            if (results.length >= count) break;
+          }
         }
-      }
-      return results;
-    };
+        return results;
+      };
 
-    // ============================================
-    // PHASE 1: HIGHLY SPECIFIC SECTIONS (extract first to ensure they get items)
-    // These sections have very specific criteria that may only match a few items
-    // ============================================
+      // ============================================
+      // PHASE 1: HIGHLY SPECIFIC SECTIONS (extract first to ensure they get items)
+      // These sections have very specific criteria that may only match a few items
+      // ============================================
 
-    // 0. Seasonal Recommendations (if applicable - time-sensitive)
-    const seasonalPicks = seasonalConfig.genres.length > 0 ?
-      getNextItems(isSeasonalMatch, 12) : [];
+      // 0. Seasonal Recommendations (if applicable - time-sensitive)
+      const seasonalPicks =
+        seasonalConfig.genres.length > 0
+          ? getNextItems(isSeasonalMatch, 12)
+          : [];
 
-    console.log('[Suggest] Seasonal picks result', {
-      configGenres: seasonalConfig.genres,
-      configKeywords: seasonalConfig.keywords,
-      seasonalPicksCount: seasonalPicks.length
-    });
+      console.log("[Suggest] Seasonal picks result", {
+        configGenres: seasonalConfig.genres,
+        configKeywords: seasonalConfig.keywords,
+        seasonalPicksCount: seasonalPicks.length,
+      });
 
-    // 1. Multi-Source Consensus: Films recommended by multiple sources (rare, high-value)
-    const multiSourceConsensus = getNextItems(item => {
-      return (item.sources?.length ?? 0) >= 2;
-    }, 12);
+      // 1. Multi-Source Consensus: Films recommended by multiple sources (rare, high-value)
+      const multiSourceConsensus = getNextItems((item) => {
+        return (item.sources?.length ?? 0) >= 2;
+      }, 12);
 
-    // 2. Animation Picks: Animated films (specific genre, not many)
-    const animationPicks = getNextItems(item => {
-      if (!item.genres || item.genres.length === 0) return false;
-      const hasAnimation = item.genres.some(g => g === 'Animation');
-      const isDocumentary = item.genres.some(g => g === 'Documentary');
-      return hasAnimation && !isDocumentary;
-    }, 12);
+      // 2. Animation Picks: Animated films (specific genre, not many)
+      const animationPicks = getNextItems((item) => {
+        if (!item.genres || item.genres.length === 0) return false;
+        const hasAnimation = item.genres.some((g) => g === "Animation");
+        const isDocumentary = item.genres.some((g) => g === "Documentary");
+        return hasAnimation && !isDocumentary;
+      }, 12);
 
-    // 3. Documentaries (specific genre)
-    const documentaries = getNextItems(item => {
-      if (!item.genres || item.genres.length === 0) return false;
-      return item.genres.some(g => g === 'Documentary');
-    }, 12);
+      // 3. Documentaries (specific genre)
+      const documentaries = getNextItems((item) => {
+        if (!item.genres || item.genres.length === 0) return false;
+        return item.genres.some((g) => g === "Documentary");
+      }, 12);
 
-    // 4. International Cinema: Non-English films (specific language filter)
-    const internationalCinema = getNextItems(item => {
-      return Boolean(item.original_language && item.original_language !== 'en');
-    }, 12);
+      // 4. International Cinema: Non-English films (specific language filter)
+      const internationalCinema = getNextItems((item) => {
+        return Boolean(
+          item.original_language && item.original_language !== "en",
+        );
+      }, 12);
 
-    // 5. Quick Watches: Films under 100 minutes (specific runtime)
-    const quickWatches = getNextItems(item => {
-      return Boolean(item.runtime && item.runtime > 0 && item.runtime <= 100);
-    }, 12);
+      // 5. Quick Watches: Films under 100 minutes (specific runtime)
+      const quickWatches = getNextItems((item) => {
+        return Boolean(item.runtime && item.runtime > 0 && item.runtime <= 100);
+      }, 12);
 
-    // 6. Epic Films: Films over 150 minutes (specific runtime)
-    const epicFilms = getNextItems(item => {
-      return Boolean(item.runtime && item.runtime >= 150);
-    }, 12);
+      // 6. Epic Films: Films over 150 minutes (specific runtime)
+      const epicFilms = getNextItems((item) => {
+        return Boolean(item.runtime && item.runtime >= 150);
+      }, 12);
 
-    // 7. Critically Acclaimed: Very high ratings (specific threshold)
-    const criticallyAcclaimed = getNextItems(item => {
-      const imdbRating = parseFloat(item.imdb_rating || '0');
-      const rtScore = parseInt(item.rotten_tomatoes?.replace('%', '') || '0');
-      const metaScore = parseInt(item.metacritic || '0');
-      return imdbRating >= 8.0 || rtScore >= 90 || metaScore >= 80;
-    }, 12);
+      // 7. Critically Acclaimed: Very high ratings (specific threshold)
+      const criticallyAcclaimed = getNextItems((item) => {
+        const imdbRating = parseFloat(item.imdb_rating || "0");
+        const rtScore = parseInt(item.rotten_tomatoes?.replace("%", "") || "0");
+        const metaScore = parseInt(item.metacritic || "0");
+        return imdbRating >= 8.0 || rtScore >= 90 || metaScore >= 80;
+      }, 12);
 
-    // 8. From Collections: Films in same collections/franchises (specific metadata)
-    const fromCollections = getNextItems(item => !!item.collectionName, 12);
+      // 8. From Collections: Films in same collections/franchises (specific metadata)
+      const fromCollections = getNextItems((item) => !!item.collectionName, 12);
 
-    // ============================================
-    // PHASE 2: VOTE CATEGORY SECTIONS (moderately specific)
-    // ============================================
+      // ============================================
+      // PHASE 2: VOTE CATEGORY SECTIONS (moderately specific)
+      // ============================================
 
-    // 9. Hidden Gems (Smart Discovery): Films with hidden-gem vote category
-    const smartDiscovery = getNextItems(item => {
-      return item.voteCategory === 'hidden-gem';
-    }, 12);
+      // 9. Hidden Gems (Smart Discovery): Films with hidden-gem vote category
+      const smartDiscovery = getNextItems((item) => {
+        return item.voteCategory === "hidden-gem";
+      }, 12);
 
-    // 10. Classic Hidden Gems: Pre-2015 hidden gems
-    const hiddenGems = getNextItems(item => {
-      const year = parseInt(item.year || '0');
-      return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
-    }, 12);
+      // 10. Classic Hidden Gems: Pre-2015 hidden gems
+      const hiddenGems = getNextItems((item) => {
+        const year = parseInt(item.year || "0");
+        return year > 0 && year < 2015 && item.voteCategory === "hidden-gem";
+      }, 12);
 
-    // 11. Cult Classics: Films with cult following
-    const cultClassics = getNextItems(item => {
-      return item.voteCategory === 'cult-classic';
-    }, 12);
+      // 11. Cult Classics: Films with cult following
+      const cultClassics = getNextItems((item) => {
+        return item.voteCategory === "cult-classic";
+      }, 12);
 
-    // 12. Crowd Pleasers: Popular high-rated films
-    const crowdPleasers = getNextItems(item => {
-      return item.voteCategory === 'crowd-pleaser';
-    }, 12);
+      // 12. Crowd Pleasers: Popular high-rated films
+      const crowdPleasers = getNextItems((item) => {
+        return item.voteCategory === "crowd-pleaser";
+      }, 12);
 
-    // ============================================
-    // PHASE 3: REASON-BASED SECTIONS (medium specificity)
-    // ============================================
+      // ============================================
+      // PHASE 3: REASON-BASED SECTIONS (medium specificity)
+      // ============================================
 
-    // 13. Based on Recent Watches: Films similar to recent favorites
-    const recentWatchMatches = getNextItems(item => hasRecentWatchMatch(item.reasons), 12);
+      // 13. Based on Recent Watches: Films similar to recent favorites
+      const recentWatchMatches = getNextItems(
+        (item) => hasRecentWatchMatch(item.reasons),
+        12,
+      );
 
-    // 14. Inspired by Directors You Love
-    const directorMatches = getNextItems(item => hasDirectorMatch(item.reasons), 12);
+      // 14. Inspired by Directors You Love
+      const directorMatches = getNextItems(
+        (item) => hasDirectorMatch(item.reasons),
+        12,
+      );
 
-    // 15. From Studios You Love
-    const studioMatches = getNextItems(item => hasStudioMatch(item.reasons), 12);
+      // 15. From Studios You Love
+      const studioMatches = getNextItems(
+        (item) => hasStudioMatch(item.reasons),
+        12,
+      );
 
-    // 16. From Actors You Love
-    const actorMatches = getNextItems(item => hasActorMatch(item.reasons), 12);
+      // 16. From Actors You Love
+      const actorMatches = getNextItems(
+        (item) => hasActorMatch(item.reasons),
+        12,
+      );
 
-    // 17. Your Favorite Genres
-    const genreMatches = getNextItems(item => hasGenreMatch(item.reasons), 12);
+      // 17. Your Favorite Genres
+      const genreMatches = getNextItems(
+        (item) => hasGenreMatch(item.reasons),
+        12,
+      );
 
-    // 18. Deep Cuts: Films with specific theme/keyword matches
-    const deepCuts = getNextItems(item => hasDeepCutThemes(item.reasons), 12);
+      // 18. Deep Cuts: Films with specific theme/keyword matches
+      const deepCuts = getNextItems(
+        (item) => hasDeepCutThemes(item.reasons),
+        12,
+      );
 
-    // ============================================
-    // PHASE 4: TIME-BASED SECTIONS (broad filters)
-    // ============================================
+      // ============================================
+      // PHASE 4: TIME-BASED SECTIONS (broad filters)
+      // ============================================
 
-    // 19. Best of the [Decade]s
-    const decadeMatches = topDecade ? getNextItems(item => {
-      const year = parseInt(item.year || '0');
-      return year >= topDecade && year < topDecade + 10;
-    }, 12) : [];
+      // 19. Best of the [Decade]s
+      const decadeMatches = topDecade
+        ? getNextItems((item) => {
+            const year = parseInt(item.year || "0");
+            return year >= topDecade && year < topDecade + 10;
+          }, 12)
+        : [];
 
-    // 20. New & Trending: Recent releases (2023+)
-    const newReleases = getNextItems(item => {
-      const year = parseInt(item.year || '0');
-      return year >= 2023;
-    }, 12);
+      // 20. New & Trending: Recent releases (2023+)
+      const newReleases = getNextItems((item) => {
+        const year = parseInt(item.year || "0");
+        return year >= 2023;
+      }, 12);
 
-    // 21. Recent Classics: Films from 2015-2022
-    const recentClassics = getNextItems(item => {
-      const year = parseInt(item.year || '0');
-      return year >= 2015 && year < 2023;
-    }, 12);
+      // 21. Recent Classics: Films from 2015-2022
+      const recentClassics = getNextItems((item) => {
+        const year = parseInt(item.year || "0");
+        return year >= 2015 && year < 2023;
+      }, 12);
 
-    // ============================================
-    // PHASE 5: CATCH-ALL SECTIONS (least specific, gets remaining items)
-    // ============================================
+      // ============================================
+      // PHASE 5: CATCH-ALL SECTIONS (least specific, gets remaining items)
+      // ============================================
 
-    // 22. Perfect Matches: Top scoring films that haven't been categorized yet
-    const perfectMatches = getNextItems(() => true, 12);
+      // 22. Perfect Matches: Top scoring films that haven't been categorized yet
+      const perfectMatches = getNextItems(() => true, 12);
 
-    // 23. More Recommendations: Any remaining films
-    const moreRecommendations = getNextItems(() => true, 24); // Increased to catch more
+      // 23. More Recommendations: Any remaining films
+      const moreRecommendations = getNextItems(() => true, 24); // Increased to catch more
 
-    // Helper to sort by rating
-    const sortByRating = (items: MovieItem[]) => {
-      return [...items].sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0));
-    };
+      // Helper to sort by rating
+      const sortByRating = (items: MovieItem[]) => {
+        return [...items].sort(
+          (a, b) => (b.vote_average || 0) - (a.vote_average || 0),
+        );
+      };
 
-    console.log('[Suggest] Categorization complete', {
-      seasonalPicks: seasonalPicks.length,
-      perfectMatches: perfectMatches.length,
-      recentWatchMatches: recentWatchMatches.length,
-      studioMatches: studioMatches.length,
-      directorMatches: directorMatches.length,
-      actorMatches: actorMatches.length,
-      genreMatches: genreMatches.length,
-      documentaries: documentaries.length,
-      hiddenGems: hiddenGems.length,
-      cultClassics: cultClassics.length,
-      crowdPleasers: crowdPleasers.length,
-      newReleases: newReleases.length,
-      recentClassics: recentClassics.length,
-      deepCuts: deepCuts.length,
-      fromCollections: fromCollections.length,
-      multiSourceConsensus: multiSourceConsensus.length,
-      internationalCinema: internationalCinema.length,
-      animationPicks: animationPicks.length,
-      quickWatches: quickWatches.length,
-      epicFilms: epicFilms.length,
-      criticallyAcclaimed: criticallyAcclaimed.length,
-      moreRecommendations: moreRecommendations.length,
-      totalUsed: usedIds.size,
-      totalAvailable: items.length
-    });
+      console.log("[Suggest] Categorization complete", {
+        seasonalPicks: seasonalPicks.length,
+        perfectMatches: perfectMatches.length,
+        recentWatchMatches: recentWatchMatches.length,
+        studioMatches: studioMatches.length,
+        directorMatches: directorMatches.length,
+        actorMatches: actorMatches.length,
+        genreMatches: genreMatches.length,
+        documentaries: documentaries.length,
+        hiddenGems: hiddenGems.length,
+        cultClassics: cultClassics.length,
+        crowdPleasers: crowdPleasers.length,
+        newReleases: newReleases.length,
+        recentClassics: recentClassics.length,
+        deepCuts: deepCuts.length,
+        fromCollections: fromCollections.length,
+        multiSourceConsensus: multiSourceConsensus.length,
+        internationalCinema: internationalCinema.length,
+        animationPicks: animationPicks.length,
+        quickWatches: quickWatches.length,
+        epicFilms: epicFilms.length,
+        criticallyAcclaimed: criticallyAcclaimed.length,
+        moreRecommendations: moreRecommendations.length,
+        totalUsed: usedIds.size,
+        totalAvailable: items.length,
+      });
 
-    return {
-      watchlistPicks: [], // Will be populated separately from watchlistPicks state
-      seasonalPicks: sortByRating(seasonalPicks),
-      seasonalConfig,
-      perfectMatches: sortByRating(perfectMatches),
-      recentWatchMatches: sortByRating(recentWatchMatches),
-      studioMatches: sortByRating(studioMatches),
-      directorMatches: sortByRating(directorMatches),
-      actorMatches: sortByRating(actorMatches),
-      genreMatches: sortByRating(genreMatches),
-      documentaries: sortByRating(documentaries),
-      decadeMatches: sortByRating(decadeMatches),
-      smartDiscovery: sortByRating(smartDiscovery),
-      hiddenGems: sortByRating(hiddenGems),
-      cultClassics: sortByRating(cultClassics),
-      crowdPleasers: sortByRating(crowdPleasers),
-      newReleases: sortByRating(newReleases),
-      recentClassics: sortByRating(recentClassics),
-      deepCuts: sortByRating(deepCuts),
-      fromCollections: sortByRating(fromCollections),
-      multiSourceConsensus: sortByRating(multiSourceConsensus),
-      internationalCinema: sortByRating(internationalCinema),
-      animationPicks: sortByRating(animationPicks),
-      quickWatches: sortByRating(quickWatches),
-      epicFilms: sortByRating(epicFilms),
-      criticallyAcclaimed: sortByRating(criticallyAcclaimed),
-      moreRecommendations: sortByRating(moreRecommendations)
-    };
-  }, [topDecade]);
+      return {
+        watchlistPicks: [], // Will be populated separately from watchlistPicks state
+        seasonalPicks: sortByRating(seasonalPicks),
+        seasonalConfig,
+        perfectMatches: sortByRating(perfectMatches),
+        recentWatchMatches: sortByRating(recentWatchMatches),
+        studioMatches: sortByRating(studioMatches),
+        directorMatches: sortByRating(directorMatches),
+        actorMatches: sortByRating(actorMatches),
+        genreMatches: sortByRating(genreMatches),
+        documentaries: sortByRating(documentaries),
+        decadeMatches: sortByRating(decadeMatches),
+        smartDiscovery: sortByRating(smartDiscovery),
+        hiddenGems: sortByRating(hiddenGems),
+        cultClassics: sortByRating(cultClassics),
+        crowdPleasers: sortByRating(crowdPleasers),
+        newReleases: sortByRating(newReleases),
+        recentClassics: sortByRating(recentClassics),
+        deepCuts: sortByRating(deepCuts),
+        fromCollections: sortByRating(fromCollections),
+        multiSourceConsensus: sortByRating(multiSourceConsensus),
+        internationalCinema: sortByRating(internationalCinema),
+        animationPicks: sortByRating(animationPicks),
+        quickWatches: sortByRating(quickWatches),
+        epicFilms: sortByRating(epicFilms),
+        criticallyAcclaimed: sortByRating(criticallyAcclaimed),
+        moreRecommendations: sortByRating(moreRecommendations),
+      };
+    },
+    [topDecade],
+  );
 
   // Update categories when items change
   useEffect(() => {
@@ -614,219 +783,285 @@ export default function SuggestPage() {
   }, [items, categorizeItems, watchlistPicks]);
 
   // Section filter mapping for individual section refresh
-  const getSectionFilter = useCallback((sectionName: string, seasonalConfig: any) => {
-    const currentYear = new Date().getFullYear();
+  const getSectionFilter = useCallback(
+    (sectionName: string, seasonalConfig: any) => {
+      const currentYear = new Date().getFullYear();
 
-    // Helper functions for checking reasons
-    const hasDirectorMatch = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return lower.includes('directed by') ||
-          lower.includes('director') ||
-          lower.includes('similar to') ||
-          lower.includes('inspired by') ||
-          lower.includes('in the style of');
-      });
+      // Helper functions for checking reasons
+      const hasDirectorMatch = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            lower.includes("directed by") ||
+            lower.includes("director") ||
+            lower.includes("similar to") ||
+            lower.includes("inspired by") ||
+            lower.includes("in the style of")
+          );
+        });
 
-    const hasActorMatch = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return lower.includes('stars ') ||
-          lower.includes('starring') ||
-          lower.includes('cast member') ||
-          lower.includes('cast members') ||
-          lower.includes('actor') ||
-          (lower.includes('similar to') && lower.includes('enjoy')) ||
-          lower.includes('works in');
-      });
+      const hasActorMatch = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            lower.includes("stars ") ||
+            lower.includes("starring") ||
+            lower.includes("cast member") ||
+            lower.includes("cast members") ||
+            lower.includes("actor") ||
+            (lower.includes("similar to") && lower.includes("enjoy")) ||
+            lower.includes("works in")
+          );
+        });
 
-    const hasGenreMatch = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return lower.includes('matches your taste in') ||
-          lower.includes('matches your specific taste in') ||
-          lower.includes('genre:') ||
-          lower.includes('similar genre');
-      });
+      const hasGenreMatch = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            lower.includes("matches your taste in") ||
+            lower.includes("matches your specific taste in") ||
+            lower.includes("genre:") ||
+            lower.includes("similar genre")
+          );
+        });
 
-    const hasRecentWatchMatch = (reasons: string[]) =>
-      reasons.some(r => r.toLowerCase().includes('recent') && (r.toLowerCase().includes('watch') || r.toLowerCase().includes('favorite')));
+      const hasRecentWatchMatch = (reasons: string[]) =>
+        reasons.some(
+          (r) =>
+            r.toLowerCase().includes("recent") &&
+            (r.toLowerCase().includes("watch") ||
+              r.toLowerCase().includes("favorite")),
+        );
 
-    const hasStudioMatch = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return (lower.includes('from ') && (lower.includes('studio') || lower.includes('—'))) ||
-          lower.includes('studios you enjoy') ||
-          lower.includes('a24') ||
-          lower.includes('neon') ||
-          lower.includes('annapurna') ||
-          lower.includes('blumhouse') ||
-          lower.includes('ghibli') ||
-          lower.includes('searchlight');
-      });
+      const hasStudioMatch = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            (lower.includes("from ") &&
+              (lower.includes("studio") || lower.includes("—"))) ||
+            lower.includes("studios you enjoy") ||
+            lower.includes("a24") ||
+            lower.includes("neon") ||
+            lower.includes("annapurna") ||
+            lower.includes("blumhouse") ||
+            lower.includes("ghibli") ||
+            lower.includes("searchlight")
+          );
+        });
 
-    const hasDeepCutThemes = (reasons: string[]) =>
-      reasons.some(r => {
-        const lower = r.toLowerCase();
-        return lower.includes('themes you') ||
-          lower.includes('specific themes') ||
-          lower.includes('keyword:') ||
-          lower.includes('matches specific themes');
-      });
+      const hasDeepCutThemes = (reasons: string[]) =>
+        reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return (
+            lower.includes("themes you") ||
+            lower.includes("specific themes") ||
+            lower.includes("keyword:") ||
+            lower.includes("matches specific themes")
+          );
+        });
 
-    const isSeasonalMatch = (item: MovieItem): boolean => {
-      const titleLower = item.title.toLowerCase();
-      const titleMatch = seasonalConfig.keywords.some((kw: string) => titleLower.includes(kw.toLowerCase()));
-      const genreMatch = item.genres ? seasonalConfig.keywords.some((kw: string) =>
-        item.genres!.some(g => g.toLowerCase().includes(kw.toLowerCase()))
-      ) : false;
-      const reasonsMatch = item.reasons.some(r => {
-        const lower = r.toLowerCase();
-        return seasonalConfig.keywords.some((kw: string) => lower.includes(kw.toLowerCase()));
-      });
-      return titleMatch || genreMatch || reasonsMatch;
-    };
+      const isSeasonalMatch = (item: MovieItem): boolean => {
+        const titleLower = item.title.toLowerCase();
+        const titleMatch = seasonalConfig.keywords.some((kw: string) =>
+          titleLower.includes(kw.toLowerCase()),
+        );
+        const genreMatch = item.genres
+          ? seasonalConfig.keywords.some((kw: string) =>
+              item.genres!.some((g) =>
+                g.toLowerCase().includes(kw.toLowerCase()),
+              ),
+            )
+          : false;
+        const reasonsMatch = item.reasons.some((r) => {
+          const lower = r.toLowerCase();
+          return seasonalConfig.keywords.some((kw: string) =>
+            lower.includes(kw.toLowerCase()),
+          );
+        });
+        return titleMatch || genreMatch || reasonsMatch;
+      };
 
-    // Return the appropriate filter function
-    const filters: Record<string, (item: MovieItem) => boolean> = {
-      seasonalPicks: isSeasonalMatch,
-      recentWatchMatches: (item) => hasRecentWatchMatch(item.reasons),
-      studioMatches: (item) => hasStudioMatch(item.reasons),
-      directorMatches: (item) => hasDirectorMatch(item.reasons),
-      actorMatches: (item) => hasActorMatch(item.reasons),
-      genreMatches: (item) => hasGenreMatch(item.reasons),
-      documentaries: (item) => {
-        if (!item.genres || item.genres.length === 0) return false;
-        return item.genres.some(g => g === 'Documentary');
-      },
-      decadeMatches: (item) => {
-        if (!topDecade) return false;
-        const year = parseInt(item.year || '0');
-        return year >= topDecade && year < topDecade + 10;
-      },
-      smartDiscovery: (item) => item.voteCategory === 'hidden-gem',
-      hiddenGems: (item) => {
-        const year = parseInt(item.year || '0');
-        return year > 0 && year < 2015 && item.voteCategory === 'hidden-gem';
-      },
-      cultClassics: (item) => item.voteCategory === 'cult-classic',
-      crowdPleasers: (item) => item.voteCategory === 'crowd-pleaser',
-      newReleases: (item) => {
-        const year = parseInt(item.year || '0');
-        return year >= 2023;
-      },
-      recentClassics: (item) => {
-        const year = parseInt(item.year || '0');
-        return year >= 2015 && year < 2023;
-      },
-      deepCuts: (item) => hasDeepCutThemes(item.reasons),
-      fromCollections: (item) => !!item.collectionName,
-      multiSourceConsensus: (item) => (item.sources?.length ?? 0) >= 2,
-      internationalCinema: (item) => Boolean(item.original_language && item.original_language !== 'en'),
-      animationPicks: (item) => {
-        if (!item.genres || item.genres.length === 0) return false;
-        const hasAnimation = item.genres.some(g => g === 'Animation');
-        const isDocumentary = item.genres.some(g => g === 'Documentary');
-        return hasAnimation && !isDocumentary;
-      },
-      quickWatches: (item) => Boolean(item.runtime && item.runtime > 0 && item.runtime <= 100),
-      epicFilms: (item) => Boolean(item.runtime && item.runtime >= 150),
-      criticallyAcclaimed: (item) => {
-        const imdbRating = parseFloat(item.imdb_rating || '0');
-        const rtScore = parseInt(item.rotten_tomatoes?.replace('%', '') || '0');
-        const metaScore = parseInt(item.metacritic || '0');
-        return imdbRating >= 8.0 || rtScore >= 90 || metaScore >= 80;
-      },
-      perfectMatches: () => true,
-      moreRecommendations: () => true,
-    };
+      // Return the appropriate filter function
+      const filters: Record<string, (item: MovieItem) => boolean> = {
+        seasonalPicks: isSeasonalMatch,
+        recentWatchMatches: (item) => hasRecentWatchMatch(item.reasons),
+        studioMatches: (item) => hasStudioMatch(item.reasons),
+        directorMatches: (item) => hasDirectorMatch(item.reasons),
+        actorMatches: (item) => hasActorMatch(item.reasons),
+        genreMatches: (item) => hasGenreMatch(item.reasons),
+        documentaries: (item) => {
+          if (!item.genres || item.genres.length === 0) return false;
+          return item.genres.some((g) => g === "Documentary");
+        },
+        decadeMatches: (item) => {
+          if (!topDecade) return false;
+          const year = parseInt(item.year || "0");
+          return year >= topDecade && year < topDecade + 10;
+        },
+        smartDiscovery: (item) => item.voteCategory === "hidden-gem",
+        hiddenGems: (item) => {
+          const year = parseInt(item.year || "0");
+          return year > 0 && year < 2015 && item.voteCategory === "hidden-gem";
+        },
+        cultClassics: (item) => item.voteCategory === "cult-classic",
+        crowdPleasers: (item) => item.voteCategory === "crowd-pleaser",
+        newReleases: (item) => {
+          const year = parseInt(item.year || "0");
+          return year >= 2023;
+        },
+        recentClassics: (item) => {
+          const year = parseInt(item.year || "0");
+          return year >= 2015 && year < 2023;
+        },
+        deepCuts: (item) => hasDeepCutThemes(item.reasons),
+        fromCollections: (item) => !!item.collectionName,
+        multiSourceConsensus: (item) => (item.sources?.length ?? 0) >= 2,
+        internationalCinema: (item) =>
+          Boolean(item.original_language && item.original_language !== "en"),
+        animationPicks: (item) => {
+          if (!item.genres || item.genres.length === 0) return false;
+          const hasAnimation = item.genres.some((g) => g === "Animation");
+          const isDocumentary = item.genres.some((g) => g === "Documentary");
+          return hasAnimation && !isDocumentary;
+        },
+        quickWatches: (item) =>
+          Boolean(item.runtime && item.runtime > 0 && item.runtime <= 100),
+        epicFilms: (item) => Boolean(item.runtime && item.runtime >= 150),
+        criticallyAcclaimed: (item) => {
+          const imdbRating = parseFloat(item.imdb_rating || "0");
+          const rtScore = parseInt(
+            item.rotten_tomatoes?.replace("%", "") || "0",
+          );
+          const metaScore = parseInt(item.metacritic || "0");
+          return imdbRating >= 8.0 || rtScore >= 90 || metaScore >= 80;
+        },
+        perfectMatches: () => true,
+        moreRecommendations: () => true,
+      };
 
-    return filters[sectionName] || (() => true);
-  }, [topDecade]);
+      return filters[sectionName] || (() => true);
+    },
+    [topDecade],
+  );
 
+  const extractFeaturesFromReason = useCallback(
+    (reason: string): Array<{ type: FeatureType; name: string }> => {
+      const features: Array<{ type: FeatureType; name: string }> = [];
 
+      const genreMatch = reason.match(
+        /Matches your (?:specific )?taste in ([^(]+)/i,
+      );
+      if (genreMatch) {
+        const names = genreMatch[1]
+          .split(/,| \+ /)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        names.forEach((name) => features.push({ type: "genre", name }));
+      }
 
-  const extractFeaturesFromReason = useCallback((reason: string): Array<{ type: FeatureType; name: string }> => {
-    const features: Array<{ type: FeatureType; name: string }> = [];
+      const directorMatch = reason.match(/Directed by ([^—]+)/i);
+      if (directorMatch) {
+        directorMatch[1]
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((name) => features.push({ type: "director", name }));
+      }
 
-    const genreMatch = reason.match(/Matches your (?:specific )?taste in ([^(]+)/i);
-    if (genreMatch) {
-      const names = genreMatch[1].split(/,| \+ /).map((s) => s.trim()).filter(Boolean);
-      names.forEach((name) => features.push({ type: 'genre', name }));
-    }
+      const keywordMatch = reason.match(
+        /(?:Matches specific themes|explores) (?:you )?(?:especially love|enjoy)[^:]*: ([^(]+)/i,
+      );
+      if (keywordMatch) {
+        keywordMatch[1]
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((name) => features.push({ type: "keyword", name }));
+      }
 
-    const directorMatch = reason.match(/Directed by ([^—]+)/i);
-    if (directorMatch) {
-      directorMatch[1].split(',').map((s) => s.trim()).filter(Boolean).forEach((name) => features.push({ type: 'director', name }));
-    }
+      const studioMatch = reason.match(/From ([^—]+)/i);
+      if (studioMatch) {
+        studioMatch[1]
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((name) => features.push({ type: "collection", name }));
+      }
 
-    const keywordMatch = reason.match(/(?:Matches specific themes|explores) (?:you )?(?:especially love|enjoy)[^:]*: ([^(]+)/i);
-    if (keywordMatch) {
-      keywordMatch[1].split(',').map((s) => s.trim()).filter(Boolean).forEach((name) => features.push({ type: 'keyword', name }));
-    }
+      const castMatch = reason.match(/Stars ([^—]+)/i);
+      if (castMatch) {
+        castMatch[1]
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((name) => features.push({ type: "actor", name }));
+      }
 
-    const studioMatch = reason.match(/From ([^—]+)/i);
-    if (studioMatch) {
-      studioMatch[1].split(',').map((s) => s.trim()).filter(Boolean).forEach((name) => features.push({ type: 'collection', name }));
-    }
+      return features;
+    },
+    [],
+  );
 
-    const castMatch = reason.match(/Stars ([^—]+)/i);
-    if (castMatch) {
-      castMatch[1].split(',').map((s) => s.trim()).filter(Boolean).forEach((name) => features.push({ type: 'actor', name }));
-    }
+  const collectFeatureRequests = useCallback(
+    (movies: MovieItem[]): Array<{ type: FeatureType; name: string }> => {
+      const seen = new Set<string>();
+      const requests: Array<{ type: FeatureType; name: string }> = [];
 
-    return features;
-  }, []);
-
-  const collectFeatureRequests = useCallback((movies: MovieItem[]): Array<{ type: FeatureType; name: string }> => {
-    const seen = new Set<string>();
-    const requests: Array<{ type: FeatureType; name: string }> = [];
-
-    movies.forEach((item) => {
-      item.reasons?.forEach((reason) => {
-        const feats = extractFeaturesFromReason(reason);
-        feats.forEach((f) => {
-          const key = `${f.type}:${f.name.toLowerCase()}`;
-          if (seen.has(key)) return;
-          seen.add(key);
-          requests.push(f);
+      movies.forEach((item) => {
+        item.reasons?.forEach((reason) => {
+          const feats = extractFeaturesFromReason(reason);
+          feats.forEach((f) => {
+            const key = `${f.type}:${f.name.toLowerCase()}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            requests.push(f);
+          });
         });
       });
-    });
 
-    return requests;
-  }, [extractFeaturesFromReason]);
+      return requests;
+    },
+    [extractFeaturesFromReason],
+  );
 
-  const mergeFeatureEvidence = useCallback((map: Map<string, FeatureEvidenceSummary>) => {
-    setFeatureEvidence((prev) => {
-      const next = { ...prev } as Record<string, FeatureEvidenceSummary>;
-      map.forEach((value, key) => {
-        next[key] = value;
+  const mergeFeatureEvidence = useCallback(
+    (map: Map<string, FeatureEvidenceSummary>) => {
+      setFeatureEvidence((prev) => {
+        const next = { ...prev } as Record<string, FeatureEvidenceSummary>;
+        map.forEach((value, key) => {
+          next[key] = value;
+        });
+        return next;
       });
-      return next;
-    });
-  }, []);
+    },
+    [],
+  );
 
-  const fetchEvidenceForFeatures = useCallback(async (featureList: Array<{ type: FeatureType; name: string }>) => {
-    if (!uid || featureList.length === 0) return;
-    try {
-      const map = await getFeatureEvidenceSummary(uid, featureList);
-      mergeFeatureEvidence(map);
-    } catch (e) {
-      console.error('[FeatureEvidence] Failed to fetch evidence', e);
-    }
-  }, [uid, mergeFeatureEvidence]);
-
-
+  const fetchEvidenceForFeatures = useCallback(
+    async (featureList: Array<{ type: FeatureType; name: string }>) => {
+      if (!uid || featureList.length === 0) return;
+      try {
+        const map = await getFeatureEvidenceSummary(uid, featureList);
+        mergeFeatureEvidence(map);
+      } catch (e) {
+        console.error("[FeatureEvidence] Failed to fetch evidence", e);
+      }
+    },
+    [uid, mergeFeatureEvidence],
+  );
 
   const computeContext = useCallback(() => {
     const hour = localHour ?? new Date().getHours();
-    if (contextMode !== 'auto') return { mode: contextMode, localHour: hour } as const;
+    if (contextMode !== "auto")
+      return { mode: contextMode, localHour: hour } as const;
 
-    if (hour >= 22 || hour <= 6) return { mode: 'short', localHour: hour } as const;
-    if (hour >= 17 && hour <= 21) return { mode: 'weeknight', localHour: hour } as const;
-    if (hour >= 7 && hour <= 9) return { mode: 'short', localHour: hour } as const;
-    return { mode: 'background', localHour: hour } as const;
+    if (hour >= 22 || hour <= 6)
+      return { mode: "short", localHour: hour } as const;
+    if (hour >= 17 && hour <= 21)
+      return { mode: "weeknight", localHour: hour } as const;
+    if (hour >= 7 && hour <= 9)
+      return { mode: "short", localHour: hour } as const;
+    return { mode: "background", localHour: hour } as const;
   }, [contextMode, localHour]);
 
   useEffect(() => {
@@ -842,7 +1077,7 @@ export default function SuggestPage() {
           const blocked = await getBlockedSuggestions(userId);
           setBlockedIds(blocked);
         } catch (e) {
-          console.error('Failed to fetch blocked suggestions:', e);
+          console.error("Failed to fetch blocked suggestions:", e);
         }
       }
     };
@@ -854,39 +1089,55 @@ export default function SuggestPage() {
     const loadSavedMovies = async () => {
       if (!uid) return;
       const { movies } = await getSavedMovies(uid);
-      setSavedMovieIds(new Set(movies.map(m => m.tmdb_id)));
+      setSavedMovieIds(new Set(movies.map((m) => m.tmdb_id)));
     };
     void loadSavedMovies();
   }, [uid]);
 
-  const sourceFilms = useMemo(() => (films && films.length ? films : (fallbackFilms ?? [])), [films, fallbackFilms]);
+  const sourceFilms = useMemo(
+    () => (films && films.length ? films : (fallbackFilms ?? [])),
+    [films, fallbackFilms],
+  );
 
   const runSuggest = useCallback(async () => {
     try {
       // Generate new cache key to bust browser and API caches
       const freshCacheKey = Date.now();
       setCacheKey(freshCacheKey);
-      console.log('[Suggest] runSuggest start', { uid, hasSourceFilms: sourceFilms.length, excludeGenres, yearMin, yearMax, mode, cacheKey: freshCacheKey });
+      console.log("[Suggest] runSuggest start", {
+        uid,
+        hasSourceFilms: sourceFilms.length,
+        excludeGenres,
+        yearMin,
+        yearMax,
+        mode,
+        cacheKey: freshCacheKey,
+      });
 
       // Clear previous state completely
       setItems(null);
       setError(null);
       setNoCandidatesReason(null);
       setLoading(true);
-      setProgress({ current: 0, total: 7, stage: 'init', details: 'Preparing recommendation engine...' });
+      setProgress({
+        current: 0,
+        total: 7,
+        stage: "init",
+        details: "Preparing recommendation engine...",
+      });
 
       // Reset pairwise state when refreshing suggestions
       setPairwisePair(null);
       setPairwiseCount(0);
       setPairHistory(new Set());
-      if (!supabase) throw new Error('Supabase not initialized');
-      if (!uid) throw new Error('Not signed in');
+      if (!supabase) throw new Error("Supabase not initialized");
+      if (!uid) throw new Error("Not signed in");
       // Apply quick filters to source films
       const gExclude = new Set(
         excludeGenres
-          .split(',')
+          .split(",")
           .map((s) => s.trim().toLowerCase())
-          .filter(Boolean)
+          .filter(Boolean),
       );
       const yMin = Number(yearMin) || undefined;
       const yMax = Number(yearMax) || undefined;
@@ -896,10 +1147,18 @@ export default function SuggestPage() {
         return true; // genre filter will apply on candidates via overlap features
       });
       const uris = filteredFilms.map((f) => f.uri);
-      console.log('[Suggest] fetching mappings for', uris.length, 'films');
-      setProgress({ current: 1, total: 7, stage: 'library', details: `Loading ${uris.length} films from your Letterboxd...` });
+      console.log("[Suggest] fetching mappings for", uris.length, "films");
+      setProgress({
+        current: 1,
+        total: 7,
+        stage: "library",
+        details: `Loading ${uris.length} films from your Letterboxd...`,
+      });
       const mappings = await getFilmMappings(uid, uris);
-      console.log('[Suggest] mappings loaded', { mappingCount: mappings.size, totalFilms: uris.length });
+      console.log("[Suggest] mappings loaded", {
+        mappingCount: mappings.size,
+        totalFilms: uris.length,
+      });
 
       // Track mapping coverage for UI feedback
       setMappingCoverage({ mapped: mappings.size, total: uris.length });
@@ -920,35 +1179,58 @@ export default function SuggestPage() {
       }
 
       setWatchlistTmdbIds(watchlistIds);
-      console.log('[Suggest] watchlist IDs', { count: watchlistIds.size });
+      console.log("[Suggest] watchlist IDs", { count: watchlistIds.size });
 
       // Pre-fetch all TMDB details from cache for better taste profile analysis
-      console.log('[Suggest] Pre-fetching TMDB details from cache');
+      console.log("[Suggest] Pre-fetching TMDB details from cache");
       const allMappedIds = Array.from(mappings.values());
-      setProgress({ current: 2, total: 7, stage: 'cache', details: `Loading metadata for ${allMappedIds.length} movies...` });
+      setProgress({
+        current: 2,
+        total: 7,
+        stage: "cache",
+        details: `Loading metadata for ${allMappedIds.length} movies...`,
+      });
       const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
-      const cacheHitRate = ((tmdbDetailsMap.size / allMappedIds.length) * 100).toFixed(1);
-      console.log('[Suggest] TMDB details loaded from cache', {
+      const cacheHitRate = (
+        (tmdbDetailsMap.size / allMappedIds.length) *
+        100
+      ).toFixed(1);
+      console.log("[Suggest] TMDB details loaded from cache", {
         requested: allMappedIds.length,
         found: tmdbDetailsMap.size,
-        coverage: `${cacheHitRate}%`
+        coverage: `${cacheHitRate}%`,
       });
-      setProgress({ current: 2, total: 7, stage: 'cache', details: `Found ${tmdbDetailsMap.size}/${allMappedIds.length} movies in cache (${cacheHitRate}%)` });
+      setProgress({
+        current: 2,
+        total: 7,
+        stage: "cache",
+        details: `Found ${tmdbDetailsMap.size}/${allMappedIds.length} movies in cache (${cacheHitRate}%)`,
+      });
 
       // Build taste profile with IDs for smarter discovery
-      console.log('[Suggest] Building taste profile for smart discovery');
-      setProgress({ current: 3, total: 7, stage: 'taste', details: 'Learning from your ratings and preferences...' });
+      console.log("[Suggest] Building taste profile for smart discovery");
+      setProgress({
+        current: 3,
+        total: 7,
+        stage: "taste",
+        details: "Learning from your ratings and preferences...",
+      });
 
       // Fetch negative feedback to learn from dislikes
       let negativeFeedbackIds: number[] = [];
       try {
         const feedbackMap = await getFeedback(uid);
         negativeFeedbackIds = Array.from(feedbackMap.entries())
-          .filter((entry): entry is [number, 'negative' | 'positive'] => entry[1] === 'negative')
+          .filter(
+            (entry): entry is [number, "negative" | "positive"] =>
+              entry[1] === "negative",
+          )
           .map((entry) => entry[0]);
-        console.log('[Suggest] Found negative feedback', { count: negativeFeedbackIds.length });
+        console.log("[Suggest] Found negative feedback", {
+          count: negativeFeedbackIds.length,
+        });
       } catch (e) {
-        console.error('[Suggest] Failed to fetch feedback', e);
+        console.error("[Suggest] Failed to fetch feedback", e);
       }
 
       // Fetch feature-level feedback (learned from "Not Interested" / "More Like This" clicks)
@@ -956,26 +1238,44 @@ export default function SuggestPage() {
       let featureFeedback = null;
       try {
         featureFeedback = await getAvoidedFeatures(uid);
-        console.log('[Suggest] Loaded feature feedback', {
-          avoidActors: featureFeedback.avoidActors.map(a => a.name).slice(0, 3),
-          avoidKeywords: featureFeedback.avoidKeywords.map(k => k.name).slice(0, 5),
-          avoidFranchises: featureFeedback.avoidFranchises.map(f => f.name),
-          preferActors: featureFeedback.preferActors.map(a => a.name).slice(0, 3),
-          preferKeywords: featureFeedback.preferKeywords.map(k => k.name).slice(0, 5)
+        console.log("[Suggest] Loaded feature feedback", {
+          avoidActors: featureFeedback.avoidActors
+            .map((a) => a.name)
+            .slice(0, 3),
+          avoidKeywords: featureFeedback.avoidKeywords
+            .map((k) => k.name)
+            .slice(0, 5),
+          avoidFranchises: featureFeedback.avoidFranchises.map((f) => f.name),
+          preferActors: featureFeedback.preferActors
+            .map((a) => a.name)
+            .slice(0, 3),
+          preferKeywords: featureFeedback.preferKeywords
+            .map((k) => k.name)
+            .slice(0, 5),
         });
       } catch (e) {
-        console.error('[Suggest] Failed to fetch feature feedback', e);
+        console.error("[Suggest] Failed to fetch feature feedback", e);
       }
 
       // Get watchlist films for intent signals
-      const watchlistFilms = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
-      const watchlistEntries = watchlistFilms.map(f => ({
+      const watchlistFilms = sourceFilms.filter(
+        (f) => f.onWatchlist && mappings.has(f.uri),
+      );
+      const watchlistEntries = watchlistFilms.map((f) => ({
         tmdbId: mappings.get(f.uri)!,
         addedAt: f.watchlistAddedAt ?? null,
       }));
-      console.log('[Suggest] Watchlist films for taste profile:', watchlistFilms.length);
+      console.log(
+        "[Suggest] Watchlist films for taste profile:",
+        watchlistFilms.length,
+      );
 
-      setProgress({ current: 3, total: 7, stage: 'taste', details: `Analyzing ${filteredFilms.length} films from your library...` });
+      setProgress({
+        current: 3,
+        total: 7,
+        stage: "taste",
+        details: `Analyzing ${filteredFilms.length} films from your library...`,
+      });
       const tasteProfile = await buildTasteProfile({
         films: filteredFilms,
         mappings,
@@ -983,32 +1283,56 @@ export default function SuggestPage() {
         negativeFeedbackIds,
         tmdbDetails: tmdbDetailsMap, // Pass pre-fetched details to analyze ALL movies, not just 100
         watchlistFilms, // Pass watchlist for intent signals
-        userId: uid ?? undefined // Pass user ID for explicit preference fetching
+        userId: uid ?? undefined, // Pass user ID for explicit preference fetching
       });
 
       // Update progress with taste profile results
-      const topGenresPreview = tasteProfile.topGenres.slice(0, 3).map(g => g.name).join(', ');
-      setProgress({ current: 3, total: 7, stage: 'taste', details: `Found preferences: ${topGenresPreview}${tasteProfile.topGenres.length > 3 ? '...' : ''}` });
+      const topGenresPreview = tasteProfile.topGenres
+        .slice(0, 3)
+        .map((g) => g.name)
+        .join(", ");
+      setProgress({
+        current: 3,
+        total: 7,
+        stage: "taste",
+        details: `Found preferences: ${topGenresPreview}${tasteProfile.topGenres.length > 3 ? "..." : ""}`,
+      });
 
       // === GENERATE WATCHLIST PICKS ===
       // Get unwatched watchlist films (onWatchlist=true but not watched)
-      const unwatchedWatchlist = sourceFilms.filter(f =>
-        f.onWatchlist &&
-        (!f.watchCount || f.watchCount === 0) &&
-        mappings.has(f.uri)
+      const unwatchedWatchlist = sourceFilms.filter(
+        (f) =>
+          f.onWatchlist &&
+          (!f.watchCount || f.watchCount === 0) &&
+          mappings.has(f.uri),
       );
-      console.log('[Suggest] Unwatched watchlist films:', unwatchedWatchlist.length);
+      console.log(
+        "[Suggest] Unwatched watchlist films:",
+        unwatchedWatchlist.length,
+      );
 
       // Get recent watches for similarity scoring (last 30 days)
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       const recentWatches = filteredFilms
-        .filter(f => f.lastDate && new Date(f.lastDate) >= thirtyDaysAgo && (f.rating ?? 0) >= 3)
-        .sort((a, b) => new Date(b.lastDate!).getTime() - new Date(a.lastDate!).getTime())
+        .filter(
+          (f) =>
+            f.lastDate &&
+            new Date(f.lastDate) >= thirtyDaysAgo &&
+            (f.rating ?? 0) >= 3,
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.lastDate!).getTime() - new Date(a.lastDate!).getTime(),
+        )
         .slice(0, 20);
 
       // Get TMDB IDs and details for recent watches
-      const recentWatchDetails: Array<{ tmdbId: number; genres: number[]; keywords: number[] }> = [];
+      const recentWatchDetails: Array<{
+        tmdbId: number;
+        genres: number[];
+        keywords: number[];
+      }> = [];
       for (const film of recentWatches) {
         const tmdbId = mappings.get(film.uri);
         if (!tmdbId) continue;
@@ -1017,13 +1341,20 @@ export default function SuggestPage() {
           recentWatchDetails.push({
             tmdbId,
             genres: (details.genres || []).map((g: any) => g.id),
-            keywords: (details.keywords?.keywords || []).map((k: any) => k.id).slice(0, 10)
+            keywords: (details.keywords?.keywords || [])
+              .map((k: any) => k.id)
+              .slice(0, 10),
           });
         }
       }
 
       // Score watchlist films
-      const scoredWatchlist: Array<{ film: FilmEvent; tmdbId: number; score: number; reasons: string[] }> = [];
+      const scoredWatchlist: Array<{
+        film: FilmEvent;
+        tmdbId: number;
+        score: number;
+        reasons: string[];
+      }> = [];
       for (const film of unwatchedWatchlist) {
         const tmdbId = mappings.get(film.uri);
         if (!tmdbId) continue;
@@ -1031,33 +1362,45 @@ export default function SuggestPage() {
         const details = tmdbDetailsMap.get(tmdbId);
         if (!details) continue;
 
-        const filmGenres = new Set((details.genres || []).map((g: any) => g.id));
-        const filmKeywords = new Set((details.keywords?.keywords || []).map((k: any) => k.id));
+        const filmGenres = new Set(
+          (details.genres || []).map((g: any) => g.id),
+        );
+        const filmKeywords = new Set(
+          (details.keywords?.keywords || []).map((k: any) => k.id),
+        );
 
         let similarityScore = 0;
         let genreScore = 0;
-        const reasons: string[] = ['From your Letterboxd watchlist'];
+        const reasons: string[] = ["From your Letterboxd watchlist"];
 
         // 60%: Similarity to recent watches
         for (const recent of recentWatchDetails) {
-          const genreOverlap = recent.genres.filter(g => filmGenres.has(g)).length;
-          const keywordOverlap = recent.keywords.filter(k => filmKeywords.has(k)).length;
-          similarityScore += (genreOverlap * 3 + keywordOverlap * 2);
+          const genreOverlap = recent.genres.filter((g) =>
+            filmGenres.has(g),
+          ).length;
+          const keywordOverlap = recent.keywords.filter((k) =>
+            filmKeywords.has(k),
+          ).length;
+          similarityScore += genreOverlap * 3 + keywordOverlap * 2;
         }
         if (recentWatchDetails.length > 0) {
           similarityScore = (similarityScore / recentWatchDetails.length) * 0.6;
           if (similarityScore > 0) {
-            reasons.push('Similar to your recent watches');
+            reasons.push("Similar to your recent watches");
           }
         }
 
         // 20%: Match with top genres from taste profile
-        const topGenreIds = new Set(tasteProfile.topGenres.slice(0, 5).map(g => g.id));
+        const topGenreIds = new Set(
+          tasteProfile.topGenres.slice(0, 5).map((g) => g.id),
+        );
         for (const genreId of filmGenres) {
           if (topGenreIds.has(genreId)) {
             genreScore += 5;
-            const genreName = tasteProfile.topGenres.find(g => g.id === genreId)?.name;
-            if (genreName && !reasons.some(r => r.includes(genreName))) {
+            const genreName = tasteProfile.topGenres.find(
+              (g) => g.id === genreId,
+            )?.name;
+            if (genreName && !reasons.some((r) => r.includes(genreName))) {
               reasons.push(`Matches your love of ${genreName}`);
             }
           }
@@ -1075,61 +1418,76 @@ export default function SuggestPage() {
       scoredWatchlist.sort((a, b) => b.score - a.score);
       const topWatchlistPicks = scoredWatchlist.slice(0, 5);
 
-      console.log('[Suggest] Top watchlist picks:', topWatchlistPicks.length);
+      console.log("[Suggest] Top watchlist picks:", topWatchlistPicks.length);
 
       // Fetch full details for watchlist picks
       const watchlistPicksWithDetails: MovieItem[] = [];
       for (const pick of topWatchlistPicks) {
         try {
-          const u = new URL('/api/tmdb/movie', getBaseUrl());
-          u.searchParams.set('id', String(pick.tmdbId));
-          u.searchParams.set('_t', String(freshCacheKey));
-          const r = await fetch(u.toString(), { cache: 'no-store' });
+          const u = new URL("/api/tmdb/movie", getBaseUrl());
+          u.searchParams.set("id", String(pick.tmdbId));
+          u.searchParams.set("_t", String(freshCacheKey));
+          const r = await fetch(u.toString(), { cache: "no-store" });
           const j = await r.json();
 
           if (j.ok && j.movie) {
             const movie = j.movie;
             const videos = movie.videos?.results || [];
-            const trailer = videos.find((v: any) =>
-              v.site === 'YouTube' && v.type === 'Trailer' && v.official
-            ) || videos.find((v: any) =>
-              v.site === 'YouTube' && v.type === 'Trailer'
-            );
+            const trailer =
+              videos.find(
+                (v: any) =>
+                  v.site === "YouTube" && v.type === "Trailer" && v.official,
+              ) ||
+              videos.find(
+                (v: any) => v.site === "YouTube" && v.type === "Trailer",
+              );
 
             watchlistPicksWithDetails.push({
               id: pick.tmdbId,
               title: movie.title || pick.film.title,
-              year: movie.release_date?.slice(0, 4) || String(pick.film.year || ''),
+              year:
+                movie.release_date?.slice(0, 4) || String(pick.film.year || ""),
               reasons: pick.reasons,
               poster_path: movie.poster_path,
               score: pick.score,
               trailerKey: trailer?.key || null,
-              voteCategory: 'standard',
+              voteCategory: "standard",
               collectionName: movie.belongs_to_collection?.name,
               genres: (movie.genres || []).map((g: any) => g.name),
               vote_average: movie.vote_average,
               vote_count: movie.vote_count,
               overview: movie.overview,
               runtime: movie.runtime,
-              original_language: movie.original_language
+              original_language: movie.original_language,
             });
           }
         } catch (e) {
-          console.error(`[Suggest] Failed to fetch watchlist pick ${pick.tmdbId}`, e);
+          console.error(
+            `[Suggest] Failed to fetch watchlist pick ${pick.tmdbId}`,
+            e,
+          );
         }
       }
 
       // Set watchlist picks state
       setWatchlistPicks(watchlistPicksWithDetails);
-      console.log('[Suggest] Watchlist picks ready:', watchlistPicksWithDetails.length);
+      console.log(
+        "[Suggest] Watchlist picks ready:",
+        watchlistPicksWithDetails.length,
+      );
 
       // Refresh poster cache for watchlist picks
       if (watchlistPicksWithDetails.length > 0) {
         try {
-          const watchlistIdsForCache = watchlistPicksWithDetails.map(p => p.id);
+          const watchlistIdsForCache = watchlistPicksWithDetails.map(
+            (p) => p.id,
+          );
           await refreshTmdbCacheForIds(watchlistIdsForCache);
         } catch (e) {
-          console.error('[Suggest] Failed to refresh watchlist poster cache', e);
+          console.error(
+            "[Suggest] Failed to refresh watchlist poster cache",
+            e,
+          );
         }
       }
       // === END WATCHLIST PICKS ===
@@ -1144,35 +1502,48 @@ export default function SuggestPage() {
         updateExplorationStats(
           uid,
           filteredFilms,
-          tasteProfile.topGenres.map(g => g.name)
-        ).catch(e => console.error('[Suggest] Failed to update exploration stats', e));
+          tasteProfile.topGenres.map((g) => g.name),
+        ).catch((e) =>
+          console.error("[Suggest] Failed to update exploration stats", e),
+        );
       }
 
       // Get highly-rated film IDs for similar movie recommendations
       // Uses weighted scoring based on rating, liked, rewatch, recency, and genre diversity
       const filmsForSeeding: FilmForSeeding[] = filteredFilms
-        .filter(f => mappings.has(f.uri))
-        .map(f => ({
+        .filter((f) => mappings.has(f.uri))
+        .map((f) => ({
           uri: f.uri,
           tmdbId: mappings.get(f.uri)!,
           rating: f.rating,
           liked: f.liked,
           rewatch: f.rewatch,
           lastDate: f.lastDate,
-          genreIds: tmdbDetailsMap.get(mappings.get(f.uri)!)?.genres?.map((g: any) => g.id) || []
+          genreIds:
+            tmdbDetailsMap
+              .get(mappings.get(f.uri)!)
+              ?.genres?.map((g: any) => g.id) || [],
         }));
       const highlyRated = getWeightedSeedIds(filmsForSeeding, 30, true);
 
       // Get watchlist film IDs for intent-based discovery (P1.3 improvement)
       const watchlistIdArray = filteredFilms
-        .filter(f => f.onWatchlist === true)
-        .map(f => mappings.get(f.uri))
+        .filter((f) => f.onWatchlist === true)
+        .map((f) => mappings.get(f.uri))
         .filter((id): id is number => id != null);
-      console.log('[Suggest] Watchlist IDs for discovery:', watchlistIdArray.length);
+      console.log(
+        "[Suggest] Watchlist IDs for discovery:",
+        watchlistIdArray.length,
+      );
 
       // Generate smart candidates using multiple TMDB discovery strategies
-      console.log('[Suggest] Generating smart candidates');
-      setProgress({ current: 4, total: 7, stage: 'discover', details: 'Searching across TMDB, TasteDive, Trakt, and more...' });
+      console.log("[Suggest] Generating smart candidates");
+      setProgress({
+        current: 4,
+        total: 7,
+        stage: "discover",
+        details: "Searching across TMDB, TasteDive, Trakt, and more...",
+      });
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
         watchlistIds: watchlistIdArray, // Pass watchlist for intent-based discovery (P1.3)
@@ -1183,7 +1554,7 @@ export default function SuggestPage() {
         topStudios: tasteProfile.topStudios,
         tmdbDetailsMap, // Pass details for TasteDive to use titles
         nichePreferences: tasteProfile.nichePreferences, // Issue #7 implementation
-        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds // NEW: Sub-genre discovery
+        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds, // NEW: Sub-genre discovery
       });
 
       // Fetch decade candidates
@@ -1194,47 +1565,64 @@ export default function SuggestPage() {
       }
 
       // Fetch smart discovery candidates (hidden gems)
-      const discoveryCandidates = await getSmartDiscoveryCandidates(tasteProfile);
+      const discoveryCandidates =
+        await getSmartDiscoveryCandidates(tasteProfile);
 
       // Fetch candidates from TMDB lists containing user's favorites
       let listCandidates: number[] = [];
       try {
         // Build seed films with titles for list discovery
-        const seedFilmsForLists = highlyRated.slice(0, 10).map(tmdbId => {
+        const seedFilmsForLists = highlyRated.slice(0, 10).map((tmdbId) => {
           const details = tmdbDetailsMap.get(tmdbId);
-          const film = filteredFilms.find(f => mappings.get(f.uri) === tmdbId);
+          const film = filteredFilms.find(
+            (f) => mappings.get(f.uri) === tmdbId,
+          );
           return {
             tmdbId,
-            title: details?.title ?? '',
-            rating: film?.rating
+            title: details?.title ?? "",
+            rating: film?.rating,
           };
-        }).filter(s => s.title);
+        });
 
-        listCandidates = await discoverFromLists(seedFilmsForLists);
-        console.log('[Suggest] List candidates:', listCandidates.length);
+        const seedFilmsForListsWithTitles = seedFilmsForLists.filter(
+          (s) => s.title,
+        );
+
+        console.log("[Suggest] List discovery seed quality", {
+          totalSeeds: seedFilmsForLists.length,
+          seedsWithTitles: seedFilmsForListsWithTitles.length,
+          seedsWithoutTitles:
+            seedFilmsForLists.length - seedFilmsForListsWithTitles.length,
+        });
+
+        listCandidates = await discoverFromLists(seedFilmsForListsWithTitles);
+        console.log("[Suggest] List candidates:", listCandidates.length);
       } catch (e) {
-        console.error('[Suggest] List discovery failed', e);
+        console.error("[Suggest] List discovery failed", e);
       }
 
       // Phase 5+: Adaptive exploration rate (5-30% based on user feedback)
       const explorationRate = await getAdaptiveExplorationRate(uid);
       const exploratoryCount = Math.floor(150 * explorationRate);
-      console.log('[Suggest][Phase5+] Using adaptive exploration', {
+      console.log("[Suggest][Phase5+] Using adaptive exploration", {
         rate: explorationRate,
         count: exploratoryCount,
-        message: explorationRate !== 0.15 ? 'Rate adjusted based on your feedback!' : 'Using default rate (will adjust after rating exploratory picks)'
+        message:
+          explorationRate !== 0.15
+            ? "Rate adjusted based on your feedback!"
+            : "Using default rate (will adjust after rating exploratory picks)",
       });
 
       const exploratoryPicks = await generateExploratoryPicks(
         {
           topGenres: tasteProfile.topGenres,
-          avoidGenres: tasteProfile.avoidGenres
+          avoidGenres: tasteProfile.avoidGenres,
         },
         {
           count: exploratoryCount,
           minVoteAverage: 7.0,
-          minVoteCount: 500
-        }
+          minVoteCount: 500,
+        },
       );
 
       // Combine all candidate sources
@@ -1248,9 +1636,14 @@ export default function SuggestPage() {
       candidatesRaw.push(...exploratoryPicks); // Add exploratory picks
 
       const sourceSummary = `TMDB: ${smartCandidates.trending.length + smartCandidates.similar.length + smartCandidates.discovered.length}, Trakt: ${decadeCandidates.length}, TasteDive: ${discoveryCandidates.length}`;
-      setProgress({ current: 4, total: 7, stage: 'discover', details: `Found ${candidatesRaw.length} candidates (${sourceSummary})` });
+      setProgress({
+        current: 4,
+        total: 7,
+        stage: "discover",
+        details: `Found ${candidatesRaw.length} candidates (${sourceSummary})`,
+      });
 
-      console.log('[Suggest] Smart candidates breakdown', {
+      console.log("[Suggest] Smart candidates breakdown", {
         trending: smartCandidates.trending.length,
         similar: smartCandidates.similar.length,
         discovered: smartCandidates.discovered.length,
@@ -1258,7 +1651,7 @@ export default function SuggestPage() {
         discovery: discoveryCandidates.length,
         lists: listCandidates.length,
         exploratory: exploratoryPicks.length,
-        totalRaw: candidatesRaw.length
+        totalRaw: candidatesRaw.length,
       });
 
       // Filter out already watched films, blocked suggestions, and deduplicate
@@ -1273,24 +1666,27 @@ export default function SuggestPage() {
         // Use crypto random for better distribution
         return Math.random() - 0.5;
       });
-      const candidates = shuffled.slice(0, mode === 'quick' ? 500 : 800); // Much larger pool for variety
+      const candidates = shuffled.slice(0, mode === "quick" ? 500 : 800); // Much larger pool for variety
 
-      console.log('[Suggest] candidate pool', {
+      console.log("[Suggest] candidate pool", {
         blockedCount: blockedIds.size,
         mode,
         totalCandidates: candidatesRaw.length,
         afterFilter: candidates.length,
-        watchedCount: watchedIds.size
+        watchedCount: watchedIds.size,
       });
 
       if (candidates.length === 0) {
-        const reason = 'No candidates available. Please check your TMDB API key or try again later.';
+        const reason =
+          "No candidates available. Please check your TMDB API key or try again later.";
         setNoCandidatesReason(reason);
       }
 
       // Fetch learned genre transitions
       const adjacentGenres = await getGenreTransitions(uid);
-      console.log('[Suggest] Loaded genre transitions', { count: adjacentGenres.size });
+      console.log("[Suggest] Loaded genre transitions", {
+        count: adjacentGenres.size,
+      });
 
       // Fetch per-source reliability multipliers from past feedback
       const userSourceReliability = await fetchSourceReliability(uid);
@@ -1300,7 +1696,11 @@ export default function SuggestPage() {
       // `tasteProfile` has `topGenres` but those are overall.
       // Let's use the `filteredFilms` (source films) to find recent genres.
       const recentFilms = filteredFilms
-        .sort((a, b) => (b.lastDate ? new Date(b.lastDate).getTime() : 0) - (a.lastDate ? new Date(a.lastDate).getTime() : 0))
+        .sort(
+          (a, b) =>
+            (b.lastDate ? new Date(b.lastDate).getTime() : 0) -
+            (a.lastDate ? new Date(a.lastDate).getTime() : 0),
+        )
         .slice(0, 5);
 
       // We need genres for these. We have mappings but not genres in `filteredFilms`.
@@ -1313,25 +1713,44 @@ export default function SuggestPage() {
       // Let's just pass `tasteProfile.topGenres` names as "recent" for now? No, that's wrong.
       // Transitions are "From X -> To Y". If I like X generally, I might like Y.
       // So passing top genres as "recent" is a decent approximation of "current state".
-      const recentGenreNames = tasteProfile.topGenres.slice(0, 5).map(g => g.name);
+      const recentGenreNames = tasteProfile.topGenres
+        .slice(0, 5)
+        .map((g) => g.name);
 
       // Fetch recent exposures to apply repeat penalty
       // This penalizes movies shown recently to favor fresh content
       const recentExposures = await getRecentExposures(uid, 14);
-      console.log('[Suggest] Recent exposures for repeat prevention:', recentExposures.size);
+      console.log(
+        "[Suggest] Recent exposures for repeat prevention:",
+        recentExposures.size,
+      );
 
       const context = computeContext();
-      setSourceLabel('Based on your watched & liked films + trending releases');
-      const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
-      console.log('[Suggest] calling suggestByOverlap', { liteCount: lite.length, candidatesCount: candidates.length });
-      setProgress({ current: 5, total: 7, stage: 'score', details: `Ranking ${candidates.length} candidates...` });
+      setSourceLabel("Based on your watched & liked films + trending releases");
+      const lite = filteredFilms.map((f) => ({
+        uri: f.uri,
+        title: f.title,
+        year: f.year,
+        rating: f.rating,
+        liked: f.liked,
+      }));
+      console.log("[Suggest] calling suggestByOverlap", {
+        liteCount: lite.length,
+        candidatesCount: candidates.length,
+      });
+      setProgress({
+        current: 5,
+        total: 7,
+        stage: "score",
+        details: `Ranking ${candidates.length} candidates...`,
+      });
       const suggestions = await suggestByOverlap({
         userId: uid,
         films: lite,
         mappings,
         candidates,
         excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: mode === 'quick' ? 400 : 800,
+        maxCandidates: mode === "quick" ? 400 : 800,
         concurrency: 6,
         excludeWatchedIds: watchedIds,
         desiredResults: 300, // Increased to fill all 24 sections (24 × 12 = 288 potential items)
@@ -1353,16 +1772,21 @@ export default function SuggestPage() {
           adjacentGenres,
           recentGenres: recentGenreNames,
           topDecades: tasteProfile.topDecades,
-          watchlistGenres: tasteProfile.watchlistGenres?.map(w => w.name),
-          watchlistKeywords: tasteProfile.watchlistKeywords?.map(w => w.name),
-          watchlistDirectors: tasteProfile.watchlistDirectors?.map(w => w.name)
-        }
+          watchlistGenres: tasteProfile.watchlistGenres?.map((w) => w.name),
+          watchlistKeywords: tasteProfile.watchlistKeywords?.map((w) => w.name),
+          watchlistDirectors: tasteProfile.watchlistDirectors?.map(
+            (w) => w.name,
+          ),
+        },
       });
       // Best-effort: ensure posters/backdrops exist for suggested ids.
       if (suggestions.length) {
         try {
           const idsForCache = suggestions.map((s) => s.tmdbId);
-          console.log('[Suggest] refreshing TMDB cache for suggested ids', idsForCache.length);
+          console.log(
+            "[Suggest] refreshing TMDB cache for suggested ids",
+            idsForCache.length,
+          );
           await refreshTmdbCacheForIds(idsForCache);
           await refreshPosters();
         } catch {
@@ -1371,24 +1795,36 @@ export default function SuggestPage() {
       }
 
       // Track these IDs as shown for next refresh, but limit to last 200 to prevent indefinite accumulation
-      const newShownIds = new Set([...shownIds, ...suggestions.map(s => s.tmdbId)]);
+      const newShownIds = new Set([
+        ...shownIds,
+        ...suggestions.map((s) => s.tmdbId),
+      ]);
       // Keep only the most recent 200 shown IDs for variety
       const recentShownIds = Array.from(newShownIds).slice(-200);
       setShownIds(new Set(recentShownIds));
-      console.log('[Suggest] Tracking shown IDs', { total: recentShownIds.length, newThisRound: suggestions.length, limited: newShownIds.size > 200 });
+      console.log("[Suggest] Tracking shown IDs", {
+        total: recentShownIds.length,
+        newThisRound: suggestions.length,
+        limited: newShownIds.size > 200,
+      });
 
       // Fetch full movie data for each suggestion to get videos, collections, etc.
-      setProgress({ current: 6, total: 7, stage: 'details', details: `Loading full details for ${suggestions.length} suggestions...` });
+      setProgress({
+        current: 6,
+        total: 7,
+        stage: "details",
+        details: `Loading full details for ${suggestions.length} suggestions...`,
+      });
       const detailsPromises = suggestions.map(async (s) => {
         try {
           let movie = null;
 
           // Fetch from TMDB API
           // Note: TuiMDB integration requires UID mapping which we skip for now
-          const u = new URL('/api/tmdb/movie', getBaseUrl());
-          u.searchParams.set('id', String(s.tmdbId));
-          u.searchParams.set('_t', String(freshCacheKey)); // Cache buster
-          const r = await fetch(u.toString(), { cache: 'no-store' });
+          const u = new URL("/api/tmdb/movie", getBaseUrl());
+          u.searchParams.set("id", String(s.tmdbId));
+          u.searchParams.set("_t", String(freshCacheKey)); // Cache buster
+          const r = await fetch(u.toString(), { cache: "no-store" });
           const j = await r.json();
 
           if (j.ok && j.movie) {
@@ -1396,17 +1832,19 @@ export default function SuggestPage() {
           }
 
           if (movie) {
-
             // Extract trailer key (first official trailer or first trailer)
             const videos = movie.videos?.results || [];
-            const trailer = videos.find((v: any) =>
-              v.site === 'YouTube' && v.type === 'Trailer' && v.official
-            ) || videos.find((v: any) =>
-              v.site === 'YouTube' && v.type === 'Trailer'
-            );
+            const trailer =
+              videos.find(
+                (v: any) =>
+                  v.site === "YouTube" && v.type === "Trailer" && v.official,
+              ) ||
+              videos.find(
+                (v: any) => v.site === "YouTube" && v.type === "Trailer",
+              );
 
             // Use voteCategory from suggestByOverlap result (already calculated there)
-            const voteCategory = s.voteCategory || 'standard';
+            const voteCategory = s.voteCategory || "standard";
 
             // Extract collection name
             const collection = movie.belongs_to_collection;
@@ -1418,28 +1856,40 @@ export default function SuggestPage() {
             // Extract additional metadata for new sections
             const runtime = movie.runtime || undefined;
             const original_language = movie.original_language || undefined;
-            const spoken_languages = (movie.spoken_languages || []).map((l: any) => l.iso_639_1);
-            const production_countries = (movie.production_countries || []).map((c: any) => c.iso_3166_1);
+            const spoken_languages = (movie.spoken_languages || []).map(
+              (l: any) => l.iso_639_1,
+            );
+            const production_countries = (movie.production_countries || []).map(
+              (c: any) => c.iso_3166_1,
+            );
 
             // P2.3: Fetch streaming availability from Watchmode via API route
             let streamingSources: any[] = [];
             try {
-              const watchmodeUrl = new URL('/api/watchmode/streaming', getBaseUrl());
-              watchmodeUrl.searchParams.set('tmdbId', String(s.tmdbId));
-              const watchmodeRes = await fetch(watchmodeUrl.toString(), { cache: 'no-store' });
+              const watchmodeUrl = new URL(
+                "/api/watchmode/streaming",
+                getBaseUrl(),
+              );
+              watchmodeUrl.searchParams.set("tmdbId", String(s.tmdbId));
+              const watchmodeRes = await fetch(watchmodeUrl.toString(), {
+                cache: "no-store",
+              });
               const watchmodeData = await watchmodeRes.json();
               if (watchmodeData.ok && watchmodeData.sources) {
                 streamingSources = watchmodeData.sources;
               }
             } catch (e) {
-              console.warn(`[Suggest] Failed to fetch streaming sources for ${s.tmdbId}`, e);
+              console.warn(
+                `[Suggest] Failed to fetch streaming sources for ${s.tmdbId}`,
+                e,
+              );
             }
-
 
             return {
               id: s.tmdbId,
               title: s.title ?? movie.title ?? `#${s.tmdbId}`,
-              year: s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
+              year:
+                s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
               reasons: s.reasons,
               poster_path: s.poster_path || movie.poster_path,
               score: s.score,
@@ -1458,7 +1908,7 @@ export default function SuggestPage() {
               original_language,
               spoken_languages,
               production_countries,
-              streamingSources // P2.3 implementation
+              streamingSources, // P2.3 implementation
             };
           }
         } catch (e) {
@@ -1474,7 +1924,7 @@ export default function SuggestPage() {
           poster_path: s.poster_path,
           score: s.score,
           trailerKey: null,
-          voteCategory: 'standard' as const,
+          voteCategory: "standard" as const,
           collectionName: undefined,
           genres: [],
           sources: s.sources,
@@ -1483,17 +1933,19 @@ export default function SuggestPage() {
           runtime: undefined,
           original_language: undefined,
           spoken_languages: undefined,
-          production_countries: undefined
+          production_countries: undefined,
         };
       });
 
       const details = await Promise.all(detailsPromises);
-      console.log('[Suggest] suggestions ready with full details', { count: details.length });
+      console.log("[Suggest] suggestions ready with full details", {
+        count: details.length,
+      });
 
       // Track shown IDs for future refreshes
-      setShownIds(prev => {
+      setShownIds((prev) => {
         const updated = new Set(prev);
-        details.forEach(d => updated.add(d.id));
+        details.forEach((d) => updated.add(d.id));
         return updated;
       });
 
@@ -1514,7 +1966,7 @@ export default function SuggestPage() {
 
         await logSuggestionExposure({
           userId: uid,
-          suggestions: details.map(d => ({
+          suggestions: details.map((d) => ({
             tmdbId: d.id,
             baseScore: d.score,
             consensusLevel: d.consensusLevel,
@@ -1534,19 +1986,36 @@ export default function SuggestPage() {
           },
         });
       } catch (e) {
-        console.error('[Suggest] Failed to log exposures', e);
+        console.error("[Suggest] Failed to log exposures", e);
       }
 
       // Mark progress as complete
-      setProgress({ current: 7, total: 7, stage: 'details', details: `Loaded ${details.length} personalized suggestions!` });
+      setProgress({
+        current: 7,
+        total: 7,
+        stage: "details",
+        details: `Loaded ${details.length} personalized suggestions!`,
+      });
     } catch (e: any) {
-      console.error('[Suggest] error in runSuggest', e);
-      setError(e?.message ?? 'Failed to get suggestions');
+      console.error("[Suggest] error in runSuggest", e);
+      setError(e?.message ?? "Failed to get suggestions");
     } finally {
-      console.log('[Suggest] runSuggest end');
+      console.log("[Suggest] runSuggest end");
       setLoading(false);
     }
-  }, [uid, sourceFilms, excludeGenres, yearMin, yearMax, mode, refreshPosters, blockedIds, shownIds, computeContext, discoveryLevel]);
+  }, [
+    uid,
+    sourceFilms,
+    excludeGenres,
+    yearMin,
+    yearMax,
+    mode,
+    refreshPosters,
+    blockedIds,
+    shownIds,
+    computeContext,
+    discoveryLevel,
+  ]);
 
   // Fallback: if no local films, load from Supabase once
   useEffect(() => {
@@ -1555,9 +2024,9 @@ export default function SuggestPage() {
         if (!supabase || !uid) return;
         if (films && films.length) return;
         const { data, error } = await supabase
-          .from('film_events')
-          .select('uri,title,year,rating,rewatch,last_date,liked,on_watchlist')
-          .eq('user_id', uid)
+          .from("film_events")
+          .select("uri,title,year,rating,rewatch,last_date,liked,on_watchlist")
+          .eq("user_id", uid)
           .limit(5000);
         if (error) throw error;
         if (data && data.length) {
@@ -1603,7 +2072,10 @@ export default function SuggestPage() {
       return;
     }
 
-    const candidate = findPairwiseCandidate(items.filter((i) => !i.dismissed), pairHistory);
+    const candidate = findPairwiseCandidate(
+      items.filter((i) => !i.dismissed),
+      pairHistory,
+    );
     // TypeScript check: specific casting might be needed if generic inference fails, but MovieItem matches PairwiseCandidate structure
     setPairwisePair(candidate as { a: MovieItem; b: MovieItem } | null);
   }, [items, pairHistory, pairwiseCount, pairwisePair, PAIRWISE_SESSION_LIMIT]);
@@ -1636,475 +2108,584 @@ export default function SuggestPage() {
       setItems(null);
       void runSuggest();
     };
-    if (typeof window !== 'undefined') {
-      window.addEventListener('lettr:mappings-updated', handler);
-      window.addEventListener('lettr:blocked-updated', blockedHandler);
-      window.addEventListener('lettr:feedback-updated', feedbackHandler);
+    if (typeof window !== "undefined") {
+      window.addEventListener("lettr:mappings-updated", handler);
+      window.addEventListener("lettr:blocked-updated", blockedHandler);
+      window.addEventListener("lettr:feedback-updated", feedbackHandler);
     }
     return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('lettr:mappings-updated', handler);
-        window.removeEventListener('lettr:blocked-updated', blockedHandler);
-        window.removeEventListener('lettr:feedback-updated', feedbackHandler);
+      if (typeof window !== "undefined") {
+        window.removeEventListener("lettr:mappings-updated", handler);
+        window.removeEventListener("lettr:blocked-updated", blockedHandler);
+        window.removeEventListener("lettr:feedback-updated", feedbackHandler);
       }
     };
   }, [runSuggest, uid]);
 
   // Fetch a single replacement suggestion
-  const fetchReplacementSuggestion = useCallback(async (): Promise<MovieItem | null> => {
-    if (!uid || !sourceFilms) return null;
-
-    try {
-      const filteredFilms = sourceFilms;
-      const uris = filteredFilms.map((f) => f.uri);
-      const mappings = await getFilmMappings(uid, uris);
-
-      // Fetch feature feedback for replacements too
-      let featureFeedback = undefined;
-      try {
-        featureFeedback = await getAvoidedFeatures(uid);
-      } catch (e) {
-        // ignore
-      }
-
-      // Build sets of watched and blocked IDs
-      const watchedIds = new Set<number>();
-      for (const f of filteredFilms) {
-        const mid = mappings.get(f.uri);
-        if (mid) watchedIds.add(mid);
-      }
-
-      // Get all currently shown IDs
-      const currentShownIds = new Set([...shownIds, ...(items?.map(i => i.id) ?? [])]);
-
-      // Generate candidates
-      const highlyRated = filteredFilms
-        .filter(f => (f.rating ?? 0) >= 4 || f.liked)
-        .map(f => mappings.get(f.uri))
-        .filter((id): id is number => id != null);
-
-      // Get watchlist films for intent signals
-      const watchlistFilmsForMore = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
-      const watchlistEntriesForMore = watchlistFilmsForMore.map(f => ({
-        tmdbId: mappings.get(f.uri)!,
-        addedAt: f.watchlistAddedAt ?? null,
-      }));
-
-      // Fetch TMDB details for seed movie titles (needed for TasteDive/similar recommendations)
-      const allMappedIds = Array.from(mappings.values());
-      const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
-
-      const tasteProfile = await buildTasteProfile({
-        films: filteredFilms,
-        mappings,
-        topN: 10,
-        tmdbDetails: tmdbDetailsMap,
-        watchlistFilms: watchlistFilmsForMore,
-        userId: uid ?? undefined
-      });
-
-      const smartCandidates = await generateSmartCandidates({
-        highlyRatedIds: highlyRated,
-        watchlistIds: watchlistFilmsForMore.map(f => mappings.get(f.uri)!), // Use watchlist for intent-based discovery
-        topGenres: tasteProfile.topGenres,
-        topKeywords: tasteProfile.topKeywords,
-        topDirectors: tasteProfile.topDirectors,
-        nichePreferences: tasteProfile.nichePreferences,
-        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
-        tmdbDetailsMap // Critical: enables seed movie titles for similar recommendations
-      });
-
-      let candidatesRaw: number[] = [];
-      candidatesRaw.push(...smartCandidates.trending);
-      candidatesRaw.push(...smartCandidates.similar);
-      candidatesRaw.push(...smartCandidates.discovered);
-
-      // Filter candidates
-      const candidatesFiltered = candidatesRaw
-        .filter((id, idx, arr) => arr.indexOf(id) === idx)
-        .filter((id) => !watchedIds.has(id))
-        .filter((id) => !blockedIds.has(id))
-        .filter((id) => !currentShownIds.has(id));
-
-      if (candidatesFiltered.length === 0) return null;
-
-      // Shuffle and take one
-      const shuffled = [...candidatesFiltered].sort(() => Math.random() - 0.5);
-      const candidateId = shuffled[0];
-
-      // Get suggestion details
-      const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
-      const suggestions = await suggestByOverlap({
-        userId: uid,
-        films: lite,
-        mappings,
-        candidates: [candidateId],
-        excludeGenres: undefined,
-        maxCandidates: 1,
-        concurrency: 1,
-        excludeWatchedIds: watchedIds,
-        desiredResults: 1,
-        context: computeContext(),
-        watchlistEntries: watchlistEntriesForMore,
-        enhancedProfile: {
-          topActors: tasteProfile.topActors,
-          topStudios: tasteProfile.topStudios,
-          avoidGenres: tasteProfile.avoidGenres,
-          avoidKeywords: tasteProfile.avoidKeywords,
-          avoidDirectors: tasteProfile.avoidDirectors,
-          topDecades: tasteProfile.topDecades,
-          watchlistGenres: tasteProfile.watchlistGenres?.map(w => w.name),
-          watchlistKeywords: tasteProfile.watchlistKeywords?.map(w => w.name),
-          watchlistDirectors: tasteProfile.watchlistDirectors?.map(w => w.name)
-        },
-        featureFeedback
-      });
-
-      if (suggestions.length === 0) return null;
-
-      const s = suggestions[0];
-
-      // Fetch full movie details from TMDB
-      let movie = null;
+  const fetchReplacementSuggestion =
+    useCallback(async (): Promise<MovieItem | null> => {
+      if (!uid || !sourceFilms) return null;
 
       try {
-        const u = new URL('/api/tmdb/movie', window.location.origin);
-        u.searchParams.set('id', String(s.tmdbId));
-        u.searchParams.set('_t', String(Date.now())); // Cache buster
-        const r = await fetch(u.toString(), { cache: 'no-store' });
-        const j = await r.json();
+        const filteredFilms = sourceFilms;
+        const uris = filteredFilms.map((f) => f.uri);
+        const mappings = await getFilmMappings(uid, uris);
 
-        if (j.ok && j.movie) {
-          movie = j.movie;
-        }
-      } catch (e) {
-        console.error('[Suggest] Failed to fetch movie details', e);
-      }
-
-      if (movie) {
-        const videos = movie.videos?.results || [];
-        const trailer = videos.find((v: any) =>
-          v.site === 'YouTube' && v.type === 'Trailer' && v.official
-        ) || videos.find((v: any) =>
-          v.site === 'YouTube' && v.type === 'Trailer'
-        );
-
-        // Use voteCategory from suggestByOverlap result (already calculated there)
-        const voteCategory = s.voteCategory || 'standard';
-
-        const collection = movie.belongs_to_collection;
-        const collectionName = collection?.name || undefined;
-
-        const genres = (movie.genres || []).map((g: any) => g.name);
-
-        return {
-          id: s.tmdbId,
-          title: s.title ?? movie.title ?? `#${s.tmdbId}`,
-          year: s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
-          reasons: s.reasons,
-          poster_path: s.poster_path || movie.poster_path,
-          score: s.score,
-          trailerKey: trailer?.key || null,
-          voteCategory,
-          collectionName,
-          genres,
-          vote_average: movie.vote_average,
-          vote_count: movie.vote_count,
-          overview: movie.overview,
-          contributingFilms: s.contributingFilms
-        };
-      }
-
-      return null;
-    } catch (e) {
-      console.error('[Suggest] Failed to fetch replacement:', e);
-      return null;
-    }
-  }, [uid, sourceFilms, blockedIds, shownIds, items, computeContext]);
-
-  // Fetch replacement suggestions for a specific section
-  const fetchSectionReplacements = useCallback(async (sectionName: string, count: number = 12): Promise<MovieItem[]> => {
-    if (!uid || !sourceFilms || !items) return [];
-
-    try {
-      console.log(`[SectionRefresh] Fetching replacements for ${sectionName}`);
-
-      const filteredFilms = sourceFilms;
-      const uris = filteredFilms.map((f) => f.uri);
-      const mappings = await getFilmMappings(uid, uris);
-
-      // Fetch feature feedback
-      let featureFeedback = undefined;
-      try {
-        featureFeedback = await getAvoidedFeatures(uid);
-      } catch (e) {
-        // ignore
-      }
-
-      // Build sets of watched and blocked IDs
-      const watchedIds = new Set<number>();
-      for (const f of filteredFilms) {
-        const mid = mappings.get(f.uri);
-        if (mid) watchedIds.add(mid);
-      }
-
-      // Get all currently shown IDs
-      const currentShownIds = new Set([...shownIds, ...(items?.map(i => i.id) ?? [])]);
-
-      // Generate candidates (smaller batch for section refresh)
-      const highlyRated = filteredFilms
-        .filter(f => (f.rating ?? 0) >= 4 || f.liked)
-        .map(f => mappings.get(f.uri))
-        .filter((id): id is number => id != null);
-
-      // Fetch negative feedback to learn from dislikes
-      let negativeFeedbackIds: number[] = [];
-      try {
-        const feedbackMap = await getFeedback(uid);
-        negativeFeedbackIds = Array.from(feedbackMap.entries())
-          .filter((entry): entry is [number, 'negative' | 'positive'] => entry[1] === 'negative')
-          .map((entry) => entry[0]);
-      } catch (e) {
-        console.error('[SectionRefresh] Failed to fetch feedback', e);
-      }
-
-      // Get watchlist films for intent signals
-      const watchlistFilmsForRefresh = sourceFilms.filter(f => f.onWatchlist && mappings.has(f.uri));
-      const watchlistEntriesForRefresh = watchlistFilmsForRefresh.map(f => ({
-        tmdbId: mappings.get(f.uri)!,
-        addedAt: f.watchlistAddedAt ?? null,
-      }));
-
-      // Fetch TMDB details for seed movie titles (needed for TasteDive/similar recommendations)
-      const allMappedIds = Array.from(mappings.values());
-      const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
-
-      const tasteProfile = await buildTasteProfile({
-        films: filteredFilms,
-        mappings,
-        topN: 10,
-        negativeFeedbackIds,
-        tmdbDetails: tmdbDetailsMap,
-        watchlistFilms: watchlistFilmsForRefresh,
-        userId: uid ?? undefined
-      });
-
-      const smartCandidates = await generateSmartCandidates({
-        highlyRatedIds: highlyRated,
-        watchlistIds: watchlistFilmsForRefresh.map(f => mappings.get(f.uri)!), // Use watchlist for intent-based discovery
-        topGenres: tasteProfile.topGenres,
-        topKeywords: tasteProfile.topKeywords,
-        topDirectors: tasteProfile.topDirectors,
-        nichePreferences: tasteProfile.nichePreferences,
-        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
-        tmdbDetailsMap // Critical: enables seed movie titles for similar recommendations
-      });
-
-      let candidatesRaw: number[] = [];
-      candidatesRaw.push(...smartCandidates.trending);
-      candidatesRaw.push(...smartCandidates.similar);
-      candidatesRaw.push(...smartCandidates.discovered);
-
-      // Filter candidates
-      const candidatesFiltered = candidatesRaw
-        .filter((id, idx, arr) => arr.indexOf(id) === idx)
-        .filter((id) => !watchedIds.has(id))
-        .filter((id) => !blockedIds.has(id))
-        .filter((id) => !currentShownIds.has(id));
-
-      // Shuffle and take a batch
-      const shuffled = [...candidatesFiltered].sort(() => Math.random() - 0.5);
-      const candidates = shuffled.slice(0, 100); // Smaller batch for section refresh
-
-      if (candidates.length === 0) {
-        console.log(`[SectionRefresh] No candidates available for ${sectionName}`);
-        return [];
-      }
-
-      // Score the candidates
-      const lite = filteredFilms.map((f) => ({ uri: f.uri, title: f.title, year: f.year, rating: f.rating, liked: f.liked }));
-      const suggestions = await suggestByOverlap({
-        userId: uid,
-        films: lite,
-        mappings,
-        candidates,
-        excludeGenres: undefined,
-        maxCandidates: 100,
-        concurrency: 3,
-        excludeWatchedIds: watchedIds,
-        desiredResults: count * 3, // Request more than needed to ensure enough after filtering
-        context: computeContext(),
-        watchlistEntries: watchlistEntriesForRefresh,
-        enhancedProfile: {
-          topActors: tasteProfile.topActors,
-          topStudios: tasteProfile.topStudios,
-          avoidGenres: tasteProfile.avoidGenres,
-          avoidKeywords: tasteProfile.avoidKeywords,
-          avoidDirectors: tasteProfile.avoidDirectors,
-          topDecades: tasteProfile.topDecades,
-          watchlistGenres: tasteProfile.watchlistGenres?.map(w => w.name),
-          watchlistKeywords: tasteProfile.watchlistKeywords?.map(w => w.name),
-          watchlistDirectors: tasteProfile.watchlistDirectors?.map(w => w.name)
-        },
-        featureFeedback
-      });
-
-      if (suggestions.length === 0) return [];
-
-      // Fetch full movie details
-      const detailsPromises = suggestions.map(async (s): Promise<MovieItem | null> => {
+        // Fetch feature feedback for replacements too
+        let featureFeedback = undefined;
         try {
-          const u = new URL('/api/tmdb/movie', window.location.origin);
-          u.searchParams.set('id', String(s.tmdbId));
-          u.searchParams.set('_t', String(Date.now()));
-          const r = await fetch(u.toString(), { cache: 'no-store' });
+          featureFeedback = await getAvoidedFeatures(uid);
+        } catch (e) {
+          // ignore
+        }
+
+        // Build sets of watched and blocked IDs
+        const watchedIds = new Set<number>();
+        for (const f of filteredFilms) {
+          const mid = mappings.get(f.uri);
+          if (mid) watchedIds.add(mid);
+        }
+
+        // Get all currently shown IDs
+        const currentShownIds = new Set([
+          ...shownIds,
+          ...(items?.map((i) => i.id) ?? []),
+        ]);
+
+        // Generate candidates
+        const highlyRated = filteredFilms
+          .filter((f) => (f.rating ?? 0) >= 4 || f.liked)
+          .map((f) => mappings.get(f.uri))
+          .filter((id): id is number => id != null);
+
+        // Get watchlist films for intent signals
+        const watchlistFilmsForMore = sourceFilms.filter(
+          (f) => f.onWatchlist && mappings.has(f.uri),
+        );
+        const watchlistEntriesForMore = watchlistFilmsForMore.map((f) => ({
+          tmdbId: mappings.get(f.uri)!,
+          addedAt: f.watchlistAddedAt ?? null,
+        }));
+
+        // Fetch TMDB details for seed movie titles (needed for TasteDive/similar recommendations)
+        const allMappedIds = Array.from(mappings.values());
+        const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
+
+        const tasteProfile = await buildTasteProfile({
+          films: filteredFilms,
+          mappings,
+          topN: 10,
+          tmdbDetails: tmdbDetailsMap,
+          watchlistFilms: watchlistFilmsForMore,
+          userId: uid ?? undefined,
+        });
+
+        const smartCandidates = await generateSmartCandidates({
+          highlyRatedIds: highlyRated,
+          watchlistIds: watchlistFilmsForMore.map((f) => mappings.get(f.uri)!), // Use watchlist for intent-based discovery
+          topGenres: tasteProfile.topGenres,
+          topKeywords: tasteProfile.topKeywords,
+          topDirectors: tasteProfile.topDirectors,
+          nichePreferences: tasteProfile.nichePreferences,
+          preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
+          tmdbDetailsMap, // Critical: enables seed movie titles for similar recommendations
+        });
+
+        let candidatesRaw: number[] = [];
+        candidatesRaw.push(...smartCandidates.trending);
+        candidatesRaw.push(...smartCandidates.similar);
+        candidatesRaw.push(...smartCandidates.discovered);
+
+        // Filter candidates
+        const candidatesFiltered = candidatesRaw
+          .filter((id, idx, arr) => arr.indexOf(id) === idx)
+          .filter((id) => !watchedIds.has(id))
+          .filter((id) => !blockedIds.has(id))
+          .filter((id) => !currentShownIds.has(id));
+
+        if (candidatesFiltered.length === 0) return null;
+
+        // Shuffle and take one
+        const shuffled = [...candidatesFiltered].sort(
+          () => Math.random() - 0.5,
+        );
+        const candidateId = shuffled[0];
+
+        // Get suggestion details
+        const lite = filteredFilms.map((f) => ({
+          uri: f.uri,
+          title: f.title,
+          year: f.year,
+          rating: f.rating,
+          liked: f.liked,
+        }));
+        const suggestions = await suggestByOverlap({
+          userId: uid,
+          films: lite,
+          mappings,
+          candidates: [candidateId],
+          excludeGenres: undefined,
+          maxCandidates: 1,
+          concurrency: 1,
+          excludeWatchedIds: watchedIds,
+          desiredResults: 1,
+          context: computeContext(),
+          watchlistEntries: watchlistEntriesForMore,
+          enhancedProfile: {
+            topActors: tasteProfile.topActors,
+            topStudios: tasteProfile.topStudios,
+            avoidGenres: tasteProfile.avoidGenres,
+            avoidKeywords: tasteProfile.avoidKeywords,
+            avoidDirectors: tasteProfile.avoidDirectors,
+            topDecades: tasteProfile.topDecades,
+            watchlistGenres: tasteProfile.watchlistGenres?.map((w) => w.name),
+            watchlistKeywords: tasteProfile.watchlistKeywords?.map(
+              (w) => w.name,
+            ),
+            watchlistDirectors: tasteProfile.watchlistDirectors?.map(
+              (w) => w.name,
+            ),
+          },
+          featureFeedback,
+        });
+
+        if (suggestions.length === 0) return null;
+
+        const s = suggestions[0];
+
+        // Fetch full movie details from TMDB
+        let movie = null;
+
+        try {
+          const u = new URL("/api/tmdb/movie", window.location.origin);
+          u.searchParams.set("id", String(s.tmdbId));
+          u.searchParams.set("_t", String(Date.now())); // Cache buster
+          const r = await fetch(u.toString(), { cache: "no-store" });
           const j = await r.json();
 
           if (j.ok && j.movie) {
-            const movie = j.movie;
-            const videos = movie.videos?.results || [];
-            const trailer = videos.find((v: any) =>
-              v.site === 'YouTube' && v.type === 'Trailer' && v.official
-            ) || videos.find((v: any) =>
-              v.site === 'YouTube' && v.type === 'Trailer'
-            );
-
-            const voteCategory = s.voteCategory || 'standard';
-            const collection = movie.belongs_to_collection;
-            const collectionName = collection?.name || undefined;
-            const genres = (movie.genres || []).map((g: any) => g.name);
-
-            const movieItem: MovieItem = {
-              id: s.tmdbId,
-              title: s.title ?? movie.title ?? `#${s.tmdbId}`,
-              year: s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
-              reasons: s.reasons,
-              poster_path: s.poster_path || movie.poster_path,
-              score: s.score,
-              trailerKey: trailer?.key || null,
-              voteCategory,
-              collectionName,
-              genres,
-              vote_average: movie.vote_average,
-              vote_count: movie.vote_count,
-              overview: movie.overview,
-              contributingFilms: s.contributingFilms
-            };
-            return movieItem;
+            movie = j.movie;
           }
         } catch (e) {
-          console.error(`[SectionRefresh] Failed to fetch details for ${s.tmdbId}`, e);
+          console.error("[Suggest] Failed to fetch movie details", e);
         }
+
+        if (movie) {
+          const videos = movie.videos?.results || [];
+          const trailer =
+            videos.find(
+              (v: any) =>
+                v.site === "YouTube" && v.type === "Trailer" && v.official,
+            ) ||
+            videos.find(
+              (v: any) => v.site === "YouTube" && v.type === "Trailer",
+            );
+
+          // Use voteCategory from suggestByOverlap result (already calculated there)
+          const voteCategory = s.voteCategory || "standard";
+
+          const collection = movie.belongs_to_collection;
+          const collectionName = collection?.name || undefined;
+
+          const genres = (movie.genres || []).map((g: any) => g.name);
+
+          return {
+            id: s.tmdbId,
+            title: s.title ?? movie.title ?? `#${s.tmdbId}`,
+            year:
+              s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
+            reasons: s.reasons,
+            poster_path: s.poster_path || movie.poster_path,
+            score: s.score,
+            trailerKey: trailer?.key || null,
+            voteCategory,
+            collectionName,
+            genres,
+            vote_average: movie.vote_average,
+            vote_count: movie.vote_count,
+            overview: movie.overview,
+            contributingFilms: s.contributingFilms,
+          };
+        }
+
         return null;
-      });
+      } catch (e) {
+        console.error("[Suggest] Failed to fetch replacement:", e);
+        return null;
+      }
+    }, [uid, sourceFilms, blockedIds, shownIds, items, computeContext]);
 
-      const allDetails = await Promise.all(detailsPromises);
-      const details: MovieItem[] = allDetails.filter((d): d is MovieItem => d !== null);
+  // Fetch replacement suggestions for a specific section
+  const fetchSectionReplacements = useCallback(
+    async (sectionName: string, count: number = 12): Promise<MovieItem[]> => {
+      if (!uid || !sourceFilms || !items) return [];
 
-      // Filter by section criteria
-      const seasonalConfig = getSeasonalRecommendationConfig();
-      const sectionFilter = getSectionFilter(sectionName, seasonalConfig);
-      const filtered = details.filter(sectionFilter) as MovieItem[];
+      try {
+        console.log(
+          `[SectionRefresh] Fetching replacements for ${sectionName}`,
+        );
 
-      // Sort by score and take top N
-      const sorted = filtered.sort((a, b) => b.score - a.score);
-      const result = sorted.slice(0, count);
+        const filteredFilms = sourceFilms;
+        const uris = filteredFilms.map((f) => f.uri);
+        const mappings = await getFilmMappings(uid, uris);
 
-      console.log(`[SectionRefresh] Found ${result.length} replacements for ${sectionName}`);
-      return result;
-    } catch (e) {
-      console.error(`[SectionRefresh] Failed to fetch replacements for ${sectionName}:`, e);
-      return [];
-    }
-  }, [uid, sourceFilms, blockedIds, shownIds, items, getSectionFilter, computeContext]);
+        // Fetch feature feedback
+        let featureFeedback = undefined;
+        try {
+          featureFeedback = await getAvoidedFeatures(uid);
+        } catch (e) {
+          // ignore
+        }
+
+        // Build sets of watched and blocked IDs
+        const watchedIds = new Set<number>();
+        for (const f of filteredFilms) {
+          const mid = mappings.get(f.uri);
+          if (mid) watchedIds.add(mid);
+        }
+
+        // Get all currently shown IDs
+        const currentShownIds = new Set([
+          ...shownIds,
+          ...(items?.map((i) => i.id) ?? []),
+        ]);
+
+        // Generate candidates (smaller batch for section refresh)
+        const highlyRated = filteredFilms
+          .filter((f) => (f.rating ?? 0) >= 4 || f.liked)
+          .map((f) => mappings.get(f.uri))
+          .filter((id): id is number => id != null);
+
+        // Fetch negative feedback to learn from dislikes
+        let negativeFeedbackIds: number[] = [];
+        try {
+          const feedbackMap = await getFeedback(uid);
+          negativeFeedbackIds = Array.from(feedbackMap.entries())
+            .filter(
+              (entry): entry is [number, "negative" | "positive"] =>
+                entry[1] === "negative",
+            )
+            .map((entry) => entry[0]);
+        } catch (e) {
+          console.error("[SectionRefresh] Failed to fetch feedback", e);
+        }
+
+        // Get watchlist films for intent signals
+        const watchlistFilmsForRefresh = sourceFilms.filter(
+          (f) => f.onWatchlist && mappings.has(f.uri),
+        );
+        const watchlistEntriesForRefresh = watchlistFilmsForRefresh.map(
+          (f) => ({
+            tmdbId: mappings.get(f.uri)!,
+            addedAt: f.watchlistAddedAt ?? null,
+          }),
+        );
+
+        // Fetch TMDB details for seed movie titles (needed for TasteDive/similar recommendations)
+        const allMappedIds = Array.from(mappings.values());
+        const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
+
+        const tasteProfile = await buildTasteProfile({
+          films: filteredFilms,
+          mappings,
+          topN: 10,
+          negativeFeedbackIds,
+          tmdbDetails: tmdbDetailsMap,
+          watchlistFilms: watchlistFilmsForRefresh,
+          userId: uid ?? undefined,
+        });
+
+        const smartCandidates = await generateSmartCandidates({
+          highlyRatedIds: highlyRated,
+          watchlistIds: watchlistFilmsForRefresh.map(
+            (f) => mappings.get(f.uri)!,
+          ), // Use watchlist for intent-based discovery
+          topGenres: tasteProfile.topGenres,
+          topKeywords: tasteProfile.topKeywords,
+          topDirectors: tasteProfile.topDirectors,
+          nichePreferences: tasteProfile.nichePreferences,
+          preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
+          tmdbDetailsMap, // Critical: enables seed movie titles for similar recommendations
+        });
+
+        let candidatesRaw: number[] = [];
+        candidatesRaw.push(...smartCandidates.trending);
+        candidatesRaw.push(...smartCandidates.similar);
+        candidatesRaw.push(...smartCandidates.discovered);
+
+        // Filter candidates
+        const candidatesFiltered = candidatesRaw
+          .filter((id, idx, arr) => arr.indexOf(id) === idx)
+          .filter((id) => !watchedIds.has(id))
+          .filter((id) => !blockedIds.has(id))
+          .filter((id) => !currentShownIds.has(id));
+
+        // Shuffle and take a batch
+        const shuffled = [...candidatesFiltered].sort(
+          () => Math.random() - 0.5,
+        );
+        const candidates = shuffled.slice(0, 100); // Smaller batch for section refresh
+
+        if (candidates.length === 0) {
+          console.log(
+            `[SectionRefresh] No candidates available for ${sectionName}`,
+          );
+          return [];
+        }
+
+        // Score the candidates
+        const lite = filteredFilms.map((f) => ({
+          uri: f.uri,
+          title: f.title,
+          year: f.year,
+          rating: f.rating,
+          liked: f.liked,
+        }));
+        const suggestions = await suggestByOverlap({
+          userId: uid,
+          films: lite,
+          mappings,
+          candidates,
+          excludeGenres: undefined,
+          maxCandidates: 100,
+          concurrency: 3,
+          excludeWatchedIds: watchedIds,
+          desiredResults: count * 3, // Request more than needed to ensure enough after filtering
+          context: computeContext(),
+          watchlistEntries: watchlistEntriesForRefresh,
+          enhancedProfile: {
+            topActors: tasteProfile.topActors,
+            topStudios: tasteProfile.topStudios,
+            avoidGenres: tasteProfile.avoidGenres,
+            avoidKeywords: tasteProfile.avoidKeywords,
+            avoidDirectors: tasteProfile.avoidDirectors,
+            topDecades: tasteProfile.topDecades,
+            watchlistGenres: tasteProfile.watchlistGenres?.map((w) => w.name),
+            watchlistKeywords: tasteProfile.watchlistKeywords?.map(
+              (w) => w.name,
+            ),
+            watchlistDirectors: tasteProfile.watchlistDirectors?.map(
+              (w) => w.name,
+            ),
+          },
+          featureFeedback,
+        });
+
+        if (suggestions.length === 0) return [];
+
+        // Fetch full movie details
+        const detailsPromises = suggestions.map(
+          async (s): Promise<MovieItem | null> => {
+            try {
+              const u = new URL("/api/tmdb/movie", window.location.origin);
+              u.searchParams.set("id", String(s.tmdbId));
+              u.searchParams.set("_t", String(Date.now()));
+              const r = await fetch(u.toString(), { cache: "no-store" });
+              const j = await r.json();
+
+              if (j.ok && j.movie) {
+                const movie = j.movie;
+                const videos = movie.videos?.results || [];
+                const trailer =
+                  videos.find(
+                    (v: any) =>
+                      v.site === "YouTube" &&
+                      v.type === "Trailer" &&
+                      v.official,
+                  ) ||
+                  videos.find(
+                    (v: any) => v.site === "YouTube" && v.type === "Trailer",
+                  );
+
+                const voteCategory = s.voteCategory || "standard";
+                const collection = movie.belongs_to_collection;
+                const collectionName = collection?.name || undefined;
+                const genres = (movie.genres || []).map((g: any) => g.name);
+
+                const movieItem: MovieItem = {
+                  id: s.tmdbId,
+                  title: s.title ?? movie.title ?? `#${s.tmdbId}`,
+                  year:
+                    s.release_date?.slice(0, 4) ||
+                    movie.release_date?.slice(0, 4),
+                  reasons: s.reasons,
+                  poster_path: s.poster_path || movie.poster_path,
+                  score: s.score,
+                  trailerKey: trailer?.key || null,
+                  voteCategory,
+                  collectionName,
+                  genres,
+                  vote_average: movie.vote_average,
+                  vote_count: movie.vote_count,
+                  overview: movie.overview,
+                  contributingFilms: s.contributingFilms,
+                };
+                return movieItem;
+              }
+            } catch (e) {
+              console.error(
+                `[SectionRefresh] Failed to fetch details for ${s.tmdbId}`,
+                e,
+              );
+            }
+            return null;
+          },
+        );
+
+        const allDetails = await Promise.all(detailsPromises);
+        const details: MovieItem[] = allDetails.filter(
+          (d): d is MovieItem => d !== null,
+        );
+
+        // Filter by section criteria
+        const seasonalConfig = getSeasonalRecommendationConfig();
+        const sectionFilter = getSectionFilter(sectionName, seasonalConfig);
+        const filtered = details.filter(sectionFilter) as MovieItem[];
+
+        // Sort by score and take top N
+        const sorted = filtered.sort((a, b) => b.score - a.score);
+        const result = sorted.slice(0, count);
+
+        console.log(
+          `[SectionRefresh] Found ${result.length} replacements for ${sectionName}`,
+        );
+        return result;
+      } catch (e) {
+        console.error(
+          `[SectionRefresh] Failed to fetch replacements for ${sectionName}:`,
+          e,
+        );
+        return [];
+      }
+    },
+    [
+      uid,
+      sourceFilms,
+      blockedIds,
+      shownIds,
+      items,
+      getSectionFilter,
+      computeContext,
+    ],
+  );
 
   // Apply a single explicit reason (shared helper so multi-select can submit all)
-  const applyExplicitReason = async (reason: string, popup: NonNullable<typeof feedbackPopup>) => {
+  const applyExplicitReason = async (
+    reason: string,
+    popup: NonNullable<typeof feedbackPopup>,
+  ) => {
     if (!uid) return popup.insights.learningSummary;
-    const isPositive = popup.feedbackType === 'positive';
+    const isPositive = popup.feedbackType === "positive";
     let confirmMessage = popup.insights.learningSummary;
 
     // === NEGATIVE FEEDBACK REASONS ===
-    if (reason === 'already_seen') {
-      confirmMessage = "👍 Got it! We won't count this against the movie's features.";
-    } else if (reason === 'not_in_mood') {
+    if (reason === "already_seen") {
+      confirmMessage =
+        "👍 Got it! We won't count this against the movie's features.";
+    } else if (reason === "not_in_mood") {
       confirmMessage = "👍 No problem! This won't affect your preferences.";
-    } else if (reason === 'too_long') {
+    } else if (reason === "too_long") {
       confirmMessage = "👎 Noted. We'll suggest more quick watches.";
-    } else if (reason === 'dislike_all') {
+    } else if (reason === "dislike_all") {
       confirmMessage = "👎👎 Got it! We'll strongly avoid movies like this.";
       for (const actor of popup.leadActors) {
-        await boostExplicitFeedback(uid, 'actor', actor, false, 3);
+        await boostExplicitFeedback(uid, "actor", actor, false, 3);
       }
       for (const genre of popup.genres) {
-        await boostExplicitFeedback(uid, 'genre', genre, false, 3);
+        await boostExplicitFeedback(uid, "genre", genre, false, 3);
       }
       for (const keyword of popup.topKeywords || []) {
-        await boostExplicitFeedback(uid, 'keyword', keyword, false, 3);
+        await boostExplicitFeedback(uid, "keyword", keyword, false, 3);
       }
       if (popup.franchise) {
-        await boostExplicitFeedback(uid, 'collection', popup.franchise, false, 3);
+        await boostExplicitFeedback(
+          uid,
+          "collection",
+          popup.franchise,
+          false,
+          3,
+        );
       }
 
       // === POSITIVE FEEDBACK REASONS ===
-    } else if (reason === 'great_pick') {
-      confirmMessage = "👍 Awesome! We'll learn from this to find more like it.";
-    } else if (reason === 'want_more_director' && popup.director) {
+    } else if (reason === "great_pick") {
+      confirmMessage =
+        "👍 Awesome! We'll learn from this to find more like it.";
+    } else if (reason === "want_more_director" && popup.director) {
       confirmMessage = `👍 Great! More ${popup.director} films coming your way.`;
-    } else if (reason === 'love_all') {
+    } else if (reason === "love_all") {
       confirmMessage = "❤️❤️ Amazing! We'll find more movies just like this!";
       for (const actor of popup.leadActors) {
-        await boostExplicitFeedback(uid, 'actor', actor, true, 3);
+        await boostExplicitFeedback(uid, "actor", actor, true, 3);
       }
       for (const genre of popup.genres) {
-        await boostExplicitFeedback(uid, 'genre', genre, true, 3);
+        await boostExplicitFeedback(uid, "genre", genre, true, 3);
       }
       for (const keyword of popup.topKeywords || []) {
-        await boostExplicitFeedback(uid, 'keyword', keyword, true, 3);
+        await boostExplicitFeedback(uid, "keyword", keyword, true, 3);
       }
       if (popup.franchise) {
-        await boostExplicitFeedback(uid, 'collection', popup.franchise, true, 3);
+        await boostExplicitFeedback(
+          uid,
+          "collection",
+          popup.franchise,
+          true,
+          3,
+        );
       }
 
       // === SHARED REASONS (work for both positive and negative) ===
-    } else if (reason.startsWith('actor:')) {
-      const actorName = reason.replace('actor:', '');
+    } else if (reason.startsWith("actor:")) {
+      const actorName = reason.replace("actor:", "");
       if (isPositive) {
         confirmMessage = `👍 Love it! More ${actorName} movies coming up.`;
-        await boostExplicitFeedback(uid, 'actor', actorName, true, 2);
+        await boostExplicitFeedback(uid, "actor", actorName, true, 2);
       } else {
         confirmMessage = `👎 Got it. ${actorName} movies will appear less often.`;
-        await boostExplicitFeedback(uid, 'actor', actorName, false, 2);
+        await boostExplicitFeedback(uid, "actor", actorName, false, 2);
       }
-    } else if (reason === 'franchise') {
+    } else if (reason === "franchise") {
       if (isPositive) {
         confirmMessage = `👍 Love the ${popup.franchise}! Showing more from this series.`;
         if (popup.franchise) {
-          await boostExplicitFeedback(uid, 'collection', popup.franchise, true, 2);
+          await boostExplicitFeedback(
+            uid,
+            "collection",
+            popup.franchise,
+            true,
+            2,
+          );
         }
       } else {
         confirmMessage = `👎 ${popup.franchise} fatigue noted. Showing fewer from this series.`;
         if (popup.franchise) {
-          await boostExplicitFeedback(uid, 'collection', popup.franchise, false, 2);
+          await boostExplicitFeedback(
+            uid,
+            "collection",
+            popup.franchise,
+            false,
+            2,
+          );
         }
       }
-    } else if (reason.startsWith('genre:')) {
-      const genreName = reason.replace('genre:', '');
+    } else if (reason.startsWith("genre:")) {
+      const genreName = reason.replace("genre:", "");
       if (isPositive) {
         confirmMessage = `👍 Great! More ${genreName} movies for you.`;
-        await boostExplicitFeedback(uid, 'genre', genreName, true, 2);
+        await boostExplicitFeedback(uid, "genre", genreName, true, 2);
       } else {
         confirmMessage = `👎 Got it. Fewer ${genreName} movies coming up.`;
-        await boostExplicitFeedback(uid, 'genre', genreName, false, 2);
+        await boostExplicitFeedback(uid, "genre", genreName, false, 2);
       }
-    } else if (reason.startsWith('keyword:')) {
-      const keywordName = reason.replace('keyword:', '');
+    } else if (reason.startsWith("keyword:")) {
+      const keywordName = reason.replace("keyword:", "");
       if (isPositive) {
         confirmMessage = `👍 Noted! More "${keywordName}" themed movies coming up.`;
-        await boostExplicitFeedback(uid, 'keyword', keywordName, true, 2);
+        await boostExplicitFeedback(uid, "keyword", keywordName, true, 2);
       } else {
         confirmMessage = `👎 Got it. Fewer "${keywordName}" themed movies coming up.`;
-        await boostExplicitFeedback(uid, 'keyword', keywordName, false, 2);
+        await boostExplicitFeedback(uid, "keyword", keywordName, false, 2);
       }
     }
 
@@ -2115,7 +2696,14 @@ export default function SuggestPage() {
   const handleExplicitReason = async (reason: string) => {
     if (!feedbackPopup) return;
     const popupData = feedbackPopup;
-    console.log('[FeedbackPopup] User selected explicit reason:', reason, 'for movie:', popupData.title, 'type:', popupData.feedbackType);
+    console.log(
+      "[FeedbackPopup] User selected explicit reason:",
+      reason,
+      "for movie:",
+      popupData.title,
+      "type:",
+      popupData.feedbackType,
+    );
     const confirmMessage = await applyExplicitReason(reason, popupData);
     setFeedbackPopup(null);
     setSelectedReasons([]);
@@ -2124,27 +2712,38 @@ export default function SuggestPage() {
   };
 
   const toggleReasonSelection = (reason: string) => {
-    setSelectedReasons((prev) => prev.includes(reason)
-      ? prev.filter((r) => r !== reason)
-      : [...prev, reason]);
+    setSelectedReasons((prev) =>
+      prev.includes(reason)
+        ? prev.filter((r) => r !== reason)
+        : [...prev, reason],
+    );
   };
 
-  const getReasonButtonClasses = (baseClasses: string, selected: boolean) => selected
-    ? `${baseClasses} ring-2 ring-offset-1 ring-blue-500 ring-offset-white dark:ring-offset-gray-800`
-    : baseClasses;
-
+  const getReasonButtonClasses = (baseClasses: string, selected: boolean) =>
+    selected
+      ? `${baseClasses} ring-2 ring-offset-1 ring-blue-500 ring-offset-white dark:ring-offset-gray-800`
+      : baseClasses;
 
   const getFeatureEvidenceBadge = (type: FeatureType, name: string) => {
     const key = `${type}:${name.toLowerCase()}`;
     const data = featureEvidence[key];
     if (!data) return null;
     const effective = data.totalCount * data.decayMultiplier;
-    const label = effective >= 6 ? 'Strong' : effective >= 3 ? 'Solid' : 'Light';
-    const days = data.lastUpdated ? Math.max(0, Math.round((Date.now() - new Date(data.lastUpdated).getTime()) / (1000 * 60 * 60 * 24))) : null;
-    const recency = days === null ? 'stale' : days === 0 ? '<1d' : `${days}d`;
+    const label =
+      effective >= 6 ? "Strong" : effective >= 3 ? "Solid" : "Light";
+    const days = data.lastUpdated
+      ? Math.max(
+          0,
+          Math.round(
+            (Date.now() - new Date(data.lastUpdated).getTime()) /
+              (1000 * 60 * 60 * 24),
+          ),
+        )
+      : null;
+    const recency = days === null ? "stale" : days === 0 ? "<1d" : `${days}d`;
     return {
       text: `${label} • ${data.totalCount} signals • ${recency}`,
-      title: `${label} evidence for ${name}${days === null ? '' : ` • last updated ${recency}`}`
+      title: `${label} evidence for ${name}${days === null ? "" : ` • last updated ${recency}`}`,
     };
   };
   const handleSubmitSelectedReasons = async () => {
@@ -2169,76 +2768,113 @@ export default function SuggestPage() {
     try {
       await neutralizeFeedback(uid, feedbackPopup.tmdbId);
       await handleUndoDismiss(feedbackPopup.tmdbId);
-      setFeedbackMessage('Marked as neutral. We will stop penalizing this pick.');
+      setFeedbackMessage(
+        "Marked as neutral. We will stop penalizing this pick.",
+      );
       setTimeout(() => setFeedbackMessage(null), 3500);
     } catch (e) {
-      console.error('[FeedbackPopup] Fast neutralize failed', e);
-      setFeedbackMessage('Could not reset feedback right now.');
+      console.error("[FeedbackPopup] Fast neutralize failed", e);
+      setFeedbackMessage("Could not reset feedback right now.");
       setTimeout(() => setFeedbackMessage(null), 3500);
     } finally {
       setFeedbackPopup(null);
     }
   };
 
-  const handleMicroSurveyChoice = async (choice: 'cast' | 'tone' | 'runtime') => {
+  const handleMicroSurveyChoice = async (
+    choice: "cast" | "tone" | "runtime",
+  ) => {
     if (!feedbackPopup) return;
-    if (choice === 'runtime') {
-      await handleExplicitReason('too_long');
+    if (choice === "runtime") {
+      await handleExplicitReason("too_long");
       return;
     }
-    if (choice === 'cast' && feedbackPopup.leadActors.length > 0) {
+    if (choice === "cast" && feedbackPopup.leadActors.length > 0) {
       await handleExplicitReason(`actor:${feedbackPopup.leadActors[0]}`);
       return;
     }
-    if (choice === 'tone' && feedbackPopup.topKeywords.length > 0) {
+    if (choice === "tone" && feedbackPopup.topKeywords.length > 0) {
       await handleExplicitReason(`keyword:${feedbackPopup.topKeywords[0]}`);
       return;
     }
-    await handleExplicitReason('not_in_mood');
+    await handleExplicitReason("not_in_mood");
   };
 
   // Handle feedback
-  const handleFeedback = async (tmdbId: number, type: 'negative' | 'positive', reasons?: string[]) => {
+  const handleFeedback = async (
+    tmdbId: number,
+    type: "negative" | "positive",
+    reasons?: string[],
+  ) => {
     if (!uid) return;
 
     // Find the movie title for the popup
-    const movie = items?.find(i => i.id === tmdbId);
-    const movieTitle = movie?.title || 'this movie';
+    const movie = items?.find((i) => i.id === tmdbId);
+    const movieTitle = movie?.title || "this movie";
     const feedbackMeta = {
       sources: movie?.sources,
-      consensusLevel: movie?.consensusLevel ?? 'low',
+      consensusLevel: movie?.consensusLevel ?? "low",
     };
 
     try {
-      if (type === 'negative') {
+      if (type === "negative") {
         // Block the suggestion in the background and get learning insights
         const [insights, movieFeatures] = await Promise.all([
-          addFeedback(uid, tmdbId, 'negative', reasons, feedbackMeta),
-          blockSuggestion(uid, tmdbId).then(() => getMovieFeaturesForPopup(tmdbId))
+          addFeedback(uid, tmdbId, "negative", reasons, feedbackMeta),
+          blockSuggestion(uid, tmdbId).then(() =>
+            getMovieFeaturesForPopup(tmdbId),
+          ),
         ]);
 
         await fetchEvidenceForFeatures([
-          ...movieFeatures.leadActors.map((name) => ({ type: 'actor' as FeatureType, name })),
-          ...movieFeatures.genres.map((name) => ({ type: 'genre' as FeatureType, name })),
-          ...movieFeatures.topKeywords.map((name) => ({ type: 'keyword' as FeatureType, name })),
-          ...(movieFeatures.franchise ? [{ type: 'collection' as FeatureType, name: movieFeatures.franchise }] : []),
-          ...(movieFeatures.director ? [{ type: 'director' as FeatureType, name: movieFeatures.director }] : [])
+          ...movieFeatures.leadActors.map((name) => ({
+            type: "actor" as FeatureType,
+            name,
+          })),
+          ...movieFeatures.genres.map((name) => ({
+            type: "genre" as FeatureType,
+            name,
+          })),
+          ...movieFeatures.topKeywords.map((name) => ({
+            type: "keyword" as FeatureType,
+            name,
+          })),
+          ...(movieFeatures.franchise
+            ? [
+                {
+                  type: "collection" as FeatureType,
+                  name: movieFeatures.franchise,
+                },
+              ]
+            : []),
+          ...(movieFeatures.director
+            ? [
+                {
+                  type: "director" as FeatureType,
+                  name: movieFeatures.director,
+                },
+              ]
+            : []),
         ]);
 
-        setBlockedIds(prev => new Set([...prev, tmdbId]));
+        setBlockedIds((prev) => new Set([...prev, tmdbId]));
 
         // Store for persistent undo control
         setLastFeedback({ id: tmdbId, title: movieTitle });
 
         // Offer quick undo toast
         setUndoToast({ id: tmdbId, title: movieTitle });
-        setTimeout(() => setUndoToast((curr) => curr && curr.id === tmdbId ? null : curr), 5000);
+        setTimeout(
+          () =>
+            setUndoToast((curr) => (curr && curr.id === tmdbId ? null : curr)),
+          5000,
+        );
 
         // Mark the item as dismissed in items (source of truth for storage)
-        setItems(prev => {
+        setItems((prev) => {
           if (!prev) return prev;
-          return prev.map(item =>
-            item.id === tmdbId ? { ...item, dismissed: true } : item
+          return prev.map((item) =>
+            item.id === tmdbId ? { ...item, dismissed: true } : item,
           );
         });
 
@@ -2252,7 +2888,9 @@ export default function SuggestPage() {
             // @ts-ignore - dynamic key access
             const section = next[key as keyof CategorizedSuggestions];
             if (Array.isArray(section)) {
-              const idx = section.findIndex((item: MovieItem) => item.id === tmdbId);
+              const idx = section.findIndex(
+                (item: MovieItem) => item.id === tmdbId,
+              );
               if (idx !== -1) {
                 // Mark as dismissed
                 const newArray = [...section];
@@ -2273,10 +2911,12 @@ export default function SuggestPage() {
         const hasFranchise = !!movieFeatures.franchise;
         const hasGenres = movieFeatures.genres.length > 0;
         const hasKeywords = movieFeatures.topKeywords.length > 0;
-        const shouldShowMicroSurvey = type === 'negative'
-          && microSurveyCount < 2
-          && (insights.strengthenedAvoidance.length > 0 || insights.newAvoidance.length > 0)
-          && Math.random() < 0.35;
+        const shouldShowMicroSurvey =
+          type === "negative" &&
+          microSurveyCount < 2 &&
+          (insights.strengthenedAvoidance.length > 0 ||
+            insights.newAvoidance.length > 0) &&
+          Math.random() < 0.35;
 
         if (hasActors || hasFranchise || hasGenres || hasKeywords) {
           setFeedbackPopup({
@@ -2287,9 +2927,9 @@ export default function SuggestPage() {
             franchise: movieFeatures.franchise,
             topKeywords: movieFeatures.topKeywords,
             genres: movieFeatures.genres,
-            feedbackType: 'negative',
+            feedbackType: "negative",
             director: movieFeatures.director,
-            showMicroSurvey: shouldShowMicroSurvey
+            showMicroSurvey: shouldShowMicroSurvey,
           });
           if (shouldShowMicroSurvey) {
             setMicroSurveyCount((c) => c + 1);
@@ -2303,16 +2943,39 @@ export default function SuggestPage() {
       } else {
         // Positive feedback - get learning insights AND show popup for explicit learning
         const [insights, movieFeatures] = await Promise.all([
-          addFeedback(uid, tmdbId, 'positive', reasons, feedbackMeta),
-          getMovieFeaturesForPopup(tmdbId)
+          addFeedback(uid, tmdbId, "positive", reasons, feedbackMeta),
+          getMovieFeaturesForPopup(tmdbId),
         ]);
 
         await fetchEvidenceForFeatures([
-          ...movieFeatures.leadActors.map((name) => ({ type: 'actor' as FeatureType, name })),
-          ...movieFeatures.genres.map((name) => ({ type: 'genre' as FeatureType, name })),
-          ...movieFeatures.topKeywords.map((name) => ({ type: 'keyword' as FeatureType, name })),
-          ...(movieFeatures.franchise ? [{ type: 'collection' as FeatureType, name: movieFeatures.franchise }] : []),
-          ...(movieFeatures.director ? [{ type: 'director' as FeatureType, name: movieFeatures.director }] : [])
+          ...movieFeatures.leadActors.map((name) => ({
+            type: "actor" as FeatureType,
+            name,
+          })),
+          ...movieFeatures.genres.map((name) => ({
+            type: "genre" as FeatureType,
+            name,
+          })),
+          ...movieFeatures.topKeywords.map((name) => ({
+            type: "keyword" as FeatureType,
+            name,
+          })),
+          ...(movieFeatures.franchise
+            ? [
+                {
+                  type: "collection" as FeatureType,
+                  name: movieFeatures.franchise,
+                },
+              ]
+            : []),
+          ...(movieFeatures.director
+            ? [
+                {
+                  type: "director" as FeatureType,
+                  name: movieFeatures.director,
+                },
+              ]
+            : []),
         ]);
 
         // Show popup for positive feedback too - let users tell us what they loved
@@ -2330,8 +2993,8 @@ export default function SuggestPage() {
             franchise: movieFeatures.franchise,
             topKeywords: movieFeatures.topKeywords,
             genres: movieFeatures.genres,
-            feedbackType: 'positive',
-            director: movieFeatures.director
+            feedbackType: "positive",
+            director: movieFeatures.director,
           });
         } else {
           setFeedbackMessage(insights.learningSummary);
@@ -2339,9 +3002,9 @@ export default function SuggestPage() {
         }
       }
     } catch (e) {
-      console.error('Failed to submit feedback:', e);
+      console.error("Failed to submit feedback:", e);
       // On error for negative feedback, just remove the item from categories
-      if (type === 'negative') {
+      if (type === "negative") {
         setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
           if (!prev) return prev;
           const next = { ...prev };
@@ -2350,7 +3013,9 @@ export default function SuggestPage() {
             const section = next[key as keyof CategorizedSuggestions];
             if (Array.isArray(section)) {
               // @ts-ignore - dynamic key assignment
-              next[key as keyof CategorizedSuggestions] = section.filter((item: MovieItem) => item.id !== tmdbId);
+              next[key as keyof CategorizedSuggestions] = section.filter(
+                (item: MovieItem) => item.id !== tmdbId,
+              );
             }
           }
           return next;
@@ -2362,7 +3027,11 @@ export default function SuggestPage() {
   const handlePairwiseVote = async (winnerId: number, loserId: number) => {
     if (!uid) return;
 
-    console.log('[Pairwise] Vote received:', { winnerId, loserId, currentCount: pairwiseCount });
+    console.log("[Pairwise] Vote received:", {
+      winnerId,
+      loserId,
+      currentCount: pairwiseCount,
+    });
 
     const nextCount = pairwiseCount + 1;
     const nextHistory = new Set(pairHistory);
@@ -2381,19 +3050,21 @@ export default function SuggestPage() {
       const loser = items?.find((i) => i.id === loserId);
 
       const sharedTags = (() => {
-        const tagsA = winner ? reasonTypeTags(winner.reasons) : new Set<string>();
+        const tagsA = winner
+          ? reasonTypeTags(winner.reasons)
+          : new Set<string>();
         const tagsB = loser ? reasonTypeTags(loser.reasons) : new Set<string>();
         return Array.from(tagsA).filter((t) => tagsB.has(t));
       })();
 
       await Promise.all([
-        addFeedback(uid, winnerId, 'positive', winner?.reasons, {
+        addFeedback(uid, winnerId, "positive", winner?.reasons, {
           sources: winner?.sources,
-          consensusLevel: winner?.consensusLevel ?? 'low',
+          consensusLevel: winner?.consensusLevel ?? "low",
         }),
-        addFeedback(uid, loserId, 'negative', loser?.reasons, {
+        addFeedback(uid, loserId, "negative", loser?.reasons, {
           sources: loser?.sources,
-          consensusLevel: loser?.consensusLevel ?? 'low',
+          consensusLevel: loser?.consensusLevel ?? "low",
         }),
         recordPairwiseEvent(uid, {
           winnerId,
@@ -2401,25 +3072,32 @@ export default function SuggestPage() {
           sharedReasonTags: sharedTags,
           winnerSources: winner?.sources,
           loserSources: loser?.sources,
-          winnerConsensus: winner?.consensusLevel ?? 'low',
-          loserConsensus: loser?.consensusLevel ?? 'low',
+          winnerConsensus: winner?.consensusLevel ?? "low",
+          loserConsensus: loser?.consensusLevel ?? "low",
         }),
       ]);
 
       await applyPairwiseFeatureLearning(uid, winnerId, loserId);
 
-      setFeedbackMessage('Got it — we will favor your pick.');
+      setFeedbackMessage("Got it — we will favor your pick.");
       setTimeout(() => setFeedbackMessage(null), 2200);
     } catch (e) {
-      console.error('[Pairwise] Failed to record preference', e);
+      console.error("[Pairwise] Failed to record preference", e);
     } finally {
       // Find next pair from items that aren't blocked, or close modal if limit reached
       if (nextCount >= PAIRWISE_SESSION_LIMIT) {
         setPairwisePair(null);
       } else {
-        const availableItems = (items ?? []).filter((i) => !nextBlockedIds.has(i.id) && !i.dismissed);
+        const availableItems = (items ?? []).filter(
+          (i) => !nextBlockedIds.has(i.id) && !i.dismissed,
+        );
         const next = findPairwiseCandidate(availableItems, nextHistory);
-        console.log('[Pairwise] Finding next pair:', { availableCount: availableItems.length, found: !!next, nextCount, limit: PAIRWISE_SESSION_LIMIT });
+        console.log("[Pairwise] Finding next pair:", {
+          availableCount: availableItems.length,
+          found: !!next,
+          nextCount,
+          limit: PAIRWISE_SESSION_LIMIT,
+        });
         setPairwisePair(next);
       }
     }
@@ -2432,14 +3110,22 @@ export default function SuggestPage() {
     setPairHistory(nextHistory);
     setPairwiseCount(nextCount);
 
-    console.log('[Pairwise] Skipping pair:', { aId, bId, nextCount, limit: PAIRWISE_SESSION_LIMIT });
+    console.log("[Pairwise] Skipping pair:", {
+      aId,
+      bId,
+      nextCount,
+      limit: PAIRWISE_SESSION_LIMIT,
+    });
 
     // Find next pair, or close modal if limit reached
     if (nextCount >= PAIRWISE_SESSION_LIMIT) {
       setPairwisePair(null);
     } else {
       const next = findPairwiseCandidate(items ?? [], nextHistory);
-      console.log('[Pairwise] Finding next after skip:', { availableCount: items?.length ?? 0, found: !!next });
+      console.log("[Pairwise] Finding next after skip:", {
+        availableCount: items?.length ?? 0,
+        found: !!next,
+      });
       setPairwisePair(next);
     }
   };
@@ -2450,12 +3136,17 @@ export default function SuggestPage() {
       await unblockSuggestion(uid, tmdbId);
       setUndoToast(null);
       setLastFeedback((curr) => (curr && curr.id === tmdbId ? null : curr));
-      setBlockedIds(prev => {
+      setBlockedIds((prev) => {
         const next = new Set(prev);
         next.delete(tmdbId);
         return next;
       });
-      setItems(prev => prev?.map(item => item.id === tmdbId ? { ...item, dismissed: false } : item) ?? prev);
+      setItems(
+        (prev) =>
+          prev?.map((item) =>
+            item.id === tmdbId ? { ...item, dismissed: false } : item,
+          ) ?? prev,
+      );
       setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
         if (!prev) return prev;
         const next = { ...prev } as CategorizedSuggestions;
@@ -2476,7 +3167,7 @@ export default function SuggestPage() {
         return next;
       });
     } catch (e) {
-      console.error('[Suggest] undo dismiss failed', e);
+      console.error("[Suggest] undo dismiss failed", e);
     }
   };
 
@@ -2486,33 +3177,41 @@ export default function SuggestPage() {
   };
 
   // Handle saving a movie to the list
-  const handleSave = async (tmdbId: number, title: string, year?: string, posterPath?: string | null) => {
+  const handleSave = async (
+    tmdbId: number,
+    title: string,
+    year?: string,
+    posterPath?: string | null,
+  ) => {
     if (!uid) return;
     try {
       const result = await saveMovie(uid, {
         tmdb_id: tmdbId,
         title,
         year: year || null,
-        poster_path: posterPath || null
+        poster_path: posterPath || null,
       });
 
       if (result.success) {
-        setSavedMovieIds(prev => new Set([...prev, tmdbId]));
-        setFeedbackMessage('Saved to your list!');
+        setSavedMovieIds((prev) => new Set([...prev, tmdbId]));
+        setFeedbackMessage("Saved to your list!");
         setTimeout(() => setFeedbackMessage(null), 3000);
       } else {
-        console.error('Failed to save movie:', result.error);
+        console.error("Failed to save movie:", result.error);
         // Check if it's a duplicate error
-        if (result.error?.includes('duplicate') || result.error?.includes('unique')) {
-          setFeedbackMessage('Already in your list!');
+        if (
+          result.error?.includes("duplicate") ||
+          result.error?.includes("unique")
+        ) {
+          setFeedbackMessage("Already in your list!");
         } else {
-          setFeedbackMessage('Failed to save movie');
+          setFeedbackMessage("Failed to save movie");
         }
         setTimeout(() => setFeedbackMessage(null), 3000);
       }
     } catch (e) {
-      console.error('Error saving movie:', e);
-      setFeedbackMessage('Failed to save movie');
+      console.error("Error saving movie:", e);
+      setFeedbackMessage("Failed to save movie");
       setTimeout(() => setFeedbackMessage(null), 3000);
     }
   };
@@ -2521,32 +3220,36 @@ export default function SuggestPage() {
   const handleRefreshSection = async (sectionName: string) => {
     if (!uid || !categorizedSuggestions) return;
 
-    setRefreshingSections(prev => new Set([...prev, sectionName]));
+    setRefreshingSections((prev) => new Set([...prev, sectionName]));
 
     try {
       console.log(`[SectionRefresh] Refreshing section: ${sectionName}`);
 
       // Special handling for watchlist picks - they come from a different source
-      if (sectionName === 'watchlistPicks') {
+      if (sectionName === "watchlistPicks") {
         // Re-shuffle watchlist picks by regenerating scores with more randomness
         const currentPicks = categorizedSuggestions.watchlistPicks;
         if (currentPicks.length > 0) {
           // Shuffle and re-score with higher random factor
           const shuffled = [...currentPicks]
-            .map(item => ({
+            .map((item) => ({
               ...item,
-              score: item.score * 0.5 + Math.random() * 50 // Add more randomness
+              score: item.score * 0.5 + Math.random() * 50, // Add more randomness
             }))
             .sort((a, b) => b.score - a.score);
 
           // Update via setCategorizedSuggestions
-          setCategorizedSuggestions(prev => prev ? {
-            ...prev,
-            watchlistPicks: shuffled
-          } : null);
+          setCategorizedSuggestions((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  watchlistPicks: shuffled,
+                }
+              : null,
+          );
         }
 
-        setRefreshingSections(prev => {
+        setRefreshingSections((prev) => {
           const next = new Set(prev);
           next.delete(sectionName);
           return next;
@@ -2555,20 +3258,34 @@ export default function SuggestPage() {
       }
 
       // Get the movie IDs currently in this section (excluding dismissed ones)
-      const currentSectionMovies = (categorizedSuggestions as any)[sectionName] || [];
-      const nonDismissedMovies = currentSectionMovies.filter((m: MovieItem) => !m.dismissed);
-      const dismissedMovies = currentSectionMovies.filter((m: MovieItem) => m.dismissed);
-      const currentSectionIds = new Set(currentSectionMovies.map((m: MovieItem) => m.id));
+      const currentSectionMovies =
+        (categorizedSuggestions as any)[sectionName] || [];
+      const nonDismissedMovies = currentSectionMovies.filter(
+        (m: MovieItem) => !m.dismissed,
+      );
+      const dismissedMovies = currentSectionMovies.filter(
+        (m: MovieItem) => m.dismissed,
+      );
+      const currentSectionIds = new Set(
+        currentSectionMovies.map((m: MovieItem) => m.id),
+      );
       const dismissedIds = new Set(dismissedMovies.map((m: MovieItem) => m.id));
 
-      console.log(`[SectionRefresh] Current section has ${currentSectionIds.size} movies (${dismissedIds.size} dismissed)`);
+      console.log(
+        `[SectionRefresh] Current section has ${currentSectionIds.size} movies (${dismissedIds.size} dismissed)`,
+      );
 
       // Fetch replacement movies for this section (replace both non-dismissed and dismissed)
-      const replacements = await fetchSectionReplacements(sectionName, currentSectionIds.size || 12);
+      const replacements = await fetchSectionReplacements(
+        sectionName,
+        currentSectionIds.size || 12,
+      );
 
       if (replacements.length === 0) {
-        console.log(`[SectionRefresh] No replacements found for ${sectionName}`);
-        setRefreshingSections(prev => {
+        console.log(
+          `[SectionRefresh] No replacements found for ${sectionName}`,
+        );
+        setRefreshingSections((prev) => {
           const next = new Set(prev);
           next.delete(sectionName);
           return next;
@@ -2577,33 +3294,34 @@ export default function SuggestPage() {
       }
 
       //Remove old section movies and add new ones
-      setItems(prev => {
+      setItems((prev) => {
         if (!prev) return prev;
 
         // Filter out the old section movies
-        const filtered = prev.filter(item => !currentSectionIds.has(item.id));
+        const filtered = prev.filter((item) => !currentSectionIds.has(item.id));
 
         // Add the new replacement movies
         const updated = [...filtered, ...replacements];
 
-        console.log(`[SectionRefresh] Updated items: removed ${currentSectionIds.size}, added ${replacements.length}, total now ${updated.length}`);
+        console.log(
+          `[SectionRefresh] Updated items: removed ${currentSectionIds.size}, added ${replacements.length}, total now ${updated.length}`,
+        );
 
         return updated;
       });
 
       // Track the new movies as shown
-      setShownIds(prev => {
+      setShownIds((prev) => {
         const updated = new Set(prev);
-        replacements.forEach(m => updated.add(m.id));
+        replacements.forEach((m) => updated.add(m.id));
         // Keep only last 200
         const recentShownIds = Array.from(updated).slice(-200);
         return new Set(recentShownIds);
       });
-
     } catch (e) {
-      console.error('Failed to refresh section:', e);
+      console.error("Failed to refresh section:", e);
     } finally {
-      setRefreshingSections(prev => {
+      setRefreshingSections((prev) => {
         const next = new Set(prev);
         next.delete(sectionName);
         return next;
@@ -2661,8 +3379,18 @@ export default function SuggestPage() {
                     className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
                     aria-label="Close"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
                     </svg>
                   </button>
                 </div>
@@ -2670,20 +3398,28 @@ export default function SuggestPage() {
 
               {/* Scrollable Content */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {feedbackPopup.feedbackType === 'negative' ? (
+                {feedbackPopup.feedbackType === "negative" ? (
                   <>
                     {/* === NEGATIVE FEEDBACK OPTIONS === */}
 
                     {/* NUCLEAR OPTION - Dislike everything */}
                     <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Strong dislike:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                        Strong dislike:
+                      </p>
                       <div className="flex flex-wrap gap-2">
                         {(() => {
-                          const isSelected = selectedReasons.includes('dislike_all');
+                          const isSelected =
+                            selectedReasons.includes("dislike_all");
                           return (
                             <button
-                              onClick={() => toggleReasonSelection('dislike_all')}
-                              className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-200 dark:bg-red-900/60 text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-900/80 rounded-full transition-colors font-medium border border-red-300 dark:border-red-800', isSelected)}
+                              onClick={() =>
+                                toggleReasonSelection("dislike_all")
+                              }
+                              className={getReasonButtonClasses(
+                                "px-3 py-1.5 text-xs bg-red-200 dark:bg-red-900/60 text-red-800 dark:text-red-200 hover:bg-red-300 dark:hover:bg-red-900/80 rounded-full transition-colors font-medium border border-red-300 dark:border-red-800",
+                                isSelected,
+                              )}
                             >
                               🚫 I don&apos;t like this movie
                             </button>
@@ -2694,19 +3430,39 @@ export default function SuggestPage() {
 
                     {/* Non-negative reasons (won't learn avoidance) */}
                     <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not a problem with the movie:</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                        Not a problem with the movie:
+                      </p>
                       <div className="flex flex-wrap gap-2">
                         {[
-                          { key: 'already_seen', label: '✓ Already seen it', color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-900/60' },
-                          { key: 'not_in_mood', label: '😴 Not in the mood', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600' },
-                          { key: 'too_long', label: '⏱️ Too long right now', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600' },
+                          {
+                            key: "already_seen",
+                            label: "✓ Already seen it",
+                            color:
+                              "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-900/60",
+                          },
+                          {
+                            key: "not_in_mood",
+                            label: "😴 Not in the mood",
+                            color:
+                              "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600",
+                          },
+                          {
+                            key: "too_long",
+                            label: "⏱️ Too long right now",
+                            color:
+                              "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600",
+                          },
                         ].map(({ key, label, color }) => {
                           const isSelected = selectedReasons.includes(key);
                           return (
                             <button
                               key={key}
                               onClick={() => toggleReasonSelection(key)}
-                              className={getReasonButtonClasses(`px-3 py-1.5 text-xs rounded-full transition-colors ${color}`, isSelected)}
+                              className={getReasonButtonClasses(
+                                `px-3 py-1.5 text-xs rounded-full transition-colors ${color}`,
+                                isSelected,
+                              )}
                             >
                               {label}
                             </button>
@@ -2717,22 +3473,24 @@ export default function SuggestPage() {
 
                     {feedbackPopup.showMicroSurvey && (
                       <div className="border border-dashed border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-900">
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Quick check: what missed?</p>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                          Quick check: what missed?
+                        </p>
                         <div className="flex flex-wrap gap-2">
                           <button
-                            onClick={() => handleMicroSurveyChoice('cast')}
+                            onClick={() => handleMicroSurveyChoice("cast")}
                             className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           >
                             🎭 Cast/tone off
                           </button>
                           <button
-                            onClick={() => handleMicroSurveyChoice('tone')}
+                            onClick={() => handleMicroSurveyChoice("tone")}
                             className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           >
                             🎨 Theme mismatch
                           </button>
                           <button
-                            onClick={() => handleMicroSurveyChoice('runtime')}
+                            onClick={() => handleMicroSurveyChoice("runtime")}
                             className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           >
                             ⏱️ Too long/slow
@@ -2743,27 +3501,40 @@ export default function SuggestPage() {
 
                     {/* Specific reasons section header */}
                     <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Or tell us specifically:</p>
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                        Or tell us specifically:
+                      </p>
                     </div>
 
                     {/* Actor-specific reasons - show ALL lead actors so user can pick specific ones */}
                     {feedbackPopup.leadActors.length > 0 && (
                       <div>
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not a fan of this actor:</p>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                          Not a fan of this actor:
+                        </p>
                         <div className="flex flex-wrap gap-2">
-                          {feedbackPopup.leadActors.map(actor => {
+                          {feedbackPopup.leadActors.map((actor) => {
                             const reason = `actor:${actor}`;
                             const isSelected = selectedReasons.includes(reason);
-                            const badge = getFeatureEvidenceBadge('actor', actor);
+                            const badge = getFeatureEvidenceBadge(
+                              "actor",
+                              actor,
+                            );
                             return (
                               <button
                                 key={actor}
                                 onClick={() => toggleReasonSelection(reason)}
-                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                                className={getReasonButtonClasses(
+                                  "px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-200 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-full transition-colors flex items-center gap-1",
+                                  isSelected,
+                                )}
                               >
                                 <span>👎 {actor}</span>
                                 {badge && (
-                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                  <span
+                                    className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600"
+                                    title={badge.title}
+                                  >
                                     {badge.text}
                                   </span>
                                 )}
@@ -2777,20 +3548,34 @@ export default function SuggestPage() {
                     {/* Franchise fatigue */}
                     {feedbackPopup.franchise && (
                       <div>
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Franchise fatigue:</p>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                          Franchise fatigue:
+                        </p>
                         <div className="flex flex-wrap gap-2">
                           {(() => {
-                            const reason = 'franchise';
+                            const reason = "franchise";
                             const isSelected = selectedReasons.includes(reason);
-                            const badge = getFeatureEvidenceBadge('collection', feedbackPopup.franchise);
+                            const badge = getFeatureEvidenceBadge(
+                              "collection",
+                              feedbackPopup.franchise,
+                            );
                             return (
                               <button
                                 onClick={() => toggleReasonSelection(reason)}
-                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-200 hover:bg-orange-200 dark:hover:bg-orange-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                                className={getReasonButtonClasses(
+                                  "px-3 py-1.5 text-xs bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-200 hover:bg-orange-200 dark:hover:bg-orange-900/60 rounded-full transition-colors flex items-center gap-1",
+                                  isSelected,
+                                )}
                               >
-                                <span>🔄 Done with {feedbackPopup.franchise.split(':')[0]}</span>
+                                <span>
+                                  🔄 Done with{" "}
+                                  {feedbackPopup.franchise.split(":")[0]}
+                                </span>
                                 {badge && (
-                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                  <span
+                                    className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600"
+                                    title={badge.title}
+                                  >
                                     {badge.text}
                                   </span>
                                 )}
@@ -2804,21 +3589,32 @@ export default function SuggestPage() {
                     {/* Genre-specific reasons */}
                     {feedbackPopup.genres.length > 0 && (
                       <div>
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not into this genre:</p>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                          Not into this genre:
+                        </p>
                         <div className="flex flex-wrap gap-2">
-                          {feedbackPopup.genres.slice(0, 3).map(genre => {
+                          {feedbackPopup.genres.slice(0, 3).map((genre) => {
                             const reason = `genre:${genre}`;
                             const isSelected = selectedReasons.includes(reason);
-                            const badge = getFeatureEvidenceBadge('genre', genre);
+                            const badge = getFeatureEvidenceBadge(
+                              "genre",
+                              genre,
+                            );
                             return (
                               <button
                                 key={genre}
                                 onClick={() => toggleReasonSelection(reason)}
-                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-200 hover:bg-purple-200 dark:hover:bg-purple-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                                className={getReasonButtonClasses(
+                                  "px-3 py-1.5 text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-200 hover:bg-purple-200 dark:hover:bg-purple-900/60 rounded-full transition-colors flex items-center gap-1",
+                                  isSelected,
+                                )}
                               >
                                 <span>👎 {genre}</span>
                                 {badge && (
-                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                  <span
+                                    className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600"
+                                    title={badge.title}
+                                  >
                                     {badge.text}
                                   </span>
                                 )}
@@ -2830,32 +3626,49 @@ export default function SuggestPage() {
                     )}
 
                     {/* Topic/Theme-specific reasons (keywords) */}
-                    {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
-                      <div>
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Not interested in this topic:</p>
-                        <div className="flex flex-wrap gap-2">
-                          {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
-                            const reason = `keyword:${keyword}`;
-                            const isSelected = selectedReasons.includes(reason);
-                            const badge = getFeatureEvidenceBadge('keyword', keyword);
-                            return (
-                              <button
-                                key={keyword}
-                                onClick={() => toggleReasonSelection(reason)}
-                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                              >
-                                <span>🏷️ {keyword}</span>
-                                {badge && (
-                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                    {badge.text}
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
+                    {feedbackPopup.topKeywords &&
+                      feedbackPopup.topKeywords.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                            Not interested in this topic:
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {feedbackPopup.topKeywords
+                              .slice(0, 5)
+                              .map((keyword) => {
+                                const reason = `keyword:${keyword}`;
+                                const isSelected =
+                                  selectedReasons.includes(reason);
+                                const badge = getFeatureEvidenceBadge(
+                                  "keyword",
+                                  keyword,
+                                );
+                                return (
+                                  <button
+                                    key={keyword}
+                                    onClick={() =>
+                                      toggleReasonSelection(reason)
+                                    }
+                                    className={getReasonButtonClasses(
+                                      "px-3 py-1.5 text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 rounded-full transition-colors flex items-center gap-1",
+                                      isSelected,
+                                    )}
+                                  >
+                                    <span>🏷️ {keyword}</span>
+                                    {badge && (
+                                      <span
+                                        className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600"
+                                        title={badge.title}
+                                      >
+                                        {badge.text}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
                     <div className="flex justify-end pt-2">
                       <button
@@ -2871,18 +3684,33 @@ export default function SuggestPage() {
                     {/* === POSITIVE FEEDBACK OPTIONS === */}
                     {/* Generic positive */}
                     <div>
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">What made this a great pick?</p>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                        What made this a great pick?
+                      </p>
                       <div className="flex flex-wrap gap-2">
                         {[
-                          { key: 'great_pick', label: '✨ Just a great pick!', color: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-900/60' },
-                          { key: 'love_all', label: '❤️ I love everything about this!', color: 'bg-emerald-200 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-300 dark:hover:bg-emerald-900/80 border border-emerald-300 dark:border-emerald-800 font-medium' },
+                          {
+                            key: "great_pick",
+                            label: "✨ Just a great pick!",
+                            color:
+                              "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-900/60",
+                          },
+                          {
+                            key: "love_all",
+                            label: "❤️ I love everything about this!",
+                            color:
+                              "bg-emerald-200 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-300 dark:hover:bg-emerald-900/80 border border-emerald-300 dark:border-emerald-800 font-medium",
+                          },
                         ].map(({ key, label, color }) => {
                           const isSelected = selectedReasons.includes(key);
                           return (
                             <button
                               key={key}
                               onClick={() => toggleReasonSelection(key)}
-                              className={getReasonButtonClasses(`px-3 py-1.5 text-xs rounded-full transition-colors ${color}`, isSelected)}
+                              className={getReasonButtonClasses(
+                                `px-3 py-1.5 text-xs rounded-full transition-colors ${color}`,
+                                isSelected,
+                              )}
                             >
                               {label}
                             </button>
@@ -2893,27 +3721,40 @@ export default function SuggestPage() {
 
                     {/* Specific reasons section header */}
                     <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Or tell us specifically:</p>
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                        Or tell us specifically:
+                      </p>
                     </div>
 
                     {/* Actor love */}
                     {feedbackPopup.leadActors.length > 0 && (
                       <div>
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this actor:</p>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                          Love this actor:
+                        </p>
                         <div className="flex flex-wrap gap-2">
-                          {feedbackPopup.leadActors.map(actor => {
+                          {feedbackPopup.leadActors.map((actor) => {
                             const reason = `actor:${actor}`;
                             const isSelected = selectedReasons.includes(reason);
-                            const badge = getFeatureEvidenceBadge('actor', actor);
+                            const badge = getFeatureEvidenceBadge(
+                              "actor",
+                              actor,
+                            );
                             return (
                               <button
                                 key={actor}
                                 onClick={() => toggleReasonSelection(reason)}
-                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                                className={getReasonButtonClasses(
+                                  "px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1",
+                                  isSelected,
+                                )}
                               >
                                 <span>❤️ {actor}</span>
                                 {badge && (
-                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                  <span
+                                    className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600"
+                                    title={badge.title}
+                                  >
                                     {badge.text}
                                   </span>
                                 )}
@@ -2927,20 +3768,34 @@ export default function SuggestPage() {
                     {/* Franchise love */}
                     {feedbackPopup.franchise && (
                       <div>
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this franchise:</p>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                          Love this franchise:
+                        </p>
                         <div className="flex flex-wrap gap-2">
                           {(() => {
-                            const reason = 'franchise';
+                            const reason = "franchise";
                             const isSelected = selectedReasons.includes(reason);
-                            const badge = getFeatureEvidenceBadge('collection', feedbackPopup.franchise);
+                            const badge = getFeatureEvidenceBadge(
+                              "collection",
+                              feedbackPopup.franchise,
+                            );
                             return (
                               <button
                                 onClick={() => toggleReasonSelection(reason)}
-                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                                className={getReasonButtonClasses(
+                                  "px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1",
+                                  isSelected,
+                                )}
                               >
-                                <span>🎬 More {feedbackPopup.franchise.split(':')[0]}!</span>
+                                <span>
+                                  🎬 More{" "}
+                                  {feedbackPopup.franchise.split(":")[0]}!
+                                </span>
                                 {badge && (
-                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                  <span
+                                    className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600"
+                                    title={badge.title}
+                                  >
                                     {badge.text}
                                   </span>
                                 )}
@@ -2954,21 +3809,32 @@ export default function SuggestPage() {
                     {/* Genre love */}
                     {feedbackPopup.genres.length > 0 && (
                       <div>
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this genre:</p>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                          Love this genre:
+                        </p>
                         <div className="flex flex-wrap gap-2">
-                          {feedbackPopup.genres.slice(0, 3).map(genre => {
+                          {feedbackPopup.genres.slice(0, 3).map((genre) => {
                             const reason = `genre:${genre}`;
                             const isSelected = selectedReasons.includes(reason);
-                            const badge = getFeatureEvidenceBadge('genre', genre);
+                            const badge = getFeatureEvidenceBadge(
+                              "genre",
+                              genre,
+                            );
                             return (
                               <button
                                 key={genre}
                                 onClick={() => toggleReasonSelection(reason)}
-                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
+                                className={getReasonButtonClasses(
+                                  "px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1",
+                                  isSelected,
+                                )}
                               >
                                 <span>❤️ {genre}</span>
                                 {badge && (
-                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
+                                  <span
+                                    className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600"
+                                    title={badge.title}
+                                  >
                                     {badge.text}
                                   </span>
                                 )}
@@ -2980,32 +3846,49 @@ export default function SuggestPage() {
                     )}
 
                     {/* Topic/Theme love (keywords) */}
-                    {feedbackPopup.topKeywords && feedbackPopup.topKeywords.length > 0 && (
-                      <div>
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">Love this theme:</p>
-                        <div className="flex flex-wrap gap-2">
-                          {feedbackPopup.topKeywords.slice(0, 5).map(keyword => {
-                            const reason = `keyword:${keyword}`;
-                            const isSelected = selectedReasons.includes(reason);
-                            const badge = getFeatureEvidenceBadge('keyword', keyword);
-                            return (
-                              <button
-                                key={keyword}
-                                onClick={() => toggleReasonSelection(reason)}
-                                className={getReasonButtonClasses('px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1', isSelected)}
-                              >
-                                <span>❤️ {keyword}</span>
-                                {badge && (
-                                  <span className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600" title={badge.title}>
-                                    {badge.text}
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
+                    {feedbackPopup.topKeywords &&
+                      feedbackPopup.topKeywords.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1.5">
+                            Love this theme:
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {feedbackPopup.topKeywords
+                              .slice(0, 5)
+                              .map((keyword) => {
+                                const reason = `keyword:${keyword}`;
+                                const isSelected =
+                                  selectedReasons.includes(reason);
+                                const badge = getFeatureEvidenceBadge(
+                                  "keyword",
+                                  keyword,
+                                );
+                                return (
+                                  <button
+                                    key={keyword}
+                                    onClick={() =>
+                                      toggleReasonSelection(reason)
+                                    }
+                                    className={getReasonButtonClasses(
+                                      "px-3 py-1.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 rounded-full transition-colors flex items-center gap-1",
+                                      isSelected,
+                                    )}
+                                  >
+                                    <span>❤️ {keyword}</span>
+                                    {badge && (
+                                      <span
+                                        className="px-1.5 py-0.5 text-[10px] bg-white/70 dark:bg-gray-800/70 text-gray-700 dark:text-gray-300 rounded-full border border-gray-200 dark:border-gray-600"
+                                        title={badge.title}
+                                      >
+                                        {badge.text}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
                   </>
                 )}
               </div>
@@ -3014,14 +3897,14 @@ export default function SuggestPage() {
               <div className="flex-shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
                 <div className="text-xs text-center text-gray-500 dark:text-gray-400 mb-2">
                   {selectedReasons.length > 0
-                    ? `${selectedReasons.length} reason${selectedReasons.length === 1 ? '' : 's'} selected`
-                    : 'Pick one or more reasons, then submit'}
+                    ? `${selectedReasons.length} reason${selectedReasons.length === 1 ? "" : "s"} selected`
+                    : "Pick one or more reasons, then submit"}
                 </div>
                 <div className="flex items-center justify-center gap-2">
                   <button
                     onClick={handleSubmitSelectedReasons}
                     disabled={selectedReasons.length === 0}
-                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${selectedReasons.length === 0 ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed' : 'bg-blue-600 dark:bg-blue-700 text-white hover:bg-blue-700 dark:hover:bg-blue-600'}`}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${selectedReasons.length === 0 ? "bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed" : "bg-blue-600 dark:bg-blue-700 text-white hover:bg-blue-700 dark:hover:bg-blue-600"}`}
                   >
                     Submit selected
                   </button>
@@ -3049,7 +3932,10 @@ export default function SuggestPage() {
                   onClick={(e) => e.stopPropagation()}
                 >
                   {(() => {
-                    const videoItem = pairwiseVideoId === pairwisePair.a.id ? pairwisePair.a : pairwisePair.b;
+                    const videoItem =
+                      pairwiseVideoId === pairwisePair.a.id
+                        ? pairwisePair.a
+                        : pairwisePair.b;
                     return videoItem.trailerKey ? (
                       <iframe
                         src={`https://www.youtube.com/embed/${videoItem.trailerKey}?autoplay=1`}
@@ -3074,15 +3960,26 @@ export default function SuggestPage() {
             <div className="mb-5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Which fits you better right now?</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">These two were neck-and-neck; your pick will tune future rankings.</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Which fits you better right now?
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    These two were neck-and-neck; your pick will tune future
+                    rankings.
+                  </p>
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-gray-500">
-                  <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200">Pairwise learning</span>
-                  <span>{pairwiseCount + 1}/{PAIRWISE_SESSION_LIMIT} this session</span>
+                  <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200">
+                    Pairwise learning
+                  </span>
+                  <span>
+                    {pairwiseCount + 1}/{PAIRWISE_SESSION_LIMIT} this session
+                  </span>
                   <button
                     className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                    onClick={() => handlePairwiseSkip(pairwisePair.a.id, pairwisePair.b.id)}
+                    onClick={() =>
+                      handlePairwiseSkip(pairwisePair.a.id, pairwisePair.b.id)
+                    }
                   >
                     Skip
                   </button>
@@ -3092,10 +3989,15 @@ export default function SuggestPage() {
                 {[pairwisePair.a, pairwisePair.b].map((item, idx) => {
                   const other = idx === 0 ? pairwisePair.b : pairwisePair.a;
                   return (
-                    <div key={item.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col">
+                    <div
+                      key={item.id}
+                      className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col"
+                    >
                       {/* Header badge */}
                       <div className="px-3 py-2 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-                        <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Option {idx === 0 ? 'A' : 'B'}</div>
+                        <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+                          Option {idx === 0 ? "A" : "B"}
+                        </div>
                       </div>
 
                       {/* Movie content */}
@@ -3122,14 +4024,19 @@ export default function SuggestPage() {
                             {item.title}
                           </div>
                           {item.year && (
-                            <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">{item.year}</div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                              {item.year}
+                            </div>
                           )}
 
                           {/* Genres */}
                           {item.genres && item.genres.length > 0 && (
                             <div className="flex flex-wrap gap-1 mb-2">
                               {item.genres.slice(0, 3).map((genre, i) => (
-                                <span key={i} className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full">
+                                <span
+                                  key={i}
+                                  className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
+                                >
                                   {genre}
                                 </span>
                               ))}
@@ -3140,8 +4047,12 @@ export default function SuggestPage() {
                           {item.vote_average && (
                             <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400 mb-2">
                               <span className="text-yellow-500">⭐</span>
-                              <span className="font-medium">{item.vote_average.toFixed(1)}</span>
-                              <span className="text-gray-400 dark:text-gray-500 text-xs">/10</span>
+                              <span className="font-medium">
+                                {item.vote_average.toFixed(1)}
+                              </span>
+                              <span className="text-gray-400 dark:text-gray-500 text-xs">
+                                /10
+                              </span>
                             </div>
                           )}
                         </div>
@@ -3166,7 +4077,11 @@ export default function SuggestPage() {
                             }}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-100 hover:bg-red-200 dark:hover:bg-red-900/60 rounded-md transition-colors font-medium"
                           >
-                            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                            <svg
+                              className="w-3.5 h-3.5"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
                               <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" />
                             </svg>
                             Watch Trailer
@@ -3176,7 +4091,9 @@ export default function SuggestPage() {
 
                       {/* Reasons */}
                       <div className="px-3 pb-3 border-t border-gray-100 dark:border-gray-700 pt-3">
-                        <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Why this matches you:</div>
+                        <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Why this matches you:
+                        </div>
                         <div className="text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
                           {item.reasons.slice(0, 2).map((reason, i) => (
                             <div key={i} className="flex items-start gap-1.5">
@@ -3197,7 +4114,8 @@ export default function SuggestPage() {
                           )}
                           {item.sources?.length ? (
                             <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-800">
-                              {item.sources.length} source{item.sources.length === 1 ? '' : 's'}
+                              {item.sources.length} source
+                              {item.sources.length === 1 ? "" : "s"}
                             </span>
                           ) : null}
                         </div>
@@ -3223,8 +4141,12 @@ export default function SuggestPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div>
-              <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Suggestions</h1>
-              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Based on your liked and highly rated films.</p>
+              <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                Suggestions
+              </h1>
+              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                Based on your liked and highly rated films.
+              </p>
             </div>
             <button
               onClick={() => setQuizOpen(true)}
@@ -3240,15 +4162,27 @@ export default function SuggestPage() {
               <span className="text-gray-600 dark:text-gray-400">Mode:</span>
               <button
                 type="button"
-                className={`px-2 py-1 rounded border text-xs ${mode === 'quick' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
-                onClick={() => { setMode('quick'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
+                className={`px-2 py-1 rounded border text-xs ${mode === "quick" ? "bg-gray-900 text-white border-gray-900" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600"}`}
+                onClick={() => {
+                  setMode("quick");
+                  setItems(null);
+                  setShownIds(new Set());
+                  setRefreshTick((x) => x + 1);
+                  void runSuggest();
+                }}
               >
                 Quick
               </button>
               <button
                 type="button"
-                className={`px-2 py-1 rounded border text-xs ${mode === 'deep' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600'}`}
-                onClick={() => { setMode('deep'); setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
+                className={`px-2 py-1 rounded border text-xs ${mode === "deep" ? "bg-gray-900 text-white border-gray-900" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600"}`}
+                onClick={() => {
+                  setMode("deep");
+                  setItems(null);
+                  setShownIds(new Set());
+                  setRefreshTick((x) => x + 1);
+                  void runSuggest();
+                }}
               >
                 Deep dive
               </button>
@@ -3260,7 +4194,9 @@ export default function SuggestPage() {
         </div>
         <div className="mb-4 flex flex-wrap items-end gap-3">
           <div>
-            <label className="block text-xs text-gray-600">Exclude genres (comma)</label>
+            <label className="block text-xs text-gray-600">
+              Exclude genres (comma)
+            </label>
             <input
               value={excludeGenres}
               onChange={(e) => setExcludeGenres(e.target.value)}
@@ -3270,17 +4206,32 @@ export default function SuggestPage() {
           </div>
           <div>
             <label className="block text-xs text-gray-600">Year min</label>
-            <input value={yearMin} onChange={(e) => setYearMin(e.target.value)} placeholder="e.g., 1990" className="border rounded px-2 py-1 text-sm w-24" />
+            <input
+              value={yearMin}
+              onChange={(e) => setYearMin(e.target.value)}
+              placeholder="e.g., 1990"
+              className="border rounded px-2 py-1 text-sm w-24"
+            />
           </div>
           <div>
             <label className="block text-xs text-gray-600">Year max</label>
-            <input value={yearMax} onChange={(e) => setYearMax(e.target.value)} placeholder="e.g., 2025" className="border rounded px-2 py-1 text-sm w-24" />
+            <input
+              value={yearMax}
+              onChange={(e) => setYearMax(e.target.value)}
+              placeholder="e.g., 2025"
+              className="border rounded px-2 py-1 text-sm w-24"
+            />
           </div>
           <div className="ml-auto flex items-center gap-2">
             <button
               className="px-3 py-2 rounded border text-sm hover:bg-gray-50 flex items-center gap-1"
               title="Get completely fresh suggestions (clears history)"
-              onClick={() => { setItems(null); setShownIds(new Set()); setRefreshTick((x) => x + 1); void runSuggest(); }}
+              onClick={() => {
+                setItems(null);
+                setShownIds(new Set());
+                setRefreshTick((x) => x + 1);
+                void runSuggest();
+              }}
             >
               <span>🔄</span>
               <span>Refresh</span>
@@ -3289,15 +4240,22 @@ export default function SuggestPage() {
         </div>
 
         {/* Enrichment Warning - show if less than 50% of films are mapped */}
-        {mappingCoverage && mappingCoverage.mapped < mappingCoverage.total * 0.5 && !loading && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 flex gap-3">
-            <span className="text-lg">⚠️</span>
-            <div className="text-sm text-amber-900">
-              <p>Only {mappingCoverage.mapped} of {mappingCoverage.total} films are mapped to TMDB. Recommendations may miss items.</p>
-              <p className="text-xs text-amber-800 mt-1">Import more data or refresh mappings to improve coverage.</p>
+        {mappingCoverage &&
+          mappingCoverage.mapped < mappingCoverage.total * 0.5 &&
+          !loading && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 flex gap-3">
+              <span className="text-lg">⚠️</span>
+              <div className="text-sm text-amber-900">
+                <p>
+                  Only {mappingCoverage.mapped} of {mappingCoverage.total} films
+                  are mapped to TMDB. Recommendations may miss items.
+                </p>
+                <p className="text-xs text-amber-800 mt-1">
+                  Import more data or refresh mappings to improve coverage.
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {loading && (
           <div className="mb-6">
@@ -3311,1586 +4269,1974 @@ export default function SuggestPage() {
           </div>
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}
-        {
-          !loading && !error && noCandidatesReason && (
-            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
-              {noCandidatesReason}
-            </p>
-          )
-        }
-        {
-          items && categorizedSuggestions && (
-            <div className="space-y-8">
-              <div className="flex items-center justify-between gap-3 text-sm text-gray-700 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-600" title="Lower = safer, familiar picks. Higher = more exploratory, diverse picks.">Discovery vs Safety</label>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={discoveryLevel}
-                    onChange={(e) => {
-                      const newValue = Number(e.target.value);
-                      setDiscoveryLevel(newValue);
-                      // Debounced auto-refresh when slider changes
-                      if ((window as any).__discoverySliderTimeout) {
-                        clearTimeout((window as any).__discoverySliderTimeout);
-                      }
-                      (window as any).__discoverySliderTimeout = setTimeout(() => {
-                        setItems(null);
-                        setShownIds(new Set());
-                        setRefreshTick((x) => x + 1);
-                        void runSuggest();
-                      }, 800);
-                    }}
-                    className="w-40 accent-blue-600"
-                    title="Drag to adjust. Changes apply automatically after a brief pause."
-                  />
-                  <span className="text-xs text-gray-500 w-8 text-right">{discoveryLevel}%</span>
-                  {discoveryLevel !== 50 && (
-                    <button
-                      onClick={() => {
-                        setDiscoveryLevel(50);
-                        setItems(null);
-                        setShownIds(new Set());
-                        setRefreshTick((x) => x + 1);
-                        void runSuggest();
-                      }}
-                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline whitespace-nowrap"
-                      title="Reset to default (50%)"
-                    >
-                      Reset
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-600">Context</label>
-                  <select
-                    value={contextMode}
-                    onChange={(e) => setContextMode(e.target.value as typeof contextMode)}
-                    className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-800"
-                  >
-                    <option value="auto">Auto (time-based)</option>
-                    <option value="weeknight">Weeknight wind-down</option>
-                    <option value="short">Short session</option>
-                    <option value="immersive">Immersive/long-form</option>
-                    <option value="family">Family/group friendly</option>
-                    <option value="background">Easy-background</option>
-                  </select>
-                </div>
-                <button
-                  onClick={handleUndoLastFeedback}
-                  disabled={!lastFeedback}
-                  className={`px-3 py-1.5 rounded border text-sm font-medium transition-colors ${lastFeedback ? 'bg-white hover:bg-gray-50 text-gray-800 border-gray-200' : 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed'}`}
-                  title={lastFeedback ? `Restore "${lastFeedback.title}" and unblock it` : 'No feedback to undo yet'}
+        {!loading && !error && noCandidatesReason && (
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
+            {noCandidatesReason}
+          </p>
+        )}
+        {items && categorizedSuggestions && (
+          <div className="space-y-8">
+            <div className="flex items-center justify-between gap-3 text-sm text-gray-700 flex-wrap">
+              <div className="flex items-center gap-2">
+                <label
+                  className="text-xs text-gray-600"
+                  title="Lower = safer, familiar picks. Higher = more exploratory, diverse picks."
                 >
-                  ↩️ Undo last feedback
-                </button>
+                  Discovery vs Safety
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={discoveryLevel}
+                  onChange={(e) => {
+                    const newValue = Number(e.target.value);
+                    setDiscoveryLevel(newValue);
+                    // Debounced auto-refresh when slider changes
+                    if ((window as any).__discoverySliderTimeout) {
+                      clearTimeout((window as any).__discoverySliderTimeout);
+                    }
+                    (window as any).__discoverySliderTimeout = setTimeout(
+                      () => {
+                        setItems(null);
+                        setShownIds(new Set());
+                        setRefreshTick((x) => x + 1);
+                        void runSuggest();
+                      },
+                      800,
+                    );
+                  }}
+                  className="w-40 accent-blue-600"
+                  title="Drag to adjust. Changes apply automatically after a brief pause."
+                />
+                <span className="text-xs text-gray-500 w-8 text-right">
+                  {discoveryLevel}%
+                </span>
+                {discoveryLevel !== 50 && (
+                  <button
+                    onClick={() => {
+                      setDiscoveryLevel(50);
+                      setItems(null);
+                      setShownIds(new Set());
+                      setRefreshTick((x) => x + 1);
+                      void runSuggest();
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline whitespace-nowrap"
+                    title="Reset to default (50%)"
+                  >
+                    Reset
+                  </button>
+                )}
               </div>
-              {sourceLabel && (
-                <p className="text-xs text-gray-500 mb-4">Source: {sourceLabel}</p>
-              )}
-
-              {/* Picks From Your Letterboxd Watchlist - TOP PRIORITY */}
-              {categorizedSuggestions.watchlistPicks.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">📋</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Picks From Your Letterboxd Watchlist</h2>
-                        <p className="text-xs text-gray-600">Movies you saved to watch, prioritized by what you&apos;ve been enjoying recently</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('watchlistPicks')}
-                      disabled={refreshingSections.has('watchlistPicks')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('watchlistPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.watchlistPicks.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={true}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Seasonal/Holiday Recommendations Section */}
-              {categorizedSuggestions.seasonalPicks.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">
-                        {categorizedSuggestions.seasonalConfig.title.includes('Christmas') ? '🎄' :
-                          categorizedSuggestions.seasonalConfig.title.includes('Halloween') ? '🎃' :
-                            categorizedSuggestions.seasonalConfig.title.includes('Thanksgiving') ? '🦃' :
-                              categorizedSuggestions.seasonalConfig.title.includes('Valentine') ? '💝' :
-                                categorizedSuggestions.seasonalConfig.title.includes('Fourth') || categorizedSuggestions.seasonalConfig.title.includes('Independence') ? '🎆' :
-                                  categorizedSuggestions.seasonalConfig.title.includes('Easter') ? '🐰' : '📅'}
-                      </span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">{categorizedSuggestions.seasonalConfig.title}</h2>
-                        <p className="text-xs text-gray-600">{categorizedSuggestions.seasonalConfig.description}</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('seasonalPicks')}
-                      disabled={refreshingSections.has('seasonalPicks')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('seasonalPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.seasonalPicks.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Perfect Matches Section */}
-              {categorizedSuggestions.perfectMatches.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎯</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Perfect Matches</h2>
-                        <p className="text-xs text-gray-600">These match everything you love</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('perfectMatches')}
-                      disabled={refreshingSections.has('perfectMatches')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('perfectMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.perfectMatches.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Based on Recent Watches Section */}
-              {categorizedSuggestions.recentWatchMatches.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">⏱️</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Based on Recent Watches</h2>
-                        <p className="text-xs text-gray-600">Similar to films you&apos;ve enjoyed recently</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('recentWatchMatches')}
-                      disabled={refreshingSections.has('recentWatchMatches')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('recentWatchMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.recentWatchMatches.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Inspired by Directors You Love Section */}
-              {categorizedSuggestions.directorMatches.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎬</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Inspired by Directors You Love</h2>
-                        <p className="text-xs text-gray-600">From filmmakers you enjoy and directors with similar styles</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('directorMatches')}
-                      disabled={refreshingSections.has('directorMatches')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('directorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.directorMatches.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* From Studios You Love Section */}
-              {categorizedSuggestions.studioMatches.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎞️</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">From Studios You Love</h2>
-                        <p className="text-xs text-gray-600">More from production companies whose style you enjoy</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('studioMatches')}
-                      disabled={refreshingSections.has('studioMatches')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('studioMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.studioMatches.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* From Actors You Love Section */}
-              {categorizedSuggestions.actorMatches.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">⭐</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">From Actors You Love</h2>
-                        <p className="text-xs text-gray-600">More from your favorite performers</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('actorMatches')}
-                      disabled={refreshingSections.has('actorMatches')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('actorMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.actorMatches.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Your Favorite Genres Section */}
-              {categorizedSuggestions.genreMatches.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎭</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Your Favorite Genres</h2>
-                        <p className="text-xs text-gray-600">Based on genres you watch most</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('genreMatches')}
-                      disabled={refreshingSections.has('genreMatches')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('genreMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.genreMatches.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Documentaries Section */}
-              {categorizedSuggestions.documentaries.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">📹</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Documentaries</h2>
-                        <p className="text-xs text-gray-600">Real stories and factual films</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('documentaries')}
-                      disabled={refreshingSections.has('documentaries')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('documentaries') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.documentaries.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Best of the [Decade]s Section */}
-              {categorizedSuggestions.decadeMatches.length >= 1 && topDecade && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">📅</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Best of the {topDecade}s</h2>
-                        <p className="text-xs text-gray-600">Top picks from your favorite era</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('decadeMatches')}
-                      disabled={refreshingSections.has('decadeMatches')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('decadeMatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.decadeMatches.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Smart Discovery (Hidden Gems) Section */}
-              {categorizedSuggestions.smartDiscovery.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">💎</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Hidden Gems for You</h2>
-                        <p className="text-xs text-gray-600">Highly rated films you might have missed</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('smartDiscovery')}
-                      disabled={refreshingSections.has('smartDiscovery')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('smartDiscovery') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.smartDiscovery.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Hidden Gems Section */}
-              {categorizedSuggestions.hiddenGems.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🔍</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Hidden Gems</h2>
-                        <p className="text-xs text-gray-600">Older films that match your taste</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('hiddenGems')}
-                      disabled={refreshingSections.has('hiddenGems')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('hiddenGems') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.hiddenGems.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Cult Classics Section */}
-              {categorizedSuggestions.cultClassics.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎭</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Cult Classics</h2>
-                        <p className="text-xs text-gray-600">Films with dedicated followings</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('cultClassics')}
-                      disabled={refreshingSections.has('cultClassics')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('cultClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.cultClassics.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Crowd Pleasers Section */}
-              {categorizedSuggestions.crowdPleasers.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎉</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Crowd Pleasers</h2>
-                        <p className="text-xs text-gray-600">Widely loved and highly rated</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('crowdPleasers')}
-                      disabled={refreshingSections.has('crowdPleasers')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('crowdPleasers') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.crowdPleasers.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* New & Trending Section */}
-              {categorizedSuggestions.newReleases.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">✨</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">New & Trending</h2>
-                        <p className="text-xs text-gray-600">Fresh picks based on your taste</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('newReleases')}
-                      disabled={refreshingSections.has('newReleases')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('newReleases') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.newReleases.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Recent Classics Section */}
-              {categorizedSuggestions.recentClassics.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎬</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Recent Classics</h2>
-                        <p className="text-xs text-gray-600">Great films from 2015-2022</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('recentClassics')}
-                      disabled={refreshingSections.has('recentClassics')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('recentClassics') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.recentClassics.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Deep Cuts Section */}
-              {categorizedSuggestions.deepCuts.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🌟</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Deep Cuts</h2>
-                        <p className="text-xs text-gray-600">Niche matches for your specific taste</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('deepCuts')}
-                      disabled={refreshingSections.has('deepCuts')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('deepCuts') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.deepCuts.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* From Collections Section */}
-              {categorizedSuggestions.fromCollections.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">📚</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">From Collections</h2>
-                        <p className="text-xs text-gray-600">Complete franchises and series</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('fromCollections')}
-                      disabled={refreshingSections.has('fromCollections')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('fromCollections') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.fromCollections.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Multi-Source Consensus Section - Films recommended by multiple sources */}
-              {categorizedSuggestions.multiSourceConsensus.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎯</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Multi-Source Consensus</h2>
-                        <p className="text-xs text-gray-600">Recommended by multiple sources (TMDB, TasteDive, Trakt)</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('multiSourceConsensus')}
-                      disabled={refreshingSections.has('multiSourceConsensus')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('multiSourceConsensus') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.multiSourceConsensus.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* International Cinema Section - Non-English films */}
-              {categorizedSuggestions.internationalCinema.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🌍</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">International Cinema</h2>
-                        <p className="text-xs text-gray-600">World cinema that matches your taste</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('internationalCinema')}
-                      disabled={refreshingSections.has('internationalCinema')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('internationalCinema') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.internationalCinema.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Animation Picks Section */}
-              {categorizedSuggestions.animationPicks.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎨</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Animation Picks</h2>
-                        <p className="text-xs text-gray-600">Animated films for you</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('animationPicks')}
-                      disabled={refreshingSections.has('animationPicks')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('animationPicks') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.animationPicks.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Quick Watches Section - Under 100 minutes */}
-              {categorizedSuggestions.quickWatches.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">⚡</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Quick Watches</h2>
-                        <p className="text-xs text-gray-600">Great films under 100 minutes</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('quickWatches')}
-                      disabled={refreshingSections.has('quickWatches')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('quickWatches') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.quickWatches.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Epic Films Section - Over 150 minutes */}
-              {categorizedSuggestions.epicFilms.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎬</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Epic Films</h2>
-                        <p className="text-xs text-gray-600">Immersive experiences over 2.5 hours</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('epicFilms')}
-                      disabled={refreshingSections.has('epicFilms')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('epicFilms') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.epicFilms.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Critically Acclaimed Section */}
-              {categorizedSuggestions.criticallyAcclaimed.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🏆</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">Critically Acclaimed</h2>
-                        <p className="text-xs text-gray-600">Top-rated by critics (IMDB 8+, RT 90%+)</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('criticallyAcclaimed')}
-                      disabled={refreshingSections.has('criticallyAcclaimed')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('criticallyAcclaimed') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.criticallyAcclaimed.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                        vote_average={item.vote_average}
-                        vote_count={item.vote_count}
-                        overview={item.overview}
-                        contributingFilms={item.contributingFilms}
-                        dismissed={item.dismissed}
-                        imdb_rating={item.imdb_rating}
-                        rotten_tomatoes={item.rotten_tomatoes}
-                        metacritic={item.metacritic}
-                        awards={item.awards}
-                        genres={item.genres}
-                        sources={item.sources}
-                        consensusLevel={item.consensusLevel}
-                        reliabilityMultiplier={item.reliabilityMultiplier}
-                        onUndoDismiss={handleUndoDismiss}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* More Recommendations Section - Fallback for remaining suggestions */}
-              {categorizedSuggestions.moreRecommendations.length >= 1 && (
-                <section>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🎥</span>
-                      <div>
-                        <h2 className="text-lg font-semibold text-gray-900">More Recommendations</h2>
-                        <p className="text-xs text-gray-600">Additional films you might enjoy</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRefreshSection('moreRecommendations')}
-                      disabled={refreshingSections.has('moreRecommendations')}
-                      className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                      title="Refresh this section"
-                    >
-                      <svg className={`w-3 h-3 ${refreshingSections.has('moreRecommendations') ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                    {categorizedSuggestions.moreRecommendations.map((item) => (
-                      <MovieCard
-                        key={item.id}
-                        id={item.id}
-                        title={item.title}
-                        year={item.year}
-                        posterPath={posters[item.id]}
-                        trailerKey={item.trailerKey}
-                        isInWatchlist={watchlistTmdbIds.has(item.id)}
-                        reasons={item.reasons}
-                        score={item.score}
-                        voteCategory={item.voteCategory}
-                        collectionName={item.collectionName}
-                        onFeedback={handleFeedback}
-                        onSave={handleSave}
-                        isSaved={savedMovieIds.has(item.id)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-600">Context</label>
+                <select
+                  value={contextMode}
+                  onChange={(e) =>
+                    setContextMode(e.target.value as typeof contextMode)
+                  }
+                  className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-800"
+                >
+                  <option value="auto">Auto (time-based)</option>
+                  <option value="weeknight">Weeknight wind-down</option>
+                  <option value="short">Short session</option>
+                  <option value="immersive">Immersive/long-form</option>
+                  <option value="family">Family/group friendly</option>
+                  <option value="background">Easy-background</option>
+                </select>
+              </div>
+              <button
+                onClick={handleUndoLastFeedback}
+                disabled={!lastFeedback}
+                className={`px-3 py-1.5 rounded border text-sm font-medium transition-colors ${lastFeedback ? "bg-white hover:bg-gray-50 text-gray-800 border-gray-200" : "bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed"}`}
+                title={
+                  lastFeedback
+                    ? `Restore "${lastFeedback.title}" and unblock it`
+                    : "No feedback to undo yet"
+                }
+              >
+                ↩️ Undo last feedback
+              </button>
             </div>
-          )
-        }
-        {
-          !items && (
-            <p className="text-gray-700">Your personalized recommendations will appear here.</p>
-          )
-        }
+            {sourceLabel && (
+              <p className="text-xs text-gray-500 mb-4">
+                Source: {sourceLabel}
+              </p>
+            )}
+
+            {/* Picks From Your Letterboxd Watchlist - TOP PRIORITY */}
+            {categorizedSuggestions.watchlistPicks.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📋</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Picks From Your Letterboxd Watchlist
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Movies you saved to watch, prioritized by what
+                        you&apos;ve been enjoying recently
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("watchlistPicks")}
+                    disabled={refreshingSections.has("watchlistPicks")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("watchlistPicks") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.watchlistPicks.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={true}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Seasonal/Holiday Recommendations Section */}
+            {categorizedSuggestions.seasonalPicks.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">
+                      {categorizedSuggestions.seasonalConfig.title.includes(
+                        "Christmas",
+                      )
+                        ? "🎄"
+                        : categorizedSuggestions.seasonalConfig.title.includes(
+                              "Halloween",
+                            )
+                          ? "🎃"
+                          : categorizedSuggestions.seasonalConfig.title.includes(
+                                "Thanksgiving",
+                              )
+                            ? "🦃"
+                            : categorizedSuggestions.seasonalConfig.title.includes(
+                                  "Valentine",
+                                )
+                              ? "💝"
+                              : categorizedSuggestions.seasonalConfig.title.includes(
+                                    "Fourth",
+                                  ) ||
+                                  categorizedSuggestions.seasonalConfig.title.includes(
+                                    "Independence",
+                                  )
+                                ? "🎆"
+                                : categorizedSuggestions.seasonalConfig.title.includes(
+                                      "Easter",
+                                    )
+                                  ? "🐰"
+                                  : "📅"}
+                    </span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        {categorizedSuggestions.seasonalConfig.title}
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        {categorizedSuggestions.seasonalConfig.description}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("seasonalPicks")}
+                    disabled={refreshingSections.has("seasonalPicks")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("seasonalPicks") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.seasonalPicks.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Perfect Matches Section */}
+            {categorizedSuggestions.perfectMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎯</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Perfect Matches
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        These match everything you love
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("perfectMatches")}
+                    disabled={refreshingSections.has("perfectMatches")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("perfectMatches") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.perfectMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Based on Recent Watches Section */}
+            {categorizedSuggestions.recentWatchMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">⏱️</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Based on Recent Watches
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Similar to films you&apos;ve enjoyed recently
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("recentWatchMatches")}
+                    disabled={refreshingSections.has("recentWatchMatches")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("recentWatchMatches") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.recentWatchMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Inspired by Directors You Love Section */}
+            {categorizedSuggestions.directorMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎬</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Inspired by Directors You Love
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        From filmmakers you enjoy and directors with similar
+                        styles
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("directorMatches")}
+                    disabled={refreshingSections.has("directorMatches")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("directorMatches") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.directorMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* From Studios You Love Section */}
+            {categorizedSuggestions.studioMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎞️</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        From Studios You Love
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        More from production companies whose style you enjoy
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("studioMatches")}
+                    disabled={refreshingSections.has("studioMatches")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("studioMatches") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.studioMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* From Actors You Love Section */}
+            {categorizedSuggestions.actorMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">⭐</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        From Actors You Love
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        More from your favorite performers
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("actorMatches")}
+                    disabled={refreshingSections.has("actorMatches")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("actorMatches") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.actorMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Your Favorite Genres Section */}
+            {categorizedSuggestions.genreMatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎭</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Your Favorite Genres
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Based on genres you watch most
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("genreMatches")}
+                    disabled={refreshingSections.has("genreMatches")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("genreMatches") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.genreMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Documentaries Section */}
+            {categorizedSuggestions.documentaries.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📹</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Documentaries
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Real stories and factual films
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("documentaries")}
+                    disabled={refreshingSections.has("documentaries")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("documentaries") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.documentaries.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Best of the [Decade]s Section */}
+            {categorizedSuggestions.decadeMatches.length >= 1 && topDecade && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📅</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Best of the {topDecade}s
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Top picks from your favorite era
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("decadeMatches")}
+                    disabled={refreshingSections.has("decadeMatches")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("decadeMatches") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.decadeMatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Smart Discovery (Hidden Gems) Section */}
+            {categorizedSuggestions.smartDiscovery.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">💎</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Hidden Gems for You
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Highly rated films you might have missed
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("smartDiscovery")}
+                    disabled={refreshingSections.has("smartDiscovery")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("smartDiscovery") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.smartDiscovery.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Hidden Gems Section */}
+            {categorizedSuggestions.hiddenGems.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🔍</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Hidden Gems
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Older films that match your taste
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("hiddenGems")}
+                    disabled={refreshingSections.has("hiddenGems")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("hiddenGems") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.hiddenGems.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Cult Classics Section */}
+            {categorizedSuggestions.cultClassics.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎭</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Cult Classics
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Films with dedicated followings
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("cultClassics")}
+                    disabled={refreshingSections.has("cultClassics")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("cultClassics") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.cultClassics.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Crowd Pleasers Section */}
+            {categorizedSuggestions.crowdPleasers.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎉</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Crowd Pleasers
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Widely loved and highly rated
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("crowdPleasers")}
+                    disabled={refreshingSections.has("crowdPleasers")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("crowdPleasers") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.crowdPleasers.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* New & Trending Section */}
+            {categorizedSuggestions.newReleases.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">✨</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        New & Trending
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Fresh picks based on your taste
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("newReleases")}
+                    disabled={refreshingSections.has("newReleases")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("newReleases") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.newReleases.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Recent Classics Section */}
+            {categorizedSuggestions.recentClassics.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎬</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Recent Classics
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Great films from 2015-2022
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("recentClassics")}
+                    disabled={refreshingSections.has("recentClassics")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("recentClassics") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.recentClassics.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Deep Cuts Section */}
+            {categorizedSuggestions.deepCuts.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🌟</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Deep Cuts
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Niche matches for your specific taste
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("deepCuts")}
+                    disabled={refreshingSections.has("deepCuts")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("deepCuts") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.deepCuts.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* From Collections Section */}
+            {categorizedSuggestions.fromCollections.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📚</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        From Collections
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Complete franchises and series
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("fromCollections")}
+                    disabled={refreshingSections.has("fromCollections")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("fromCollections") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.fromCollections.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Multi-Source Consensus Section - Films recommended by multiple sources */}
+            {categorizedSuggestions.multiSourceConsensus.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎯</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Multi-Source Consensus
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Recommended by multiple sources (TMDB, TasteDive, Trakt)
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("multiSourceConsensus")}
+                    disabled={refreshingSections.has("multiSourceConsensus")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("multiSourceConsensus") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.multiSourceConsensus.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* International Cinema Section - Non-English films */}
+            {categorizedSuggestions.internationalCinema.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🌍</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        International Cinema
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        World cinema that matches your taste
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("internationalCinema")}
+                    disabled={refreshingSections.has("internationalCinema")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("internationalCinema") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.internationalCinema.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Animation Picks Section */}
+            {categorizedSuggestions.animationPicks.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎨</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Animation Picks
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Animated films for you
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("animationPicks")}
+                    disabled={refreshingSections.has("animationPicks")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("animationPicks") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.animationPicks.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Quick Watches Section - Under 100 minutes */}
+            {categorizedSuggestions.quickWatches.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">⚡</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Quick Watches
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Great films under 100 minutes
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("quickWatches")}
+                    disabled={refreshingSections.has("quickWatches")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("quickWatches") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.quickWatches.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Epic Films Section - Over 150 minutes */}
+            {categorizedSuggestions.epicFilms.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎬</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Epic Films
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Immersive experiences over 2.5 hours
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("epicFilms")}
+                    disabled={refreshingSections.has("epicFilms")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("epicFilms") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.epicFilms.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Critically Acclaimed Section */}
+            {categorizedSuggestions.criticallyAcclaimed.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🏆</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Critically Acclaimed
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Top-rated by critics (IMDB 8+, RT 90%+)
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("criticallyAcclaimed")}
+                    disabled={refreshingSections.has("criticallyAcclaimed")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("criticallyAcclaimed") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.criticallyAcclaimed.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                      vote_average={item.vote_average}
+                      vote_count={item.vote_count}
+                      overview={item.overview}
+                      contributingFilms={item.contributingFilms}
+                      dismissed={item.dismissed}
+                      imdb_rating={item.imdb_rating}
+                      rotten_tomatoes={item.rotten_tomatoes}
+                      metacritic={item.metacritic}
+                      awards={item.awards}
+                      genres={item.genres}
+                      sources={item.sources}
+                      consensusLevel={item.consensusLevel}
+                      reliabilityMultiplier={item.reliabilityMultiplier}
+                      onUndoDismiss={handleUndoDismiss}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* More Recommendations Section - Fallback for remaining suggestions */}
+            {categorizedSuggestions.moreRecommendations.length >= 1 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🎥</span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        More Recommendations
+                      </h2>
+                      <p className="text-xs text-gray-600">
+                        Additional films you might enjoy
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRefreshSection("moreRecommendations")}
+                    disabled={refreshingSections.has("moreRecommendations")}
+                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                    title="Refresh this section"
+                  >
+                    <svg
+                      className={`w-3 h-3 ${refreshingSections.has("moreRecommendations") ? "animate-spin" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                  {categorizedSuggestions.moreRecommendations.map((item) => (
+                    <MovieCard
+                      key={item.id}
+                      id={item.id}
+                      title={item.title}
+                      year={item.year}
+                      posterPath={posters[item.id]}
+                      trailerKey={item.trailerKey}
+                      isInWatchlist={watchlistTmdbIds.has(item.id)}
+                      reasons={item.reasons}
+                      score={item.score}
+                      voteCategory={item.voteCategory}
+                      collectionName={item.collectionName}
+                      onFeedback={handleFeedback}
+                      onSave={handleSave}
+                      isSaved={savedMovieIds.has(item.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
+        )}
+        {!items && (
+          <p className="text-gray-700">
+            Your personalized recommendations will appear here.
+          </p>
+        )}
 
         {/* Taste Quiz Modal */}
         {uid && (
@@ -4904,7 +6250,3 @@ export default function SuggestPage() {
     </AuthGate>
   );
 }
-
-
-
-

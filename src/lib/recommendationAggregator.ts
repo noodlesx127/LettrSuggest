@@ -53,6 +53,7 @@ export async function aggregateRecommendations(params: {
   limit?: number;
 }): Promise<AggregatedRecommendation[]> {
   const { seedMovies, limit = 50 } = params;
+  const startTime = Date.now();
 
   console.log("[Aggregator] Starting multi-source aggregation", {
     seedCount: seedMovies.length,
@@ -60,6 +61,7 @@ export async function aggregateRecommendations(params: {
   });
 
   // Fetch from all sources in parallel
+  const sourceFetchStart = Date.now();
   const [tmdbRecs, tastediveRecs, traktRecs, watchmodeRecs] =
     await Promise.allSettled([
       fetchTMDBRecommendations(seedMovies),
@@ -67,6 +69,7 @@ export async function aggregateRecommendations(params: {
       fetchTraktRecommendations(seedMovies),
       fetchWatchmodeTrending(),
     ]);
+  const sourceFetchElapsed = Date.now() - sourceFetchStart;
 
   // Collect all recommendations
   const allRecs: SourceRecommendation[] = [];
@@ -74,6 +77,8 @@ export async function aggregateRecommendations(params: {
   if (tmdbRecs.status === "fulfilled") {
     allRecs.push(...tmdbRecs.value);
     console.log("[Aggregator] TMDB recommendations:", tmdbRecs.value.length);
+  } else {
+    console.error("[Aggregator] TMDB fetch failed:", tmdbRecs.reason);
   }
 
   if (tastediveRecs.status === "fulfilled") {
@@ -82,11 +87,15 @@ export async function aggregateRecommendations(params: {
       "[Aggregator] TasteDive recommendations:",
       tastediveRecs.value.length,
     );
+  } else {
+    console.error("[Aggregator] TasteDive fetch failed:", tastediveRecs.reason);
   }
 
   if (traktRecs.status === "fulfilled") {
     allRecs.push(...traktRecs.value);
     console.log("[Aggregator] Trakt recommendations:", traktRecs.value.length);
+  } else {
+    console.error("[Aggregator] Trakt fetch failed:", traktRecs.reason);
   }
 
   if (watchmodeRecs.status === "fulfilled") {
@@ -95,7 +104,13 @@ export async function aggregateRecommendations(params: {
       "[Aggregator] Watchmode recommendations:",
       watchmodeRecs.value.length,
     );
+  } else {
+    console.error("[Aggregator] Watchmode fetch failed:", watchmodeRecs.reason);
   }
+
+  console.log(
+    `[Aggregator] Source fetching completed in ${sourceFetchElapsed}ms`,
+  );
 
   // Merge and deduplicate by TMDB ID
   const mergedRecs = mergeRecommendations(allRecs);
@@ -128,31 +143,158 @@ export async function aggregateRecommendations(params: {
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 
-  // Log source distribution in top results
-  const sourceStats = {
-    trakt: scored.filter((r) => r.sources.some((s) => s.source === "trakt"))
-      .length,
-    tastedive: scored.filter((r) =>
-      r.sources.some((s) => s.source === "tastedive"),
-    ).length,
-    tmdb: scored.filter((r) => r.sources.some((s) => s.source === "tmdb"))
-      .length,
-    watchmode: scored.filter((r) =>
-      r.sources.some((s) => s.source === "watchmode"),
-    ).length,
-  };
+  // Log comprehensive source distribution and quality metrics
+  logSourceDistribution(scored);
+  logReasonQuality(scored);
+  logTopRecommendations(scored);
 
-  console.log("[Aggregator] Top recommendations by consensus:", {
-    high: scored.filter((r) => r.consensusLevel === "high").length,
-    medium: scored.filter((r) => r.consensusLevel === "medium").length,
-    low: scored.filter((r) => r.consensusLevel === "low").length,
-  });
+  // Log timing information
+  const elapsed = Date.now() - startTime;
   console.log(
-    "[Aggregator] Source representation in top results:",
-    sourceStats,
+    `[Aggregator] Completed in ${elapsed}ms with ${scored.length} recommendations`,
   );
 
   return scored;
+}
+
+/**
+ * Log source distribution across final recommendations
+ * Tracks which sources contributed and how often multiple sources agree
+ */
+function logSourceDistribution(recommendations: AggregatedRecommendation[]) {
+  const sourceCount: Record<string, number> = {};
+  const multiSourceCount = { single: 0, multi: 0 };
+
+  for (const rec of recommendations) {
+    const sources = rec.sources || [];
+    if (sources.length === 1) {
+      multiSourceCount.single++;
+    } else {
+      multiSourceCount.multi++;
+    }
+
+    for (const src of sources) {
+      sourceCount[src.source] = (sourceCount[src.source] || 0) + 1;
+    }
+  }
+
+  const total = recommendations.length;
+  console.log("[Aggregator] Source Distribution:", {
+    total,
+    bySource: Object.entries(sourceCount).map(([source, count]) => ({
+      source,
+      count,
+      percent: ((count / total) * 100).toFixed(1) + "%",
+    })),
+    singleSource: multiSourceCount.single,
+    multiSource: multiSourceCount.multi,
+    consensusRate: ((multiSourceCount.multi / total) * 100).toFixed(1) + "%",
+  });
+
+  // Consensus level breakdown
+  console.log("[Aggregator] Consensus Breakdown:", {
+    high: recommendations.filter((r) => r.consensusLevel === "high").length,
+    medium: recommendations.filter((r) => r.consensusLevel === "medium").length,
+    low: recommendations.filter((r) => r.consensusLevel === "low").length,
+  });
+
+  // Check if we're meeting the goal: TasteDive/Trakt > 40%
+  const tastediveCount = sourceCount["tastedive"] || 0;
+  const traktCount = sourceCount["trakt"] || 0;
+  const qualitySourceTotal = tastediveCount + traktCount;
+  const qualitySourceRate = (qualitySourceTotal / (total * 2)) * 100; // Divide by total*2 since each rec can have both
+
+  console.log("[Aggregator] Quality Source Metrics:", {
+    tastedive: tastediveCount,
+    trakt: traktCount,
+    qualitySourceRate: qualitySourceRate.toFixed(1) + "%",
+    goalMet: qualitySourceRate > 40 ? "✓ YES" : "✗ NO (goal: >40%)",
+  });
+}
+
+/**
+ * Log recommendation reason quality
+ * Tracks how personalized vs generic the recommendation reasons are
+ */
+function logReasonQuality(recommendations: AggregatedRecommendation[]) {
+  const reasonStats = {
+    personalized: 0, // "Because you loved X", "Similar to X"
+    generic: 0, // "Trending", "Popular"
+    sourceSpecific: 0, // "Via TasteDive", "Trakt community pick"
+    noReason: 0,
+  };
+
+  for (const rec of recommendations) {
+    // Check all source reasons for this recommendation
+    let hasPersonalized = false;
+    let hasGeneric = false;
+    let hasSourceSpecific = false;
+
+    for (const source of rec.sources) {
+      const reason = source.reason || "";
+
+      if (
+        reason.includes("you loved") ||
+        reason.includes("Similar to") ||
+        reason.includes("Recommended based on")
+      ) {
+        hasPersonalized = true;
+      } else if (reason.includes("Trending") || reason.includes("Popular")) {
+        hasGeneric = true;
+      } else if (
+        reason.includes("TasteDive") ||
+        reason.includes("Trakt community") ||
+        reason.includes("Related to")
+      ) {
+        hasSourceSpecific = true;
+      }
+    }
+
+    // Categorize based on priority: personalized > sourceSpecific > generic
+    if (hasPersonalized) {
+      reasonStats.personalized++;
+    } else if (hasSourceSpecific) {
+      reasonStats.sourceSpecific++;
+    } else if (hasGeneric) {
+      reasonStats.generic++;
+    } else {
+      reasonStats.noReason++;
+    }
+  }
+
+  const total = recommendations.length;
+  console.log("[Aggregator] Reason Quality:", {
+    ...reasonStats,
+    personalizedRate:
+      ((reasonStats.personalized / total) * 100).toFixed(1) + "%",
+    sourceSpecificRate:
+      ((reasonStats.sourceSpecific / total) * 100).toFixed(1) + "%",
+    genericRate: ((reasonStats.generic / total) * 100).toFixed(1) + "%",
+  });
+}
+
+/**
+ * Log top recommendations with their source breakdown
+ * Helps understand why certain movies were selected
+ */
+function logTopRecommendations(recommendations: AggregatedRecommendation[]) {
+  const topN = 10;
+  const top = recommendations.slice(0, topN);
+
+  console.log(`[Aggregator] Top ${topN} Recommendations with Sources:`);
+  for (let i = 0; i < top.length; i++) {
+    const rec = top[i];
+    const sourceList = rec.sources.map((s) => s.source).join(", ");
+    const reasonSample = rec.sources[0]?.reason || "No reason";
+
+    console.log(`  ${i + 1}. ${rec.title || `TMDB ${rec.tmdbId}`}`, {
+      score: rec.score.toFixed(2),
+      consensus: rec.consensusLevel,
+      sources: sourceList,
+      sourceCount: rec.sources.length,
+      sampleReason: reasonSample,
+    });
+  }
 }
 
 /**
@@ -347,6 +489,39 @@ async function fetchTMDBRecommendations(
 }
 
 /**
+ * Calculate title similarity for fuzzy matching
+ * Returns a score from 0.0 (no match) to 1.0 (exact match)
+ */
+function titleSimilarity(a: string, b: string): number {
+  // Preserve spaces for word splitting, remove other special chars
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const na = normalize(a);
+  const nb = normalize(b);
+
+  // Handle empty strings
+  if (na.length === 0 || nb.length === 0) return 0;
+
+  // Exact match after normalization
+  if (na === nb) return 1.0;
+
+  // One title contains the other (e.g., "Alien" and "Alien Director's Cut")
+  if (na.includes(nb) || nb.includes(na)) return 0.8;
+
+  // Calculate word overlap
+  const words1 = na.split(/\s+/);
+  const words2 = nb.split(/\s+/);
+
+  const overlap = words1.filter((w) => words2.includes(w)).length;
+  return overlap / Math.max(words1.length, words2.length);
+}
+
+/**
  * Fetch TasteDive recommendations for seed movies
  * Uses TasteDive's similar content API
  */
@@ -388,14 +563,49 @@ async function fetchTasteDiveRecommendations(
       });
 
       if (searchResults.length > 0) {
-        const tmdbId = searchResults[0].id;
+        const tmdbMatch = searchResults[0];
+
+        // Verify title similarity to avoid false matches
+        const similarity = titleSimilarity(result.Name, tmdbMatch.title);
+
+        // Skip very poor matches (likely wrong movie)
+        if (similarity < 0.3) {
+          console.log(
+            `[Aggregator] TasteDive skip: "${result.Name}" → "${tmdbMatch.title}" (similarity: ${similarity.toFixed(2)})`,
+          );
+          continue;
+        }
+
+        // Base confidence for TasteDive (excellent cross-media intelligence)
+        const baseConfidence = 0.88;
+
+        // Adjust confidence based on match quality
+        let adjustedConfidence: number;
+        if (similarity >= 0.8) {
+          // Strong match (exact or very close)
+          adjustedConfidence = baseConfidence;
+        } else if (similarity >= 0.5) {
+          // Moderate match (probably correct but not certain)
+          adjustedConfidence = baseConfidence * 0.7; // 0.616
+        } else {
+          // Weak match (possible but uncertain)
+          adjustedConfidence = baseConfidence * 0.4; // 0.352
+        }
+
         recommendations.push({
           source: "tastedive",
-          tmdbId,
+          tmdbId: tmdbMatch.id,
           title: result.Name,
-          confidence: 0.88, // TasteDive has excellent cross-media intelligence (boosted)
-          reason: "Similar content via TasteDive",
+          confidence: adjustedConfidence,
+          reason: `Similar content via TasteDive (match: ${Math.round(similarity * 100)}%)`,
         });
+
+        // Log match quality for monitoring
+        if (similarity < 0.8) {
+          console.log(
+            `[Aggregator] TasteDive fuzzy match: "${result.Name}" → "${tmdbMatch.title}" (similarity: ${similarity.toFixed(2)}, confidence: ${adjustedConfidence.toFixed(2)})`,
+          );
+        }
       }
     }
 
