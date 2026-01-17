@@ -98,11 +98,24 @@ export async function aggregateRecommendations(params: {
   }
 
   // Merge and deduplicate by TMDB ID
-  const aggregated = mergeRecommendations(allRecs);
+  const mergedRecs = mergeRecommendations(allRecs);
 
-  console.log("[Aggregator] Merged recommendations:", {
-    total: allRecs.length,
-    unique: aggregated.length,
+  // Filter out Watchmode-only entries - these are generic trending content
+  // without any personalization signal. Only keep Watchmode recs that also
+  // appear in at least one personalized source (TMDB similar, TasteDive, Trakt)
+  const aggregated = mergedRecs.filter((rec) => {
+    const isWatchmodeOnly =
+      rec.sources.length === 1 && rec.sources[0].source === "watchmode";
+    if (isWatchmodeOnly) {
+      console.log("[Aggregator] Filtering Watchmode-only:", rec.title);
+    }
+    return !isWatchmodeOnly;
+  });
+
+  console.log("[Aggregator] After Watchmode filter:", {
+    beforeFilter: mergedRecs.length,
+    afterFilter: aggregated.length,
+    filtered: mergedRecs.length - aggregated.length,
   });
 
   // Calculate consensus scores and sort
@@ -155,6 +168,10 @@ function mergeRecommendations(
     const existing = grouped.get(rec.tmdbId);
 
     if (existing) {
+      // Prefer non-empty title (Trakt returns empty titles)
+      if (!existing.title && rec.title) {
+        existing.title = rec.title;
+      }
       // Add this source to existing recommendation
       existing.sources.push({
         source: rec.source,
@@ -163,6 +180,7 @@ function mergeRecommendations(
       });
     } else {
       // Create new aggregated recommendation
+      // Note: Title may be empty (e.g., Trakt) - will be filled when other sources add same movie
       grouped.set(rec.tmdbId, {
         tmdbId: rec.tmdbId,
         title: rec.title,
@@ -193,14 +211,14 @@ const ACTIVE_SOURCE_COUNT = 4; // tmdb, tastedive, trakt, watchmode
  * 3. Individual source confidence
  */
 function calculateAggregateScore(rec: AggregatedRecommendation): number {
-  // Balanced weights: consensus matters more than source identity
-  // Range narrowed from 0.6-1.4 to 0.95-1.15 for fairer scoring
+  // Rebalanced weights: Boost niche/personalized sources, reduce generic ones
+  // This helps unique discoveries from TasteDive/Trakt compete with mainstream TMDB results
   const sourceWeights: Record<RecommendationSource, number> = {
-    tmdb: 1.0, // Baseline - reliable mainstream recommendations
-    tastedive: 1.1, // Slight boost - good at finding non-obvious matches
-    trakt: 1.15, // Slight boost - community-driven quality
-    tuimdb: 1.0, // Baseline - good for genre matching
-    watchmode: 0.95, // Slight reduction - trending but less personalized
+    tmdb: 0.85, // Reduced - already dominant, favors mainstream
+    tastedive: 1.3, // Boosted - excellent at finding niche/non-obvious matches
+    trakt: 1.25, // Boosted - community-driven curation, quality signal
+    tuimdb: 1.05, // Slight boost if implemented
+    watchmode: 0.9, // Reduced - trending = generic, not personalized
   };
 
   let totalScore = 0;
@@ -217,14 +235,29 @@ function calculateAggregateScore(rec: AggregatedRecommendation): number {
   const consensusBonus =
     Math.min(rec.sources.length / ACTIVE_SOURCE_COUNT, 1.0) * 0.3;
 
-  // Extra bonus when high-quality sources (Trakt/TasteDive) are present
+  // Quality source bonus (TasteDive/Trakt are better for personalized niche finds)
+  // Combined with the uniqueness bonus below, this ensures niche sources compete with consensus
   const sourceNames = rec.sources.map((s) => s.source);
-  // Reduced quality source bonus since weights are now more balanced
   const hasTrakt = sourceNames.includes("trakt");
   const hasTasteDive = sourceNames.includes("tastedive");
   const qualitySourceBonus = (hasTrakt ? 0.05 : 0) + (hasTasteDive ? 0.05 : 0);
 
-  return totalScore / totalWeight + consensusBonus + qualitySourceBonus;
+  // Uniqueness bonus: Single-source discoveries are often niche finds worth surfacing
+  // Particularly valuable when the source is TasteDive or Trakt
+  const isUniqueFind = rec.sources.length === 1;
+  const uniqueSource = isUniqueFind ? rec.sources[0].source : null;
+  const uniquenessBonus = isUniqueFind
+    ? uniqueSource === "tastedive" || uniqueSource === "trakt"
+      ? 0.2
+      : 0.1
+    : 0;
+
+  return (
+    totalScore / totalWeight +
+    consensusBonus +
+    qualitySourceBonus +
+    uniquenessBonus
+  );
 }
 
 /**

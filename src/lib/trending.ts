@@ -808,7 +808,7 @@ export async function generateSmartCandidates(profile: {
       if (directorDiscovered.length === 0 && shuffledDirectors.length > 0) {
         const singleDirector = await discoverMoviesByProfile({
           people: [shuffledDirectors[0].id],
-          sortBy: "popularity.desc",
+          sortBy: "vote_average.desc", // Quality-first for director discovery
           limit: 50,
         });
         results.discovered.push(...singleDirector);
@@ -830,7 +830,7 @@ export async function generateSmartCandidates(profile: {
       );
       const nicheDiscovered = await discoverMoviesByProfile({
         keywords: shuffledKeywords.slice(0, 2).map((k) => k.id),
-        sortBy: "popularity.desc",
+        sortBy: "vote_average.desc", // Quality-first for niche discovery
         minVotes: 30,
         limit: 100,
       });
@@ -977,7 +977,7 @@ export async function generateSmartCandidates(profile: {
       const topGenre = profile.topGenres[0];
       const singleGenreDiscovered = await discoverMoviesByProfile({
         genres: [topGenre.id],
-        sortBy: "popularity.desc",
+        sortBy: "vote_average.desc", // Quality-first for genre discovery
         minVotes: 100,
         limit: 100,
       });
