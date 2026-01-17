@@ -4307,6 +4307,92 @@ function applyMMRRerank<
   return [...selected, ...pool];
 }
 
+/**
+ * Cold start recommendations for users with no liked films
+ * Returns popular, highly-rated movies to help new users get started
+ * Uses vote_average * log(vote_count) to balance quality and popularity
+ */
+async function getColdStartRecommendations(
+  candidateIds: number[],
+  limit: number,
+): Promise<
+  Array<{
+    tmdbId: number;
+    score: number;
+    reasons: string[];
+    title?: string;
+    release_date?: string;
+    genres?: string[];
+    poster_path?: string | null;
+    voteCategory?: "hidden-gem" | "crowd-pleaser" | "cult-classic" | "standard";
+    voteAverage?: number;
+    voteCount?: number;
+  }>
+> {
+  console.log("[ColdStart] Fetching candidate details", {
+    candidatesCount: candidateIds.length,
+    limit,
+  });
+
+  // Fetch movie details for all candidates
+  const candidates = await mapLimit(candidateIds, 10, async (id) => {
+    try {
+      return await fetchTmdbMovieCached(id);
+    } catch (e) {
+      console.error(`[ColdStart] Failed to fetch movie ${id}`, e);
+      return null;
+    }
+  });
+
+  const validCandidates = candidates.filter(
+    (m): m is TMDBMovie =>
+      m != null && m.vote_average != null && m.vote_count != null,
+  );
+
+  console.log("[ColdStart] Valid candidates", {
+    total: candidates.length,
+    valid: validCandidates.length,
+  });
+
+  // Score by vote_average * log10(vote_count + 1) to balance quality and popularity
+  // Require minimum 100 votes to filter out unreliable ratings
+  const scored = validCandidates
+    .filter((m) => m.vote_count! >= 100)
+    .map((m) => {
+      const voteScore = m.vote_average! * Math.log10(m.vote_count! + 1);
+      return { movie: m, score: voteScore };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  console.log("[ColdStart] Scored and sorted", {
+    scoredCount: scored.length,
+    topScores: scored.slice(0, 5).map((s) => s.score.toFixed(2)),
+  });
+
+  // Convert to recommendation format
+  return scored.map(({ movie, score }) => {
+    const features = extractFeatures(movie);
+    return {
+      tmdbId: movie.id,
+      score,
+      reasons: [
+        "Critically acclaimed",
+        "Popular with audiences",
+        ...(features.voteAverage >= 8.0 ? ["Highly rated"] : []),
+        ...(features.voteCount >= 10000 ? ["Widely watched"] : []),
+      ],
+      title: movie.title,
+      release_date: movie.release_date,
+      genres: features.genres,
+      poster_path: movie.poster_path,
+      voteCategory: features.voteCategory,
+      voteAverage: movie.vote_average,
+      voteCount: movie.vote_count,
+    };
+  });
+}
+
 export async function suggestByOverlap(params: {
   userId: string;
   films: FilmEventLite[];
@@ -4816,6 +4902,27 @@ export async function suggestByOverlap(params: {
   const dislikedFeats = dislikedMovies
     .filter(Boolean)
     .map((m) => extractFeatures(m as TMDBMovie));
+
+  // COLD START: If user has no liked films, return popular, highly-rated movies
+  // Consider watchlist as an alternative signal if available
+  if (likedFeats.length === 0) {
+    const hasWatchlist =
+      params.watchlistEntries && params.watchlistEntries.length > 0;
+    console.warn("[SuggestByOverlap] Cold start - no liked films detected", {
+      likedCount: likedFeats.length,
+      watchlistCount: params.watchlistEntries?.length ?? 0,
+      totalFilms: params.films.length,
+      fallbackStrategy: hasWatchlist ? "watchlist-based" : "popular-fallback",
+    });
+
+    // If user has watchlist items, we could use those as weak signals
+    // But for now, we'll stick to popular fallback for simplicity
+    // Future enhancement: extract genres/directors from watchlist items
+    return getColdStartRecommendations(
+      finalCandidates,
+      params.desiredResults || 20,
+    );
+  }
 
   // Map TMDB IDs back to original film data for weighting
   const likedFilmData = liked.filter((f) => params.mappings.has(f.uri));

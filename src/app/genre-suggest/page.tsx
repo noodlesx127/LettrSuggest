@@ -974,7 +974,10 @@ export default function GenreSuggestPage() {
   ) => {
     if (!uid) return;
 
-    const allMovies = Object.values(genreSuggestions).flat();
+    const allMovies = [
+      ...Object.values(genreSuggestions).flat(),
+      ...Object.values(subgenreSuggestions).flat(),
+    ];
     const movie = allMovies.find((i) => i.id === tmdbId);
     const movieTitle = movie?.title || "this movie";
 
@@ -992,6 +995,17 @@ export default function GenreSuggestPage() {
           const next = { ...prev };
           for (const genreId in next) {
             next[Number(genreId)] = next[Number(genreId)].map((item) =>
+              item.id === tmdbId ? { ...item, dismissed: true } : item,
+            );
+          }
+          return next;
+        });
+
+        // Mark as dismissed in subgenre suggestions
+        setSubgenreSuggestions((prev) => {
+          const next = { ...prev };
+          for (const subgenreKey in next) {
+            next[subgenreKey] = next[subgenreKey].map((item) =>
               item.id === tmdbId ? { ...item, dismissed: true } : item,
             );
           }
@@ -1025,11 +1039,22 @@ export default function GenreSuggestPage() {
         return next;
       });
 
-      // Unmark as dismissed
+      // Unmark as dismissed in genre suggestions
       setGenreSuggestions((prev) => {
         const next = { ...prev };
         for (const genreId in next) {
           next[Number(genreId)] = next[Number(genreId)].map((item) =>
+            item.id === tmdbId ? { ...item, dismissed: false } : item,
+          );
+        }
+        return next;
+      });
+
+      // Unmark as dismissed in subgenre suggestions
+      setSubgenreSuggestions((prev) => {
+        const next = { ...prev };
+        for (const subgenreKey in next) {
+          next[subgenreKey] = next[subgenreKey].map((item) =>
             item.id === tmdbId ? { ...item, dismissed: false } : item,
           );
         }

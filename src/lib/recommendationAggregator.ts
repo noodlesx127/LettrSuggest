@@ -162,6 +162,13 @@ export async function aggregateRecommendations(params: {
  * Tracks which sources contributed and how often multiple sources agree
  */
 function logSourceDistribution(recommendations: AggregatedRecommendation[]) {
+  if (recommendations.length === 0) {
+    console.log(
+      "[Aggregator] Source Distribution: No recommendations to analyze",
+    );
+    return;
+  }
+
   const sourceCount: Record<string, number> = {};
   const multiSourceCount = { single: 0, multi: 0 };
 
@@ -217,6 +224,11 @@ function logSourceDistribution(recommendations: AggregatedRecommendation[]) {
  * Tracks how personalized vs generic the recommendation reasons are
  */
 function logReasonQuality(recommendations: AggregatedRecommendation[]) {
+  if (recommendations.length === 0) {
+    console.log("[Aggregator] Reason Quality: No recommendations to analyze");
+    return;
+  }
+
   const reasonStats = {
     personalized: 0, // "Because you loved X", "Similar to X"
     generic: 0, // "Trending", "Popular"
@@ -278,20 +290,26 @@ function logReasonQuality(recommendations: AggregatedRecommendation[]) {
  * Helps understand why certain movies were selected
  */
 function logTopRecommendations(recommendations: AggregatedRecommendation[]) {
-  const topN = 10;
+  if (recommendations.length === 0) {
+    console.log("[Aggregator] Top Recommendations: None available");
+    return;
+  }
+
+  const topN = Math.min(10, recommendations.length);
   const top = recommendations.slice(0, topN);
 
   console.log(`[Aggregator] Top ${topN} Recommendations with Sources:`);
   for (let i = 0; i < top.length; i++) {
     const rec = top[i];
-    const sourceList = rec.sources.map((s) => s.source).join(", ");
-    const reasonSample = rec.sources[0]?.reason || "No reason";
+    const sources = rec.sources || [];
+    const sourceList = sources.map((s) => s.source).join(", ") || "unknown";
+    const reasonSample = sources[0]?.reason || "No reason";
 
     console.log(`  ${i + 1}. ${rec.title || `TMDB ${rec.tmdbId}`}`, {
       score: rec.score.toFixed(2),
       consensus: rec.consensusLevel,
       sources: sourceList,
-      sourceCount: rec.sources.length,
+      sourceCount: sources.length,
       sampleReason: reasonSample,
     });
   }
