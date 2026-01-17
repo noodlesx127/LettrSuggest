@@ -1,8 +1,8 @@
-# Algorithm Fixes: Personalization Over Generic Recommendations
+# Algorithm Fixes: Personalization Over Generic Recommendations (Phase 1 Complete)
 
 **Created:** January 16, 2026  
-**Updated:** January 16, 2026 (Phase 0 Complete)  
-**Status:** Phase 0 Complete - Phase 1 In Progress  
+**Updated:** January 16, 2026 (Phase 1 Complete)  
+**Status:** Phase 1 Complete - Phases 2-4 Remaining  
 **Priority:** High - Core User Experience Issue
 
 ---
@@ -378,10 +378,12 @@ if (likedFeats.length === 0) {
 
 ### Phase 1: Quick Wins (1-2 days)
 
-6. [ ] Issue #4: Rebalance source weights in aggregator
-7. [ ] Issue #2: Change default sort to `vote_average.desc`
-8. [ ] Issue #5: Remove or filter Watchmode trending
-9. [ ] Issue #7: Fix Trakt empty titles
+6. [x] Issue #4: Rebalance source weights in aggregator
+7. [x] Issue #2: Change default sort to `vote_average.desc`
+8. [x] Issue #5: Remove or filter Watchmode trending
+9. [x] Issue #7: Fix Trakt empty titles
+
+**Phase 1 Completed:** January 17, 2026 (Commit: `01a2a91`)
 
 ### Phase 2: Core Algorithm Fixes (2-3 days)
 

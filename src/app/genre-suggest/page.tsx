@@ -544,7 +544,7 @@ export default function GenreSuggestPage() {
           // Limit to first 5 to avoid too many API calls
           const singleGenreDiscovered = await discoverMoviesByProfile({
             genres: [genreId],
-            sortBy: "popularity.desc",
+            sortBy: "vote_average.desc", // Quality-first for genre discovery
             minVotes: 30,
             limit: 50,
           });
