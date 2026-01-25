@@ -3207,31 +3207,81 @@ export async function buildTasteProfile(params: {
   });
 
   // Fetch movie details (use pre-fetched if available)
-  const fetchDetails = async (id: number) => {
-    if (params.tmdbDetails?.has(id)) {
-      return params.tmdbDetails.get(id);
+  // Track in-flight requests to prevent duplicate fetches
+  const inflightFetches = new Map<number, Promise<TMDBMovie | null>>();
+
+  const fetchDetails = async (id: number): Promise<TMDBMovie | null> => {
+    // Check for in-flight fetch to avoid duplicate requests
+    const inflight = inflightFetches.get(id);
+    if (inflight) {
+      return inflight;
     }
-    return fetchTmdbMovieCached(id);
+
+    const cached = params.tmdbDetails?.get(id);
+
+    // Only trust cache if it has profile-critical fields
+    // We need credits (cast AND crew) and keywords for proper taste profiling
+    // Handle both keywords.keywords and keywords.results shapes
+    const hasCredits =
+      Array.isArray(cached?.credits?.cast) &&
+      Array.isArray(cached?.credits?.crew);
+    const hasKeywords =
+      Array.isArray(cached?.keywords?.keywords) ||
+      Array.isArray(cached?.keywords?.results);
+    const isProfileComplete = cached && hasCredits && hasKeywords;
+
+    if (isProfileComplete) {
+      return cached;
+    }
+
+    // Fetch full data if cache is incomplete or missing
+    // Memoize the promise to prevent concurrent duplicate fetches
+    const fetchPromise = (async () => {
+      try {
+        const full = await fetchTmdbMovieCached(id);
+
+        // Backfill cache so we don't refetch next time
+        if (full && params.tmdbDetails) {
+          params.tmdbDetails.set(id, full);
+        }
+
+        return full;
+      } catch (error) {
+        console.error(
+          `[TasteProfile] Failed to fetch TMDB details for ${id}:`,
+          error,
+        );
+        return null;
+      } finally {
+        // Remove from in-flight map when done
+        inflightFetches.delete(id);
+      }
+    })();
+
+    inflightFetches.set(id, fetchPromise);
+    return fetchPromise;
   };
 
+  // Use mapLimit to prevent request storms with large libraries
+  // Limit concurrency to 10 parallel fetches
   const [likedMovies, dislikedMovies, negativeFeedbackMovies] =
     await Promise.all([
-      Promise.all(likedIds.map((id) => fetchDetails(id))),
-      Promise.all(dislikedIds.map((id) => fetchDetails(id))),
-      Promise.all(
-        (params.negativeFeedbackIds || []).map((id) => fetchDetails(id)),
-      ),
+      mapLimit(likedIds, 10, fetchDetails),
+      mapLimit(dislikedIds, 10, fetchDetails),
+      mapLimit(params.negativeFeedbackIds || [], 10, fetchDetails),
     ]);
 
   // Log details fetch results
   const likedWithData = likedMovies.filter((m) => m != null);
-  const likedWithGenres = likedMovies.filter((m) => m?.genres?.length > 0);
+  const likedWithGenres = likedMovies.filter(
+    (m) => m?.genres && m.genres.length > 0,
+  );
   const likedWithKeywords = likedMovies.filter((m) => {
     const kws = m?.keywords?.keywords || m?.keywords?.results || [];
     return kws.length > 0;
   });
   const likedWithCredits = likedMovies.filter(
-    (m) => m?.credits?.crew?.length > 0,
+    (m) => m?.credits?.crew && m.credits.crew.length > 0,
   );
 
   console.log("[TasteProfile] Movie details fetched:", {
