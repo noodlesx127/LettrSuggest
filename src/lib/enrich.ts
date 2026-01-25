@@ -3159,7 +3159,7 @@ export async function buildTasteProfile(params: {
   if (params.userId && supabase) {
     try {
       const { data: diaryEvents, error } = await supabase
-        .from("film_diary_events")
+        .from("film_diary_events_enriched")
         .select("tmdb_id, watched_at, rating")
         .eq("user_id", params.userId)
         .order("watched_at", { ascending: false })
@@ -3955,12 +3955,11 @@ export async function buildTasteProfile(params: {
             return { id: keywordId, idf: cached };
           }
 
+          // Query using keyword_names array column (fast GIN index, no special char issues)
           const { count: filmsWithKeyword, error } = await supabaseClient
             .from("tmdb_movies")
             .select("tmdb_id", { count: "exact", head: true })
-            .or(
-              `data->keywords->keywords.cs.${JSON.stringify([{ name: keyword }])},data->keywords->results.cs.${JSON.stringify([{ name: keyword }])}`,
-            );
+            .contains("keyword_names", [keyword.toLowerCase()]);
 
           if (error) {
             if (process.env.NODE_ENV === "development") {
