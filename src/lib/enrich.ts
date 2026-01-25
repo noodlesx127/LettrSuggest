@@ -111,10 +111,14 @@ export type TMDBMovie = {
  * Search for movies using unified API (tries TuiMDB first to get UIDs, then TMDB)
  */
 export async function searchTmdb(query: string, year?: number) {
-  console.log("[MovieAPI] search start", { query, year });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[MovieAPI] search start", { query, year });
+  }
   try {
     const results = await searchMovies({ query, year, preferTuiMDB: true });
-    console.log("[MovieAPI] search ok", { count: results.length });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[MovieAPI] search ok", { count: results.length });
+    }
     return results;
   } catch (e) {
     console.error("[MovieAPI] search exception", e);
@@ -130,7 +134,9 @@ export async function fetchMovieById(
   id: number,
   mediaType: "movie" | "tv" = "movie",
 ): Promise<TMDBMovie | null> {
-  console.log("[MovieAPI] fetchById start", { id, mediaType });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[MovieAPI] fetchById start", { id, mediaType });
+  }
   try {
     const apiKey =
       process.env.NEXT_PUBLIC_TMDB_API_KEY || process.env.TMDB_API_KEY;
@@ -227,27 +233,14 @@ export async function getFilmMappings(userId: string, uris: string[]) {
   if (!supabase) throw new Error("Supabase not initialized");
   if (!uris.length) return new Map<string, number>();
 
-  // First verify auth is working
-  try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData?.session) {
-      console.error("[Mappings] No active session - cannot fetch mappings");
-      return new Map<string, number>();
-    }
-    console.log("[Mappings] Auth verified", {
-      uid: sessionData.session.user.id,
-    });
-  } catch (e) {
-    console.error("[Mappings] Auth check failed", e);
-    return new Map<string, number>();
-  }
-
   // Instead of chunking by URIs (which can hit query size limits),
   // fetch ALL mappings for this user (with pagination), then filter in memory
-  console.log("[Mappings] fetching all mappings for user", {
-    userId,
-    uriCount: uris.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Mappings] fetching all mappings for user", {
+      userId,
+      uriCount: uris.length,
+    });
+  }
   const map = new Map<string, number>();
 
   try {
@@ -289,9 +282,11 @@ export async function getFilmMappings(userId: string, uris: string[]) {
       from += pageSize;
     }
 
-    console.log("[Mappings] all mappings loaded", {
-      totalRows: allMappings.length,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Mappings] all mappings loaded", {
+        totalRows: allMappings.length,
+      });
+    }
 
     // Filter to only the URIs we care about
     const uriSet = new Set(uris);
@@ -309,10 +304,12 @@ export async function getFilmMappings(userId: string, uris: string[]) {
     });
   }
 
-  console.log("[Mappings] finished getFilmMappings", {
-    totalMappings: map.size,
-    requestedUris: uris.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Mappings] finished getFilmMappings", {
+      totalMappings: map.size,
+      requestedUris: uris.length,
+    });
+  }
   return map;
 }
 
@@ -328,7 +325,11 @@ export async function getBulkTmdbDetails(
   const detailsMap = new Map<number, TMDBMovie>();
   if (!supabase || tmdbIds.length === 0) return detailsMap;
 
-  console.log("[BulkTmdb] Fetching cached details", { count: tmdbIds.length });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[BulkTmdb] Fetching cached details", {
+      count: tmdbIds.length,
+    });
+  }
 
   try {
     // Fetch in chunks of 500 to avoid query limits
@@ -355,10 +356,12 @@ export async function getBulkTmdbDetails(
       }
     }
 
-    console.log("[BulkTmdb] Fetched details", {
-      requested: tmdbIds.length,
-      found: detailsMap.size,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[BulkTmdb] Fetched details", {
+        requested: tmdbIds.length,
+        found: detailsMap.size,
+      });
+    }
   } catch (e) {
     console.error("[BulkTmdb] Exception", e);
   }
@@ -586,10 +589,12 @@ export async function removeAllowedSuggestion(
 ): Promise<void> {
   try {
     await clearSuggestionFeedback(userId, tmdbId);
-    console.log(
-      "[RemoveAllowed] Cleared positive feedback and related preferences",
-      { userId: userId.slice(0, 8), tmdbId },
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[RemoveAllowed] Cleared positive feedback and related preferences",
+        { userId: userId.slice(0, 8), tmdbId },
+      );
+    }
   } catch (e) {
     console.error("[RemoveAllowed] Failed to remove allowed suggestion", {
       tmdbId,
@@ -610,10 +615,12 @@ export async function neutralizeFeedback(
     await unblockSuggestion(userId, tmdbId, { skipFeedbackClear: true }).catch(
       (e) => console.warn("[Neutralize] unblock failed", e),
     );
-    console.log("[Neutralize] Cleared feedback and unblocked", {
-      userId: userId.slice(0, 8),
-      tmdbId,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Neutralize] Cleared feedback and unblocked", {
+        userId: userId.slice(0, 8),
+        tmdbId,
+      });
+    }
   } catch (e) {
     console.error("[Neutralize] Failed to neutralize feedback", {
       tmdbId,
@@ -844,21 +851,23 @@ export async function addFeedback(
     patternInsights,
   );
 
-  console.log(
-    `[FeedbackLearning] Processed ${type} feedback for movie ${tmdbId}`,
-    {
-      reasonTypes,
-      features: movieFeatures
-        ? {
-            actors: movieFeatures.actors?.slice(0, 3).map((a) => a.name),
-            keywords: movieFeatures.keywords?.slice(0, 5).map((k) => k.name),
-            collection: movieFeatures.collection?.name,
-            genres: movieFeatures.genres?.map((g) => g.name),
-          }
-        : "none",
-      insights,
-    },
-  );
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      `[FeedbackLearning] Processed ${type} feedback for movie ${tmdbId}`,
+      {
+        reasonTypes,
+        features: movieFeatures
+          ? {
+              actors: movieFeatures.actors?.slice(0, 3).map((a) => a.name),
+              keywords: movieFeatures.keywords?.slice(0, 5).map((k) => k.name),
+              collection: movieFeatures.collection?.name,
+              genres: movieFeatures.genres?.map((g) => g.name),
+            }
+          : "none",
+        insights,
+      },
+    );
+  }
 
   return insights;
 }
@@ -1092,10 +1101,12 @@ export async function applyPairwiseFeatureLearning(
     }
 
     if (updates.size > 0) {
-      console.log("[PairwiseLearning] Applied feature deltas", {
-        userId: userId.slice(0, 8),
-        updates: updates.size,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[PairwiseLearning] Applied feature deltas", {
+          userId: userId.slice(0, 8),
+          updates: updates.size,
+        });
+      }
     }
   } catch (e) {
     console.error("[PairwiseLearning] Failed to apply pairwise learning", e);
@@ -1424,14 +1435,16 @@ export async function boostExplicitFeedback(
 ): Promise<void> {
   if (!supabase) return;
 
-  console.log(
-    "[ExplicitFeedback] Boosting",
-    featureType,
-    featureName,
-    isPositive ? "+" : "-",
-    "by",
-    explicitBoost,
-  );
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      "[ExplicitFeedback] Boosting",
+      featureType,
+      featureName,
+      isPositive ? "+" : "-",
+      "by",
+      explicitBoost,
+    );
+  }
 
   try {
     // Get or create the feature record
@@ -1472,11 +1485,13 @@ export async function boostExplicitFeedback(
       },
     );
 
-    console.log("[ExplicitFeedback] Updated", featureName, ":", {
-      newPositive,
-      newNegative,
-      inferredPreference,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[ExplicitFeedback] Updated", featureName, ":", {
+        newPositive,
+        newNegative,
+        inferredPreference,
+      });
+    }
   } catch (e) {
     console.error("[ExplicitFeedback] Failed to boost", featureName, e);
   }
@@ -1635,10 +1650,12 @@ async function updateFeaturePreferences(
         feature_name: subgenre.key, // e.g., 'HORROR_FOLK'
       });
     });
-    console.log(
-      "[SubgenreFeedback] Detected subgenres for feedback learning:",
-      features.subgenres.map((s) => s.key),
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[SubgenreFeedback] Detected subgenres for feedback learning:",
+        features.subgenres.map((s) => s.key),
+      );
+    }
   }
 
   // Update each feature's feedback counts
@@ -1682,11 +1699,13 @@ async function updateFeaturePreferences(
     }
   }
 
-  console.log("[FeaturePreference] Updated feature preferences", {
-    userId: userId.slice(0, 8),
-    isPositive,
-    featuresUpdated: updates.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[FeaturePreference] Updated feature preferences", {
+      userId: userId.slice(0, 8),
+      isPositive,
+      featuresUpdated: updates.length,
+    });
+  }
 }
 
 /**
@@ -1722,10 +1741,12 @@ async function detectFeedbackPatterns(userId: string): Promise<string[]> {
       preference: f.inferred_preference,
     }));
 
-    console.log(
-      "[PatternDetection] Detected avoidance patterns:",
-      patterns.slice(0, 5),
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[PatternDetection] Detected avoidance patterns:",
+        patterns.slice(0, 5),
+      );
+    }
 
     // Actors with 3+ rejections and low preference are strongly avoided
     const avoidedActors = avoidedFeatures.filter(
@@ -1754,13 +1775,15 @@ async function detectFeedbackPatterns(userId: string): Promise<string[]> {
       insights.push(
         `👎 Pattern detected: You've passed on ${count} movies with ${actorName}. They'll appear less often now.`,
       );
-      console.log(
-        "[PatternDetection] Strong actor avoidance detected:",
-        avoidedActors.map(
-          (a) =>
-            `${a.feature_name}(${a.negative_count}👎/${a.positive_count}👍)`,
-        ),
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[PatternDetection] Strong actor avoidance detected:",
+          avoidedActors.map(
+            (a) =>
+              `${a.feature_name}(${a.negative_count}👎/${a.positive_count}👍)`,
+          ),
+        );
+      }
     }
 
     if (avoidedFranchises.length > 0) {
@@ -1768,10 +1791,12 @@ async function detectFeedbackPatterns(userId: string): Promise<string[]> {
       insights.push(
         `👎 Franchise fatigue detected: Reducing ${franchiseName} suggestions.`,
       );
-      console.log(
-        "[PatternDetection] Franchise fatigue detected:",
-        avoidedFranchises.map((f) => f.feature_name),
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[PatternDetection] Franchise fatigue detected:",
+          avoidedFranchises.map((f) => f.feature_name),
+        );
+      }
     }
 
     if (avoidedKeywords.length > 0) {
@@ -1780,10 +1805,14 @@ async function detectFeedbackPatterns(userId: string): Promise<string[]> {
       insights.push(
         `👎 Learning from ${count} rejections: Less "${keywordName}" themed content.`,
       );
-      console.log(
-        "[PatternDetection] Content avoidance detected:",
-        avoidedKeywords.map((k) => `${k.feature_name}(${k.negative_count}👎)`),
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[PatternDetection] Content avoidance detected:",
+          avoidedKeywords.map(
+            (k) => `${k.feature_name}(${k.negative_count}👎)`,
+          ),
+        );
+      }
     }
   } catch (e) {
     console.error("[PatternDetection] Error detecting patterns", e);
@@ -2153,39 +2182,41 @@ export async function getAvoidedFeatures(userId: string): Promise<{
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 15);
 
-    console.log("[PandoraLearning] Loaded graduated preferences", {
-      avoidActors: avoidActors
-        .map((a) => `${a.name}(${a.count}👎, -${a.weight.toFixed(1)})`)
-        .slice(0, 3),
-      avoidKeywords: avoidKeywords
-        .map((k) => `${k.name}(${k.count}👎)`)
-        .slice(0, 5),
-      avoidFranchises: avoidFranchises.map((f) => f.name),
-      avoidDirectors: avoidDirectors
-        .map((d) => `${d.name}(${d.count}👎)`)
-        .slice(0, 3),
-      avoidGenres: avoidGenres
-        .map((g) => `${g.name}(${g.count}👎)`)
-        .slice(0, 3),
-      avoidSubgenres: avoidSubgenres
-        .map((s) => `${s.key}(${s.count}👎)`)
-        .slice(0, 5),
-      preferActors: preferActors
-        .map((a) => `${a.name}(${a.count}👍)`)
-        .slice(0, 3),
-      preferKeywords: preferKeywords
-        .map((k) => `${k.name}(${k.count}👍)`)
-        .slice(0, 5),
-      preferDirectors: preferDirectors
-        .map((d) => `${d.name}(${d.count}👍)`)
-        .slice(0, 3),
-      preferGenres: preferGenres
-        .map((g) => `${g.name}(${g.count}👍)`)
-        .slice(0, 3),
-      preferSubgenres: preferSubgenres
-        .map((s) => `${s.key}(${s.count}👍)`)
-        .slice(0, 5),
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[PandoraLearning] Loaded graduated preferences", {
+        avoidActors: avoidActors
+          .map((a) => `${a.name}(${a.count}👎, -${a.weight.toFixed(1)})`)
+          .slice(0, 3),
+        avoidKeywords: avoidKeywords
+          .map((k) => `${k.name}(${k.count}👎)`)
+          .slice(0, 5),
+        avoidFranchises: avoidFranchises.map((f) => f.name),
+        avoidDirectors: avoidDirectors
+          .map((d) => `${d.name}(${d.count}👎)`)
+          .slice(0, 3),
+        avoidGenres: avoidGenres
+          .map((g) => `${g.name}(${g.count}👎)`)
+          .slice(0, 3),
+        avoidSubgenres: avoidSubgenres
+          .map((s) => `${s.key}(${s.count}👎)`)
+          .slice(0, 5),
+        preferActors: preferActors
+          .map((a) => `${a.name}(${a.count}👍)`)
+          .slice(0, 3),
+        preferKeywords: preferKeywords
+          .map((k) => `${k.name}(${k.count}👍)`)
+          .slice(0, 5),
+        preferDirectors: preferDirectors
+          .map((d) => `${d.name}(${d.count}👍)`)
+          .slice(0, 3),
+        preferGenres: preferGenres
+          .map((g) => `${g.name}(${g.count}👍)`)
+          .slice(0, 3),
+        preferSubgenres: preferSubgenres
+          .map((s) => `${s.key}(${s.count}👍)`)
+          .slice(0, 5),
+      });
+    }
 
     return {
       avoidActors,
@@ -2265,11 +2296,13 @@ async function updateReasonPreferences(
       }
     }
 
-    console.log("[AdaptiveLearning] Updated reason preferences", {
-      userId,
-      reasonTypes,
-      isPositive,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[AdaptiveLearning] Updated reason preferences", {
+        userId,
+        reasonTypes,
+        isPositive,
+      });
+    }
   } catch (e) {
     console.error("[AdaptiveLearning] Error in updateReasonPreferences", e);
   }
@@ -2333,7 +2366,9 @@ export async function getFeedback(
 
 export async function fetchTmdbMovie(id: number): Promise<TMDBMovie | null> {
   // Fetch from TMDB (primary source)
-  console.log("[UnifiedAPI] fetch movie from TMDB", { id });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[UnifiedAPI] fetch movie from TMDB", { id });
+  }
   const u = new URL("/api/tmdb/movie", getBaseUrl());
   u.searchParams.set("id", String(id));
   u.searchParams.set("_t", String(Date.now())); // Cache buster
@@ -2351,7 +2386,9 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie | null> {
       if (r.status === 404) return null; // Handle 404 gracefully
       throw new Error(j.error || "Movie fetch failed");
     }
-    console.log("[UnifiedAPI] TMDB fetch movie ok", { id });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[UnifiedAPI] TMDB fetch movie ok", { id });
+    }
     movie = j.movie as TMDBMovie;
   } catch (e) {
     console.error("[UnifiedAPI] TMDB fetch movie exception", { id, error: e });
@@ -2360,10 +2397,12 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie | null> {
 
   // Try to get TuiMDB UID by searching for the movie
   try {
-    console.log("[UnifiedAPI] searching TuiMDB for UID", {
-      tmdbId: id,
-      title: movie.title,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[UnifiedAPI] searching TuiMDB for UID", {
+        tmdbId: id,
+        title: movie.title,
+      });
+    }
     const tuiUrl = new URL("/api/tuimdb/search", getBaseUrl());
     const year = movie.release_date
       ? new Date(movie.release_date).getFullYear()
@@ -2378,7 +2417,9 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie | null> {
     if (tuiR.ok && tuiJ.ok && tuiJ.results?.length > 0) {
       // Use first result (best match)
       const tuimdbUid = tuiJ.results[0].UID;
-      console.log("[UnifiedAPI] TuiMDB UID found", { tmdbId: id, tuimdbUid });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[UnifiedAPI] TuiMDB UID found", { tmdbId: id, tuimdbUid });
+      }
       movie.tuimdb_uid = tuimdbUid;
 
       // Fetch full TuiMDB movie details to get enhanced genres
@@ -2390,12 +2431,14 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie | null> {
             movie.genres || [],
             tuiMovie.genres,
           );
-          console.log("[UnifiedAPI] Enhanced genres merged", {
-            tmdbId: id,
-            tmdbGenres: movie.genres?.length || 0,
-            tuimdbGenres: tuiMovie.genres.length,
-            enhancedTotal: movie.enhanced_genres?.length || 0,
-          });
+          if (process.env.NODE_ENV === "development") {
+            console.log("[UnifiedAPI] Enhanced genres merged", {
+              tmdbId: id,
+              tmdbGenres: movie.genres?.length || 0,
+              tuimdbGenres: tuiMovie.genres.length,
+              enhancedTotal: movie.enhanced_genres?.length || 0,
+            });
+          }
         }
       } catch (tuiErr) {
         console.warn("[UnifiedAPI] Failed to fetch TuiMDB details", {
@@ -2404,13 +2447,17 @@ export async function fetchTmdbMovie(id: number): Promise<TMDBMovie | null> {
         });
       }
     } else {
-      console.log("[UnifiedAPI] TuiMDB UID not found", { tmdbId: id });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[UnifiedAPI] TuiMDB UID not found", { tmdbId: id });
+      }
     }
   } catch (e) {
-    console.log("[UnifiedAPI] TuiMDB UID search failed", {
-      tmdbId: id,
-      error: e,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[UnifiedAPI] TuiMDB UID search failed", {
+        tmdbId: id,
+        error: e,
+      });
+    }
   }
 
   return movie;
@@ -2763,9 +2810,11 @@ export async function findIncompleteCollections(
     avgRating: number;
   }>
 > {
-  console.log("[Collections] Analyzing collections", {
-    filmCount: watchedFilms.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Collections] Analyzing collections", {
+      filmCount: watchedFilms.length,
+    });
+  }
 
   // Group films by collection
   const collectionMap = new Map<
@@ -2806,7 +2855,11 @@ export async function findIncompleteCollections(
     }
   }
 
-  console.log("[Collections] Found collections", { count: collectionMap.size });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Collections] Found collections", {
+      count: collectionMap.size,
+    });
+  }
 
   // For each collection with watched films, fetch full collection to find missing films
   const incomplete: Array<{
@@ -2860,9 +2913,11 @@ export async function findIncompleteCollections(
   // Sort by avg rating (highest first)
   incomplete.sort((a, b) => b.avgRating - a.avgRating);
 
-  console.log("[Collections] Incomplete collections found", {
-    count: incomplete.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Collections] Incomplete collections found", {
+      count: incomplete.length,
+    });
+  }
   return incomplete;
 }
 
@@ -2873,9 +2928,11 @@ export async function findIncompleteCollections(
 export async function discoverFromLists(
   seedFilms: Array<{ tmdbId: number; title: string; rating?: number }>,
 ): Promise<number[]> {
-  console.log("[Lists] Discovering from curated lists", {
-    seedCount: seedFilms.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Lists] Discovering from curated lists", {
+      seedCount: seedFilms.length,
+    });
+  }
 
   // Use top 5 highest-rated films as seeds
   const seeds = seedFilms
@@ -2907,7 +2964,9 @@ export async function discoverFromLists(
     }
   }
 
-  console.log("[Lists] Found relevant lists", { count: listIds.size });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Lists] Found relevant lists", { count: listIds.size });
+  }
 
   // Fetch films from each list (up to 10 lists)
   const limitedLists = Array.from(listIds).slice(0, 10);
@@ -2931,9 +2990,11 @@ export async function discoverFromLists(
     }
   }
 
-  console.log("[Lists] Discovered films from lists", {
-    count: discoveredIds.size,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Lists] Discovered films from lists", {
+      count: discoveredIds.size,
+    });
+  }
   return Array.from(discoveredIds);
 }
 
@@ -3050,15 +3111,17 @@ export async function buildTasteProfile(params: {
 
   // However, buildTasteProfile in enrich.ts might not have titles for all films.
   // Let's actually use the data we are already collecting in the loop below.
-  console.log("=== BUILD TASTE PROFILE START ===");
-  console.log("[TasteProfile] Input params:", {
-    filmsCount: params.films.length,
-    mappingsCount: params.mappings.size,
-    topN: params.topN,
-    negativeFeedbackCount: params.negativeFeedbackIds?.length ?? 0,
-    tmdbDetailsCount: params.tmdbDetails?.size ?? 0,
-    watchlistCount: params.watchlistFilms?.length ?? 0,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("=== BUILD TASTE PROFILE START ===");
+    console.log("[TasteProfile] Input params:", {
+      filmsCount: params.films.length,
+      mappingsCount: params.mappings.size,
+      topN: params.topN,
+      negativeFeedbackCount: params.negativeFeedbackIds?.length ?? 0,
+      tmdbDetailsCount: params.tmdbDetails?.size ?? 0,
+      watchlistCount: params.watchlistFilms?.length ?? 0,
+    });
+  }
 
   const topN = params.topN ?? 10;
 
@@ -3173,20 +3236,22 @@ export async function buildTasteProfile(params: {
         (f.rating! > DISLIKE_THRESHOLD && f.rating! < 3)),
   );
 
-  console.log("[TasteProfile] Film filtering:", {
-    totalFilms: params.films.length,
-    filmsWithMappings: params.films.filter((f) => params.mappings.has(f.uri))
-      .length,
-    likedFilmsCount: likedFilms.length,
-    dislikedFilmsCount: dislikedFilms.length,
-    guiltyPleasuresCount: guiltyPleasures.length,
-    neutralFilmsCount: neutralFilms.length,
-    dislikeThreshold: DISLIKE_THRESHOLD,
-    filmsWithRating0: params.films.filter((f) => f.rating === 0).length,
-    rewatchFilms: params.films.filter((f) => f.rewatch).length,
-    likedByLikeFlag: params.films.filter((f) => f.liked).length,
-    note: 'rating=0 means "no rating" (same as null), not "0 stars"',
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[TasteProfile] Film filtering:", {
+      totalFilms: params.films.length,
+      filmsWithMappings: params.films.filter((f) => params.mappings.has(f.uri))
+        .length,
+      likedFilmsCount: likedFilms.length,
+      dislikedFilmsCount: dislikedFilms.length,
+      guiltyPleasuresCount: guiltyPleasures.length,
+      neutralFilmsCount: neutralFilms.length,
+      dislikeThreshold: DISLIKE_THRESHOLD,
+      filmsWithRating0: params.films.filter((f) => f.rating === 0).length,
+      rewatchFilms: params.films.filter((f) => f.rewatch).length,
+      likedByLikeFlag: params.films.filter((f) => f.liked).length,
+      note: 'rating=0 means "no rating" (same as null), not "0 stars"',
+    });
+  }
 
   const limit = params.tmdbDetails ? 2000 : 100; // Higher limit if details are pre-fetched
 
@@ -3200,11 +3265,13 @@ export async function buildTasteProfile(params: {
     .filter(Boolean)
     .slice(0, 50); // Cap negative signals
 
-  console.log("[TasteProfile] TMDB IDs to fetch:", {
-    likedIdsCount: likedIds.length,
-    dislikedIdsCount: dislikedIds.length,
-    limit: limit,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[TasteProfile] TMDB IDs to fetch:", {
+      likedIdsCount: likedIds.length,
+      dislikedIdsCount: dislikedIds.length,
+      limit: limit,
+    });
+  }
 
   // Fetch movie details (use pre-fetched if available)
   // Track in-flight requests to prevent duplicate fetches
@@ -3284,34 +3351,38 @@ export async function buildTasteProfile(params: {
     (m) => m?.credits?.crew && m.credits.crew.length > 0,
   );
 
-  console.log("[TasteProfile] Movie details fetched:", {
-    likedMoviesTotal: likedMovies.length,
-    likedMoviesWithData: likedWithData.length,
-    likedMoviesWithGenres: likedWithGenres.length,
-    likedMoviesWithKeywords: likedWithKeywords.length,
-    likedMoviesWithCredits: likedWithCredits.length,
-    dislikedMoviesTotal: dislikedMovies.length,
-    dislikedMoviesWithData: dislikedMovies.filter((m) => m != null).length,
-    negativeFeedbackMovies: negativeFeedbackMovies.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[TasteProfile] Movie details fetched:", {
+      likedMoviesTotal: likedMovies.length,
+      likedMoviesWithData: likedWithData.length,
+      likedMoviesWithGenres: likedWithGenres.length,
+      likedMoviesWithKeywords: likedWithKeywords.length,
+      likedMoviesWithCredits: likedWithCredits.length,
+      dislikedMoviesTotal: dislikedMovies.length,
+      dislikedMoviesWithData: dislikedMovies.filter((m) => m != null).length,
+      negativeFeedbackMovies: negativeFeedbackMovies.length,
+    });
+  }
 
   // Sample a few movies to see their data quality
   if (likedWithData.length > 0) {
     const sample = likedWithData[0];
-    console.log("[TasteProfile] Sample movie data:", {
-      title: sample?.title,
-      genres: sample?.genres?.map((g: any) => g.name),
-      keywordCount: (
-        sample?.keywords?.keywords ||
-        sample?.keywords?.results ||
-        []
-      ).length,
-      castCount: sample?.credits?.cast?.length ?? 0,
-      crewCount: sample?.credits?.crew?.length ?? 0,
-      directors: sample?.credits?.crew
-        ?.filter((c: any) => c.job === "Director")
-        .map((d: any) => d.name),
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[TasteProfile] Sample movie data:", {
+        title: sample?.title,
+        genres: sample?.genres?.map((g: any) => g.name),
+        keywordCount: (
+          sample?.keywords?.keywords ||
+          sample?.keywords?.results ||
+          []
+        ).length,
+        castCount: sample?.credits?.cast?.length ?? 0,
+        crewCount: sample?.credits?.crew?.length ?? 0,
+        directors: sample?.credits?.crew
+          ?.filter((c: any) => c.job === "Director")
+          .map((d: any) => d.name),
+      });
+    }
   }
 
   // Positive profile weights
@@ -3577,9 +3648,11 @@ export async function buildTasteProfile(params: {
   const watchlistDirectorCounts = new Map<string, number>();
 
   if (params.watchlistFilms && params.watchlistFilms.length > 0) {
-    console.log("[TasteProfile] Processing watchlist for intent signals:", {
-      watchlistCount: params.watchlistFilms.length,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[TasteProfile] Processing watchlist for intent signals:", {
+        watchlistCount: params.watchlistFilms.length,
+      });
+    }
 
     // Get TMDB IDs for watchlist films
     const watchlistEntries = params.watchlistFilms
@@ -3596,10 +3669,12 @@ export async function buildTasteProfile(params: {
 
     const watchlistIds = watchlistEntries.map((r) => r.id);
 
-    console.log(
-      "[TasteProfile] Watchlist TMDB IDs found:",
-      watchlistIds.length,
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[TasteProfile] Watchlist TMDB IDs found:",
+        watchlistIds.length,
+      );
+    }
 
     // Fetch details for watchlist films
     const watchlistMovies = await Promise.all(
@@ -3713,11 +3788,13 @@ export async function buildTasteProfile(params: {
       });
     }
 
-    console.log("[TasteProfile] Watchlist signals extracted:", {
-      genresOnWatchlist: watchlistGenreIds.size,
-      keywordsOnWatchlist: watchlistKeywordIds.size,
-      directorsOnWatchlist: watchlistDirectorIds.size,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[TasteProfile] Watchlist signals extracted:", {
+        genresOnWatchlist: watchlistGenreIds.size,
+        keywordsOnWatchlist: watchlistKeywordIds.size,
+        directorsOnWatchlist: watchlistDirectorIds.size,
+      });
+    }
   }
 
   // Sort and return top N for each category
@@ -3832,29 +3909,35 @@ export async function buildTasteProfile(params: {
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
   if (mixedGenres.length > 0) {
-    console.log(
-      "[TasteProfile] Genres NOT avoided because user likes them more:",
-      mixedGenres.map((g) => `${g.name}(${g.liked}👍/${g.disliked}👎)`),
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[TasteProfile] Genres NOT avoided because user likes them more:",
+        mixedGenres.map((g) => `${g.name}(${g.liked}👍/${g.disliked}👎)`),
+      );
+    }
   }
   if (protectedByWatchlist.length > 0) {
-    console.log(
-      "[TasteProfile] Items NOT avoided due to watchlist interest:",
-      protectedByWatchlist,
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[TasteProfile] Items NOT avoided due to watchlist interest:",
+        protectedByWatchlist,
+      );
+    }
   }
 
-  console.log("[TasteProfile] Genre avoidance analysis:", {
-    genresWithBothLikedAndDisliked: Array.from(genreDislikedCounts.entries())
-      .filter(([id]) => (genreLikedCounts.get(id) || 0) > 0)
-      .map(([id, disliked]) => {
-        const data = avoidGenreWeights.get(id);
-        const liked = genreLikedCounts.get(id) || 0;
-        return `${data?.name || id}(${liked}👍/${disliked}👎)`;
-      })
-      .slice(0, 8),
-    finalAvoidGenres: avoidGenres.map((g) => g.name),
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[TasteProfile] Genre avoidance analysis:", {
+      genresWithBothLikedAndDisliked: Array.from(genreDislikedCounts.entries())
+        .filter(([id]) => (genreLikedCounts.get(id) || 0) > 0)
+        .map(([id, disliked]) => {
+          const data = avoidGenreWeights.get(id);
+          const liked = genreLikedCounts.get(id) || 0;
+          return `${data?.name || id}(${liked}👍/${disliked}👎)`;
+        })
+        .slice(0, 8),
+      finalAvoidGenres: avoidGenres.map((g) => g.name),
+    });
+  }
 
   // Filter keywords by ratio - also check watchlist override
   const protectedKeywordsByRatio: string[] = [];
@@ -3878,12 +3961,14 @@ export async function buildTasteProfile(params: {
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
   if (mixedKeywords.length > 0) {
-    console.log(
-      "[TasteProfile] Keywords NOT avoided because user likes them more:",
-      mixedKeywords
-        .map((k) => `${k.name}(${k.liked}👍/${k.disliked}👎)`)
-        .slice(0, 10),
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[TasteProfile] Keywords NOT avoided because user likes them more:",
+        mixedKeywords
+          .map((k) => `${k.name}(${k.liked}👍/${k.disliked}👎)`)
+          .slice(0, 10),
+      );
+    }
   }
 
   // Filter directors by ratio - also check watchlist override
@@ -3907,41 +3992,47 @@ export async function buildTasteProfile(params: {
     .map(([id, { name, weight }]) => ({ id, name, weight }));
 
   if (mixedDirectors.length > 0) {
-    console.log(
-      "[TasteProfile] Directors NOT avoided because user likes them more:",
-      mixedDirectors.map((d) => `${d.name}(${d.liked}👍/${d.disliked}👎)`),
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[TasteProfile] Directors NOT avoided because user likes them more:",
+        mixedDirectors.map((d) => `${d.name}(${d.liked}👍/${d.disliked}👎)`),
+      );
+    }
   }
 
-  console.log("[TasteProfile] Enhanced profile built", {
-    topGenres: topGenres
-      .slice(0, 3)
-      .map((g) => `${g.name}(${g.weight.toFixed(1)})`),
-    topKeywords: topKeywords
-      .slice(0, 3)
-      .map((k) => `${k.name}(${k.weight.toFixed(1)})`),
-    topDirectors: topDirectors
-      .slice(0, 3)
-      .map((d) => `${d.name}(${d.weight.toFixed(1)})`),
-    topActors: topActors
-      .slice(0, 3)
-      .map((a) => `${a.name}(${a.weight.toFixed(1)})`),
-    topStudios: topStudios
-      .slice(0, 3)
-      .map((s) => `${s.name}(${s.weight.toFixed(1)})`),
-    topDecades: topDecades.map((d) => `${d.decade}s(${d.weight.toFixed(1)})`),
-    avoidGenres: avoidGenres.map((g) => g.name),
-    avoidKeywords: avoidKeywords.map((k) => k.name),
-    avoidDirectors: avoidDirectors.map((d) => d.name),
-    watchlistOverrides: protectedByWatchlist.length,
-    userStats: {
-      avgRating: avgRating.toFixed(2),
-      stdDev: stdDevRating.toFixed(2),
-      rewatchRate: (rewatchRate * 100).toFixed(1) + "%",
-    },
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[TasteProfile] Enhanced profile built", {
+      topGenres: topGenres
+        .slice(0, 3)
+        .map((g) => `${g.name}(${g.weight.toFixed(1)})`),
+      topKeywords: topKeywords
+        .slice(0, 3)
+        .map((k) => `${k.name}(${k.weight.toFixed(1)})`),
+      topDirectors: topDirectors
+        .slice(0, 3)
+        .map((d) => `${d.name}(${d.weight.toFixed(1)})`),
+      topActors: topActors
+        .slice(0, 3)
+        .map((a) => `${a.name}(${a.weight.toFixed(1)})`),
+      topStudios: topStudios
+        .slice(0, 3)
+        .map((s) => `${s.name}(${s.weight.toFixed(1)})`),
+      topDecades: topDecades.map((d) => `${d.decade}s(${d.weight.toFixed(1)})`),
+      avoidGenres: avoidGenres.map((g) => g.name),
+      avoidKeywords: avoidKeywords.map((k) => k.name),
+      avoidDirectors: avoidDirectors.map((d) => d.name),
+      watchlistOverrides: protectedByWatchlist.length,
+      userStats: {
+        avgRating: avgRating.toFixed(2),
+        stdDev: stdDevRating.toFixed(2),
+        rewatchRate: (rewatchRate * 100).toFixed(1) + "%",
+      },
+    });
+  }
 
-  console.log("=== BUILD TASTE PROFILE END ===");
+  if (process.env.NODE_ENV === "development") {
+    console.log("=== BUILD TASTE PROFILE END ===");
+  }
 
   // Issue #7: Detect niche genre preferences
   const nicheFilmsForDetection = likedFilms.map((f) => {
@@ -4045,18 +4136,20 @@ export async function buildTasteProfile(params: {
             }
           }
 
-          console.log(
-            "[TasteProfile] Added explicit Quiz/Feedback preferences:",
-            {
-              count: explicitIds.length,
-              types: explicitPrefs
-                .map((ep) => ep.feature_type)
-                .reduce(
-                  (acc, t) => ({ ...acc, [t]: (acc[t] || 0) + 1 }),
-                  {} as Record<string, number>,
-                ),
-            },
-          );
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              "[TasteProfile] Added explicit Quiz/Feedback preferences:",
+              {
+                count: explicitIds.length,
+                types: explicitPrefs
+                  .map((ep) => ep.feature_type)
+                  .reduce(
+                    (acc, t) => ({ ...acc, [t]: (acc[t] || 0) + 1 }),
+                    {} as Record<string, number>,
+                  ),
+              },
+            );
+          }
         }
       } catch (err) {
         console.error(
@@ -4066,11 +4159,13 @@ export async function buildTasteProfile(params: {
       }
     }
 
-    console.log("[TasteProfile] Preferred subgenre keywords for discovery:", {
-      keywordIds: preferredSubgenreKeywordIds.slice(0, 10),
-      totalKeywords: preferredSubgenreKeywordIds.length,
-      patternsAnalyzed: subgenrePatterns.size,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[TasteProfile] Preferred subgenre keywords for discovery:", {
+        keywordIds: preferredSubgenreKeywordIds.slice(0, 10),
+        totalKeywords: preferredSubgenreKeywordIds.length,
+        patternsAnalyzed: subgenrePatterns.size,
+      });
+    }
   } catch (e) {
     console.error("[TasteProfile] Failed to analyze subgenre patterns:", e);
   }
@@ -4379,10 +4474,12 @@ async function getColdStartRecommendations(
     voteCount?: number;
   }>
 > {
-  console.log("[ColdStart] Fetching candidate details", {
-    candidatesCount: candidateIds.length,
-    limit,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[ColdStart] Fetching candidate details", {
+      candidatesCount: candidateIds.length,
+      limit,
+    });
+  }
 
   // Fetch movie details for all candidates
   const candidates = await mapLimit(candidateIds, 10, async (id) => {
@@ -4399,10 +4496,12 @@ async function getColdStartRecommendations(
       m != null && m.vote_average != null && m.vote_count != null,
   );
 
-  console.log("[ColdStart] Valid candidates", {
-    total: candidates.length,
-    valid: validCandidates.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[ColdStart] Valid candidates", {
+      total: candidates.length,
+      valid: validCandidates.length,
+    });
+  }
 
   // Score by vote_average * log10(vote_count + 1) to balance quality and popularity
   // Require minimum 100 votes to filter out unreliable ratings
@@ -4415,10 +4514,12 @@ async function getColdStartRecommendations(
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 
-  console.log("[ColdStart] Scored and sorted", {
-    scoredCount: scored.length,
-    topScores: scored.slice(0, 5).map((s) => s.score.toFixed(2)),
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[ColdStart] Scored and sorted", {
+      scoredCount: scored.length,
+      topScores: scored.slice(0, 5).map((s) => s.score.toFixed(2)),
+    });
+  }
 
   // Convert to recommendation format
   return scored.map(({ movie, score }) => {
@@ -5488,18 +5589,22 @@ export async function suggestByOverlap(params: {
       ) {
         // Log when niche content is filtered to help with debugging
         if (isNiche) {
-          console.log(
-            `[QualityFilter] Filtered niche content "${m.title}" - votes: ${feats.voteCount}/${minVoteCount}, rating: ${feats.voteAverage}/${minVoteAverage}`,
-          );
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[QualityFilter] Filtered niche content "${m.title}" - votes: ${feats.voteCount}/${minVoteCount}, rating: ${feats.voteAverage}/${minVoteAverage}`,
+            );
+          }
         }
         return null; // Skip low-quality or unrated movies
       }
 
       // Log when niche thresholds allowed content through
       if (isNiche && (feats.voteCount < 50 || feats.voteAverage < 6.5)) {
-        console.log(
-          `[QualityFilter] Niche content passed "${m.title}" - votes: ${feats.voteCount}, rating: ${feats.voteAverage}`,
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[QualityFilter] Niche content passed "${m.title}" - votes: ${feats.voteCount}, rating: ${feats.voteAverage}`,
+          );
+        }
       }
 
       // Apply negative filters: exclude animation/family/children's if user avoids them
@@ -5535,9 +5640,11 @@ export async function suggestByOverlap(params: {
       );
 
       if (subgenreCheck.shouldFilter) {
-        console.log(
-          `[SubgenreFilter] Filtered "${m.title}" - ${subgenreCheck.reason}`,
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[SubgenreFilter] Filtered "${m.title}" - ${subgenreCheck.reason}`,
+          );
+        }
         return null;
       }
 
@@ -5565,9 +5672,11 @@ export async function suggestByOverlap(params: {
 
       const nicheCheck = checkNicheCompatibility(m, nicheProfile as any);
       if (!nicheCheck.compatible) {
-        console.log(
-          `[NicheFilter] Filtered "${m.title}" - ${nicheCheck.reason}`,
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[NicheFilter] Filtered "${m.title}" - ${nicheCheck.reason}`,
+          );
+        }
         return null;
       }
 
@@ -5709,9 +5818,11 @@ export async function suggestByOverlap(params: {
         score += cappedCrossGenreBoost;
         if (crossGenreBoost.reason) {
           reasons.push(crossGenreBoost.reason);
-          console.log(
-            `[CrossGenreBoost] Boosted "${m.title}" by ${cappedCrossGenreBoost.toFixed(2)} - ${crossGenreBoost.reason}`,
-          );
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[CrossGenreBoost] Boosted "${m.title}" by ${cappedCrossGenreBoost.toFixed(2)} - ${crossGenreBoost.reason}`,
+            );
+          }
         }
       }
 
@@ -6220,9 +6331,11 @@ export async function suggestByOverlap(params: {
               reasons.push(
                 `Matches your interest in ${prettyName} ${parentPretty} films`,
               );
-              console.log(
-                `[SubgenreBoost] Boosted "${m.title}" by ${boost.toFixed(2)} for ${subgenre}`,
-              );
+              if (process.env.NODE_ENV === "development") {
+                console.log(
+                  `[SubgenreBoost] Boosted "${m.title}" by ${boost.toFixed(2)} for ${subgenre}`,
+                );
+              }
 
               // If we found a strong match, we can stop checking other patterns for THIS subgenre
               // (One boost covers it)
@@ -6251,9 +6364,11 @@ export async function suggestByOverlap(params: {
               penaltyReasons.push(
                 `Contains ${prettyName} elements match a subgenre you avoid`,
               );
-              console.log(
-                `[SubgenrePenalty] Penalized "${m.title}" by ${penalty.toFixed(2)} for ${subgenre}`,
-              );
+              if (process.env.NODE_ENV === "development") {
+                console.log(
+                  `[SubgenrePenalty] Penalized "${m.title}" by ${penalty.toFixed(2)} for ${subgenre}`,
+                );
+              }
               break;
             }
           }
@@ -6344,9 +6459,11 @@ export async function suggestByOverlap(params: {
             }
 
             totalPenalty += actorPenalty;
-            console.log(
-              `[PandoraLearning] Actor penalty for "${m.title}": ${matchedAvoidActors.map((a) => `${a.name}(${a.count}👎)`).join(", ")} (${actorPenalty.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Actor penalty for "${m.title}": ${matchedAvoidActors.map((a) => `${a.name}(${a.count}👎)`).join(", ")} (${actorPenalty.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6389,9 +6506,11 @@ export async function suggestByOverlap(params: {
             penaltyReasons.push(
               `Contains "${topKeyword.name}" — ${hardnessLabel}; you've skipped this ${countLabel}`,
             );
-            console.log(
-              `[PandoraLearning] Keyword penalty for "${m.title}": ${matchedKeywords.length} matches (${keywordPenalty.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Keyword penalty for "${m.title}": ${matchedKeywords.length} matches (${keywordPenalty.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6419,9 +6538,11 @@ export async function suggestByOverlap(params: {
             penaltyReasons.push(
               `Part of ${avoidedFranchise.name}${countLabel} — you seem done with this`,
             );
-            console.log(
-              `[PandoraLearning] Franchise penalty for "${m.title}": ${avoidedFranchise.name} (${franchisePenalty.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Franchise penalty for "${m.title}": ${avoidedFranchise.name} (${franchisePenalty.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6473,9 +6594,11 @@ export async function suggestByOverlap(params: {
             }
 
             score += actorBoost;
-            console.log(
-              `[PandoraLearning] Actor boost for "${m.title}": ${matchedPreferActors.map((a) => a.name).join(", ")} (+${actorBoost.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Actor boost for "${m.title}": ${matchedPreferActors.map((a) => a.name).join(", ")} (+${actorBoost.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6514,9 +6637,11 @@ export async function suggestByOverlap(params: {
             reasons.push(
               `Matches "${topKeyword.name}" — a theme you consistently enjoy`,
             );
-            console.log(
-              `[PandoraLearning] Keyword boost for "${m.title}": ${matchedKeywords.length} matches (+${keywordBoost.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Keyword boost for "${m.title}": ${matchedKeywords.length} matches (+${keywordBoost.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6551,9 +6676,11 @@ export async function suggestByOverlap(params: {
             penaltyReasons.push(
               `Directed by ${director.name} — you've passed on their films ${countLabel}`,
             );
-            console.log(
-              `[PandoraLearning] Director penalty for "${m.title}": ${director.name} (${directorPenalty.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Director penalty for "${m.title}": ${director.name} (${directorPenalty.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6588,9 +6715,11 @@ export async function suggestByOverlap(params: {
             reasons.push(
               `By ${director.name}${countLabel} — a director you consistently pick`,
             );
-            console.log(
-              `[PandoraLearning] Director boost for "${m.title}": ${director.name} (+${directorBoost.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Director boost for "${m.title}": ${director.name} (+${directorBoost.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6626,9 +6755,11 @@ export async function suggestByOverlap(params: {
             penaltyReasons.push(
               `Contains ${topGenre.name} — a genre you've been skipping`,
             );
-            console.log(
-              `[PandoraLearning] Genre penalty for "${m.title}": ${matchedAvoidGenres.map((g) => g.name).join(", ")} (${genrePenalty.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Genre penalty for "${m.title}": ${matchedAvoidGenres.map((g) => g.name).join(", ")} (${genrePenalty.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6666,9 +6797,11 @@ export async function suggestByOverlap(params: {
             reasons.push(
               `Features ${topGenre.name} — a genre you consistently enjoy`,
             );
-            console.log(
-              `[PandoraLearning] Genre boost for "${m.title}": ${matchedPreferGenres.map((g) => g.name).join(", ")} (+${genreBoost.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Genre boost for "${m.title}": ${matchedPreferGenres.map((g) => g.name).join(", ")} (+${genreBoost.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6717,9 +6850,11 @@ export async function suggestByOverlap(params: {
             penaltyReasons.push(
               `Contains ${prettyName} — a specific style you've been avoiding`,
             );
-            console.log(
-              `[PandoraLearning] Subgenre penalty for "${m.title}": ${matchedAvoidSubgenres.map((s) => s.key).join(", ")} (${subgenrePenalty.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Subgenre penalty for "${m.title}": ${matchedAvoidSubgenres.map((s) => s.key).join(", ")} (${subgenrePenalty.toFixed(1)})`,
+              );
+            }
           }
         }
 
@@ -6752,9 +6887,11 @@ export async function suggestByOverlap(params: {
             reasons.push(
               `Matches your taste in ${prettyName} — a style you consistently enjoy`,
             );
-            console.log(
-              `[PandoraLearning] Subgenre boost for "${m.title}": ${matchedPreferSubgenres.map((s) => s.key).join(", ")} (+${subgenreBoost.toFixed(1)})`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[PandoraLearning] Subgenre boost for "${m.title}": ${matchedPreferSubgenres.map((s) => s.key).join(", ")} (+${subgenreBoost.toFixed(1)})`,
+              );
+            }
           }
         }
       }
@@ -6762,9 +6899,11 @@ export async function suggestByOverlap(params: {
       // Apply penalties to score
       if (totalPenalty < 0) {
         score += totalPenalty; // totalPenalty is negative, so this reduces the score
-        console.log(
-          `[NegativePenalty] Penalized "${m.title}" by ${Math.abs(totalPenalty).toFixed(2)} - ${penaltyReasons.join("; ")}`,
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[NegativePenalty] Penalized "${m.title}" by ${Math.abs(totalPenalty).toFixed(2)} - ${penaltyReasons.join("; ")}`,
+          );
+        }
       }
 
       // Recent watches boost - if matches genres/directors/cast/keywords from last 20 films
@@ -6872,9 +7011,11 @@ export async function suggestByOverlap(params: {
             score = score * multiplier;
 
             if (Math.abs(multiplier - 1) > 0.05) {
-              console.log(
-                `[ReasonPreference] Adjusted "${m.title}" score: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${multiplier.toFixed(2)}x) based on ${reasonTypes.join(", ")} preferences`,
-              );
+              if (process.env.NODE_ENV === "development") {
+                console.log(
+                  `[ReasonPreference] Adjusted "${m.title}" score: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${multiplier.toFixed(2)}x) based on ${reasonTypes.join(", ")} preferences`,
+                );
+              }
             }
           }
         }
@@ -7001,9 +7142,11 @@ export async function suggestByOverlap(params: {
           reasons.push(
             `Backed by ${sourceMeta.consensusLevel || "multi"} consensus across ${sourceLabel}`,
           );
-          console.log(
-            `[SourceReliability] Adjusted "${m.title}" score: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${reliabilityMultiplier.toFixed(2)}x)`,
-          );
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[SourceReliability] Adjusted "${m.title}" score: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${reliabilityMultiplier.toFixed(2)}x)`,
+            );
+          }
         }
       }
 
@@ -7030,9 +7173,11 @@ export async function suggestByOverlap(params: {
           if (repeatPenalty < 1.0) {
             const oldScore = score;
             score = score * repeatPenalty;
-            console.log(
-              `[RepeatPenalty] "${m.title}" penalized: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${Math.round(daysSince * 10) / 10}d ago, ${repeatPenalty}x)`,
-            );
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                `[RepeatPenalty] "${m.title}" penalized: ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${Math.round(daysSince * 10) / 10}d ago, ${repeatPenalty}x)`,
+              );
+            }
           }
         }
       }
@@ -7050,9 +7195,11 @@ export async function suggestByOverlap(params: {
         reasons.push(
           `Quality bonus: ${qualityMultiplier.toFixed(2)}x for ${feats.voteAverage.toFixed(1)}/10 rating`,
         );
-        console.log(
-          `[QualityMultiplier] "${m.title}": ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${qualityMultiplier.toFixed(2)}x for ${feats.voteAverage.toFixed(1)}/10)`,
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[QualityMultiplier] "${m.title}": ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${qualityMultiplier.toFixed(2)}x for ${feats.voteAverage.toFixed(1)}/10)`,
+          );
+        }
       }
 
       // FAVORITE FILMMAKER BOOST: Nudge ranking without bypassing quality gates
@@ -7062,11 +7209,13 @@ export async function suggestByOverlap(params: {
         reasons.push(
           `From one of your favorite filmmakers (${favoriteFilmmakerName})`,
         );
-        console.log(
-          "[Scoring] Applied favorite filmmaker boost:",
-          favoriteFilmmakerName,
-          m.title,
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[Scoring] Applied favorite filmmaker boost:",
+            favoriteFilmmakerName,
+            m.title,
+          );
+        }
       }
 
       const r = {
@@ -7193,27 +7342,39 @@ export async function getAdaptiveExplorationRate(
     if (avgRating >= 4.0) {
       // User loves exploratory picks - increase discovery
       newRate = Math.min(0.3, data.exploration_rate + 0.05);
-      console.log("[AdaptiveExploration] Increasing rate (high satisfaction)", {
-        avgRating,
-        oldRate: data.exploration_rate,
-        newRate,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[AdaptiveExploration] Increasing rate (high satisfaction)",
+          {
+            avgRating,
+            oldRate: data.exploration_rate,
+            newRate,
+          },
+        );
+      }
     } else if (avgRating < 3.0) {
       // User dislikes exploratory picks - decrease discovery
       newRate = Math.max(0.05, data.exploration_rate - 0.05);
-      console.log("[AdaptiveExploration] Decreasing rate (low satisfaction)", {
-        avgRating,
-        oldRate: data.exploration_rate,
-        newRate,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[AdaptiveExploration] Decreasing rate (low satisfaction)",
+          {
+            avgRating,
+            oldRate: data.exploration_rate,
+            newRate,
+          },
+        );
+      }
     } else {
-      console.log(
-        "[AdaptiveExploration] Maintaining rate (neutral satisfaction)",
-        {
-          avgRating,
-          rate: data.exploration_rate,
-        },
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[AdaptiveExploration] Maintaining rate (neutral satisfaction)",
+          {
+            avgRating,
+            rate: data.exploration_rate,
+          },
+        );
+      }
     }
 
     // Update rate if changed
@@ -7263,10 +7424,12 @@ export async function updateExplorationFeedback(
         last_updated: new Date().toISOString(),
       });
 
-      console.log("[ExplorationFeedback] Created initial stats", {
-        userId,
-        rating,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[ExplorationFeedback] Created initial stats", {
+          userId,
+          rating,
+        });
+      }
     } else {
       // Update running average
       const newCount = current.exploratory_films_rated + 1;
@@ -7284,12 +7447,14 @@ export async function updateExplorationFeedback(
         })
         .eq("user_id", userId);
 
-      console.log("[ExplorationFeedback] Updated stats", {
-        userId,
-        newCount,
-        newAvg: newAvg.toFixed(2),
-        rating,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[ExplorationFeedback] Updated stats", {
+          userId,
+          newCount,
+          newAvg: newAvg.toFixed(2),
+          rating,
+        });
+      }
     }
   } catch (e) {
     console.error("[ExplorationFeedback] Error:", e);
@@ -7331,10 +7496,12 @@ export async function getPersonalizedAdjacentGenres(
 
       if (data && data.length > 0) {
         // Use learned adjacencies
-        console.log("[PersonalizedAdjacency] Found learned preferences", {
-          fromGenre: genre.name,
-          count: data.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[PersonalizedAdjacency] Found learned preferences", {
+            fromGenre: genre.name,
+            count: data.length,
+          });
+        }
 
         data.slice(0, 3).forEach((row) => {
           adjacentGenres.push({
@@ -7403,12 +7570,14 @@ export async function updateAdjacentPreferences(
             })
             .eq("id", existing.id);
 
-          console.log("[AdjacentPreferences] Updated", {
-            from: topGenre.name,
-            to: filmGenre.name,
-            newCount,
-            newSuccessRate: newSuccessRate.toFixed(2),
-          });
+          if (process.env.NODE_ENV === "development") {
+            console.log("[AdjacentPreferences] Updated", {
+              from: topGenre.name,
+              to: filmGenre.name,
+              newCount,
+              newSuccessRate: newSuccessRate.toFixed(2),
+            });
+          }
         } else {
           // Create new preference
           await supabase.from("user_adjacent_preferences").insert({
@@ -7423,11 +7592,13 @@ export async function updateAdjacentPreferences(
             last_updated: new Date().toISOString(),
           });
 
-          console.log("[AdjacentPreferences] Created", {
-            from: topGenre.name,
-            to: filmGenre.name,
-            rating,
-          });
+          if (process.env.NODE_ENV === "development") {
+            console.log("[AdjacentPreferences] Created", {
+              from: topGenre.name,
+              to: filmGenre.name,
+              rating,
+            });
+          }
         }
       }
     }
@@ -7442,15 +7613,19 @@ export async function updateAdjacentPreferences(
  */
 export async function learnFromHistoricalData(userId: string) {
   if (!supabase) {
-    console.log("[BatchLearning] Supabase not initialized");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[BatchLearning] Supabase not initialized");
+    }
     return;
   }
 
   try {
-    console.log(
-      "[BatchLearning] Starting analysis of historical data for user:",
-      userId,
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[BatchLearning] Starting analysis of historical data for user:",
+        userId,
+      );
+    }
 
     // 1. Get all film events for this user (with pagination - PostgREST defaults to 1000 max)
     const pageSize = 1000;
@@ -7482,13 +7657,17 @@ export async function learnFromHistoricalData(userId: string) {
     }
 
     if (films.length < 10) {
-      console.log("[BatchLearning] Not enough rated films for learning", {
-        count: films.length,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[BatchLearning] Not enough rated films for learning", {
+          count: films.length,
+        });
+      }
       return;
     }
 
-    console.log("[BatchLearning] Processing", films.length, "rated films");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[BatchLearning] Processing", films.length, "rated films");
+    }
 
     // 2. Get film mappings to TMDB IDs (with pagination)
     let mappings: Array<{ uri: string; tmdb_id: number }> = [];
@@ -7522,7 +7701,9 @@ export async function learnFromHistoricalData(userId: string) {
     }
 
     const uriToTmdbId = new Map(mappings.map((m) => [m.uri, m.tmdb_id]));
-    console.log("[BatchLearning] Found", mappings.length, "TMDB mappings");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[BatchLearning] Found", mappings.length, "TMDB mappings");
+    }
 
     // 3. Get TMDB details for mapped films (in batches)
     const tmdbIds = Array.from(new Set(mappings.map((m) => m.tmdb_id)));
@@ -7543,11 +7724,13 @@ export async function learnFromHistoricalData(userId: string) {
       });
     }
 
-    console.log(
-      "[BatchLearning] Loaded TMDB details for",
-      tmdbDetails.size,
-      "films",
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[BatchLearning] Loaded TMDB details for",
+        tmdbDetails.size,
+        "films",
+      );
+    }
 
     // 4. Build taste profile to get top genres
     const mappingsMap = new Map(mappings.map((m) => [m.uri, m.tmdb_id]));
@@ -7563,10 +7746,12 @@ export async function learnFromHistoricalData(userId: string) {
       userId: userId,
     });
 
-    console.log("[BatchLearning] Built taste profile", {
-      topGenres: profile.topGenres.length,
-      totalFilms: films.length,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[BatchLearning] Built taste profile", {
+        topGenres: profile.topGenres.length,
+        totalFilms: films.length,
+      });
+    }
 
     // 5. Analyze genre transitions and populate adjacency preferences
     let transitionsProcessed = 0;
@@ -7595,11 +7780,13 @@ export async function learnFromHistoricalData(userId: string) {
       transitionsProcessed++;
     }
 
-    console.log(
-      "[BatchLearning] Processed",
-      transitionsProcessed,
-      "genre transitions",
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[BatchLearning] Processed",
+        transitionsProcessed,
+        "genre transitions",
+      );
+    }
 
     // 6. Calculate initial exploration stats based on high-rated variety
     const highRated = films.filter((f) => (f.rating ?? 0) >= 4);
@@ -7629,18 +7816,22 @@ export async function learnFromHistoricalData(userId: string) {
         last_updated: new Date().toISOString(),
       });
 
-      console.log("[BatchLearning] Seeded exploration stats", {
-        exploratoryFilms: exploratory.length,
-        avgRating: exploratoryAvg.toFixed(2),
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[BatchLearning] Seeded exploration stats", {
+          exploratoryFilms: exploratory.length,
+          avgRating: exploratoryAvg.toFixed(2),
+        });
+      }
     }
 
-    console.log("[BatchLearning] ✅ Historical learning complete!", {
-      totalFilms: films.length,
-      highRated: highRated.length,
-      exploratoryFilms: exploratory.length,
-      transitionsTracked: transitionsProcessed,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[BatchLearning] ✅ Historical learning complete!", {
+        totalFilms: films.length,
+        highRated: highRated.length,
+        exploratoryFilms: exploratory.length,
+        transitionsTracked: transitionsProcessed,
+      });
+    }
   } catch (e) {
     console.error("[BatchLearning] Error during batch learning:", e);
   }

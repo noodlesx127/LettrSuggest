@@ -238,14 +238,16 @@ function getSignatureSeedIds(
     .filter((f) => f.signatureScore > 0) // Only keep films with some signature value
     .sort((a, b) => b.signatureScore - a.signatureScore);
 
-  console.log("[SignatureSeeds] Top signature films:", {
-    total: signatureScored.length,
-    top10: signatureScored.slice(0, 10).map((f) => ({
-      title: f.title || f.tmdbId,
-      score: f.signatureScore.toFixed(2),
-      reasons: f.signatureReasons.join(", "),
-    })),
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[SignatureSeeds] Top signature films:", {
+      total: signatureScored.length,
+      top10: signatureScored.slice(0, 10).map((f) => ({
+        title: f.title || f.tmdbId,
+        score: f.signatureScore.toFixed(2),
+        reasons: f.signatureReasons.join(", "),
+      })),
+    });
+  }
 
   // Strategy: Mix top signature films with some variety
   // - 60% from top signature films
@@ -271,15 +273,17 @@ function getSignatureSeedIds(
     return applyGenreDiversity(films, selectedIds, limit);
   }
 
-  console.log("[Seeds] Selected:", {
-    signatureSeeds: signatureIds.length,
-    varietySeeds: varietyIds.length,
-    total: selectedIds.length,
-    topSignatureScores: signatureScored.slice(0, 3).map((f) => ({
-      title: f.title || `Film ${f.tmdbId}`,
-      score: f.signatureScore.toFixed(2),
-    })),
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Seeds] Selected:", {
+      signatureSeeds: signatureIds.length,
+      varietySeeds: varietyIds.length,
+      total: selectedIds.length,
+      topSignatureScores: signatureScored.slice(0, 3).map((f) => ({
+        title: f.title || `Film ${f.tmdbId}`,
+        score: f.signatureScore.toFixed(2),
+      })),
+    });
+  }
 
   return selectedIds.slice(0, limit);
 }
@@ -439,15 +443,17 @@ export function getWeightedSeedIds(
     }
   }
 
-  console.log("[Seeds] Selected:", {
-    signatureSeeds: 0, // N/A for weighted scoring
-    varietySeeds: selectedIds.length,
-    total: selectedIds.length,
-    topSignatureScores: scored.slice(0, 3).map((f) => ({
-      title: f.title || `Film ${f.tmdbId}`,
-      score: f.score.toFixed(2),
-    })),
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Seeds] Selected:", {
+      signatureSeeds: 0, // N/A for weighted scoring
+      varietySeeds: selectedIds.length,
+      total: selectedIds.length,
+      topSignatureScores: scored.slice(0, 3).map((f) => ({
+        title: f.title || `Film ${f.tmdbId}`,
+        score: f.score.toFixed(2),
+      })),
+    });
+  }
 
   return selectedIds;
 }
@@ -489,11 +495,13 @@ export function getWeightedSeedIdsByGenre(
     return filmGenres.some((gid) => genreSet.has(gid));
   });
 
-  console.log("[WeightedSeedsByGenre] Filtering for genres:", {
-    requestedGenres: genreIds,
-    totalFilms: films.length,
-    matchingFilms: genreFilteredFilms.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[WeightedSeedsByGenre] Filtering for genres:", {
+      requestedGenres: genreIds,
+      totalFilms: films.length,
+      matchingFilms: genreFilteredFilms.length,
+    });
+  }
 
   // If we have enough genre-specific films, use them
   if (genreFilteredFilms.length >= minSeeds) {
@@ -503,17 +511,21 @@ export function getWeightedSeedIdsByGenre(
       false,
       profile,
     ); // No diversity needed within genre
-    console.log(
-      "[WeightedSeedsByGenre] Using genre-filtered seeds:",
-      result.length,
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[WeightedSeedsByGenre] Using genre-filtered seeds:",
+        result.length,
+      );
+    }
     return result;
   }
 
   // Fallback: not enough genre-specific films, use global seeds
-  console.log(
-    "[WeightedSeedsByGenre] Insufficient genre matches, falling back to global seeds",
-  );
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      "[WeightedSeedsByGenre] Insufficient genre matches, falling back to global seeds",
+    );
+  }
   return getWeightedSeedIds(films, limit, true, profile);
 }
 
@@ -587,9 +599,11 @@ async function fetchTraktRelatedIds(
 
     if (j.ok && j.ids) {
       const ids = j.ids as number[];
-      console.log(
-        `[Trakt] API fetch: Found ${ids.length} related movies for ${seedId}`,
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          `[Trakt] API fetch: Found ${ids.length} related movies for ${seedId}`,
+        );
+      }
 
       // Store in cache for future use
       await setCachedTraktRelated(seedId, ids);
@@ -671,9 +685,11 @@ export async function fetchSimilarMovieIds(
     }
   }
 
-  console.log(
-    `[Discovery] Combined similar movies from TMDB + Trakt: ${allIds.size} unique candidates`,
-  );
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      `[Discovery] Combined similar movies from TMDB + Trakt: ${allIds.size} unique candidates`,
+    );
+  }
   return Array.from(allIds);
 }
 
@@ -769,7 +785,9 @@ export async function discoverMoviesByProfile(options: {
     u.searchParams.set("limit", String(limit));
     u.searchParams.set("_t", String(Date.now())); // Cache buster
 
-    console.log("[TMDB] discover start", filterSummary);
+    if (process.env.NODE_ENV === "development") {
+      console.log("[TMDB] discover start", filterSummary);
+    }
     const r = await fetch(u.toString(), { cache: "no-store" });
     const j = await r.json();
 
@@ -777,10 +795,12 @@ export async function discoverMoviesByProfile(options: {
       j.results.forEach((m: any) => {
         if (m.id) allIds.add(m.id);
       });
-      console.log("[TMDB] discover ok", {
-        count: allIds.size,
-        filters: filterSummary,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[TMDB] discover ok", {
+          count: allIds.size,
+          filters: filterSummary,
+        });
+      }
     } else {
       console.warn("[TMDB] discover returned 0 results", {
         filters: filterSummary,
@@ -832,17 +852,19 @@ export async function generateSmartCandidates(profile: {
     { sources: string[]; consensusLevel: "high" | "medium" | "low" }
   >;
 }> {
-  console.log("[SmartCandidates] Generating with enhanced profile", {
-    highlyRatedCount: profile.highlyRatedIds.length,
-    watchlistCount: profile.watchlistIds?.length ?? 0,
-    savedSuggestionCount: profile.savedSuggestionIds?.length ?? 0,
-    topGenresCount: profile.topGenres.length,
-    topKeywordsCount: profile.topKeywords.length,
-    topDirectorsCount: profile.topDirectors.length,
-    topActorsCount: profile.topActors?.length ?? 0,
-    topStudiosCount: profile.topStudios?.length ?? 0,
-    hasTmdbDetails: !!profile.tmdbDetailsMap,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[SmartCandidates] Generating with enhanced profile", {
+      highlyRatedCount: profile.highlyRatedIds.length,
+      watchlistCount: profile.watchlistIds?.length ?? 0,
+      savedSuggestionCount: profile.savedSuggestionIds?.length ?? 0,
+      topGenresCount: profile.topGenres.length,
+      topKeywordsCount: profile.topKeywords.length,
+      topDirectorsCount: profile.topDirectors.length,
+      topActorsCount: profile.topActors?.length ?? 0,
+      topStudiosCount: profile.topStudios?.length ?? 0,
+      hasTmdbDetails: !!profile.tmdbDetailsMap,
+    });
+  }
 
   const results = {
     trending: [] as number[],
@@ -875,9 +897,11 @@ export async function generateSmartCandidates(profile: {
   // This is now the PRIMARY source for similar movie recommendations
   try {
     if (profile.highlyRatedIds.length > 0) {
-      console.log(
-        "[SmartCandidates] Running multi-source aggregation (primary similar source)",
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[SmartCandidates] Running multi-source aggregation (primary similar source)",
+        );
+      }
 
       // Import Server Action (safe for client use)
       const { getAggregatedRecommendations } = await import(
@@ -924,16 +948,18 @@ export async function generateSmartCandidates(profile: {
 
       const seedMoviesWithTitles = seedMovies.filter((s) => s.title); // TasteDive needs title
 
-      console.log("[SmartCandidates] Seed movies:", {
-        fromHighlyRated: Math.min(20, profile.highlyRatedIds.length),
-        fromWatchlist: Math.min(10, profile.watchlistIds?.length ?? 0),
-        fromSavedSuggestions: savedSuggestionIds.length,
-        combined: uniqueSeedIds.length,
-        total: seedMovies.length,
-        withTitles: seedMoviesWithTitles.length,
-        withoutTitles: seedMovies.length - seedMoviesWithTitles.length,
-        sampleTitles: seedMoviesWithTitles.slice(0, 5).map((s) => s.title),
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[SmartCandidates] Seed movies:", {
+          fromHighlyRated: Math.min(20, profile.highlyRatedIds.length),
+          fromWatchlist: Math.min(10, profile.watchlistIds?.length ?? 0),
+          fromSavedSuggestions: savedSuggestionIds.length,
+          combined: uniqueSeedIds.length,
+          total: seedMovies.length,
+          withTitles: seedMoviesWithTitles.length,
+          withoutTitles: seedMovies.length - seedMoviesWithTitles.length,
+          sampleTitles: seedMoviesWithTitles.slice(0, 5).map((s) => s.title),
+        });
+      }
 
       const aggregated = await getAggregatedRecommendations({
         seedMovies,
@@ -954,18 +980,22 @@ export async function generateSmartCandidates(profile: {
         }
       }
 
-      console.log(
-        "[SmartCandidates] Aggregated recommendations added:",
-        results.similar.length,
-        "with source tracking:",
-        results.sourceMetadata.size,
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[SmartCandidates] Aggregated recommendations added:",
+          results.similar.length,
+          "with source tracking:",
+          results.sourceMetadata.size,
+        );
+      }
     }
   } catch (e) {
     console.error("[SmartCandidates] Multi-source aggregation failed", e);
 
     // Fallback to old method if aggregator fails
-    console.log("[SmartCandidates] Falling back to legacy similar fetching");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[SmartCandidates] Falling back to legacy similar fetching");
+    }
     try {
       if (profile.highlyRatedIds.length > 0) {
         const shuffled = [...profile.highlyRatedIds].sort(
@@ -1027,19 +1057,21 @@ export async function generateSmartCandidates(profile: {
         ...temporalFilter,
       });
       results.discovered.push(...genreDiscovered);
-      console.log("[SmartCandidates] Genre+keyword discovery", {
-        count: genreDiscovered.length,
-        genreCount,
-        keywordCount,
-        sortBy: randomSort,
-        sortWeight:
-          sortRand < 0.6
-            ? "quality-first (60%)"
-            : sortRand < 0.85
-              ? "popularity (25%)"
-              : "recency (15%)",
-        temporal: temporalFilter,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[SmartCandidates] Genre+keyword discovery", {
+          count: genreDiscovered.length,
+          genreCount,
+          keywordCount,
+          sortBy: randomSort,
+          sortWeight:
+            sortRand < 0.6
+              ? "quality-first (60%)"
+              : sortRand < 0.85
+                ? "popularity (25%)"
+                : "recency (15%)",
+          temporal: temporalFilter,
+        });
+      }
 
       // Fallback 1: Just genres with different temporal filter
       if (genreDiscovered.length < 30) {
@@ -1068,9 +1100,11 @@ export async function generateSmartCandidates(profile: {
           ...altTemporalFilter,
         });
         results.discovered.push(...genreOnlyDiscovered);
-        console.log("[SmartCandidates] Genre-only fallback", {
-          count: genreOnlyDiscovered.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[SmartCandidates] Genre-only fallback", {
+            count: genreOnlyDiscovered.length,
+          });
+        }
       }
 
       // Fallback 2: Popular in genres (lower vote threshold, different temporal)
@@ -1090,9 +1124,11 @@ export async function generateSmartCandidates(profile: {
           ...altTemporalFilter,
         });
         results.discovered.push(...popularDiscovered);
-        console.log("[SmartCandidates] Popular fallback", {
-          count: popularDiscovered.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[SmartCandidates] Popular fallback", {
+            count: popularDiscovered.length,
+          });
+        }
       }
     }
   } catch (e) {
@@ -1116,12 +1152,14 @@ export async function generateSmartCandidates(profile: {
         limit: 100,
       });
       results.discovered.push(...directorDiscovered);
-      console.log("[SmartCandidates] Director discovery", {
-        count: directorDiscovered.length,
-        directors: shuffledDirectors
-          .slice(0, 8)
-          .map((d) => ({ id: d.id, name: d.name })),
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[SmartCandidates] Director discovery", {
+          count: directorDiscovered.length,
+          directors: shuffledDirectors
+            .slice(0, 8)
+            .map((d) => ({ id: d.id, name: d.name })),
+        });
+      }
 
       // Fallback: Try with single director if multiple directors returned nothing
       if (directorDiscovered.length === 0 && shuffledDirectors.length > 0) {
@@ -1131,9 +1169,11 @@ export async function generateSmartCandidates(profile: {
           limit: 50,
         });
         results.discovered.push(...singleDirector);
-        console.log("[SmartCandidates] Single director fallback", {
-          count: singleDirector.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[SmartCandidates] Single director fallback", {
+            count: singleDirector.length,
+          });
+        }
       }
     }
   } catch (e) {
@@ -1154,12 +1194,14 @@ export async function generateSmartCandidates(profile: {
         limit: 100,
       });
       results.discovered.push(...nicheDiscovered);
-      console.log("[SmartCandidates] Niche keyword discovery", {
-        count: nicheDiscovered.length,
-        keywords: shuffledKeywords
-          .slice(0, 2)
-          .map((k) => ({ id: k.id, name: k.name })),
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[SmartCandidates] Niche keyword discovery", {
+          count: nicheDiscovered.length,
+          keywords: shuffledKeywords
+            .slice(0, 2)
+            .map((k) => ({ id: k.id, name: k.name })),
+        });
+      }
     }
   } catch (e) {
     console.error("[SmartCandidates] Niche discovery failed", e);
@@ -1172,12 +1214,14 @@ export async function generateSmartCandidates(profile: {
       profile.preferredSubgenreKeywordIds?.length &&
       results.discovered.length < 400
     ) {
-      console.log(
-        "[SmartCandidates] Running preferred subgenre keyword discovery",
-        {
-          keywordIds: profile.preferredSubgenreKeywordIds.slice(0, 5),
-        },
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[SmartCandidates] Running preferred subgenre keyword discovery",
+          {
+            keywordIds: profile.preferredSubgenreKeywordIds.slice(0, 5),
+          },
+        );
+      }
 
       const subgenreDiscovered = await discoverMoviesByProfile({
         keywords: profile.preferredSubgenreKeywordIds.slice(0, 5),
@@ -1187,10 +1231,12 @@ export async function generateSmartCandidates(profile: {
       });
       results.discovered.push(...subgenreDiscovered);
 
-      console.log("[SmartCandidates] Subgenre keyword discovery", {
-        count: subgenreDiscovered.length,
-        keywordIds: profile.preferredSubgenreKeywordIds.slice(0, 5),
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[SmartCandidates] Subgenre keyword discovery", {
+          count: subgenreDiscovered.length,
+          keywordIds: profile.preferredSubgenreKeywordIds.slice(0, 5),
+        });
+      }
 
       // Also try with popularity sort for variety
       if (
@@ -1204,12 +1250,14 @@ export async function generateSmartCandidates(profile: {
           limit: 50,
         });
         results.discovered.push(...subgenrePopular);
-        console.log(
-          "[SmartCandidates] Subgenre keyword discovery (popular fallback)",
-          {
-            count: subgenrePopular.length,
-          },
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[SmartCandidates] Subgenre keyword discovery (popular fallback)",
+            {
+              count: subgenrePopular.length,
+            },
+          );
+        }
       }
     }
   } catch (e) {
@@ -1222,13 +1270,15 @@ export async function generateSmartCandidates(profile: {
   // This approach works with Trakt, TasteDive, and any other recommendation source
   try {
     if (profile.topGenres.length > 0 && results.discovered.length < 300) {
-      console.log(
-        "[SmartCandidates] Running enhanced genre discovery (cross-API compatible)",
-        {
-          topGenres: profile.topGenres,
-          approach: "genre-based discovery + text filtering",
-        },
-      );
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[SmartCandidates] Running enhanced genre discovery (cross-API compatible)",
+          {
+            topGenres: profile.topGenres,
+            approach: "genre-based discovery + text filtering",
+          },
+        );
+      }
 
       // Fetch more candidates from top genres for subgenre text filtering
       for (const sortBy of ["vote_average.desc", "popularity.desc"] as const) {
@@ -1240,10 +1290,12 @@ export async function generateSmartCandidates(profile: {
           limit: 150, // Increased to get more candidates for text-based subgenre detection
         });
         results.discovered.push(...enhancedDiscovered);
-        console.log(
-          `[SmartCandidates] Enhanced genre discovery (${sortBy}):`,
-          enhancedDiscovered.length,
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[SmartCandidates] Enhanced genre discovery (${sortBy}):`,
+            enhancedDiscovered.length,
+          );
+        }
       }
     }
   } catch (e) {
@@ -1301,10 +1353,12 @@ export async function generateSmartCandidates(profile: {
         limit: 100,
       });
       results.discovered.push(...singleGenreDiscovered);
-      console.log("[SmartCandidates] Single genre discovery", {
-        count: singleGenreDiscovered.length,
-        genreId: topGenre.id,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[SmartCandidates] Single genre discovery", {
+          count: singleGenreDiscovered.length,
+          genreId: topGenre.id,
+        });
+      }
     }
   } catch (e) {
     console.error("[SmartCandidates] Single genre discovery failed", e);
@@ -1328,9 +1382,11 @@ export async function generateSmartCandidates(profile: {
           limit: 50,
         });
         results.discovered.push(...animeDiscovered);
-        console.log("[SmartCandidates] Anime discovery (TuiMDB #7)", {
-          count: animeDiscovered.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[SmartCandidates] Anime discovery (TuiMDB #7)", {
+            count: animeDiscovered.length,
+          });
+        }
       }
 
       // Food documentary discovery
@@ -1345,9 +1401,11 @@ export async function generateSmartCandidates(profile: {
           limit: 30,
         });
         results.discovered.push(...foodDocDiscovered);
-        console.log("[SmartCandidates] Food doc discovery (TuiMDB #7)", {
-          count: foodDocDiscovered.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[SmartCandidates] Food doc discovery (TuiMDB #7)", {
+            count: foodDocDiscovered.length,
+          });
+        }
       }
 
       // Travel documentary discovery
@@ -1362,16 +1420,20 @@ export async function generateSmartCandidates(profile: {
           limit: 30,
         });
         results.discovered.push(...travelDocDiscovered);
-        console.log("[SmartCandidates] Travel doc discovery (TuiMDB #7)", {
-          count: travelDocDiscovered.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[SmartCandidates] Travel doc discovery (TuiMDB #7)", {
+            count: travelDocDiscovered.length,
+          });
+        }
       }
 
       // Stand-up comedy discovery (Issue #18)
       if (niche.likesStandUp && results.discovered.length < 350) {
-        console.log(
-          "[SmartCandidates] User likes stand-up, adding comedy specials",
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[SmartCandidates] User likes stand-up, adding comedy specials",
+          );
+        }
 
         // NOTE: TMDB doesn't have reliable keyword IDs for stand-up comedy
         // We rely on genre-based discovery (Comedy) + text-based filtering
@@ -1385,10 +1447,12 @@ export async function generateSmartCandidates(profile: {
         });
 
         results.discovered.push(...standUpDiscovered);
-        console.log("[SmartCandidates] Stand-up discovery:", {
-          count: standUpDiscovered.length,
-          note: "Text-based stand-up filtering applied later in pipeline",
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[SmartCandidates] Stand-up discovery:", {
+            count: standUpDiscovered.length,
+            note: "Text-based stand-up filtering applied later in pipeline",
+          });
+        }
       }
     } catch (e) {
       console.error("[SmartCandidates] Niche genre discovery failed", e);
@@ -1415,10 +1479,12 @@ export async function generateSmartCandidates(profile: {
         limit: 75,
       });
       results.discovered.push(...actorDiscovered);
-      console.log("[SmartCandidates] Actor discovery", {
-        count: actorDiscovered.length,
-        actors: shuffledActors.slice(0, 5).map((a) => a.name),
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[SmartCandidates] Actor discovery", {
+          count: actorDiscovered.length,
+          actors: shuffledActors.slice(0, 5).map((a) => a.name),
+        });
+      }
 
       // Also try popularity-sorted for variety
       if (actorDiscovered.length < 30) {
@@ -1429,9 +1495,11 @@ export async function generateSmartCandidates(profile: {
           limit: 50,
         });
         results.discovered.push(...actorPopular);
-        console.log("[SmartCandidates] Actor discovery (popular)", {
-          count: actorPopular.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[SmartCandidates] Actor discovery (popular)", {
+            count: actorPopular.length,
+          });
+        }
       }
     }
   } catch (e) {
@@ -1466,10 +1534,12 @@ export async function generateSmartCandidates(profile: {
           limit: 40,
         });
         results.discovered.push(...comboDiscovered);
-        console.log("[SmartCandidates] Genre combo discovery", {
-          genres: [genre1, genre2],
-          count: comboDiscovered.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[SmartCandidates] Genre combo discovery", {
+            genres: [genre1, genre2],
+            count: comboDiscovered.length,
+          });
+        }
       }
     }
   } catch (e) {
@@ -1502,11 +1572,13 @@ export async function generateSmartCandidates(profile: {
             limit: 40,
           });
           results.discovered.push(...studioDiscovered);
-          console.log("[SmartCandidates] Studio discovery", {
-            studio: studio.name,
-            studioId: studio.id,
-            count: studioDiscovered.length,
-          });
+          if (process.env.NODE_ENV === "development") {
+            console.log("[SmartCandidates] Studio discovery", {
+              studio: studio.name,
+              studioId: studio.id,
+              count: studioDiscovered.length,
+            });
+          }
         }
       }
     }
@@ -1552,26 +1624,33 @@ export async function generateSmartCandidates(profile: {
           limit: 50,
         });
         results.discovered.push(...decadeDiscovered);
-        console.log(`[SmartCandidates] Decade discovery (${strategy.label})`, {
-          years: `${strategy.yearMin}-${strategy.yearMax}`,
-          count: decadeDiscovered.length,
-          source: userDecades.length > 0 ? "user-preference" : "default",
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[SmartCandidates] Decade discovery (${strategy.label})`,
+            {
+              years: `${strategy.yearMin}-${strategy.yearMax}`,
+              count: decadeDiscovered.length,
+              source: userDecades.length > 0 ? "user-preference" : "default",
+            },
+          );
+        }
       }
     }
   } catch (e) {
     console.error("[SmartCandidates] Decade discovery failed", e);
   }
 
-  console.log("[SmartCandidates] Generated", {
-    trending: results.trending.length,
-    similar: results.similar.length,
-    discovered: results.discovered.length,
-    total:
-      results.trending.length +
-      results.similar.length +
-      results.discovered.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[SmartCandidates] Generated", {
+      trending: results.trending.length,
+      similar: results.similar.length,
+      discovered: results.discovered.length,
+      total:
+        results.trending.length +
+        results.similar.length +
+        results.discovered.length,
+    });
+  }
 
   // Ensure all candidates have source metadata (default to TMDB/low if not set by aggregator)
   // This is critical for pairwise comparisons to have valid consensus data
@@ -1599,9 +1678,11 @@ export async function getDecadeCandidates(
   const yearMin = decade;
   const yearMax = decade + 9;
 
-  console.log(
-    `[DecadeCandidates] Fetching for ${decade}s (${yearMin}-${yearMax})`,
-  );
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      `[DecadeCandidates] Fetching for ${decade}s (${yearMin}-${yearMax})`,
+    );
+  }
 
   return discoverMoviesByProfile({
     yearMin,
@@ -1623,7 +1704,9 @@ export async function getSmartDiscoveryCandidates(
   },
   limit = 20,
 ): Promise<number[]> {
-  console.log("[SmartDiscovery] Fetching hidden gems");
+  if (process.env.NODE_ENV === "development") {
+    console.log("[SmartDiscovery] Fetching hidden gems");
+  }
 
   const allIds = new Set<number>();
 
@@ -1700,12 +1783,14 @@ export async function generateExploratoryPicks(
   );
   exploratoryIds.push(...acclaimedIds);
 
-  console.log("[Exploration] Generated exploratory picks", {
-    total: exploratoryIds.length,
-    adjacent: adjacentIds.length,
-    acclaimed: acclaimedIds.length,
-    targetCount: options.count,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Exploration] Generated exploratory picks", {
+      total: exploratoryIds.length,
+      adjacent: adjacentIds.length,
+      acclaimed: acclaimedIds.length,
+      targetCount: options.count,
+    });
+  }
 
   return exploratoryIds;
 }
@@ -1741,7 +1826,9 @@ async function getAdjacentGenrePicks(
   }
 
   if (adjacentGenres.size === 0) {
-    console.log("[Exploration] No adjacent genres found for exploration");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Exploration] No adjacent genres found for exploration");
+    }
     return [];
   }
 
@@ -1750,11 +1837,13 @@ async function getAdjacentGenrePicks(
   const randomGenre =
     adjacentGenreArray[Math.floor(Math.random() * adjacentGenreArray.length)];
 
-  console.log("[Exploration] Exploring adjacent genre", {
-    genreId: randomGenre,
-    fromTopGenres: profile.topGenres.slice(0, 3).map((g) => g.name),
-    availableAdjacent: adjacentGenreArray.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Exploration] Exploring adjacent genre", {
+      genreId: randomGenre,
+      fromTopGenres: profile.topGenres.slice(0, 3).map((g) => g.name),
+      availableAdjacent: adjacentGenreArray.length,
+    });
+  }
 
   const ids = await discoverMoviesByProfile({
     genres: [randomGenre],
@@ -1794,9 +1883,11 @@ async function getCriticallyAcclaimedPicks(
   );
 
   if (explorationGenres.length === 0) {
-    console.log(
-      "[Exploration] No exploration genres available (all are top or avoided)",
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[Exploration] No exploration genres available (all are top or avoided)",
+      );
+    }
     return [];
   }
 
@@ -1804,10 +1895,12 @@ async function getCriticallyAcclaimedPicks(
   const randomGenre =
     explorationGenres[Math.floor(Math.random() * explorationGenres.length)];
 
-  console.log("[Exploration] Exploring acclaimed films in new genre", {
-    genreId: randomGenre,
-    availableGenres: explorationGenres.length,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Exploration] Exploring acclaimed films in new genre", {
+      genreId: randomGenre,
+      availableGenres: explorationGenres.length,
+    });
+  }
 
   // Query for highly-rated films in this genre
   const ids = await discoverMoviesByProfile({
