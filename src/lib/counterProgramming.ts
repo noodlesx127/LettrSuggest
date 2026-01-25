@@ -66,7 +66,7 @@ async function getRecentDiaryMovies(
   if (!client) return [];
 
   const { data: diaryEvents, error } = await client
-    .from("film_diary_events")
+    .from("film_diary_events_enriched")
     .select("tmdb_id, watched_at")
     .eq("user_id", userId)
     .order("watched_at", { ascending: false })
