@@ -804,6 +804,7 @@ export async function discoverMoviesByProfile(options: {
 export async function generateSmartCandidates(profile: {
   highlyRatedIds: number[];
   watchlistIds?: number[]; // NEW: User's Letterboxd watchlist for intent-based discovery
+  savedSuggestionIds?: number[];
   topGenres: Array<{ id: number; weight: number }>;
   topKeywords: Array<{ id: number; name: string; weight: number }>;
   topDirectors: Array<{ id: number; name: string; weight: number }>;
@@ -834,6 +835,7 @@ export async function generateSmartCandidates(profile: {
   console.log("[SmartCandidates] Generating with enhanced profile", {
     highlyRatedCount: profile.highlyRatedIds.length,
     watchlistCount: profile.watchlistIds?.length ?? 0,
+    savedSuggestionCount: profile.savedSuggestionIds?.length ?? 0,
     topGenresCount: profile.topGenres.length,
     topKeywordsCount: profile.topKeywords.length,
     topDirectorsCount: profile.topDirectors.length,
@@ -860,6 +862,15 @@ export async function generateSmartCandidates(profile: {
     console.error("[SmartCandidates] Trending failed", e);
   }
 
+  const savedSuggestionIds = profile.savedSuggestionIds ?? [];
+
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      "[SmartCandidates] Using saved suggestions as seeds:",
+      savedSuggestionIds.length,
+    );
+  }
+
   // 2. Multi-Source Aggregation (REPLACES old TMDB+Trakt similar fetching)
   // This is now the PRIMARY source for similar movie recommendations
   try {
@@ -876,13 +887,31 @@ export async function generateSmartCandidates(profile: {
       // Combine highly-rated films with watchlist for richer seed pool
       // highlyRatedIds = what user loved (past preferences)
       // watchlistIds = what user wants to watch (future intent/discovery signals)
-      const combinedSeedIds = [
-        ...profile.highlyRatedIds.slice(0, 20), // Top 20 from watch history
-        ...(profile.watchlistIds?.slice(0, 10) ?? []), // Top 10 from watchlist (intent signals)
-      ];
+      const seedWeights = new Map<number, { weight: number; order: number }>();
+      let seedOrder = 0;
 
-      // Deduplicate while preserving order
-      const uniqueSeedIds = [...new Set(combinedSeedIds)].slice(0, 25);
+      const addSeedIds = (ids: number[], weight: number) => {
+        for (const id of ids) {
+          if (!seedWeights.has(id)) {
+            seedWeights.set(id, { weight, order: seedOrder++ });
+          } else {
+            const existing = seedWeights.get(id);
+            if (existing && weight > existing.weight) {
+              seedWeights.set(id, { weight, order: existing.order });
+            }
+          }
+        }
+      };
+
+      addSeedIds(profile.highlyRatedIds.slice(0, 20), 1.0); // Past preferences
+      addSeedIds(profile.watchlistIds?.slice(0, 10) ?? [], 1.0); // Intent signals
+      addSeedIds(savedSuggestionIds, 1.5); // High-intent saved suggestions
+
+      const uniqueSeedIds = Array.from(seedWeights.entries())
+        .map(([tmdbId, meta]) => ({ tmdbId, ...meta }))
+        .sort((a, b) => b.weight - a.weight || a.order - b.order)
+        .slice(0, 25)
+        .map((entry) => entry.tmdbId);
 
       const seedMovies = uniqueSeedIds.map((tmdbId) => {
         const details = profile.tmdbDetailsMap?.get(tmdbId);
@@ -898,6 +927,7 @@ export async function generateSmartCandidates(profile: {
       console.log("[SmartCandidates] Seed movies:", {
         fromHighlyRated: Math.min(20, profile.highlyRatedIds.length),
         fromWatchlist: Math.min(10, profile.watchlistIds?.length ?? 0),
+        fromSavedSuggestions: savedSuggestionIds.length,
         combined: uniqueSeedIds.length,
         total: seedMovies.length,
         withTitles: seedMoviesWithTitles.length,

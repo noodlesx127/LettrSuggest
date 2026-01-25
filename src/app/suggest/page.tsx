@@ -1536,6 +1536,14 @@ export default function SuggestPage() {
         watchlistIdArray.length,
       );
 
+      // Fetch saved suggestions for seed enrichment
+      const { data: savedSuggestions } = await supabase
+        .from("saved_suggestions")
+        .select("tmdb_id")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      const savedIds = savedSuggestions?.map((s) => s.tmdb_id) || [];
+
       // Generate smart candidates using multiple TMDB discovery strategies
       console.log("[Suggest] Generating smart candidates");
       setProgress({
@@ -1547,6 +1555,7 @@ export default function SuggestPage() {
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
         watchlistIds: watchlistIdArray, // Pass watchlist for intent-based discovery (P1.3)
+        savedSuggestionIds: savedIds,
         topGenres: tasteProfile.topGenres,
         topKeywords: tasteProfile.topKeywords,
         topDirectors: tasteProfile.topDirectors,
@@ -1725,6 +1734,36 @@ export default function SuggestPage() {
         recentExposures.size,
       );
 
+      let mmrExplorationRate = 0.15;
+      try {
+        const { data, error } = await supabase
+          .from("user_exploration_stats")
+          .select("exploration_rate")
+          .eq("user_id", uid)
+          .maybeSingle();
+
+        if (error) {
+          console.error(
+            "[Suggest] Failed to fetch user exploration stats",
+            error,
+          );
+        } else if (typeof data?.exploration_rate === "number") {
+          mmrExplorationRate = data.exploration_rate;
+        }
+      } catch (e) {
+        console.error("[Suggest] Failed to load exploration rate", e);
+      }
+
+      const lambda = 0.3 + (mmrExplorationRate / 0.3) * 0.4;
+      const dynamicMmrLambda = Math.max(0.3, Math.min(0.7, lambda));
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Suggest] Dynamic MMR lambda", {
+          explorationRate: mmrExplorationRate,
+          lambdaRaw: lambda,
+          lambdaClamped: dynamicMmrLambda,
+        });
+      }
+
       const context = computeContext();
       setSourceLabel("Based on your watched & liked films + trending releases");
       const lite = filteredFilms.map((f) => ({
@@ -1756,7 +1795,7 @@ export default function SuggestPage() {
         desiredResults: 300, // Increased to fill all 24 sections (24 × 12 = 288 potential items)
         sourceMetadata: smartCandidates.sourceMetadata, // Pass multi-source metadata for badge display
         sourceReliability: userSourceReliability,
-        mmrLambda: 0.15 + (discoveryLevel / 100) * 0.35, // range ~0.15–0.5
+        mmrLambda: dynamicMmrLambda,
         mmrTopKFactor: 2.5 + (discoveryLevel / 100) * 1.5,
         // Feature-level feedback from explicit user interactions
         featureFeedback: featureFeedback || undefined,
@@ -2181,9 +2220,18 @@ export default function SuggestPage() {
           userId: uid ?? undefined,
         });
 
+        if (!supabase) throw new Error("Supabase not initialized");
+        const { data: savedSuggestions } = await supabase
+          .from("saved_suggestions")
+          .select("tmdb_id")
+          .order("created_at", { ascending: false })
+          .limit(100);
+        const savedIds = savedSuggestions?.map((s) => s.tmdb_id) || [];
+
         const smartCandidates = await generateSmartCandidates({
           highlyRatedIds: highlyRated,
           watchlistIds: watchlistFilmsForMore.map((f) => mappings.get(f.uri)!), // Use watchlist for intent-based discovery
+          savedSuggestionIds: savedIds,
           topGenres: tasteProfile.topGenres,
           topKeywords: tasteProfile.topKeywords,
           topDirectors: tasteProfile.topDirectors,
@@ -2396,11 +2444,20 @@ export default function SuggestPage() {
           userId: uid ?? undefined,
         });
 
+        if (!supabase) throw new Error("Supabase not initialized");
+        const { data: savedSuggestions } = await supabase
+          .from("saved_suggestions")
+          .select("tmdb_id")
+          .order("created_at", { ascending: false })
+          .limit(100);
+        const savedIds = savedSuggestions?.map((s) => s.tmdb_id) || [];
+
         const smartCandidates = await generateSmartCandidates({
           highlyRatedIds: highlyRated,
           watchlistIds: watchlistFilmsForRefresh.map(
             (f) => mappings.get(f.uri)!,
           ), // Use watchlist for intent-based discovery
+          savedSuggestionIds: savedIds,
           topGenres: tasteProfile.topGenres,
           topKeywords: tasteProfile.topKeywords,
           topDirectors: tasteProfile.topDirectors,

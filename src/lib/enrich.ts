@@ -4976,6 +4976,92 @@ export async function suggestByOverlap(params: {
 
   // Map TMDB IDs back to original film data for weighting
   const likedFilmData = liked.filter((f) => params.mappings.has(f.uri));
+  const likedFilmMap = new Map<number, { rating?: number; liked?: boolean }>();
+  for (const film of likedFilmData) {
+    const tmdbId = params.mappings.get(film.uri);
+    if (tmdbId != null) {
+      likedFilmMap.set(tmdbId, { rating: film.rating, liked: film.liked });
+    }
+  }
+  const likedMovieMap = new Map<number, TMDBMovie>();
+  for (const movie of likedMovies) {
+    if (movie?.id != null) likedMovieMap.set(movie.id, movie);
+  }
+
+  // Identify favorite filmmakers (directors/actors) based on highly-rated films
+  // Definition: appears in 3+ highly-rated films in the taste profile
+  const favoriteDirectorCounts = new Map<
+    number,
+    { name: string; count: number }
+  >();
+  const favoriteActorCounts = new Map<
+    number,
+    { name: string; count: number }
+  >();
+  const isHighlyRatedTasteFilm = (film?: {
+    rating?: number;
+    liked?: boolean;
+  }) => Boolean(film?.liked || (film?.rating ?? 0) >= 4);
+
+  for (const [tmdbId, filmData] of likedFilmMap.entries()) {
+    if (!isHighlyRatedTasteFilm(filmData)) continue;
+    const movie = likedMovieMap.get(tmdbId);
+    if (!movie) continue;
+
+    const directorIdsForMovie = new Set(
+      (movie.credits?.crew || [])
+        .filter((c) => c.job === "Director")
+        .map((c) => c.id)
+        .filter((id): id is number => typeof id === "number"),
+    );
+
+    for (const directorId of directorIdsForMovie) {
+      const directorName =
+        movie.credits?.crew?.find((c) => c.id === directorId)?.name ||
+        "Unknown";
+      const current = favoriteDirectorCounts.get(directorId);
+      favoriteDirectorCounts.set(directorId, {
+        name: directorName,
+        count: (current?.count ?? 0) + 1,
+      });
+    }
+
+    const actorIdsForMovie = new Set(
+      (movie.credits?.cast || [])
+        .slice(0, 5)
+        .map((c) => c.id)
+        .filter((id): id is number => typeof id === "number"),
+    );
+
+    for (const actorId of actorIdsForMovie) {
+      const actorName =
+        movie.credits?.cast?.find((c) => c.id === actorId)?.name || "Unknown";
+      const current = favoriteActorCounts.get(actorId);
+      favoriteActorCounts.set(actorId, {
+        name: actorName,
+        count: (current?.count ?? 0) + 1,
+      });
+    }
+  }
+
+  const favoriteDirectorIds = new Set<number>();
+  const favoriteActorIds = new Set<number>();
+  const favoriteDirectorNames = new Map<number, string>();
+  const favoriteActorNames = new Map<number, string>();
+
+  for (const [id, data] of favoriteDirectorCounts.entries()) {
+    if (data.count >= 3) {
+      favoriteDirectorIds.add(id);
+      favoriteDirectorNames.set(id, data.name);
+    }
+  }
+
+  for (const [id, data] of favoriteActorCounts.entries()) {
+    if (data.count >= 3) {
+      favoriteActorIds.add(id);
+      favoriteActorNames.set(id, data.name);
+    }
+  }
 
   // Multi-factor scoring weights (Phase 2 enhancements)
   // Total positive weights: 100% distributed across factors
@@ -5068,7 +5154,8 @@ export async function suggestByOverlap(params: {
 
   for (let i = 0; i < likedFeats.length; i++) {
     const f = likedFeats[i];
-    const filmData = likedFilmData[i];
+    const movie = likedMovies[i];
+    const filmData = movie?.id ? likedFilmMap.get(movie.id) : undefined;
     const weight = getPreferenceWeight(filmData?.rating, filmData?.liked);
 
     // Weight all features by the preference strength
@@ -5124,8 +5211,8 @@ export async function suggestByOverlap(params: {
   // Build film lookup from liked films (limit to top films by weight for each feature)
   for (let i = 0; i < likedFeats.length; i++) {
     const f = likedFeats[i];
-    const filmData = likedFilmData[i];
     const movie = likedMovies[i];
+    const filmData = movie?.id ? likedFilmMap.get(movie.id) : undefined;
     const weight = getPreferenceWeight(filmData?.rating, filmData?.liked);
 
     // Only track films with meaningful weight (>= 1.0)
@@ -5372,6 +5459,21 @@ export async function suggestByOverlap(params: {
         m.release_date,
         feats.runtime,
       );
+
+      const favoriteDirectorId = feats.directorIds.find((id) =>
+        favoriteDirectorIds.has(id),
+      );
+      const favoriteActorId = (m.credits?.cast || [])
+        .slice(0, 5)
+        .map((c) => c.id)
+        .find((id) => favoriteActorIds.has(id));
+      const favoriteFilmmakerId = favoriteDirectorId ?? favoriteActorId;
+      const favoriteFilmmakerName =
+        (favoriteFilmmakerId != null
+          ? favoriteDirectorNames.get(favoriteFilmmakerId) ||
+            favoriteActorNames.get(favoriteFilmmakerId)
+          : undefined) ?? "Unknown";
+      const isFavoriteFilmmaker = favoriteFilmmakerId != null;
 
       // Tiered thresholds based on content type and consensus
       // Niche content: 30 votes, 6.0 rating
@@ -6950,6 +7052,20 @@ export async function suggestByOverlap(params: {
         );
         console.log(
           `[QualityMultiplier] "${m.title}": ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${qualityMultiplier.toFixed(2)}x for ${feats.voteAverage.toFixed(1)}/10)`,
+        );
+      }
+
+      // FAVORITE FILMMAKER BOOST: Nudge ranking without bypassing quality gates
+      if (isFavoriteFilmmaker) {
+        const favoriteFilmmakerBoost = 0.2;
+        score += favoriteFilmmakerBoost;
+        reasons.push(
+          `From one of your favorite filmmakers (${favoriteFilmmakerName})`,
+        );
+        console.log(
+          "[Scoring] Applied favorite filmmaker boost:",
+          favoriteFilmmakerName,
+          m.title,
         );
       }
 
