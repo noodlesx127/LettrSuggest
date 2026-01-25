@@ -154,3 +154,12 @@ console.error("[Cache] Error:", error);
 1. Create `supabase/migrations/TIMESTAMP_description.sql`
 2. Use `IF NOT EXISTS`, `DROP POLICY IF EXISTS` for idempotency
 3. Run `NOTIFY pgrst, 'reload schema'` after changes
+
+## Does
+- All Documentation should live in the `/docs` folder.
+- All Plan Documentation should live in the `/Docs/plans` folder.
+- All Summary Documentation should live in the `/Docs/summary` folder.
+- You must always assign sub agents to tasks and plans. You should never do anything yourself, unless there isn't a sub agent available for the task.
+- Always make sure to add a code review loop for bugs and issues that send that feedback back to the sub agent to fix them if needed. Once this each tasks passes and have a the the correct Sub Agent update the docs and do a commit.
+- When envoking the ui-designer sub agent, make sure to always add the frontend-design skill.
+- Uses Skills when needed.
