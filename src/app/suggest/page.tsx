@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import AuthGate from "@/components/AuthGate";
 import MovieCard, { FeatureEvidenceContext } from "@/components/MovieCard";
 import ProgressIndicator from "@/components/ProgressIndicator";
@@ -4514,11 +4515,14 @@ export default function SuggestPage() {
                         {/* Poster */}
                         {item.poster_path ? (
                           <div className="w-20 h-28 flex-shrink-0 bg-gray-700 rounded overflow-hidden">
-                            <img
+                            <Image
                               src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
                               alt={item.title}
+                              width={80}
+                              height={112}
                               className="w-full h-full object-cover"
                               loading="lazy"
+                              sizes="80px"
                             />
                           </div>
                         ) : (
