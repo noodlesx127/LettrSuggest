@@ -161,7 +161,7 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(
               // Handle Enter and Space for keyboard accessibility
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                (e.target as HTMLDivElement).click();
+                (e.currentTarget as HTMLDivElement).click();
               }
               props.onKeyDown?.(e);
             },

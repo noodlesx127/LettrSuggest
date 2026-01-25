@@ -250,12 +250,12 @@ export function Modal({
                 onClick={onClose}
                 className={cn(
                   "flex-shrink-0",
-                  "p-2 -m-2",
+                  "p-3 -m-3",
                   "rounded-xl",
                   "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300",
                   "hover:bg-gray-100 dark:hover:bg-gray-700",
                   "transition-colors duration-150",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900",
                 )}
                 aria-label="Close modal"
               >
