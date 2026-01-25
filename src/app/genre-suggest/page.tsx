@@ -680,8 +680,11 @@ export default function GenreSuggestPage() {
         mmrLambda: 0.35,
         mmrTopKFactor: 3.0,
         enhancedProfile: {
+          topKeywords: tasteProfile.topKeywords,
           topActors: tasteProfile.topActors,
           topStudios: tasteProfile.topStudios,
+          topCountries: tasteProfile.topCountries,
+          topLanguages: tasteProfile.topLanguages,
           avoidGenres: tasteProfile.avoidGenres,
           avoidKeywords: tasteProfile.avoidKeywords,
           avoidDirectors: tasteProfile.avoidDirectors,
