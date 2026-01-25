@@ -51,8 +51,9 @@ export type AggregatedRecommendation = {
 export async function aggregateRecommendations(params: {
   seedMovies: Array<{ tmdbId: number; title: string; imdbId?: string }>;
   limit?: number;
+  sourceReliability?: Map<string, number>;
 }): Promise<AggregatedRecommendation[]> {
-  const { seedMovies, limit = 50 } = params;
+  const { seedMovies, limit = 50, sourceReliability } = params;
   const startTime = Date.now();
 
   console.log("[Aggregator] Starting multi-source aggregation", {
@@ -137,7 +138,7 @@ export async function aggregateRecommendations(params: {
   const scored = aggregated
     .map((rec) => ({
       ...rec,
-      score: calculateAggregateScore(rec),
+      score: calculateAggregateScore(rec, sourceReliability),
       consensusLevel: getConsensusLevel(rec.sources.length),
     }))
     .sort((a, b) => b.score - a.score)
@@ -367,13 +368,15 @@ const ACTIVE_SOURCE_COUNT = 4; // tmdb, tastedive, trakt, watchmode
 /**
  * Calculate weighted score based on:
  * 1. Number of sources (more = better)
- * 2. Source reliability weights
+ * 2. Source reliability weights (personalized per-user based on feedback)
  * 3. Individual source confidence
  */
-function calculateAggregateScore(rec: AggregatedRecommendation): number {
-  // Rebalanced weights: Boost niche/personalized sources, reduce generic ones
-  // This helps unique discoveries from TasteDive/Trakt compete with mainstream TMDB results
-  const sourceWeights: Record<RecommendationSource, number> = {
+function calculateAggregateScore(
+  rec: AggregatedRecommendation,
+  sourceReliability?: Map<string, number>,
+): number {
+  // Base weights: Used as fallback when no user-specific reliability data exists
+  const baseWeights: Record<RecommendationSource, number> = {
     tmdb: 0.85, // Reduced - already dominant, favors mainstream
     tastedive: 1.3, // Boosted - excellent at finding niche/non-obvious matches
     trakt: 1.25, // Boosted - community-driven curation, quality signal
@@ -381,13 +384,41 @@ function calculateAggregateScore(rec: AggregatedRecommendation): number {
     watchmode: 0.9, // Reduced - trending = generic, not personalized
   };
 
+  /**
+   * Adjust base weight using user's source reliability feedback
+   * reliability ranges from 0-1, we boost weight by up to 50%
+   */
+  const getAdjustedWeight = (
+    source: RecommendationSource,
+    baseWeight: number,
+  ): number => {
+    if (!sourceReliability || !sourceReliability.has(source)) {
+      return baseWeight;
+    }
+
+    const reliability = sourceReliability.get(source)!;
+    // Boost weight by up to 50% based on reliability (0-1 range)
+    const bonus = reliability * 0.5;
+    return baseWeight * (1 + bonus);
+  };
+
   let totalScore = 0;
   let totalWeight = 0;
+  const adjustedWeights: Record<string, number> = {};
 
   for (const source of rec.sources) {
-    const weight = sourceWeights[source.source];
-    totalScore += source.confidence * weight;
-    totalWeight += weight;
+    const adjustedWeight = getAdjustedWeight(
+      source.source,
+      baseWeights[source.source],
+    );
+    adjustedWeights[source.source] = adjustedWeight;
+    totalScore += source.confidence * adjustedWeight;
+    totalWeight += adjustedWeight;
+  }
+
+  // Log adjusted weights for first recommendation (debugging)
+  if (Object.keys(adjustedWeights).length > 0 && sourceReliability) {
+    console.log("[Aggregator] Sample adjusted weights:", adjustedWeights);
   }
 
   // Bonus for consensus (multiple sources agreeing)
