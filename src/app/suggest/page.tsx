@@ -2,7 +2,7 @@
 import AuthGate from "@/components/AuthGate";
 import MovieCard, { FeatureEvidenceContext } from "@/components/MovieCard";
 import ProgressIndicator from "@/components/ProgressIndicator";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useImportData } from "@/lib/importStore";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -136,6 +136,72 @@ type CategorizedSuggestions = {
   moreRecommendations: MovieItem[];
 };
 
+type SectionKey = Exclude<keyof CategorizedSuggestions, "seasonalConfig">;
+
+type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
+
+const ALL_SECTION_KEYS: SectionKey[] = [
+  "watchlistPicks",
+  "seasonalPicks",
+  "perfectMatches",
+  "recentWatchMatches",
+  "studioMatches",
+  "directorMatches",
+  "actorMatches",
+  "genreMatches",
+  "documentaries",
+  "decadeMatches",
+  "smartDiscovery",
+  "hiddenGems",
+  "cultClassics",
+  "crowdPleasers",
+  "newReleases",
+  "recentClassics",
+  "deepCuts",
+  "fromCollections",
+  "multiSourceConsensus",
+  "internationalCinema",
+  "animationPicks",
+  "quickWatches",
+  "epicFilms",
+  "criticallyAcclaimed",
+  "moreRecommendations",
+];
+
+const ALWAYS_VISIBLE_SECTIONS: SectionKey[] = [
+  "watchlistPicks",
+  "perfectMatches",
+  "recentWatchMatches",
+  "seasonalPicks",
+  "multiSourceConsensus",
+];
+
+const SECONDARY_SECTIONS: SectionKey[] = [
+  "directorMatches",
+  "actorMatches",
+  "studioMatches",
+  "genreMatches",
+  "smartDiscovery",
+  "hiddenGems",
+];
+
+const EXPLORE_SECTIONS: SectionKey[] = [
+  "animationPicks",
+  "documentaries",
+  "internationalCinema",
+  "quickWatches",
+  "epicFilms",
+  "criticallyAcclaimed",
+  "fromCollections",
+  "cultClassics",
+  "crowdPleasers",
+  "deepCuts",
+  "decadeMatches",
+  "newReleases",
+  "recentClassics",
+  "moreRecommendations",
+];
+
 // Progress stage definitions
 const PROGRESS_STAGES = [
   {
@@ -173,6 +239,7 @@ export default function SuggestPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<MovieItem[] | null>(null);
+  const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
   const [sourceLabel, setSourceLabel] = useState<string>("");
   const [fallbackFilms, setFallbackFilms] = useState<FilmEvent[] | null>(null);
   const [watchlistTmdbIds, setWatchlistTmdbIds] = useState<Set<number>>(
@@ -238,6 +305,9 @@ export default function SuggestPage() {
   const [microSurveyCount, setMicroSurveyCount] = useState<number>(0);
   const [pairwiseVideoId, setPairwiseVideoId] = useState<number | null>(null); // Track which pairwise option is showing video
   const [quizOpen, setQuizOpen] = useState(false); // Taste quiz modal state
+  const [showAllSections, setShowAllSections] = useState(false);
+  const [showCollapsedSmallSections, setShowCollapsedSmallSections] =
+    useState(false);
 
   // Hybrid feedback popup state - optional "tell us why" after feedback
   const [feedbackPopup, setFeedbackPopup] = useState<{
@@ -254,6 +324,58 @@ export default function SuggestPage() {
   } | null>(null);
   const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
 
+  // Ref for focus trap in feedback popup modal (A11y Issue 2)
+  const feedbackModalRef = useRef<HTMLDivElement>(null);
+
+  // Focus trap effect for feedback popup modal (A11y Issue 2)
+  useEffect(() => {
+    if (!feedbackPopup) return;
+
+    // Focus first focusable element in modal
+    const firstButton = feedbackModalRef.current?.querySelector("button");
+    firstButton?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setFeedbackPopup(null);
+        return;
+      }
+
+      if (e.key === "Tab") {
+        const focusableElements = feedbackModalRef.current?.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+        if (!focusableElements || focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0] as HTMLElement;
+        const lastElement = focusableElements[
+          focusableElements.length - 1
+        ] as HTMLElement;
+
+        if (e.shiftKey && document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        } else if (!e.shiftKey && document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement.focus();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("[A11y] Focus trap activated for feedback popup modal");
+    }
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      if (process.env.NODE_ENV === "development") {
+        console.log("[A11y] Focus trap deactivated for feedback popup modal");
+      }
+    };
+  }, [feedbackPopup]);
+
   // Load from session storage on mount
   useEffect(() => {
     try {
@@ -261,10 +383,12 @@ export default function SuggestPage() {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          console.log(
-            "[Suggest] Restored items from session storage",
-            parsed.length,
-          );
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              "[Suggest] Restored items from session storage",
+              parsed.length,
+            );
+          }
           setItems(parsed);
         }
       }
@@ -312,14 +436,18 @@ export default function SuggestPage() {
         const isValid = timestamp && Date.now() - timestamp < SEVEN_DAYS_MS;
 
         if (isValid && Array.isArray(ids) && ids.length > 0) {
-          console.log(
-            "[Suggest] Restored shown IDs from localStorage",
-            ids.length,
-          );
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              "[Suggest] Restored shown IDs from localStorage",
+              ids.length,
+            );
+          }
           setShownIds(new Set(ids));
         } else if (!isValid) {
           // Clear expired data
-          console.log("[Suggest] Cleared expired shown IDs data");
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Suggest] Cleared expired shown IDs data");
+          }
           localStorage.removeItem("lettrsuggest_shown_ids");
         }
       }
@@ -338,10 +466,12 @@ export default function SuggestPage() {
             timestamp: Date.now(),
           };
           localStorage.setItem("lettrsuggest_shown_ids", JSON.stringify(data));
-          console.log(
-            "[Suggest] Saved shown IDs to localStorage",
-            shownIds.size,
-          );
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              "[Suggest] Saved shown IDs to localStorage",
+              shownIds.size,
+            );
+          }
         } catch (e) {
           console.error("[Suggest] Failed to save shown IDs", e);
         }
@@ -550,11 +680,15 @@ export default function SuggestPage() {
           ? getNextItems(isSeasonalMatch, 12)
           : [];
 
-      console.log("[Suggest] Seasonal picks result", {
-        configGenres: seasonalConfig.genres,
-        configKeywords: seasonalConfig.keywords,
-        seasonalPicksCount: seasonalPicks.length,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] Seasonal picks result", {
+            configGenres: seasonalConfig.genres,
+            configKeywords: seasonalConfig.keywords,
+            seasonalPicksCount: seasonalPicks.length,
+          });
+        }
+      }
 
       // 1. Multi-Source Consensus: Films recommended by multiple sources (rare, high-value)
       const multiSourceConsensus = getNextItems((item) => {
@@ -709,32 +843,36 @@ export default function SuggestPage() {
         );
       };
 
-      console.log("[Suggest] Categorization complete", {
-        seasonalPicks: seasonalPicks.length,
-        perfectMatches: perfectMatches.length,
-        recentWatchMatches: recentWatchMatches.length,
-        studioMatches: studioMatches.length,
-        directorMatches: directorMatches.length,
-        actorMatches: actorMatches.length,
-        genreMatches: genreMatches.length,
-        documentaries: documentaries.length,
-        hiddenGems: hiddenGems.length,
-        cultClassics: cultClassics.length,
-        crowdPleasers: crowdPleasers.length,
-        newReleases: newReleases.length,
-        recentClassics: recentClassics.length,
-        deepCuts: deepCuts.length,
-        fromCollections: fromCollections.length,
-        multiSourceConsensus: multiSourceConsensus.length,
-        internationalCinema: internationalCinema.length,
-        animationPicks: animationPicks.length,
-        quickWatches: quickWatches.length,
-        epicFilms: epicFilms.length,
-        criticallyAcclaimed: criticallyAcclaimed.length,
-        moreRecommendations: moreRecommendations.length,
-        totalUsed: usedIds.size,
-        totalAvailable: items.length,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] Categorization complete", {
+            seasonalPicks: seasonalPicks.length,
+            perfectMatches: perfectMatches.length,
+            recentWatchMatches: recentWatchMatches.length,
+            studioMatches: studioMatches.length,
+            directorMatches: directorMatches.length,
+            actorMatches: actorMatches.length,
+            genreMatches: genreMatches.length,
+            documentaries: documentaries.length,
+            hiddenGems: hiddenGems.length,
+            cultClassics: cultClassics.length,
+            crowdPleasers: crowdPleasers.length,
+            newReleases: newReleases.length,
+            recentClassics: recentClassics.length,
+            deepCuts: deepCuts.length,
+            fromCollections: fromCollections.length,
+            multiSourceConsensus: multiSourceConsensus.length,
+            internationalCinema: internationalCinema.length,
+            animationPicks: animationPicks.length,
+            quickWatches: quickWatches.length,
+            epicFilms: epicFilms.length,
+            criticallyAcclaimed: criticallyAcclaimed.length,
+            moreRecommendations: moreRecommendations.length,
+            totalUsed: usedIds.size,
+            totalAvailable: items.length,
+          });
+        }
+      }
 
       return {
         watchlistPicks: [], // Will be populated separately from watchlistPicks state
@@ -1099,20 +1237,126 @@ export default function SuggestPage() {
     [films, fallbackFilms],
   );
 
+  const recentFilmTitle = useMemo(() => {
+    if (!sourceFilms.length) return undefined;
+    const recentFilm = sourceFilms
+      .filter((film) => film.lastDate)
+      .sort(
+        (a, b) =>
+          (b.lastDate ? new Date(b.lastDate).getTime() : 0) -
+          (a.lastDate ? new Date(a.lastDate).getTime() : 0),
+      )[0];
+    return recentFilm?.title;
+  }, [sourceFilms]);
+
+  const getPersonalizedHeader = useCallback(
+    (
+      sectionKey: string,
+      profile?: TasteProfile | null,
+      sectionItems?: MovieItem[],
+    ): string => {
+      const truncateName = (name: string) =>
+        name.length > 25 ? `${name.slice(0, 22)}...` : name;
+      const topDirector = profile?.topDirectors?.[0]?.name;
+      const topActor = profile?.topActors?.[0]?.name;
+      const topGenre = profile?.topGenres?.[0]?.name;
+      const topStudio = profile?.topStudios?.[0]?.name;
+      const nicheSignals = profile?.nichePreferences
+        ? Object.values(profile.nichePreferences).filter(Boolean).length / 4
+        : 0;
+      const { season } = getCurrentSeasonalGenres();
+      const currentYear = new Date().getFullYear();
+
+      switch (sectionKey) {
+        case "directorMatches":
+          if (topDirector) return `More from ${truncateName(topDirector)}`;
+          if ((profile?.topDirectors?.length ?? 0) > 1) {
+            return "Films by Directors You Love";
+          }
+          return "Director Matches";
+        case "actorMatches":
+          if (topActor) return `More with ${truncateName(topActor)}`;
+          if ((profile?.topActors?.length ?? 0) > 1) {
+            return "Films Starring Your Favorites";
+          }
+          return "Actor Matches";
+        case "genreMatches":
+          if (topGenre) return `More ${truncateName(topGenre)} Films`;
+          if ((profile?.topGenres?.length ?? 0) > 1) {
+            return "Films in Your Favorite Genres";
+          }
+          return "Genre Matches";
+        case "studioMatches":
+          if (topStudio) return `More from ${truncateName(topStudio)}`;
+          return "Studio Matches";
+        case "hiddenGems":
+          return nicheSignals > 0.6
+            ? "Hidden Gems (Just for You)"
+            : "Hidden Gems You Might Love";
+        case "recentWatchMatches":
+          return recentFilmTitle
+            ? `Because You Recently Watched ${truncateName(recentFilmTitle)}`
+            : "Based on Your Recent Watches";
+        case "perfectMatches":
+          return "Your Perfect Matches ✨";
+        case "seasonalPicks":
+          return `Your ${season} Picks ${currentYear}`;
+        default: {
+          if (sectionItems && sectionItems.length === 0) {
+            return sectionKey;
+          }
+          return sectionKey;
+        }
+      }
+    },
+    [recentFilmTitle],
+  );
+
+  const personalizedHeaderCount = useMemo(() => {
+    if (!categorizedSuggestions) return 0;
+    let count = 0;
+    const keys = ALL_SECTION_KEYS.filter(
+      (key) => categorizedSuggestions[key]?.length,
+    );
+    keys.forEach((key) => {
+      const header = getPersonalizedHeader(
+        key,
+        tasteProfile,
+        categorizedSuggestions[key],
+      );
+      if (header && !header.includes(key)) {
+        count += 1;
+      }
+    });
+    return count;
+  }, [categorizedSuggestions, getPersonalizedHeader, tasteProfile]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[Suggest] Generated ${personalizedHeaderCount} personalized headers`,
+      );
+    }
+  }, [personalizedHeaderCount]);
+
   const runSuggest = useCallback(async () => {
     try {
       // Generate new cache key to bust browser and API caches
       const freshCacheKey = Date.now();
       setCacheKey(freshCacheKey);
-      console.log("[Suggest] runSuggest start", {
-        uid,
-        hasSourceFilms: sourceFilms.length,
-        excludeGenres,
-        yearMin,
-        yearMax,
-        mode,
-        cacheKey: freshCacheKey,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] runSuggest start", {
+            uid,
+            hasSourceFilms: sourceFilms.length,
+            excludeGenres,
+            yearMin,
+            yearMax,
+            mode,
+            cacheKey: freshCacheKey,
+          });
+        }
+      }
 
       // Clear previous state completely
       setItems(null);
@@ -1147,7 +1391,11 @@ export default function SuggestPage() {
         return true; // genre filter will apply on candidates via overlap features
       });
       const uris = filteredFilms.map((f) => f.uri);
-      console.log("[Suggest] fetching mappings for", uris.length, "films");
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] fetching mappings for", uris.length, "films");
+        }
+      }
       setProgress({
         current: 1,
         total: 7,
@@ -1155,10 +1403,14 @@ export default function SuggestPage() {
         details: `Loading ${uris.length} films from your Letterboxd...`,
       });
       const mappings = await getFilmMappings(uid, uris);
-      console.log("[Suggest] mappings loaded", {
-        mappingCount: mappings.size,
-        totalFilms: uris.length,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] mappings loaded", {
+            mappingCount: mappings.size,
+            totalFilms: uris.length,
+          });
+        }
+      }
 
       // Track mapping coverage for UI feedback
       setMappingCoverage({ mapped: mappings.size, total: uris.length });
@@ -1179,10 +1431,18 @@ export default function SuggestPage() {
       }
 
       setWatchlistTmdbIds(watchlistIds);
-      console.log("[Suggest] watchlist IDs", { count: watchlistIds.size });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] watchlist IDs", { count: watchlistIds.size });
+        }
+      }
 
       // Pre-fetch all TMDB details from cache for better taste profile analysis
-      console.log("[Suggest] Pre-fetching TMDB details from cache");
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] Pre-fetching TMDB details from cache");
+        }
+      }
       const allMappedIds = Array.from(mappings.values());
       setProgress({
         current: 2,
@@ -1195,11 +1455,15 @@ export default function SuggestPage() {
         (tmdbDetailsMap.size / allMappedIds.length) *
         100
       ).toFixed(1);
-      console.log("[Suggest] TMDB details loaded from cache", {
-        requested: allMappedIds.length,
-        found: tmdbDetailsMap.size,
-        coverage: `${cacheHitRate}%`,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] TMDB details loaded from cache", {
+            requested: allMappedIds.length,
+            found: tmdbDetailsMap.size,
+            coverage: `${cacheHitRate}%`,
+          });
+        }
+      }
       setProgress({
         current: 2,
         total: 7,
@@ -1208,7 +1472,11 @@ export default function SuggestPage() {
       });
 
       // Build taste profile with IDs for smarter discovery
-      console.log("[Suggest] Building taste profile for smart discovery");
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] Building taste profile for smart discovery");
+        }
+      }
       setProgress({
         current: 3,
         total: 7,
@@ -1226,9 +1494,13 @@ export default function SuggestPage() {
               entry[1] === "negative",
           )
           .map((entry) => entry[0]);
-        console.log("[Suggest] Found negative feedback", {
-          count: negativeFeedbackIds.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Suggest] Found negative feedback", {
+              count: negativeFeedbackIds.length,
+            });
+          }
+        }
       } catch (e) {
         console.error("[Suggest] Failed to fetch feedback", e);
       }
@@ -1238,21 +1510,27 @@ export default function SuggestPage() {
       let featureFeedback = null;
       try {
         featureFeedback = await getAvoidedFeatures(uid);
-        console.log("[Suggest] Loaded feature feedback", {
-          avoidActors: featureFeedback.avoidActors
-            .map((a) => a.name)
-            .slice(0, 3),
-          avoidKeywords: featureFeedback.avoidKeywords
-            .map((k) => k.name)
-            .slice(0, 5),
-          avoidFranchises: featureFeedback.avoidFranchises.map((f) => f.name),
-          preferActors: featureFeedback.preferActors
-            .map((a) => a.name)
-            .slice(0, 3),
-          preferKeywords: featureFeedback.preferKeywords
-            .map((k) => k.name)
-            .slice(0, 5),
-        });
+        if (process.env.NODE_ENV === "development") {
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Suggest] Loaded feature feedback", {
+              avoidActors: featureFeedback.avoidActors
+                .map((a) => a.name)
+                .slice(0, 3),
+              avoidKeywords: featureFeedback.avoidKeywords
+                .map((k) => k.name)
+                .slice(0, 5),
+              avoidFranchises: featureFeedback.avoidFranchises.map(
+                (f) => f.name,
+              ),
+              preferActors: featureFeedback.preferActors
+                .map((a) => a.name)
+                .slice(0, 3),
+              preferKeywords: featureFeedback.preferKeywords
+                .map((k) => k.name)
+                .slice(0, 5),
+            });
+          }
+        }
       } catch (e) {
         console.error("[Suggest] Failed to fetch feature feedback", e);
       }
@@ -1265,10 +1543,14 @@ export default function SuggestPage() {
         tmdbId: mappings.get(f.uri)!,
         addedAt: f.watchlistAddedAt ?? null,
       }));
-      console.log(
-        "[Suggest] Watchlist films for taste profile:",
-        watchlistFilms.length,
-      );
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[Suggest] Watchlist films for taste profile:",
+            watchlistFilms.length,
+          );
+        }
+      }
 
       setProgress({
         current: 3,
@@ -1285,6 +1567,7 @@ export default function SuggestPage() {
         watchlistFilms, // Pass watchlist for intent signals
         userId: uid ?? undefined, // Pass user ID for explicit preference fetching
       });
+      setTasteProfile(tasteProfile);
 
       // Update progress with taste profile results
       const topGenresPreview = tasteProfile.topGenres
@@ -1306,10 +1589,14 @@ export default function SuggestPage() {
           (!f.watchCount || f.watchCount === 0) &&
           mappings.has(f.uri),
       );
-      console.log(
-        "[Suggest] Unwatched watchlist films:",
-        unwatchedWatchlist.length,
-      );
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[Suggest] Unwatched watchlist films:",
+            unwatchedWatchlist.length,
+          );
+        }
+      }
 
       // Get recent watches for similarity scoring (last 30 days)
       const thirtyDaysAgo = new Date();
@@ -1418,7 +1705,14 @@ export default function SuggestPage() {
       scoredWatchlist.sort((a, b) => b.score - a.score);
       const topWatchlistPicks = scoredWatchlist.slice(0, 5);
 
-      console.log("[Suggest] Top watchlist picks:", topWatchlistPicks.length);
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[Suggest] Top watchlist picks:",
+            topWatchlistPicks.length,
+          );
+        }
+      }
 
       // Fetch full details for watchlist picks
       const watchlistPicksWithDetails: MovieItem[] = [];
@@ -1471,10 +1765,14 @@ export default function SuggestPage() {
 
       // Set watchlist picks state
       setWatchlistPicks(watchlistPicksWithDetails);
-      console.log(
-        "[Suggest] Watchlist picks ready:",
-        watchlistPicksWithDetails.length,
-      );
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[Suggest] Watchlist picks ready:",
+            watchlistPicksWithDetails.length,
+          );
+        }
+      }
 
       // Refresh poster cache for watchlist picks
       if (watchlistPicksWithDetails.length > 0) {
@@ -1531,10 +1829,14 @@ export default function SuggestPage() {
         .filter((f) => f.onWatchlist === true)
         .map((f) => mappings.get(f.uri))
         .filter((id): id is number => id != null);
-      console.log(
-        "[Suggest] Watchlist IDs for discovery:",
-        watchlistIdArray.length,
-      );
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[Suggest] Watchlist IDs for discovery:",
+            watchlistIdArray.length,
+          );
+        }
+      }
 
       // Fetch saved suggestions for seed enrichment
       const { data: savedSuggestions } = await supabase
@@ -1545,7 +1847,11 @@ export default function SuggestPage() {
       const savedIds = savedSuggestions?.map((s) => s.tmdb_id) || [];
 
       // Generate smart candidates using multiple TMDB discovery strategies
-      console.log("[Suggest] Generating smart candidates");
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] Generating smart candidates");
+        }
+      }
       setProgress({
         current: 4,
         total: 7,
@@ -1597,15 +1903,23 @@ export default function SuggestPage() {
           (s) => s.title,
         );
 
-        console.log("[Suggest] List discovery seed quality", {
-          totalSeeds: seedFilmsForLists.length,
-          seedsWithTitles: seedFilmsForListsWithTitles.length,
-          seedsWithoutTitles:
-            seedFilmsForLists.length - seedFilmsForListsWithTitles.length,
-        });
+        if (process.env.NODE_ENV === "development") {
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Suggest] List discovery seed quality", {
+              totalSeeds: seedFilmsForLists.length,
+              seedsWithTitles: seedFilmsForListsWithTitles.length,
+              seedsWithoutTitles:
+                seedFilmsForLists.length - seedFilmsForListsWithTitles.length,
+            });
+          }
+        }
 
         listCandidates = await discoverFromLists(seedFilmsForListsWithTitles);
-        console.log("[Suggest] List candidates:", listCandidates.length);
+        if (process.env.NODE_ENV === "development") {
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Suggest] List candidates:", listCandidates.length);
+          }
+        }
       } catch (e) {
         console.error("[Suggest] List discovery failed", e);
       }
@@ -1613,14 +1927,18 @@ export default function SuggestPage() {
       // Phase 5+: Adaptive exploration rate (5-30% based on user feedback)
       const explorationRate = await getAdaptiveExplorationRate(uid);
       const exploratoryCount = Math.floor(150 * explorationRate);
-      console.log("[Suggest][Phase5+] Using adaptive exploration", {
-        rate: explorationRate,
-        count: exploratoryCount,
-        message:
-          explorationRate !== 0.15
-            ? "Rate adjusted based on your feedback!"
-            : "Using default rate (will adjust after rating exploratory picks)",
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest][Phase5+] Using adaptive exploration", {
+            rate: explorationRate,
+            count: exploratoryCount,
+            message:
+              explorationRate !== 0.15
+                ? "Rate adjusted based on your feedback!"
+                : "Using default rate (will adjust after rating exploratory picks)",
+          });
+        }
+      }
 
       const exploratoryPicks = await generateExploratoryPicks(
         {
@@ -1652,16 +1970,20 @@ export default function SuggestPage() {
         details: `Found ${candidatesRaw.length} candidates (${sourceSummary})`,
       });
 
-      console.log("[Suggest] Smart candidates breakdown", {
-        trending: smartCandidates.trending.length,
-        similar: smartCandidates.similar.length,
-        discovered: smartCandidates.discovered.length,
-        decade: decadeCandidates.length,
-        discovery: discoveryCandidates.length,
-        lists: listCandidates.length,
-        exploratory: exploratoryPicks.length,
-        totalRaw: candidatesRaw.length,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] Smart candidates breakdown", {
+            trending: smartCandidates.trending.length,
+            similar: smartCandidates.similar.length,
+            discovered: smartCandidates.discovered.length,
+            decade: decadeCandidates.length,
+            discovery: discoveryCandidates.length,
+            lists: listCandidates.length,
+            exploratory: exploratoryPicks.length,
+            totalRaw: candidatesRaw.length,
+          });
+        }
+      }
 
       // Filter out already watched films, blocked suggestions, and deduplicate
       const candidatesFiltered = candidatesRaw
@@ -1677,13 +1999,17 @@ export default function SuggestPage() {
       });
       const candidates = shuffled.slice(0, mode === "quick" ? 500 : 800); // Much larger pool for variety
 
-      console.log("[Suggest] candidate pool", {
-        blockedCount: blockedIds.size,
-        mode,
-        totalCandidates: candidatesRaw.length,
-        afterFilter: candidates.length,
-        watchedCount: watchedIds.size,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] candidate pool", {
+            blockedCount: blockedIds.size,
+            mode,
+            totalCandidates: candidatesRaw.length,
+            afterFilter: candidates.length,
+            watchedCount: watchedIds.size,
+          });
+        }
+      }
 
       if (candidates.length === 0) {
         const reason =
@@ -1693,9 +2019,13 @@ export default function SuggestPage() {
 
       // Fetch learned genre transitions
       const adjacentGenres = await getGenreTransitions(uid);
-      console.log("[Suggest] Loaded genre transitions", {
-        count: adjacentGenres.size,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] Loaded genre transitions", {
+            count: adjacentGenres.size,
+          });
+        }
+      }
 
       // Fetch per-source reliability multipliers from past feedback
       const userSourceReliability = await fetchSourceReliability(uid);
@@ -1729,10 +2059,14 @@ export default function SuggestPage() {
       // Fetch recent exposures to apply repeat penalty
       // This penalizes movies shown recently to favor fresh content
       const recentExposures = await getRecentExposures(uid, 14);
-      console.log(
-        "[Suggest] Recent exposures for repeat prevention:",
-        recentExposures.size,
-      );
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[Suggest] Recent exposures for repeat prevention:",
+            recentExposures.size,
+          );
+        }
+      }
 
       let mmrExplorationRate = 0.15;
       try {
@@ -1773,10 +2107,14 @@ export default function SuggestPage() {
         rating: f.rating,
         liked: f.liked,
       }));
-      console.log("[Suggest] calling suggestByOverlap", {
-        liteCount: lite.length,
-        candidatesCount: candidates.length,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] calling suggestByOverlap", {
+            liteCount: lite.length,
+            candidatesCount: candidates.length,
+          });
+        }
+      }
       setProgress({
         current: 5,
         total: 7,
@@ -1822,10 +2160,14 @@ export default function SuggestPage() {
       if (suggestions.length) {
         try {
           const idsForCache = suggestions.map((s) => s.tmdbId);
-          console.log(
-            "[Suggest] refreshing TMDB cache for suggested ids",
-            idsForCache.length,
-          );
+          if (process.env.NODE_ENV === "development") {
+            if (process.env.NODE_ENV === "development") {
+              console.log(
+                "[Suggest] refreshing TMDB cache for suggested ids",
+                idsForCache.length,
+              );
+            }
+          }
           await refreshTmdbCacheForIds(idsForCache);
           await refreshPosters();
         } catch {
@@ -1841,11 +2183,15 @@ export default function SuggestPage() {
       // Keep only the most recent 500 shown IDs for variety
       const recentShownIds = Array.from(newShownIds).slice(-500);
       setShownIds(new Set(recentShownIds));
-      console.log("[Suggest] Tracking shown IDs", {
-        total: recentShownIds.length,
-        newThisRound: suggestions.length,
-        limited: newShownIds.size > 500,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Suggest] Tracking shown IDs", {
+            total: recentShownIds.length,
+            newThisRound: suggestions.length,
+            limited: newShownIds.size > 500,
+          });
+        }
+      }
 
       // Fetch full movie data for each suggestion to get videos, collections, etc.
       setProgress({
@@ -1977,9 +2323,11 @@ export default function SuggestPage() {
       });
 
       const details = await Promise.all(detailsPromises);
-      console.log("[Suggest] suggestions ready with full details", {
-        count: details.length,
-      });
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Suggest] suggestions ready with full details", {
+          count: details.length,
+        });
+      }
 
       // Track shown IDs for future refreshes
       setShownIds((prev) => {
@@ -2370,9 +2718,11 @@ export default function SuggestPage() {
       if (!uid || !sourceFilms || !items) return [];
 
       try {
-        console.log(
-          `[SectionRefresh] Fetching replacements for ${sectionName}`,
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[SectionRefresh] Fetching replacements for ${sectionName}`,
+          );
+        }
 
         const filteredFilms = sourceFilms;
         const uris = filteredFilms.map((f) => f.uri);
@@ -2485,9 +2835,11 @@ export default function SuggestPage() {
         const candidates = shuffled.slice(0, 100); // Smaller batch for section refresh
 
         if (candidates.length === 0) {
-          console.log(
-            `[SectionRefresh] No candidates available for ${sectionName}`,
-          );
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[SectionRefresh] No candidates available for ${sectionName}`,
+            );
+          }
           return [];
         }
 
@@ -2604,9 +2956,11 @@ export default function SuggestPage() {
         const sorted = filtered.sort((a, b) => b.score - a.score);
         const result = sorted.slice(0, count);
 
-        console.log(
-          `[SectionRefresh] Found ${result.length} replacements for ${sectionName}`,
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[SectionRefresh] Found ${result.length} replacements for ${sectionName}`,
+          );
+        }
         return result;
       } catch (e) {
         console.error(
@@ -2753,14 +3107,18 @@ export default function SuggestPage() {
   const handleExplicitReason = async (reason: string) => {
     if (!feedbackPopup) return;
     const popupData = feedbackPopup;
-    console.log(
-      "[FeedbackPopup] User selected explicit reason:",
-      reason,
-      "for movie:",
-      popupData.title,
-      "type:",
-      popupData.feedbackType,
-    );
+    if (process.env.NODE_ENV === "development") {
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[FeedbackPopup] User selected explicit reason:",
+          reason,
+          "for movie:",
+          popupData.title,
+          "type:",
+          popupData.feedbackType,
+        );
+      }
+    }
     const confirmMessage = await applyExplicitReason(reason, popupData);
     setFeedbackPopup(null);
     setSelectedReasons([]);
@@ -3084,11 +3442,15 @@ export default function SuggestPage() {
   const handlePairwiseVote = async (winnerId: number, loserId: number) => {
     if (!uid) return;
 
-    console.log("[Pairwise] Vote received:", {
-      winnerId,
-      loserId,
-      currentCount: pairwiseCount,
-    });
+    if (process.env.NODE_ENV === "development") {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Pairwise] Vote received:", {
+          winnerId,
+          loserId,
+          currentCount: pairwiseCount,
+        });
+      }
+    }
 
     const nextCount = pairwiseCount + 1;
     const nextHistory = new Set(pairHistory);
@@ -3149,12 +3511,16 @@ export default function SuggestPage() {
           (i) => !nextBlockedIds.has(i.id) && !i.dismissed,
         );
         const next = findPairwiseCandidate(availableItems, nextHistory);
-        console.log("[Pairwise] Finding next pair:", {
-          availableCount: availableItems.length,
-          found: !!next,
-          nextCount,
-          limit: PAIRWISE_SESSION_LIMIT,
-        });
+        if (process.env.NODE_ENV === "development") {
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Pairwise] Finding next pair:", {
+              availableCount: availableItems.length,
+              found: !!next,
+              nextCount,
+              limit: PAIRWISE_SESSION_LIMIT,
+            });
+          }
+        }
         setPairwisePair(next);
       }
     }
@@ -3167,22 +3533,30 @@ export default function SuggestPage() {
     setPairHistory(nextHistory);
     setPairwiseCount(nextCount);
 
-    console.log("[Pairwise] Skipping pair:", {
-      aId,
-      bId,
-      nextCount,
-      limit: PAIRWISE_SESSION_LIMIT,
-    });
+    if (process.env.NODE_ENV === "development") {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Pairwise] Skipping pair:", {
+          aId,
+          bId,
+          nextCount,
+          limit: PAIRWISE_SESSION_LIMIT,
+        });
+      }
+    }
 
     // Find next pair, or close modal if limit reached
     if (nextCount >= PAIRWISE_SESSION_LIMIT) {
       setPairwisePair(null);
     } else {
       const next = findPairwiseCandidate(items ?? [], nextHistory);
-      console.log("[Pairwise] Finding next after skip:", {
-        availableCount: items?.length ?? 0,
-        found: !!next,
-      });
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log("[Pairwise] Finding next after skip:", {
+            availableCount: items?.length ?? 0,
+            found: !!next,
+          });
+        }
+      }
       setPairwisePair(next);
     }
   };
@@ -3280,7 +3654,11 @@ export default function SuggestPage() {
     setRefreshingSections((prev) => new Set([...prev, sectionName]));
 
     try {
-      console.log(`[SectionRefresh] Refreshing section: ${sectionName}`);
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log(`[SectionRefresh] Refreshing section: ${sectionName}`);
+        }
+      }
 
       // Special handling for watchlist picks - they come from a different source
       if (sectionName === "watchlistPicks") {
@@ -3328,9 +3706,13 @@ export default function SuggestPage() {
       );
       const dismissedIds = new Set(dismissedMovies.map((m: MovieItem) => m.id));
 
-      console.log(
-        `[SectionRefresh] Current section has ${currentSectionIds.size} movies (${dismissedIds.size} dismissed)`,
-      );
+      if (process.env.NODE_ENV === "development") {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[SectionRefresh] Current section has ${currentSectionIds.size} movies (${dismissedIds.size} dismissed)`,
+          );
+        }
+      }
 
       // Fetch replacement movies for this section (replace both non-dismissed and dismissed)
       const replacements = await fetchSectionReplacements(
@@ -3339,9 +3721,13 @@ export default function SuggestPage() {
       );
 
       if (replacements.length === 0) {
-        console.log(
-          `[SectionRefresh] No replacements found for ${sectionName}`,
-        );
+        if (process.env.NODE_ENV === "development") {
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[SectionRefresh] No replacements found for ${sectionName}`,
+            );
+          }
+        }
         setRefreshingSections((prev) => {
           const next = new Set(prev);
           next.delete(sectionName);
@@ -3360,9 +3746,13 @@ export default function SuggestPage() {
         // Add the new replacement movies
         const updated = [...filtered, ...replacements];
 
-        console.log(
-          `[SectionRefresh] Updated items: removed ${currentSectionIds.size}, added ${replacements.length}, total now ${updated.length}`,
-        );
+        if (process.env.NODE_ENV === "development") {
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[SectionRefresh] Updated items: removed ${currentSectionIds.size}, added ${replacements.length}, total now ${updated.length}`,
+            );
+          }
+        }
 
         return updated;
       });
@@ -3411,7 +3801,12 @@ export default function SuggestPage() {
 
         {/* Hybrid Feedback Popup - Optional "Tell us why" */}
         {feedbackPopup && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="feedback-popup-title"
+          >
             {/* Backdrop */}
             <div
               className="absolute inset-0 bg-black/30 backdrop-blur-sm"
@@ -3419,12 +3814,19 @@ export default function SuggestPage() {
             />
 
             {/* Popup Card - Redesigned with scrollable content */}
-            <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            <div
+              ref={feedbackModalRef}
+              tabIndex={-1}
+              className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col"
+            >
               {/* Fixed Header */}
               <div className="flex-shrink-0 p-4 border-b border-gray-200 dark:border-gray-700">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    <p
+                      id="feedback-popup-title"
+                      className="text-sm font-medium text-gray-900 dark:text-white"
+                    >
                       {feedbackPopup.insights.learningSummary}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -4251,10 +4653,14 @@ export default function SuggestPage() {
         </div>
         <div className="mb-4 flex flex-wrap items-end gap-3">
           <div>
-            <label className="block text-xs text-gray-600">
+            <label
+              htmlFor="exclude-genres"
+              className="block text-xs text-gray-600 dark:text-gray-400"
+            >
               Exclude genres (comma)
             </label>
             <input
+              id="exclude-genres"
               value={excludeGenres}
               onChange={(e) => setExcludeGenres(e.target.value)}
               placeholder="e.g., horror, musical"
@@ -4262,8 +4668,15 @@ export default function SuggestPage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-600">Year min</label>
+            <label
+              htmlFor="year-min"
+              className="block text-xs text-gray-600 dark:text-gray-400"
+            >
+              Year min
+            </label>
             <input
+              id="year-min"
+              type="number"
               value={yearMin}
               onChange={(e) => setYearMin(e.target.value)}
               placeholder="e.g., 1990"
@@ -4271,8 +4684,15 @@ export default function SuggestPage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-600">Year max</label>
+            <label
+              htmlFor="year-max"
+              className="block text-xs text-gray-600 dark:text-gray-400"
+            >
+              Year max
+            </label>
             <input
+              id="year-max"
+              type="number"
               value={yearMax}
               onChange={(e) => setYearMax(e.target.value)}
               placeholder="e.g., 2025"
@@ -4336,16 +4756,23 @@ export default function SuggestPage() {
             <div className="flex items-center justify-between gap-3 text-sm text-gray-700 flex-wrap">
               <div className="flex items-center gap-2">
                 <label
-                  className="text-xs text-gray-600"
+                  htmlFor="discovery-level"
+                  className="text-xs text-gray-600 dark:text-gray-400"
                   title="Lower = safer, familiar picks. Higher = more exploratory, diverse picks."
                 >
-                  Discovery vs Safety
+                  Discovery vs Safety: {discoveryLevel}%
                 </label>
                 <input
+                  id="discovery-level"
                   type="range"
                   min={0}
                   max={100}
                   value={discoveryLevel}
+                  aria-label="Discovery vs Safety level"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={discoveryLevel}
+                  aria-valuetext={`${discoveryLevel}% - ${discoveryLevel < 30 ? "Safe picks" : discoveryLevel > 70 ? "Exploratory picks" : "Balanced"}`}
                   onChange={(e) => {
                     const newValue = Number(e.target.value);
                     setDiscoveryLevel(newValue);
@@ -4366,7 +4793,10 @@ export default function SuggestPage() {
                   className="w-40 accent-blue-600"
                   title="Drag to adjust. Changes apply automatically after a brief pause."
                 />
-                <span className="text-xs text-gray-500 w-8 text-right">
+                <span
+                  className="text-xs text-gray-500 w-8 text-right"
+                  aria-hidden="true"
+                >
                   {discoveryLevel}%
                 </span>
                 {discoveryLevel !== 50 && (
@@ -4386,8 +4816,14 @@ export default function SuggestPage() {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-xs text-gray-600">Context</label>
+                <label
+                  htmlFor="context-mode"
+                  className="text-xs text-gray-600 dark:text-gray-400"
+                >
+                  Context
+                </label>
                 <select
+                  id="context-mode"
                   value={contextMode}
                   onChange={(e) =>
                     setContextMode(e.target.value as typeof contextMode)
@@ -4421,1872 +4857,2055 @@ export default function SuggestPage() {
               </p>
             )}
 
-            {/* Picks From Your Letterboxd Watchlist - TOP PRIORITY */}
-            {categorizedSuggestions.watchlistPicks.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📋</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Picks From Your Letterboxd Watchlist
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Movies you saved to watch, prioritized by what
-                        you&apos;ve been enjoying recently
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("watchlistPicks")}
-                    disabled={refreshingSections.has("watchlistPicks")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("watchlistPicks") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.watchlistPicks.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={true}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+            {(() => {
+              const sectionCounts = ALL_SECTION_KEYS.reduce(
+                (acc, key) => {
+                  acc[key] = categorizedSuggestions[key]?.length ?? 0;
+                  return acc;
+                },
+                {} as Record<SectionKey, number>,
+              );
 
-            {/* Seasonal/Holiday Recommendations Section */}
-            {categorizedSuggestions.seasonalPicks.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">
-                      {categorizedSuggestions.seasonalConfig.title.includes(
-                        "Christmas",
-                      )
-                        ? "🎄"
-                        : categorizedSuggestions.seasonalConfig.title.includes(
-                              "Halloween",
+              const prioritySections = ALWAYS_VISIBLE_SECTIONS.filter(
+                (key) => sectionCounts[key] > 0,
+              );
+              const prioritySet = new Set(prioritySections);
+
+              const secondarySections = SECONDARY_SECTIONS.filter(
+                (key) => !prioritySet.has(key) && sectionCounts[key] >= 3,
+              );
+              const visibleSectionKeys = [
+                ...prioritySections,
+                ...secondarySections,
+              ];
+              const visibleSet = new Set(visibleSectionKeys);
+
+              const collapsedSmallSections = ALL_SECTION_KEYS.filter(
+                (key) =>
+                  !visibleSet.has(key) &&
+                  sectionCounts[key] > 0 &&
+                  sectionCounts[key] < 3,
+              );
+              const collapsedSmallSet = new Set(collapsedSmallSections);
+
+              const exploreSections = EXPLORE_SECTIONS.filter(
+                (key) => !collapsedSmallSet.has(key) && sectionCounts[key] > 0,
+              );
+
+              const collapsedExploreSections = exploreSections.filter(
+                (key) => !showAllSections && !visibleSet.has(key),
+              );
+              const collapsedExploreSet = new Set(collapsedExploreSections);
+
+              const collapsedSmallCount = showCollapsedSmallSections
+                ? 0
+                : collapsedSmallSections.length;
+              const collapsedCount = showAllSections
+                ? collapsedSmallCount
+                : collapsedSmallCount + collapsedExploreSections.length;
+
+              const visibleCount = ALL_SECTION_KEYS.filter((key) => {
+                if (sectionCounts[key] === 0) return false;
+                if (!showAllSections && collapsedExploreSet.has(key))
+                  return false;
+                if (!showCollapsedSmallSections && collapsedSmallSet.has(key))
+                  return false;
+                return true;
+              }).length;
+
+              if (process.env.NODE_ENV === "development") {
+                console.log(
+                  `[Suggest] Showing ${visibleCount} sections, ${collapsedCount} collapsed`,
+                );
+              }
+
+              const shouldRenderSection = (key: SectionKey) => {
+                if (sectionCounts[key] === 0) return false;
+                if (!showAllSections && collapsedExploreSet.has(key))
+                  return false;
+                if (!showCollapsedSmallSections && collapsedSmallSet.has(key))
+                  return false;
+                return true;
+              };
+
+              const exploreButtonCount = showAllSections
+                ? 0
+                : collapsedExploreSections.length;
+              const smallSectionsButtonCount = showCollapsedSmallSections
+                ? 0
+                : collapsedSmallSections.length;
+
+              return (
+                <>
+                  {/* Picks From Your Letterboxd Watchlist - TOP PRIORITY */}
+                  {shouldRenderSection("watchlistPicks") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">📋</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Picks From Your Letterboxd Watchlist
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Movies you saved to watch, prioritized by what
+                              you&apos;ve been enjoying recently
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("watchlistPicks")}
+                          disabled={refreshingSections.has("watchlistPicks")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("watchlistPicks") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.watchlistPicks.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={true}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Seasonal/Holiday Recommendations Section */}
+                  {shouldRenderSection("seasonalPicks") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">
+                            {categorizedSuggestions.seasonalConfig.title.includes(
+                              "Christmas",
                             )
-                          ? "🎃"
-                          : categorizedSuggestions.seasonalConfig.title.includes(
-                                "Thanksgiving",
-                              )
-                            ? "🦃"
-                            : categorizedSuggestions.seasonalConfig.title.includes(
-                                  "Valentine",
-                                )
-                              ? "💝"
+                              ? "🎄"
                               : categorizedSuggestions.seasonalConfig.title.includes(
-                                    "Fourth",
-                                  ) ||
-                                  categorizedSuggestions.seasonalConfig.title.includes(
-                                    "Independence",
+                                    "Halloween",
                                   )
-                                ? "🎆"
+                                ? "🎃"
                                 : categorizedSuggestions.seasonalConfig.title.includes(
-                                      "Easter",
+                                      "Thanksgiving",
                                     )
-                                  ? "🐰"
-                                  : "📅"}
-                    </span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        {categorizedSuggestions.seasonalConfig.title}
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        {categorizedSuggestions.seasonalConfig.description}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("seasonalPicks")}
-                    disabled={refreshingSections.has("seasonalPicks")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("seasonalPicks") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.seasonalPicks.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                                  ? "🦃"
+                                  : categorizedSuggestions.seasonalConfig.title.includes(
+                                        "Valentine",
+                                      )
+                                    ? "💝"
+                                    : categorizedSuggestions.seasonalConfig.title.includes(
+                                          "Fourth",
+                                        ) ||
+                                        categorizedSuggestions.seasonalConfig.title.includes(
+                                          "Independence",
+                                        )
+                                      ? "🎆"
+                                      : categorizedSuggestions.seasonalConfig.title.includes(
+                                            "Easter",
+                                          )
+                                        ? "🐰"
+                                        : "📅"}
+                          </span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              {getPersonalizedHeader(
+                                "seasonalPicks",
+                                tasteProfile,
+                                categorizedSuggestions.seasonalPicks,
+                              )}
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              {
+                                categorizedSuggestions.seasonalConfig
+                                  .description
+                              }
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("seasonalPicks")}
+                          disabled={refreshingSections.has("seasonalPicks")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("seasonalPicks") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.seasonalPicks.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Perfect Matches Section */}
-            {categorizedSuggestions.perfectMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎯</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Perfect Matches
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        These match everything you love
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("perfectMatches")}
-                    disabled={refreshingSections.has("perfectMatches")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("perfectMatches") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.perfectMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Perfect Matches Section */}
+                  {shouldRenderSection("perfectMatches") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎯</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              {getPersonalizedHeader(
+                                "perfectMatches",
+                                tasteProfile,
+                                categorizedSuggestions.perfectMatches,
+                              )}
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              These match everything you love
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("perfectMatches")}
+                          disabled={refreshingSections.has("perfectMatches")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("perfectMatches") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.perfectMatches.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Based on Recent Watches Section */}
-            {categorizedSuggestions.recentWatchMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">⏱️</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Based on Recent Watches
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Similar to films you&apos;ve enjoyed recently
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("recentWatchMatches")}
-                    disabled={refreshingSections.has("recentWatchMatches")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("recentWatchMatches") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.recentWatchMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Based on Recent Watches Section */}
+                  {shouldRenderSection("recentWatchMatches") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">⏱️</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              {getPersonalizedHeader(
+                                "recentWatchMatches",
+                                tasteProfile,
+                                categorizedSuggestions.recentWatchMatches,
+                              )}
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Similar to films you&apos;ve enjoyed recently
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() =>
+                            handleRefreshSection("recentWatchMatches")
+                          }
+                          disabled={refreshingSections.has(
+                            "recentWatchMatches",
+                          )}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("recentWatchMatches") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.recentWatchMatches.map(
+                          (item) => (
+                            <MovieCard
+                              key={item.id}
+                              id={item.id}
+                              title={item.title}
+                              year={item.year}
+                              posterPath={posters[item.id]}
+                              trailerKey={item.trailerKey}
+                              isInWatchlist={watchlistTmdbIds.has(item.id)}
+                              reasons={item.reasons}
+                              score={item.score}
+                              voteCategory={item.voteCategory}
+                              collectionName={item.collectionName}
+                              onFeedback={handleFeedback}
+                              onSave={handleSave}
+                              isSaved={savedMovieIds.has(item.id)}
+                              vote_average={item.vote_average}
+                              vote_count={item.vote_count}
+                              overview={item.overview}
+                              contributingFilms={item.contributingFilms}
+                              dismissed={item.dismissed}
+                              imdb_rating={item.imdb_rating}
+                              rotten_tomatoes={item.rotten_tomatoes}
+                              metacritic={item.metacritic}
+                              awards={item.awards}
+                              genres={item.genres}
+                              sources={item.sources}
+                              consensusLevel={item.consensusLevel}
+                              reliabilityMultiplier={item.reliabilityMultiplier}
+                              onUndoDismiss={handleUndoDismiss}
+                            />
+                          ),
+                        )}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Inspired by Directors You Love Section */}
-            {categorizedSuggestions.directorMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎬</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Inspired by Directors You Love
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        From filmmakers you enjoy and directors with similar
-                        styles
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("directorMatches")}
-                    disabled={refreshingSections.has("directorMatches")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("directorMatches") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.directorMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Inspired by Directors You Love Section */}
+                  {shouldRenderSection("directorMatches") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎬</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              {getPersonalizedHeader(
+                                "directorMatches",
+                                tasteProfile,
+                                categorizedSuggestions.directorMatches,
+                              )}
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              From filmmakers you enjoy and directors with
+                              similar styles
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() =>
+                            handleRefreshSection("directorMatches")
+                          }
+                          disabled={refreshingSections.has("directorMatches")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("directorMatches") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.directorMatches.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* From Studios You Love Section */}
-            {categorizedSuggestions.studioMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎞️</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        From Studios You Love
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        More from production companies whose style you enjoy
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("studioMatches")}
-                    disabled={refreshingSections.has("studioMatches")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("studioMatches") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.studioMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* From Studios You Love Section */}
+                  {shouldRenderSection("studioMatches") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎞️</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              {getPersonalizedHeader(
+                                "studioMatches",
+                                tasteProfile,
+                                categorizedSuggestions.studioMatches,
+                              )}
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              More from production companies whose style you
+                              enjoy
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("studioMatches")}
+                          disabled={refreshingSections.has("studioMatches")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("studioMatches") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.studioMatches.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* From Actors You Love Section */}
-            {categorizedSuggestions.actorMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">⭐</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        From Actors You Love
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        More from your favorite performers
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("actorMatches")}
-                    disabled={refreshingSections.has("actorMatches")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("actorMatches") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.actorMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* From Actors You Love Section */}
+                  {shouldRenderSection("actorMatches") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">⭐</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              {getPersonalizedHeader(
+                                "actorMatches",
+                                tasteProfile,
+                                categorizedSuggestions.actorMatches,
+                              )}
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              More from your favorite performers
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("actorMatches")}
+                          disabled={refreshingSections.has("actorMatches")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("actorMatches") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.actorMatches.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Your Favorite Genres Section */}
-            {categorizedSuggestions.genreMatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎭</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Your Favorite Genres
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Based on genres you watch most
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("genreMatches")}
-                    disabled={refreshingSections.has("genreMatches")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("genreMatches") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.genreMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Your Favorite Genres Section */}
+                  {shouldRenderSection("genreMatches") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎭</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              {getPersonalizedHeader(
+                                "genreMatches",
+                                tasteProfile,
+                                categorizedSuggestions.genreMatches,
+                              )}
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Based on genres you watch most
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("genreMatches")}
+                          disabled={refreshingSections.has("genreMatches")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("genreMatches") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.genreMatches.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Documentaries Section */}
-            {categorizedSuggestions.documentaries.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📹</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Documentaries
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Real stories and factual films
-                      </p>
+                  {(exploreButtonCount > 0 || smallSectionsButtonCount > 0) && (
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {exploreButtonCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllSections((prev) => !prev)}
+                          className="px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                        >
+                          {showAllSections
+                            ? "Hide extra categories"
+                            : `Explore ${exploreButtonCount} More Categories`}
+                        </button>
+                      )}
+                      {smallSectionsButtonCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setShowCollapsedSmallSections((prev) => !prev)
+                          }
+                          className="px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                        >
+                          {showCollapsedSmallSections
+                            ? "Hide small sections"
+                            : `Show ${smallSectionsButtonCount} more sections`}
+                        </button>
+                      )}
                     </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("documentaries")}
-                    disabled={refreshingSections.has("documentaries")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("documentaries") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.documentaries.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  )}
 
-            {/* Best of the [Decade]s Section */}
-            {categorizedSuggestions.decadeMatches.length >= 1 && topDecade && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📅</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Best of the {topDecade}s
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Top picks from your favorite era
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("decadeMatches")}
-                    disabled={refreshingSections.has("decadeMatches")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("decadeMatches") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.decadeMatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Documentaries Section */}
+                  {shouldRenderSection("documentaries") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">📹</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Documentaries
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Real stories and factual films
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("documentaries")}
+                          disabled={refreshingSections.has("documentaries")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("documentaries") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.documentaries.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Smart Discovery (Hidden Gems) Section */}
-            {categorizedSuggestions.smartDiscovery.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">💎</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Hidden Gems for You
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Highly rated films you might have missed
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("smartDiscovery")}
-                    disabled={refreshingSections.has("smartDiscovery")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("smartDiscovery") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.smartDiscovery.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Best of the [Decade]s Section */}
+                  {shouldRenderSection("decadeMatches") && topDecade && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">📅</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Best of the {topDecade}s
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Top picks from your favorite era
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("decadeMatches")}
+                          disabled={refreshingSections.has("decadeMatches")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("decadeMatches") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.decadeMatches.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Hidden Gems Section */}
-            {categorizedSuggestions.hiddenGems.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🔍</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Hidden Gems
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Older films that match your taste
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("hiddenGems")}
-                    disabled={refreshingSections.has("hiddenGems")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("hiddenGems") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.hiddenGems.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Smart Discovery (Hidden Gems) Section */}
+                  {shouldRenderSection("smartDiscovery") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">💎</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Hidden Gems for You
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Highly rated films you might have missed
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("smartDiscovery")}
+                          disabled={refreshingSections.has("smartDiscovery")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("smartDiscovery") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.smartDiscovery.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Cult Classics Section */}
-            {categorizedSuggestions.cultClassics.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎭</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Cult Classics
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Films with dedicated followings
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("cultClassics")}
-                    disabled={refreshingSections.has("cultClassics")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("cultClassics") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.cultClassics.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Hidden Gems Section */}
+                  {shouldRenderSection("hiddenGems") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🔍</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              {getPersonalizedHeader(
+                                "hiddenGems",
+                                tasteProfile,
+                                categorizedSuggestions.hiddenGems,
+                              )}
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Older films that match your taste
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("hiddenGems")}
+                          disabled={refreshingSections.has("hiddenGems")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("hiddenGems") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.hiddenGems.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Crowd Pleasers Section */}
-            {categorizedSuggestions.crowdPleasers.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎉</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Crowd Pleasers
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Widely loved and highly rated
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("crowdPleasers")}
-                    disabled={refreshingSections.has("crowdPleasers")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("crowdPleasers") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.crowdPleasers.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Cult Classics Section */}
+                  {shouldRenderSection("cultClassics") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎭</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Cult Classics
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Films with dedicated followings
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("cultClassics")}
+                          disabled={refreshingSections.has("cultClassics")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("cultClassics") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.cultClassics.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* New & Trending Section */}
-            {categorizedSuggestions.newReleases.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">✨</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        New & Trending
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Fresh picks based on your taste
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("newReleases")}
-                    disabled={refreshingSections.has("newReleases")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("newReleases") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.newReleases.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Crowd Pleasers Section */}
+                  {shouldRenderSection("crowdPleasers") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎉</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Crowd Pleasers
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Widely loved and highly rated
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("crowdPleasers")}
+                          disabled={refreshingSections.has("crowdPleasers")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("crowdPleasers") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.crowdPleasers.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Recent Classics Section */}
-            {categorizedSuggestions.recentClassics.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎬</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Recent Classics
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Great films from 2015-2022
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("recentClassics")}
-                    disabled={refreshingSections.has("recentClassics")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("recentClassics") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.recentClassics.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* New & Trending Section */}
+                  {shouldRenderSection("newReleases") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">✨</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              New & Trending
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Fresh picks based on your taste
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("newReleases")}
+                          disabled={refreshingSections.has("newReleases")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("newReleases") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.newReleases.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Deep Cuts Section */}
-            {categorizedSuggestions.deepCuts.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🌟</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Deep Cuts
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Niche matches for your specific taste
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("deepCuts")}
-                    disabled={refreshingSections.has("deepCuts")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("deepCuts") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.deepCuts.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Recent Classics Section */}
+                  {shouldRenderSection("recentClassics") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎬</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Recent Classics
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Great films from 2015-2022
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("recentClassics")}
+                          disabled={refreshingSections.has("recentClassics")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("recentClassics") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.recentClassics.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* From Collections Section */}
-            {categorizedSuggestions.fromCollections.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📚</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        From Collections
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Complete franchises and series
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("fromCollections")}
-                    disabled={refreshingSections.has("fromCollections")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("fromCollections") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.fromCollections.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Deep Cuts Section */}
+                  {categorizedSuggestions.deepCuts.length >= 1 && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🌟</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Deep Cuts
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Niche matches for your specific taste
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("deepCuts")}
+                          disabled={refreshingSections.has("deepCuts")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("deepCuts") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.deepCuts.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Multi-Source Consensus Section - Films recommended by multiple sources */}
-            {categorizedSuggestions.multiSourceConsensus.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎯</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Multi-Source Consensus
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Recommended by multiple sources (TMDB, TasteDive, Trakt)
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("multiSourceConsensus")}
-                    disabled={refreshingSections.has("multiSourceConsensus")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("multiSourceConsensus") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.multiSourceConsensus.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* From Collections Section */}
+                  {shouldRenderSection("fromCollections") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">📚</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              From Collections
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Complete franchises and series
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() =>
+                            handleRefreshSection("fromCollections")
+                          }
+                          disabled={refreshingSections.has("fromCollections")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("fromCollections") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.fromCollections.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* International Cinema Section - Non-English films */}
-            {categorizedSuggestions.internationalCinema.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🌍</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        International Cinema
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        World cinema that matches your taste
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("internationalCinema")}
-                    disabled={refreshingSections.has("internationalCinema")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("internationalCinema") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.internationalCinema.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Multi-Source Consensus Section - Films recommended by multiple sources */}
+                  {shouldRenderSection("multiSourceConsensus") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎯</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Multi-Source Consensus
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Recommended by multiple sources (TMDB, TasteDive,
+                              Trakt)
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() =>
+                            handleRefreshSection("multiSourceConsensus")
+                          }
+                          disabled={refreshingSections.has(
+                            "multiSourceConsensus",
+                          )}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("multiSourceConsensus") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.multiSourceConsensus.map(
+                          (item) => (
+                            <MovieCard
+                              key={item.id}
+                              id={item.id}
+                              title={item.title}
+                              year={item.year}
+                              posterPath={posters[item.id]}
+                              trailerKey={item.trailerKey}
+                              isInWatchlist={watchlistTmdbIds.has(item.id)}
+                              reasons={item.reasons}
+                              score={item.score}
+                              voteCategory={item.voteCategory}
+                              collectionName={item.collectionName}
+                              onFeedback={handleFeedback}
+                              onSave={handleSave}
+                              isSaved={savedMovieIds.has(item.id)}
+                              vote_average={item.vote_average}
+                              vote_count={item.vote_count}
+                              overview={item.overview}
+                              contributingFilms={item.contributingFilms}
+                              dismissed={item.dismissed}
+                              imdb_rating={item.imdb_rating}
+                              rotten_tomatoes={item.rotten_tomatoes}
+                              metacritic={item.metacritic}
+                              awards={item.awards}
+                              genres={item.genres}
+                              sources={item.sources}
+                              consensusLevel={item.consensusLevel}
+                              reliabilityMultiplier={item.reliabilityMultiplier}
+                              onUndoDismiss={handleUndoDismiss}
+                            />
+                          ),
+                        )}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Animation Picks Section */}
-            {categorizedSuggestions.animationPicks.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎨</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Animation Picks
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Animated films for you
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("animationPicks")}
-                    disabled={refreshingSections.has("animationPicks")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("animationPicks") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.animationPicks.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* International Cinema Section - Non-English films */}
+                  {shouldRenderSection("internationalCinema") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🌍</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              International Cinema
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              World cinema that matches your taste
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() =>
+                            handleRefreshSection("internationalCinema")
+                          }
+                          disabled={refreshingSections.has(
+                            "internationalCinema",
+                          )}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("internationalCinema") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.internationalCinema.map(
+                          (item) => (
+                            <MovieCard
+                              key={item.id}
+                              id={item.id}
+                              title={item.title}
+                              year={item.year}
+                              posterPath={posters[item.id]}
+                              trailerKey={item.trailerKey}
+                              isInWatchlist={watchlistTmdbIds.has(item.id)}
+                              reasons={item.reasons}
+                              score={item.score}
+                              voteCategory={item.voteCategory}
+                              collectionName={item.collectionName}
+                              onFeedback={handleFeedback}
+                              onSave={handleSave}
+                              isSaved={savedMovieIds.has(item.id)}
+                              vote_average={item.vote_average}
+                              vote_count={item.vote_count}
+                              overview={item.overview}
+                              contributingFilms={item.contributingFilms}
+                              dismissed={item.dismissed}
+                              imdb_rating={item.imdb_rating}
+                              rotten_tomatoes={item.rotten_tomatoes}
+                              metacritic={item.metacritic}
+                              awards={item.awards}
+                              genres={item.genres}
+                              sources={item.sources}
+                              consensusLevel={item.consensusLevel}
+                              reliabilityMultiplier={item.reliabilityMultiplier}
+                              onUndoDismiss={handleUndoDismiss}
+                            />
+                          ),
+                        )}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Quick Watches Section - Under 100 minutes */}
-            {categorizedSuggestions.quickWatches.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">⚡</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Quick Watches
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Great films under 100 minutes
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("quickWatches")}
-                    disabled={refreshingSections.has("quickWatches")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("quickWatches") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.quickWatches.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Animation Picks Section */}
+                  {shouldRenderSection("animationPicks") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎨</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Animation Picks
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Animated films for you
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("animationPicks")}
+                          disabled={refreshingSections.has("animationPicks")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("animationPicks") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.animationPicks.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Epic Films Section - Over 150 minutes */}
-            {categorizedSuggestions.epicFilms.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎬</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Epic Films
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Immersive experiences over 2.5 hours
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("epicFilms")}
-                    disabled={refreshingSections.has("epicFilms")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("epicFilms") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.epicFilms.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Quick Watches Section - Under 100 minutes */}
+                  {shouldRenderSection("quickWatches") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">⚡</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Quick Watches
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Great films under 100 minutes
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("quickWatches")}
+                          disabled={refreshingSections.has("quickWatches")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("quickWatches") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.quickWatches.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* Critically Acclaimed Section */}
-            {categorizedSuggestions.criticallyAcclaimed.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🏆</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Critically Acclaimed
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Top-rated by critics (IMDB 8+, RT 90%+)
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("criticallyAcclaimed")}
-                    disabled={refreshingSections.has("criticallyAcclaimed")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("criticallyAcclaimed") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.criticallyAcclaimed.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                      vote_average={item.vote_average}
-                      vote_count={item.vote_count}
-                      overview={item.overview}
-                      contributingFilms={item.contributingFilms}
-                      dismissed={item.dismissed}
-                      imdb_rating={item.imdb_rating}
-                      rotten_tomatoes={item.rotten_tomatoes}
-                      metacritic={item.metacritic}
-                      awards={item.awards}
-                      genres={item.genres}
-                      sources={item.sources}
-                      consensusLevel={item.consensusLevel}
-                      reliabilityMultiplier={item.reliabilityMultiplier}
-                      onUndoDismiss={handleUndoDismiss}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Epic Films Section - Over 150 minutes */}
+                  {shouldRenderSection("epicFilms") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎬</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Epic Films
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Immersive experiences over 2.5 hours
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRefreshSection("epicFilms")}
+                          disabled={refreshingSections.has("epicFilms")}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("epicFilms") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.epicFilms.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-            {/* More Recommendations Section - Fallback for remaining suggestions */}
-            {categorizedSuggestions.moreRecommendations.length >= 1 && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎥</span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        More Recommendations
-                      </h2>
-                      <p className="text-xs text-gray-600">
-                        Additional films you might enjoy
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRefreshSection("moreRecommendations")}
-                    disabled={refreshingSections.has("moreRecommendations")}
-                    className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
-                    title="Refresh this section"
-                  >
-                    <svg
-                      className={`w-3 h-3 ${refreshingSections.has("moreRecommendations") ? "animate-spin" : ""}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    <span>Refresh</span>
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-                  {categorizedSuggestions.moreRecommendations.map((item) => (
-                    <MovieCard
-                      key={item.id}
-                      id={item.id}
-                      title={item.title}
-                      year={item.year}
-                      posterPath={posters[item.id]}
-                      trailerKey={item.trailerKey}
-                      isInWatchlist={watchlistTmdbIds.has(item.id)}
-                      reasons={item.reasons}
-                      score={item.score}
-                      voteCategory={item.voteCategory}
-                      collectionName={item.collectionName}
-                      onFeedback={handleFeedback}
-                      onSave={handleSave}
-                      isSaved={savedMovieIds.has(item.id)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+                  {/* Critically Acclaimed Section */}
+                  {shouldRenderSection("criticallyAcclaimed") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🏆</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              Critically Acclaimed
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Top-rated by critics (IMDB 8+, RT 90%+)
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() =>
+                            handleRefreshSection("criticallyAcclaimed")
+                          }
+                          disabled={refreshingSections.has(
+                            "criticallyAcclaimed",
+                          )}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("criticallyAcclaimed") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.criticallyAcclaimed.map(
+                          (item) => (
+                            <MovieCard
+                              key={item.id}
+                              id={item.id}
+                              title={item.title}
+                              year={item.year}
+                              posterPath={posters[item.id]}
+                              trailerKey={item.trailerKey}
+                              isInWatchlist={watchlistTmdbIds.has(item.id)}
+                              reasons={item.reasons}
+                              score={item.score}
+                              voteCategory={item.voteCategory}
+                              collectionName={item.collectionName}
+                              onFeedback={handleFeedback}
+                              onSave={handleSave}
+                              isSaved={savedMovieIds.has(item.id)}
+                              vote_average={item.vote_average}
+                              vote_count={item.vote_count}
+                              overview={item.overview}
+                              contributingFilms={item.contributingFilms}
+                              dismissed={item.dismissed}
+                              imdb_rating={item.imdb_rating}
+                              rotten_tomatoes={item.rotten_tomatoes}
+                              metacritic={item.metacritic}
+                              awards={item.awards}
+                              genres={item.genres}
+                              sources={item.sources}
+                              consensusLevel={item.consensusLevel}
+                              reliabilityMultiplier={item.reliabilityMultiplier}
+                              onUndoDismiss={handleUndoDismiss}
+                            />
+                          ),
+                        )}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* More Recommendations Section - Fallback for remaining suggestions */}
+                  {shouldRenderSection("moreRecommendations") && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🎥</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              More Recommendations
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              Additional films you might enjoy
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() =>
+                            handleRefreshSection("moreRecommendations")
+                          }
+                          disabled={refreshingSections.has(
+                            "moreRecommendations",
+                          )}
+                          className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50"
+                          title="Refresh this section"
+                        >
+                          <svg
+                            className={`w-3 h-3 ${refreshingSections.has("moreRecommendations") ? "animate-spin" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {categorizedSuggestions.moreRecommendations.map(
+                          (item) => (
+                            <MovieCard
+                              key={item.id}
+                              id={item.id}
+                              title={item.title}
+                              year={item.year}
+                              posterPath={posters[item.id]}
+                              trailerKey={item.trailerKey}
+                              isInWatchlist={watchlistTmdbIds.has(item.id)}
+                              reasons={item.reasons}
+                              score={item.score}
+                              voteCategory={item.voteCategory}
+                              collectionName={item.collectionName}
+                              onFeedback={handleFeedback}
+                              onSave={handleSave}
+                              isSaved={savedMovieIds.has(item.id)}
+                            />
+                          ),
+                        )}
+                      </div>
+                    </section>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
         {!items && (
