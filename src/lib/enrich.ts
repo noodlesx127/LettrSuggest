@@ -37,6 +37,10 @@ function reasonStrengthLabel(strength: number): string {
   return "Light";
 }
 
+function isValidDate(date: Date): boolean {
+  return date instanceof Date && !Number.isNaN(date.getTime());
+}
+
 export type TMDBMovie = {
   id: number;
   title: string;
@@ -47,6 +51,15 @@ export type TMDBMovie = {
   vote_average?: number;
   vote_count?: number;
   genres?: Array<{ id: number; name: string }>;
+  production_countries?: Array<{
+    iso_3166_1?: string;
+    name?: string;
+  }>;
+  spoken_languages?: Array<{
+    iso_639_1?: string;
+    name?: string;
+    english_name?: string;
+  }>;
   production_companies?: Array<{
     id: number;
     name: string;
@@ -710,6 +723,16 @@ function extractReasonTypes(reasons: string[]): string[] {
       types.add("studio");
     }
 
+    // Country matches
+    if (lower.includes("country")) {
+      types.add("country");
+    }
+
+    // Language matches
+    if (lower.includes("language")) {
+      types.add("language");
+    }
+
     // Collection matches
     if (
       lower.includes("collection") ||
@@ -1121,6 +1144,7 @@ const sourceReliabilityCache = new Map<
   { at: number; data: Map<string, number> }
 >();
 const SOURCE_RELIABILITY_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const keywordIdfCache = new Map<number, number>();
 
 export async function fetchSourceReliability(
   userId: string,
@@ -3024,6 +3048,8 @@ export async function buildTasteProfile(params: {
     name: string;
     weight: number;
     count: number;
+    tfidfScore?: number;
+    idfScore?: number;
   }>;
   topDirectors: Array<{
     id: number;
@@ -3046,6 +3072,8 @@ export async function buildTasteProfile(params: {
     weight: number;
     count: number;
   }>;
+  topCountries: Array<{ name: string; count: number }>;
+  topLanguages: Array<{ name: string; count: number }>;
   avoidGenres: Array<{ id: number; name: string; weight: number }>;
   avoidKeywords: Array<{ id: number; name: string; weight: number }>;
   avoidDirectors: Array<{ id: number; name: string; weight: number }>;
@@ -3125,6 +3153,84 @@ export async function buildTasteProfile(params: {
 
   const topN = params.topN ?? 10;
 
+  // === TEMPORAL RECENCY FROM DIARY ===
+  // Fetch most recent watch dates from film_diary_events to weight recent tastes higher
+  const watchDates = new Map<number, Date>();
+  if (params.userId && supabase) {
+    try {
+      const { data: diaryEvents, error } = await supabase
+        .from("film_diary_events")
+        .select("tmdb_id, watched_at, rating")
+        .eq("user_id", params.userId)
+        .order("watched_at", { ascending: false })
+        .limit(1000);
+
+      if (error) {
+        console.error("[TasteProfile] Failed to fetch diary events", {
+          userId: params.userId,
+          error,
+        });
+      } else {
+        for (const event of diaryEvents || []) {
+          if (!event?.tmdb_id || !event?.watched_at) continue;
+          if (!watchDates.has(event.tmdb_id)) {
+            const parsed = new Date(event.watched_at);
+            if (!isValidDate(parsed)) continue;
+            watchDates.set(event.tmdb_id, parsed);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[TasteProfile] Diary event fetch exception", e);
+    }
+  }
+
+  const HALF_LIFE_DAYS = 180;
+  const getRecencyWeight = (watchDate: Date | null): number => {
+    if (!watchDate || !isValidDate(watchDate)) return 1.0;
+    const now = new Date();
+    const daysSince =
+      (now.getTime() - watchDate.getTime()) / (1000 * 60 * 60 * 24);
+
+    if (!Number.isFinite(daysSince) || daysSince < 0) return 1.0;
+
+    // Recent watches (<3 months) get strong boost
+    if (daysSince < 90) return 1.5;
+    // Old watches (>2 years) get reduced weight
+    if (daysSince > 730) return 0.5;
+
+    const recencyWeight = Math.exp(-daysSince / HALF_LIFE_DAYS);
+    return Math.max(0.5, Math.min(1.5, recencyWeight));
+  };
+
+  const resolveWatchDate = (film: (typeof params.films)[0]): Date | null => {
+    const tmdbId = params.mappings.get(film.uri);
+    const diaryDate = tmdbId ? watchDates.get(tmdbId) : undefined;
+    if (diaryDate) return diaryDate;
+    if (film.lastDate) {
+      const parsed = new Date(film.lastDate);
+      if (isValidDate(parsed)) return parsed;
+    }
+    return null;
+  };
+
+  if (process.env.NODE_ENV === "development" && watchDates.size > 0) {
+    const recentFilms = Array.from(watchDates.entries())
+      .sort((a, b) => b[1].getTime() - a[1].getTime())
+      .slice(0, 10);
+
+    console.log("[TasteProfile] Applying temporal recency:", {
+      totalWithDates: watchDates.size,
+      recentSample: recentFilms.map(([tmdbId, date]) => ({
+        tmdbId,
+        daysAgo: Math.floor(
+          (Date.now() - date.getTime()) / (1000 * 60 * 60 * 24),
+        ),
+        weight: getRecencyWeight(date).toFixed(2),
+      })),
+    });
+  }
+
   // Calculate user statistics
   const ratedFilms = params.films.filter((f) => f.rating != null);
   const ratings = ratedFilms.map((f) => f.rating!);
@@ -3152,10 +3258,6 @@ export async function buildTasteProfile(params: {
   // Enhanced weighting function with recency and rewatch signals
   const getEnhancedWeight = (film: (typeof params.films)[0]): number => {
     const r = film.rating ?? avgRating;
-    const now = new Date();
-    const watchDate = film.lastDate ? new Date(film.lastDate) : new Date();
-    const daysSinceWatch =
-      (now.getTime() - watchDate.getTime()) / (1000 * 60 * 60 * 24);
 
     // Normalize rating to user's scale (z-score), only positive weights
     const normalizedRating = (r - avgRating) / Math.max(stdDevRating, 0.5);
@@ -3167,9 +3269,10 @@ export async function buildTasteProfile(params: {
     // Strong boost for rewatches (indicates strong preference)
     if (film.rewatch) weight *= 1.8;
 
-    // Recency decay (exponential, half-life of 1 year)
-    const recencyFactor = Math.exp(-daysSinceWatch / 365);
-    weight *= 0.5 + 0.5 * recencyFactor; // 50% base + 50% recency-based
+    // Recency decay from diary events (fallback to rating_date / lastDate)
+    const watchDate = resolveWatchDate(film);
+    const recencyWeight = getRecencyWeight(watchDate);
+    weight *= recencyWeight;
 
     return weight;
   };
@@ -3804,10 +3907,130 @@ export async function buildTasteProfile(params: {
     .slice(0, topN)
     .map(([id, { name, weight, count }]) => ({ id, name, weight, count }));
 
+  const totalLikedFilms = Math.max(1, pairedLiked.length);
+  const keywordTF = new Map<number, number>();
+  for (const [id, data] of keywordWeights.entries()) {
+    keywordTF.set(id, data.count / totalLikedFilms);
+  }
+
+  const keywordTFIDF = new Map<number, number>();
+  const keywordIdfMap = new Map<number, number>();
+  const keywordNameToId = new Map<string, number>();
+
+  for (const [id, data] of keywordWeights.entries()) {
+    if (data.name) keywordNameToId.set(data.name, id);
+  }
+
+  const supabaseClient = supabase;
+  const MAX_KEYWORDS_FOR_IDF = 100;
+  if (supabaseClient && keywordWeights.size > 0) {
+    try {
+      const { count: totalFilms, error: totalFilmsError } = await supabaseClient
+        .from("tmdb_movies")
+        .select("tmdb_id", { count: "exact", head: true });
+
+      if (totalFilmsError) {
+        console.error(
+          "[TasteProfile] Failed to fetch tmdb_movies count for TF-IDF",
+          totalFilmsError,
+        );
+      }
+
+      const totalFilmsCount = totalFilms ?? 100000;
+
+      const keywordNames = Array.from(keywordNameToId.keys());
+      const keywordsForIdf = Array.from(keywordWeights.entries())
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, MAX_KEYWORDS_FOR_IDF)
+        .map(([id, data]) => ({ id, name: data.name }))
+        .filter((k): k is { id: number; name: string } => Boolean(k.name));
+      const keywordIdfRows = await mapLimit(
+        keywordsForIdf,
+        8,
+        async ({ id: keywordId, name: keyword }) => {
+          if (!keywordId) return { id: -1, idf: 1.0 };
+
+          const cached = keywordIdfCache.get(keywordId);
+          if (cached != null) {
+            return { id: keywordId, idf: cached };
+          }
+
+          const { count: filmsWithKeyword, error } = await supabaseClient
+            .from("tmdb_movies")
+            .select("tmdb_id", { count: "exact", head: true })
+            .or(
+              `data->keywords->keywords.cs.${JSON.stringify([{ name: keyword }])},data->keywords->results.cs.${JSON.stringify([{ name: keyword }])}`,
+            );
+
+          if (error) {
+            if (process.env.NODE_ENV === "development") {
+              console.error(
+                "[TasteProfile] TF-IDF keyword query failed",
+                error,
+              );
+            }
+            return { id: keywordId, idf: 1.0 };
+          }
+
+          const idf = Math.log(
+            (totalFilmsCount + 1) / ((filmsWithKeyword ?? 0) + 1),
+          );
+          keywordIdfCache.set(keywordId, idf);
+          return { id: keywordId, idf };
+        },
+      );
+
+      for (const { id, idf } of keywordIdfRows) {
+        if (id < 0) continue;
+        const tf = keywordTF.get(id) ?? 0;
+        keywordTFIDF.set(id, tf * idf);
+        keywordIdfMap.set(id, idf);
+      }
+    } catch (error) {
+      console.error("[TasteProfile] TF-IDF keyword calculation failed", error);
+    }
+  }
+  const maxCount = Math.max(
+    1,
+    ...Array.from(keywordWeights.values()).map((k) => k.count),
+  );
+  for (const [id, data] of keywordWeights.entries()) {
+    if (!keywordIdfMap.has(id)) {
+      const inverseFreq = maxCount / Math.max(1, data.count);
+      const idf = Math.log(1 + inverseFreq);
+      keywordIdfMap.set(id, idf);
+    }
+    const tf = keywordTF.get(id) ?? 0;
+    const idf = keywordIdfMap.get(id) ?? 1.0;
+    keywordTFIDF.set(id, tf * idf);
+  }
+
   const topKeywords = Array.from(keywordWeights.entries())
-    .sort((a, b) => b[1].weight - a[1].weight)
+    .sort(
+      (a, b) => (keywordTFIDF.get(b[0]) ?? 0) - (keywordTFIDF.get(a[0]) ?? 0),
+    )
     .slice(0, topN)
-    .map(([id, { name, weight, count }]) => ({ id, name, weight, count }));
+    .map(([id, { name, weight, count }]) => ({
+      id,
+      name,
+      weight,
+      count,
+      tfidfScore: keywordTFIDF.get(id),
+      idfScore: keywordIdfMap.get(id),
+    }));
+
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      "[TasteProfile] Top keywords by TF-IDF:",
+      topKeywords
+        .slice(0, 10)
+        .map((k) => `${k.name}(${(k.tfidfScore ?? 0).toFixed(3)})`),
+    );
+    const sampleIdfs = topKeywords
+      .slice(0, 5)
+      .map((k) => `${k.name}(${(k.idfScore ?? 0).toFixed(3)})`);
+    console.log("[TasteProfile] Sample keyword IDF:", sampleIdfs);
+  }
 
   // Source reliability is calculated later when enriching suggestions; placeholder here for parity
   const sourceReliability: Array<{ source: string; reliability: number }> = [];
@@ -3838,6 +4061,52 @@ export async function buildTasteProfile(params: {
     .sort((a, b) => b[1].weight - a[1].weight)
     .slice(0, topN)
     .map(([id, { name, weight, count }]) => ({ id, name, weight, count }));
+
+  const likedFilmData = pairedLiked.map((pair) => pair.movie);
+
+  const countryCounts: Record<string, number> = {};
+  for (const film of likedFilmData) {
+    if (film.production_countries) {
+      for (const country of film.production_countries) {
+        const name = country.name || country.iso_3166_1;
+        if (!name) continue;
+        countryCounts[name] = (countryCounts[name] || 0) + 1;
+      }
+    }
+  }
+
+  const topCountries = Object.entries(countryCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([name, count]) => ({ name, count }));
+
+  const languageCounts: Record<string, number> = {};
+  for (const film of likedFilmData) {
+    if (film.spoken_languages) {
+      for (const lang of film.spoken_languages) {
+        const name = lang.english_name || lang.name || lang.iso_639_1;
+        if (!name) continue;
+        languageCounts[name] = (languageCounts[name] || 0) + 1;
+      }
+    }
+  }
+
+  const topLanguages = Object.entries(languageCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([name, count]) => ({ name, count }));
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("[TasteProfile] Production metadata extracted:", {
+      topCountries: topCountries
+        .slice(0, 5)
+        .map((c) => `${c.name} (${c.count})`),
+      topLanguages: topLanguages
+        .slice(0, 5)
+        .map((l) => `${l.name} (${l.count})`),
+      topStudios: topStudios.slice(0, 5).map((s) => `${s.name} (${s.count})`),
+    });
+  }
 
   const topDecades = Array.from(decadeWeights.entries())
     .sort((a, b) => b[1] - a[1])
@@ -4007,7 +4276,7 @@ export async function buildTasteProfile(params: {
         .map((g) => `${g.name}(${g.weight.toFixed(1)})`),
       topKeywords: topKeywords
         .slice(0, 3)
-        .map((k) => `${k.name}(${k.weight.toFixed(1)})`),
+        .map((k) => `${k.name}(${(k.tfidfScore ?? k.weight).toFixed(3)})`),
       topDirectors: topDirectors
         .slice(0, 3)
         .map((d) => `${d.name}(${d.weight.toFixed(1)})`),
@@ -4017,6 +4286,12 @@ export async function buildTasteProfile(params: {
       topStudios: topStudios
         .slice(0, 3)
         .map((s) => `${s.name}(${s.weight.toFixed(1)})`),
+      topCountries: topCountries
+        .slice(0, 3)
+        .map((c) => `${c.name}(${c.count})`),
+      topLanguages: topLanguages
+        .slice(0, 3)
+        .map((l) => `${l.name}(${l.count})`),
       topDecades: topDecades.map((d) => `${d.decade}s(${d.weight.toFixed(1)})`),
       avoidGenres: avoidGenres.map((g) => g.name),
       avoidKeywords: avoidKeywords.map((k) => k.name),
@@ -4177,6 +4452,8 @@ export async function buildTasteProfile(params: {
     topDecades,
     topActors,
     topStudios,
+    topCountries,
+    topLanguages,
     avoidGenres,
     avoidKeywords,
     avoidDirectors,
@@ -4629,7 +4906,22 @@ export async function suggestByOverlap(params: {
   };
   enhancedProfile?: {
     topActors: Array<{ id: number; name: string; weight: number }>;
-    topStudios: Array<{ id: number; name: string; weight: number }>;
+    topStudios: Array<{
+      id: number;
+      name: string;
+      weight: number;
+      count: number;
+    }>;
+    topKeywords?: Array<{
+      id: number;
+      name: string;
+      weight: number;
+      count?: number;
+      tfidfScore?: number;
+      idfScore?: number;
+    }>;
+    topCountries?: Array<{ name: string; count: number }>;
+    topLanguages?: Array<{ name: string; count: number }>;
     avoidGenres: Array<{ id: number; name: string; weight: number }>;
     avoidKeywords: Array<{ id: number; name: string; weight: number }>;
     avoidDirectors: Array<{ id: number; name: string; weight: number }>;
@@ -4913,12 +5205,94 @@ export async function suggestByOverlap(params: {
   // Fetch user's reason type preferences for adaptive weighting
   // This learns which recommendation reasons (genre, director, actor, etc.) lead to positive feedback
   const reasonPreferences = await getReasonPreferences(params.userId);
-  console.log("[AdaptiveLearning] Loaded reason preferences", {
-    count: reasonPreferences.size,
-    preferences: Array.from(reasonPreferences.entries()).map(
-      ([k, v]) => `${k}:${(v * 100).toFixed(0)}%`,
-    ),
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[AdaptiveLearning] Loaded reason preferences", {
+      count: reasonPreferences.size,
+      preferences: Array.from(reasonPreferences.entries()).map(
+        ([k, v]) => `${k}:${(v * 100).toFixed(0)}%`,
+      ),
+    });
+  }
+
+  type ReasonPreferenceStat = {
+    reason_type: string;
+    positive_count: number;
+    negative_count: number;
+  };
+
+  let reasonPreferenceStats: ReasonPreferenceStat[] = [];
+
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("user_reason_preferences")
+      .select("reason_type, success_count, total_count")
+      .eq("user_id", params.userId);
+
+    if (error) {
+      console.error("[AdaptiveLearning] Error fetching reason stats", {
+        userId: params.userId,
+        error,
+      });
+    } else if (data) {
+      reasonPreferenceStats = data.map((row) => {
+        const positive = row.success_count ?? 0;
+        const total = row.total_count ?? 0;
+        const negative = Math.max(0, total - positive);
+        return {
+          reason_type: row.reason_type,
+          positive_count: positive,
+          negative_count: negative,
+        };
+      });
+    }
+  }
+
+  const getFeatureWeight = (reasonType: string, baseWeight: number): number => {
+    const pref = reasonPreferenceStats.find(
+      (p) => p.reason_type === reasonType,
+    );
+    if (!pref) return baseWeight;
+
+    const totalFeedback = pref.positive_count + pref.negative_count;
+    if (totalFeedback < 10) return baseWeight;
+
+    const positiveRatio = pref.positive_count / totalFeedback;
+    const adjustment = (positiveRatio - 0.5) * 2;
+    return baseWeight * (1 + adjustment);
+  };
+
+  const genreWeight = getFeatureWeight("genre", 1.2);
+  const directorWeight = getFeatureWeight("director", 1.0);
+  const actorWeight = getFeatureWeight("actor", 0.75);
+  const keywordWeight = getFeatureWeight("keyword", 1.0);
+  const studioWeight = getFeatureWeight("studio", 0.5);
+
+  const dynamicWeights = [
+    genreWeight,
+    directorWeight,
+    actorWeight,
+    keywordWeight,
+    studioWeight,
+  ];
+  const avgWeight =
+    dynamicWeights.reduce((sum, w) => sum + w, 0) / dynamicWeights.length;
+  const normalizationFactor = avgWeight > 0 ? 1.0 / avgWeight : 1.0;
+
+  const normalizedGenreWeight = genreWeight * normalizationFactor;
+  const normalizedDirectorWeight = directorWeight * normalizationFactor;
+  const normalizedActorWeight = actorWeight * normalizationFactor;
+  const normalizedKeywordWeight = keywordWeight * normalizationFactor;
+  const normalizedStudioWeight = studioWeight * normalizationFactor;
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("[Scoring] Dynamic feature weights:", {
+      genre: normalizedGenreWeight.toFixed(2),
+      director: normalizedDirectorWeight.toFixed(2),
+      actor: normalizedActorWeight.toFixed(2),
+      keyword: normalizedKeywordWeight.toFixed(2),
+      studio: normalizedStudioWeight.toFixed(2),
+    });
+  }
 
   // Filter out candidates that have negative feedback
   // We need to modify the candidates array that will be used for scoring
@@ -5169,14 +5543,14 @@ export async function suggestByOverlap(params: {
   // Negative penalties applied separately
   const weights = {
     // Primary factors (70%)
-    genre: 1.2, // 30% - Genre matching (base weight, scaled by matches)
+    genre: normalizedGenreWeight, // 30% - Genre matching (base weight, scaled by matches)
     genreCombo: 1.8, // Bonus for exact genre combinations (subgenre specificity)
-    director: 1.0, // 20% - Director matching
-    actor: 0.75, // 15% - Actor matching (NEW)
+    director: normalizedDirectorWeight, // 20% - Director matching
+    actor: normalizedActorWeight, // 15% - Actor matching (NEW)
 
     // Secondary factors (20%)
-    keyword: 0.5, // 10% - Keyword/subgenre matching
-    studio: 0.8, // 10% - Production company matching (increased for A24/Ghibli fans)
+    keyword: normalizedKeywordWeight, // 10% - Keyword/subgenre matching
+    studio: normalizedStudioWeight, // 10% - Production company matching (increased for A24/Ghibli fans)
 
     // Tertiary factors (10%)
     cast: 0.2, // 5% - Supporting cast matching
@@ -6028,28 +6402,34 @@ export async function suggestByOverlap(params: {
       if (kHits.length) {
         // Sort keywords by weighted frequency in user's liked films
         const sortedKHits = kHits
-          .map((k) => ({ keyword: k, weight: pref.keywords.get(k) ?? 0 }))
+          .map((k) => {
+            const tfidfWeight = params.enhancedProfile?.topKeywords?.find(
+              (keyword) => keyword.name === k,
+            )?.tfidfScore;
+            const fallbackWeight = pref.keywords.get(k) ?? 0;
+            return { keyword: k, weight: tfidfWeight ?? fallbackWeight };
+          })
           .sort((a, b) => b.weight - a.weight);
 
         const topKeywords = sortedKHits.slice(0, 5);
-        const totalKeywordWeight = topKeywords.reduce(
-          (sum, k) => sum + k.weight,
-          0,
-        );
-        const keywordScore = topKeywords.reduce(
-          (sum, k) => sum + Math.log(k.weight + 1),
-          0,
-        );
+        const keywordScore = topKeywords.reduce((sum, k) => {
+          const clamped = Math.max(0, k.weight);
+          return sum + Math.log(clamped + 1);
+        }, 0);
         score += keywordScore * weights.keyword;
 
         const topKeywordNames = topKeywords.slice(0, 3).map((k) => k.keyword);
-        const topKeywordWeight = topKeywords[0]?.weight ?? 1;
-        const isStrongPattern = topKeywordWeight >= 3.0;
+        const topKeywordWeight = topKeywords[0]?.weight ?? 0;
+        const hasTfidf = params.enhancedProfile?.topKeywords?.some(
+          (k) => k.tfidfScore,
+        );
+        const isStrongPattern =
+          (hasTfidf && topKeywordWeight >= 0.05) ||
+          (!hasTfidf && topKeywordWeight >= 3.0);
         const strengthText = isStrongPattern ? "especially love" : "enjoy";
-        const countRounded = Math.round(topKeywordWeight);
         const strengthLabel = reasonStrengthLabel(topKeywordWeight);
         reasons.push(
-          `Matches specific themes you ${strengthText}: ${topKeywordNames.join(", ")} (${countRounded}+ highly-rated films) — ${strengthLabel} signal`,
+          `Matches specific themes you ${strengthText}: ${topKeywordNames.join(", ")} — ${strengthLabel} signal`,
         );
 
         if (kHits.some((k) => watchlistKeywordSet.has(k))) {
@@ -6108,6 +6488,55 @@ export async function suggestByOverlap(params: {
         }
       }
 
+      // PHASE 3: Production metadata scoring (countries, languages)
+      const MAX_PRODUCTION_BOOST = 3.0;
+      if (params.enhancedProfile?.topCountries?.length) {
+        let countryBoost = 0;
+        for (const country of m.production_countries || []) {
+          const name = country.name || country.iso_3166_1;
+          if (!name) continue;
+          const countryMatch = params.enhancedProfile.topCountries.find(
+            (c) => c.name === name,
+          );
+          if (countryMatch) {
+            countryBoost += Math.log1p(countryMatch.count) * 0.6;
+            reasons.push(`Production country match: ${countryMatch.name}`);
+          }
+        }
+        score += Math.min(countryBoost, MAX_PRODUCTION_BOOST);
+      }
+
+      if (params.enhancedProfile?.topLanguages?.length) {
+        let languageBoost = 0;
+        for (const lang of m.spoken_languages || []) {
+          const name = lang.english_name || lang.name || lang.iso_639_1;
+          if (!name) continue;
+          const langMatch = params.enhancedProfile.topLanguages.find(
+            (l) => l.name === name,
+          );
+          if (langMatch) {
+            languageBoost += Math.log1p(langMatch.count) * 0.5;
+            reasons.push(`Language match: ${langMatch.name}`);
+          }
+        }
+        score += Math.min(languageBoost, MAX_PRODUCTION_BOOST);
+      }
+
+      if (params.enhancedProfile?.topStudios?.length) {
+        for (const studio of m.production_companies || []) {
+          const name = studio.name;
+          if (!name) continue;
+          const studioMatch = params.enhancedProfile.topStudios.find(
+            (s) => s.name === name,
+          );
+          if (studioMatch) {
+            const boost = studioMatch.count * 0.7;
+            score += boost;
+            reasons.push(`Studio match: ${studioMatch.name}`);
+          }
+        }
+      }
+
       // PHASE 2: Enhanced actor matching using taste profile
       if (params.enhancedProfile?.topActors) {
         const actorIds = new Set(m.credits?.cast?.map((c) => c.id) || []);
@@ -6146,28 +6575,7 @@ export async function suggestByOverlap(params: {
       }
 
       // PHASE 2: Enhanced studio matching using taste profile
-      if (params.enhancedProfile?.topStudios) {
-        const studioIds = new Set(feats.productionCompanyIds);
-        const matchedStudios = params.enhancedProfile.topStudios.filter((s) =>
-          studioIds.has(s.id),
-        );
-
-        if (matchedStudios.length > 0) {
-          const studioScore = matchedStudios.reduce(
-            (sum, studio) => sum + studio.weight,
-            0,
-          );
-          score += studioScore * weights.studio;
-
-          // Only add reason if not already added by legacy studio matching
-          if (!studioHits.length) {
-            const topStudio = matchedStudios[0];
-            reasons.push(
-              `From ${topStudio.name} — a studio whose films you consistently enjoy`,
-            );
-          }
-        }
-      }
+      // Removed to avoid double-counting with Phase 3 production metadata scoring
 
       // PHASE 2: Decade/era preference matching
       // Give a boost to films from the user's preferred eras

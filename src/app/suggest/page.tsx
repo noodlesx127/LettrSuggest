@@ -2141,8 +2141,11 @@ export default function SuggestPage() {
         context,
         recentExposures, // Apply repeat penalty to recently shown movies
         enhancedProfile: {
+          topKeywords: tasteProfile.topKeywords,
           topActors: tasteProfile.topActors,
           topStudios: tasteProfile.topStudios,
+          topCountries: tasteProfile.topCountries,
+          topLanguages: tasteProfile.topLanguages,
           avoidGenres: tasteProfile.avoidGenres,
           avoidKeywords: tasteProfile.avoidKeywords,
           avoidDirectors: tasteProfile.avoidDirectors,
@@ -2629,8 +2632,11 @@ export default function SuggestPage() {
           context: computeContext(),
           watchlistEntries: watchlistEntriesForMore,
           enhancedProfile: {
+            topKeywords: tasteProfile.topKeywords,
             topActors: tasteProfile.topActors,
             topStudios: tasteProfile.topStudios,
+            topCountries: tasteProfile.topCountries,
+            topLanguages: tasteProfile.topLanguages,
             avoidGenres: tasteProfile.avoidGenres,
             avoidKeywords: tasteProfile.avoidKeywords,
             avoidDirectors: tasteProfile.avoidDirectors,
@@ -2864,6 +2870,7 @@ export default function SuggestPage() {
           context: computeContext(),
           watchlistEntries: watchlistEntriesForRefresh,
           enhancedProfile: {
+            topKeywords: tasteProfile.topKeywords,
             topActors: tasteProfile.topActors,
             topStudios: tasteProfile.topStudios,
             avoidGenres: tasteProfile.avoidGenres,
