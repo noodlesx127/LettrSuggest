@@ -5,6 +5,7 @@ import {
   useRef,
   useEffect,
   useCallback,
+  useMemo,
   type ReactNode,
   type KeyboardEvent,
 } from "react";
@@ -50,9 +51,9 @@ export interface DropdownProps {
 
 // Size styles for trigger button
 const triggerSizeClasses = {
-  sm: "h-9 px-3 text-sm",
-  md: "h-11 px-4 text-sm",
-  lg: "h-13 px-5 text-base",
+  sm: "h-9 min-h-[44px] px-3 text-sm",
+  md: "h-11 min-h-[44px] px-4 text-sm",
+  lg: "h-12 min-h-[52px] px-5 text-base",
 };
 
 /**
@@ -108,11 +109,10 @@ export function Dropdown({
   );
 
   // Normalize value to array for easier handling
-  const selectedValues: string[] = Array.isArray(value)
-    ? value
-    : value
-      ? [value]
-      : [];
+  const selectedValues = useMemo<string[]>(
+    () => (Array.isArray(value) ? value : value ? [value] : []),
+    [value],
+  );
 
   // Filter options based on search
   const filteredOptions = searchQuery
@@ -138,9 +138,10 @@ export function Dropdown({
   };
 
   // Check if an option is selected
-  const isSelected = (optionValue: string): boolean => {
-    return selectedValues.includes(optionValue);
-  };
+  const isSelected = useCallback(
+    (optionValue: string): boolean => selectedValues.includes(optionValue),
+    [selectedValues],
+  );
 
   // Handle option selection
   const handleSelect = useCallback(
@@ -343,7 +344,7 @@ export function Dropdown({
           "text-gray-900 dark:text-gray-100",
           "transition-all duration-150",
           // Focus
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900",
           // Hover
           "hover:border-gray-400 dark:hover:border-gray-500",
           // Open state

@@ -58,13 +58,13 @@ const baseInputStyles = cn(
 
 // Size-specific styles
 const sizeStyles = {
-  sm: "h-9 px-3 text-xs",
+  sm: "h-9 min-h-[44px] px-3 text-xs",
   md: cn(
     "h-11 px-4 text-sm",
     // Minimum touch target of 44px
     "min-h-[44px]",
   ),
-  lg: "h-13 px-5 text-base min-h-[52px]",
+  lg: "h-12 px-5 text-base min-h-[52px]",
 };
 
 // Icon padding adjustments

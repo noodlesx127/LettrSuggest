@@ -63,7 +63,7 @@ const baseStyles = cn(
   // Transitions
   "transition-all duration-150 ease-out",
   // Focus ring for accessibility
-  "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900",
   // Disabled state
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none",
   // Touch-friendly
@@ -152,7 +152,7 @@ const variantStyles = {
 // Size-specific styles
 const sizeStyles = {
   sm: cn(
-    "h-9 px-3 text-xs",
+    "h-9 min-h-[44px] px-3 text-xs",
     // Icon sizing
     "[&>svg]:w-3.5 [&>svg]:h-3.5",
   ),
@@ -164,7 +164,7 @@ const sizeStyles = {
     "[&>svg]:w-4 [&>svg]:h-4",
   ),
   lg: cn(
-    "h-13 px-6 text-base",
+    "h-12 px-6 text-base",
     // Larger touch target
     "min-h-[52px]",
     // Icon sizing
