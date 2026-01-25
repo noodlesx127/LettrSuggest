@@ -51,6 +51,12 @@ import {
   getSeasonalRecommendationConfig,
 } from "@/lib/genreEnhancement";
 import { saveMovie, getSavedMovies } from "@/lib/lists";
+import { calibrateRecommendations } from "@/lib/calibration";
+import {
+  detectGenreFatigue,
+  generatePalateCleanser,
+  type FatigueDetection,
+} from "@/lib/counterProgramming";
 import {
   updateExplorationStats,
   getAdaptiveExplorationRate,
@@ -288,6 +294,9 @@ export default function SuggestPage() {
     total: number;
   } | null>(null);
   const [watchlistPicks, setWatchlistPicks] = useState<MovieItem[]>([]); // Picks from user's Letterboxd watchlist
+  const [palateCleanser, setPalateCleanser] = useState<MovieItem[]>([]);
+  const [fatigueDetection, setFatigueDetection] =
+    useState<FatigueDetection | null>(null);
   const [pairHistory, setPairHistory] = useState<Set<string>>(new Set());
   const [pairwisePair, setPairwisePair] = useState<{
     a: MovieItem;
@@ -531,8 +540,9 @@ export default function SuggestPage() {
   const tmdbIds = useMemo(() => {
     const mainIds = items?.map((it) => it.id) ?? [];
     const watchlistIds = watchlistPicks.map((it) => it.id);
-    return [...new Set([...mainIds, ...watchlistIds])]; // Dedupe
-  }, [items, watchlistPicks]);
+    const palateIds = palateCleanser.map((it) => it.id);
+    return [...new Set([...mainIds, ...watchlistIds, ...palateIds])]; // Dedupe
+  }, [items, watchlistPicks, palateCleanser]);
   const { posters, mutate: refreshPosters } = usePostersSWR(tmdbIds);
 
   // Categorize suggestions into sections
@@ -1311,6 +1321,20 @@ export default function SuggestPage() {
     },
     [recentFilmTitle],
   );
+
+  const palateHeader = useMemo(() => {
+    if (!fatigueDetection) return null;
+    if (fatigueDetection.type === "mono-genre" && fatigueDetection.genre) {
+      return `Take a Break from ${fatigueDetection.genre}`;
+    }
+    if (fatigueDetection.type === "intensity") return "Lighten the Mood";
+    return "Something Uplifting";
+  }, [fatigueDetection]);
+
+  const palateDescription = useMemo(() => {
+    if (!fatigueDetection) return null;
+    return fatigueDetection.message;
+  }, [fatigueDetection]);
 
   const personalizedHeaderCount = useMemo(() => {
     if (!categorizedSuggestions) return 0;
@@ -2339,7 +2363,26 @@ export default function SuggestPage() {
         return updated;
       });
 
-      setItems(details);
+      const calibratedDetails = await calibrateRecommendations(uid, details, {
+        strength: 0.7,
+      });
+      setItems(calibratedDetails);
+
+      // Detect genre fatigue and generate palate cleansers
+      try {
+        const fatigue = await detectGenreFatigue(uid);
+        setFatigueDetection(fatigue);
+        if (fatigue) {
+          const cleansers = await generatePalateCleanser(uid, fatigue.type);
+          setPalateCleanser(cleansers);
+        } else {
+          setPalateCleanser([]);
+        }
+      } catch (e) {
+        console.error("[Suggest] Failed to generate palate cleansers", e);
+        setFatigueDetection(null);
+        setPalateCleanser([]);
+      }
 
       // Log exposure for repeat-suggestion tracking and counterfactual analysis
       try {
@@ -6049,6 +6092,59 @@ export default function SuggestPage() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
                         {categorizedSuggestions.crowdPleasers.map((item) => (
+                          <MovieCard
+                            key={item.id}
+                            id={item.id}
+                            title={item.title}
+                            year={item.year}
+                            posterPath={posters[item.id]}
+                            trailerKey={item.trailerKey}
+                            isInWatchlist={watchlistTmdbIds.has(item.id)}
+                            reasons={item.reasons}
+                            score={item.score}
+                            voteCategory={item.voteCategory}
+                            collectionName={item.collectionName}
+                            onFeedback={handleFeedback}
+                            onSave={handleSave}
+                            isSaved={savedMovieIds.has(item.id)}
+                            vote_average={item.vote_average}
+                            vote_count={item.vote_count}
+                            overview={item.overview}
+                            contributingFilms={item.contributingFilms}
+                            dismissed={item.dismissed}
+                            imdb_rating={item.imdb_rating}
+                            rotten_tomatoes={item.rotten_tomatoes}
+                            metacritic={item.metacritic}
+                            awards={item.awards}
+                            genres={item.genres}
+                            sources={item.sources}
+                            consensusLevel={item.consensusLevel}
+                            reliabilityMultiplier={item.reliabilityMultiplier}
+                            onUndoDismiss={handleUndoDismiss}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Palate Cleanser Section */}
+                  {palateCleanser.length > 0 && fatigueDetection && (
+                    <section>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">🍿</span>
+                          <div>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                              {palateHeader}
+                            </h2>
+                            <p className="text-xs text-gray-600">
+                              {palateDescription}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+                        {palateCleanser.map((item) => (
                           <MovieCard
                             key={item.id}
                             id={item.id}
