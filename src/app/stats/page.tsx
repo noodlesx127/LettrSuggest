@@ -12,17 +12,15 @@ import {
 } from "@/components/ui";
 import { useImportData } from "@/lib/importStore";
 import { supabase } from "@/lib/supabaseClient";
+import type { FilmEvent } from "@/lib/normalize";
+import StatsOverview from "@/app/stats/components/StatsOverview";
+import TasteProfileTab from "@/app/stats/components/TasteProfileTab";
+import WatchHistoryTab from "@/app/stats/components/WatchHistoryTab";
+import AlgorithmInsightsTab from "@/app/stats/components/AlgorithmInsightsTab";
+import WatchlistAnalysisTab from "@/app/stats/components/WatchlistAnalysisTab";
+import AvoidanceProfileTab from "@/app/stats/components/AvoidanceProfileTab";
 
 type TimeFilter = "all" | "year" | "month";
-
-type Film = {
-  uri: string;
-  lastDate?: string | null;
-  watchCount?: number | null;
-  rating?: number | null;
-  rewatch?: boolean | null;
-  liked?: boolean | null;
-};
 
 type TabId =
   | "overview"
@@ -68,10 +66,10 @@ export default function StatsPage() {
   const filteredFilms = useMemo(() => {
     if (!films) {
       console.log("[Stats] No films in context");
-      return [] as Film[];
+      return [] as readonly FilmEvent[];
     }
 
-    const watched = (films as Film[]).filter(
+    const watched = (films as FilmEvent[]).filter(
       (film) =>
         (film.watchCount ?? 0) > 0 || film.rating != null || !!film.lastDate,
     );
@@ -141,34 +139,58 @@ export default function StatsPage() {
           </TabsList>
 
           <TabsContent value="overview">
-            <div className="p-6 text-center text-gray-500">
-              Overview tab - Coming in Task 3.3.6
-            </div>
+            {uid && (
+              <StatsOverview
+                timeFilter={timeFilter}
+                filteredFilms={filteredFilms}
+                uid={uid}
+              />
+            )}
           </TabsContent>
           <TabsContent value="taste">
-            <div className="p-6 text-center text-gray-500">
-              Taste Profile tab - Coming in Task 3.3.6
-            </div>
+            {uid && (
+              <TasteProfileTab
+                timeFilter={timeFilter}
+                filteredFilms={filteredFilms}
+                uid={uid}
+              />
+            )}
           </TabsContent>
           <TabsContent value="history">
-            <div className="p-6 text-center text-gray-500">
-              Watch History tab - Coming in Task 3.3.6
-            </div>
+            {uid && (
+              <WatchHistoryTab
+                timeFilter={timeFilter}
+                filteredFilms={filteredFilms}
+                uid={uid}
+              />
+            )}
           </TabsContent>
           <TabsContent value="algorithm">
-            <div className="p-6 text-center text-gray-500">
-              Algorithm Insights tab - Coming in Task 3.3.6
-            </div>
+            {uid && (
+              <AlgorithmInsightsTab
+                timeFilter={timeFilter}
+                filteredFilms={filteredFilms}
+                uid={uid}
+              />
+            )}
           </TabsContent>
           <TabsContent value="watchlist">
-            <div className="p-6 text-center text-gray-500">
-              Watchlist Analysis tab - Coming in Task 3.3.6
-            </div>
+            {uid && (
+              <WatchlistAnalysisTab
+                timeFilter={timeFilter}
+                filteredFilms={filteredFilms}
+                uid={uid}
+              />
+            )}
           </TabsContent>
           <TabsContent value="filters">
-            <div className="p-6 text-center text-gray-500">
-              Avoidance Profile tab - Coming in Task 3.3.6
-            </div>
+            {uid && (
+              <AvoidanceProfileTab
+                timeFilter={timeFilter}
+                filteredFilms={filteredFilms}
+                uid={uid}
+              />
+            )}
           </TabsContent>
         </Tabs>
       </div>
