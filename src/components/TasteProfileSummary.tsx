@@ -173,7 +173,7 @@ export default function TasteProfileSummary({
   totalFilms = 0,
   averageRating = 0,
   nichePercentage = 50,
-  explorationRate = 0.5, // eslint-disable-line @typescript-eslint/no-unused-vars
+  explorationRate = 0.5,
   mostActiveDecade,
 }: TasteProfileSummaryProps) {
   // Note: explorationRate is accepted as a prop for future use

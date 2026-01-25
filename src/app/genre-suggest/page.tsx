@@ -954,6 +954,7 @@ export default function GenreSuggestPage() {
     uid,
     blockedIds,
     shownIds,
+    refreshPosters,
   ]);
 
   const handleSave = async (tmdbId: number, title: string) => {
