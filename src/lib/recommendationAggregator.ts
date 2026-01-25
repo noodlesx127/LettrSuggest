@@ -22,7 +22,8 @@ export type RecommendationSource =
   | "tastedive"
   | "trakt"
   | "tuimdb"
-  | "watchmode";
+  | "watchmode"
+  | "vector-similarity";
 
 export type SourceRecommendation = {
   source: RecommendationSource;
@@ -63,12 +64,13 @@ export async function aggregateRecommendations(params: {
 
   // Fetch from all sources in parallel
   const sourceFetchStart = Date.now();
-  const [tmdbRecs, tastediveRecs, traktRecs, watchmodeRecs] =
+  const [tmdbRecs, tastediveRecs, traktRecs, watchmodeRecs, vectorRecs] =
     await Promise.allSettled([
       fetchTMDBRecommendations(seedMovies),
       fetchTasteDiveRecommendations(seedMovies),
       fetchTraktRecommendations(seedMovies),
       fetchWatchmodeTrending(),
+      fetchVectorSimilarityRecommendations(seedMovies),
     ]);
   const sourceFetchElapsed = Date.now() - sourceFetchStart;
 
@@ -107,6 +109,19 @@ export async function aggregateRecommendations(params: {
     );
   } else {
     console.error("[Aggregator] Watchmode fetch failed:", watchmodeRecs.reason);
+  }
+
+  if (vectorRecs.status === "fulfilled") {
+    allRecs.push(...vectorRecs.value);
+    console.log(
+      "[Aggregator] Vector similarity recommendations:",
+      vectorRecs.value.length,
+    );
+  } else {
+    console.error(
+      "[Aggregator] Vector similarity fetch failed:",
+      vectorRecs.reason,
+    );
   }
 
   console.log(
@@ -363,7 +378,7 @@ function mergeRecommendations(
 
 // Number of actually implemented recommendation sources
 // Update this constant if TuiMDB or other sources are added/removed
-const ACTIVE_SOURCE_COUNT = 4; // tmdb, tastedive, trakt, watchmode
+const ACTIVE_SOURCE_COUNT = 5; // tmdb, tastedive, trakt, watchmode, vector-similarity
 
 /**
  * Calculate weighted score based on:
@@ -382,6 +397,7 @@ function calculateAggregateScore(
     trakt: 1.25, // Boosted - community-driven curation, quality signal
     tuimdb: 1.05, // Slight boost if implemented
     watchmode: 0.9, // Reduced - trending = generic, not personalized
+    "vector-similarity": 1.0, // Semantic similarity signal
   };
 
   /**
@@ -763,6 +779,62 @@ async function fetchWatchmodeTrending(): Promise<SourceRecommendation[]> {
     );
   } catch (error) {
     console.error("[Aggregator] Watchmode fetch error:", error);
+  }
+
+  return recommendations;
+}
+
+/**
+ * Fetch vector similarity recommendations for seed movies
+ * Uses server-side vector embeddings to find semantic neighbors
+ */
+async function fetchVectorSimilarityRecommendations(
+  seedMovies: Array<{ tmdbId: number; title: string }>,
+): Promise<SourceRecommendation[]> {
+  const recommendations: SourceRecommendation[] = [];
+
+  try {
+    const seeds = seedMovies.slice(0, 10);
+    const seedIds = seeds.map((s) => s.tmdbId).filter(Boolean);
+    if (seedIds.length === 0) return recommendations;
+
+    const baseUrl =
+      typeof window === "undefined"
+        ? process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
+        : typeof self !== "undefined" && self.location
+          ? self.location.origin
+          : "http://localhost:3000";
+
+    const response = await fetch(`${baseUrl}/api/vector-similarity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tmdbIds: seedIds, limit: 20 }),
+      cache: "no-store",
+    });
+
+    if (!response.ok) return recommendations;
+    const data = await response.json();
+    if (!data?.ok || !Array.isArray(data?.results)) return recommendations;
+
+    for (const rec of data.results) {
+      const tmdbId = Number(rec.tmdbId ?? rec.tmdb_id);
+      if (!tmdbId || seedIds.includes(tmdbId)) continue;
+
+      recommendations.push({
+        source: "vector-similarity",
+        tmdbId,
+        title: "",
+        confidence: 0.8,
+        reason: "Similar vibe (vector match)",
+      });
+    }
+
+    console.log("[Aggregator] Vector similarity fetched", {
+      seedCount: seedIds.length,
+      resultCount: recommendations.length,
+    });
+  } catch (error) {
+    console.error("[Aggregator] Vector similarity fetch error:", error);
   }
 
   return recommendations;
