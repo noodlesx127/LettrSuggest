@@ -32,3 +32,4 @@ create policy "Users can update their own pairwise events"
 create index if not exists pairwise_events_user_idx on pairwise_events (user_id);
 create index if not exists pairwise_events_created_idx on pairwise_events (created_at desc);
 create index if not exists pairwise_events_pair_idx on pairwise_events (winner_tmdb_id, loser_tmdb_id);
+;

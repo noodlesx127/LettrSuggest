@@ -48,4 +48,4 @@ comment on column user_feature_feedback.inferred_preference is 'Calculated prefe
 alter table suggestion_feedback 
 add column if not exists movie_features jsonb default '{}';
 
-comment on column suggestion_feedback.movie_features is 'Extracted features from the rejected/liked movie: {actors: [...], keywords: [...], collection: {...}, etc.}';
+comment on column suggestion_feedback.movie_features is 'Extracted features from the rejected/liked movie: {actors: [...], keywords: [...], collection: {...}, etc.}';;

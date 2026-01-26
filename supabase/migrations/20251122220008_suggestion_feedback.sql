@@ -6,23 +6,21 @@ create table if not exists suggestion_feedback (
   feedback_type text not null check (feedback_type in ('negative', 'positive')),
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
-
 -- Enable RLS
 alter table suggestion_feedback enable row level security;
-
 -- Policies
+drop policy if exists "Users can read their own feedback" on suggestion_feedback;
 create policy "Users can read their own feedback"
   on suggestion_feedback for select
   using (auth.uid() = user_id);
-
+drop policy if exists "Users can insert their own feedback" on suggestion_feedback;
 create policy "Users can insert their own feedback"
   on suggestion_feedback for insert
   with check (auth.uid() = user_id);
-
+drop policy if exists "Users can delete their own feedback" on suggestion_feedback;
 create policy "Users can delete their own feedback"
   on suggestion_feedback for delete
   using (auth.uid() = user_id);
-
 -- Index for faster lookups
 create index if not exists suggestion_feedback_user_id_idx on suggestion_feedback (user_id);
 create index if not exists suggestion_feedback_tmdb_id_idx on suggestion_feedback (tmdb_id);

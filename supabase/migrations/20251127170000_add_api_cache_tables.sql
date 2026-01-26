@@ -103,19 +103,23 @@ ALTER TABLE tastedive_cache ENABLE ROW LEVEL SECURITY;
 ALTER TABLE watchmode_cache ENABLE ROW LEVEL SECURITY;
 
 -- Create policies for public read access (cache is shared across all users)
+DROP POLICY IF EXISTS "Allow public read access to TasteDive cache" ON tastedive_cache;
 CREATE POLICY "Allow public read access to TasteDive cache"
     ON tastedive_cache FOR SELECT
     USING (true);
 
+DROP POLICY IF EXISTS "Allow public read access to Watchmode cache" ON watchmode_cache;
 CREATE POLICY "Allow public read access to Watchmode cache"
     ON watchmode_cache FOR SELECT
     USING (true);
 
 -- Create policies for service role write access (only backend can write)
+DROP POLICY IF EXISTS "Allow service role to insert/update TasteDive cache" ON tastedive_cache;
 CREATE POLICY "Allow service role to insert/update TasteDive cache"
     ON tastedive_cache FOR ALL
     USING (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "Allow service role to insert/update Watchmode cache" ON watchmode_cache;
 CREATE POLICY "Allow service role to insert/update Watchmode cache"
     ON watchmode_cache FOR ALL
     USING (auth.role() = 'service_role');
