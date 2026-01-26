@@ -1,5 +1,7 @@
--- Create an enriched diary view without conflicting with the base table.
--- Provides compatibility columns used by the taste profile system.
+-- Create an enriched diary view that works with film_diary_events VIEW
+-- NOTE: film_diary_events is a VIEW (from migration 20260125223141) that already
+-- joins film_events + film_tmdb_map, so we can SELECT directly from it
+-- Provides compatibility for taste profile system (user_id, tmdb_id, watched_at, rating)
 
 drop view if exists public.film_diary_events_enriched;
 
@@ -7,14 +9,11 @@ create view public.film_diary_events_enriched
 with (security_invoker = true)
 as
 select
-  e.user_id,
-  m.tmdb_id,
-  e.watched_date as watched_at,
-  e.rating
-from public.film_diary_events e
-left join public.film_tmdb_map m
-  on m.user_id = e.user_id
- and m.uri = e.uri;
+  user_id,
+  tmdb_id,
+  watched_at,
+  rating
+from public.film_diary_events;
 
 grant select on public.film_diary_events_enriched to authenticated;
 
