@@ -662,7 +662,7 @@ export default function GenreSuggestPage() {
         rating: f.rating,
         liked: f.liked,
       }));
-      const suggestions = await suggestByOverlap({
+      let suggestions = await suggestByOverlap({
         userId: uid,
         films: lite,
         mappings,
@@ -713,6 +713,50 @@ export default function GenreSuggestPage() {
         })(),
       });
 
+      const tieredSuggestions = (() => {
+        const tierBuckets = new Map<number, typeof suggestions>();
+        const maxScore = Math.max(
+          1,
+          ...suggestions.map((suggestion) => suggestion.score),
+        );
+        for (const suggestion of suggestions) {
+          const baseScore = Math.max(0, suggestion.score);
+          const similarityPercent = (baseScore / maxScore) * 100;
+          const tierKey = Math.floor(similarityPercent / 5);
+          const bucket = tierBuckets.get(tierKey) ?? [];
+          bucket.push(suggestion);
+          tierBuckets.set(tierKey, bucket);
+        }
+
+        const sortedTierKeys = Array.from(tierBuckets.keys()).sort(
+          (a, b) => b - a,
+        );
+
+        const randomized: typeof suggestions = [];
+        for (const tierKey of sortedTierKeys) {
+          const bucket = tierBuckets.get(tierKey);
+          if (!bucket || bucket.length === 0) continue;
+
+          bucket.sort((a, b) => b.score - a.score);
+          const anchorCount = Math.min(
+            bucket.length,
+            Math.ceil(bucket.length * 0.3),
+          );
+          const anchors = bucket.slice(0, anchorCount);
+          const shufflePool = bucket.slice(anchorCount);
+
+          for (let i = shufflePool.length - 1; i > 0; i -= 1) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shufflePool[i], shufflePool[j]] = [shufflePool[j], shufflePool[i]];
+          }
+
+          randomized.push(...anchors, ...shufflePool);
+        }
+
+        return randomized;
+      })();
+
+      suggestions = tieredSuggestions;
       console.log("[GenreSuggest] Suggestions scored:", suggestions.length);
 
       // Fetch full movie details

@@ -6588,25 +6588,34 @@ export async function suggestByOverlap(params: {
             (d) => d.decade === movieDecade,
           );
           if (matchedDecade) {
-            // Calculate boost based on decade preference weight (scaled down)
-            const decadeBoost = Math.min(matchedDecade.weight * 0.3, 2.0); // Cap at 2.0
-            score += decadeBoost;
-
-            // Calculate what percentage of their collection is from this era
             const totalDecadeWeight = params.enhancedProfile.topDecades.reduce(
               (sum, d) => sum + d.weight,
               0,
             );
-            const decadePercent = Math.round(
-              (matchedDecade.weight / totalDecadeWeight) * 100,
+            const userPreferenceFraction =
+              totalDecadeWeight > 0
+                ? matchedDecade.weight / totalDecadeWeight
+                : 0;
+            const decadeTargets: Record<number, number> = {
+              2020: 0.2,
+              2010: 0.3,
+              2000: 0.3,
+              1990: 0.12,
+              1980: 0.08,
+            };
+            const targetForDecade = decadeTargets[movieDecade] ?? 0;
+            const rawDecadeBoost = Math.max(
+              0,
+              (targetForDecade - userPreferenceFraction) * 2.0,
             );
+            const decadeBoost = Math.min(rawDecadeBoost, 0.8); // Cap at 0.8
+            score += decadeBoost;
 
-            reasons.push(
-              `From the ${movieDecade}s — matches your preference for this era (${decadePercent}% of your favorites)`,
-            );
-            console.log(
-              `[DecadeBoost] Boosted "${m.title}" (${year}) by ${decadeBoost.toFixed(2)} for ${movieDecade}s era preference`,
-            );
+            if (decadeBoost > 0.01) {
+              reasons.push(
+                `era diversity (${movieDecade}s boost: +${decadeBoost.toFixed(2)})`,
+              );
+            }
           }
         }
       }
