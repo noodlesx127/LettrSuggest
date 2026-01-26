@@ -108,26 +108,10 @@ CREATE POLICY "Users can delete own feature feedback"
 -- =============================================================================
 -- 3) film_diary_events_enriched - View with TMDB ID mapping for taste profile
 -- =============================================================================
+-- NOTE: This is handled by migration 20260125130000, so we skip it here to avoid conflicts
 
-DROP VIEW IF EXISTS public.film_diary_events_enriched CASCADE;
-
-CREATE VIEW public.film_diary_events_enriched
-WITH (security_invoker = true)
-AS
-SELECT
-  e.user_id,
-  m.tmdb_id,
-  e.watched_date AS watched_at,
-  e.rating
-FROM public.film_diary_events e
-LEFT JOIN public.film_tmdb_map m
-  ON m.user_id = e.user_id
- AND m.uri = e.uri;
-
-COMMENT ON VIEW public.film_diary_events_enriched IS
-'Enriched diary view joining film_diary_events with TMDB mappings for taste profile system';
-
-GRANT SELECT ON public.film_diary_events_enriched TO authenticated;
+-- Migration 20260125130000 already creates this view correctly
+-- Skipping to avoid duplicate creation
 
 
 -- =============================================================================
