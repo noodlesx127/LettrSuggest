@@ -29,10 +29,12 @@ create table if not exists suggestion_exposure_log (
 alter table suggestion_exposure_log enable row level security;
 
 -- Policies
+drop policy if exists "Users can view their own exposure logs" on suggestion_exposure_log;
 create policy "Users can view their own exposure logs"
   on suggestion_exposure_log for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can insert their own exposure logs" on suggestion_exposure_log;
 create policy "Users can insert their own exposure logs"
   on suggestion_exposure_log for insert
   with check (auth.uid() = user_id);
@@ -43,7 +45,4 @@ create index if not exists suggestion_exposure_log_tmdb_id_idx on suggestion_exp
 create index if not exists suggestion_exposure_log_user_tmdb_idx on suggestion_exposure_log (user_id, tmdb_id);
 create index if not exists suggestion_exposure_log_exposed_at_idx on suggestion_exposure_log (exposed_at desc);
 create index if not exists suggestion_exposure_log_category_idx on suggestion_exposure_log (category);
-create index if not exists suggestion_exposure_log_consensus_idx on suggestion_exposure_log (consensus_level);
-
--- Notify PostgREST to reload schema
-notify pgrst, 'reload schema';
+create index if not exists suggestion_exposure_log_consensus_idx on suggestion_exposure_log (consensus_level);;

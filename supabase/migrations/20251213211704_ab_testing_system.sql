@@ -83,7 +83,4 @@ create index if not exists ab_test_configs_dates_idx on ab_test_configs (start_d
 create index if not exists ab_test_assignments_user_idx on ab_test_assignments (user_id);
 create index if not exists ab_test_assignments_test_idx on ab_test_assignments (test_id);
 create index if not exists ab_test_metrics_test_variant_idx on ab_test_metrics (test_id, variant_name);
-create index if not exists ab_test_metrics_recorded_idx on ab_test_metrics (recorded_at desc);
-
--- Notify PostgREST to reload schema
-notify pgrst, 'reload schema';
+create index if not exists ab_test_metrics_recorded_idx on ab_test_metrics (recorded_at desc);;

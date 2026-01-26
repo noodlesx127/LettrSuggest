@@ -1,0 +1,191 @@
+================================================================================
+COMPLETE FILE REFERENCE MAP
+================================================================================
+
+TABLE 1: user_reason_preferences
+================================================================================
+
+MIGRATION FILES (Creating the table):
+  ✓ F:\Code\LettrSuggest\supabase\migrations\20251202000000_reason_type_tracking.sql (PRIMARY)
+  ⚠ F:\Code\LettrSuggest\supabase\migrations\20251203023053_reason_type_tracking.sql (DUPLICATE - identical)
+  - F:\Code\LettrSuggest\supabase\migrations\20251210051459_fix_function_search_path.sql (Related cleanup)
+
+CODE FILES (Using the table):
+  ✓ F:\Code\LettrSuggest\src\lib\enrich.ts
+    Line 472: SELECT success_count, total_count (read existing)
+    Line 487: UPSERT after negative feedback
+    Line 2290: SELECT success_count, total_count (read existing)
+    Line 2301: UPSERT after positive feedback
+    Line 2345: SELECT for reason type optimization
+    Line 5226: Reference in function
+
+  ✓ F:\Code\LettrSuggest\src\app\profile\page.tsx
+    Line 207: Data export - reasonPreferences: d.user_reason_preferences
+
+  ✓ F:\Code\LettrSuggest\supabase\delete_user_data.sql
+    Line 41: DELETE FROM public.user_reason_preferences WHERE user_id = target_user_id
+    Line 68: Tracking deleted count in response
+
+TOTAL REFERENCES: 9 (3 migrations + 6 code operations)
+
+================================================================================
+
+TABLE 2: user_feature_feedback
+================================================================================
+
+MIGRATION FILES (Creating the table):
+  ✓ F:\Code\LettrSuggest\supabase\migrations\20251203000000_feature_level_feedback.sql (v1)
+  ✓ F:\Code\LettrSuggest\supabase\migrations\20251203065343_feature_level_feedback.sql (v2)
+  ✓ F:\Code\LettrSuggest\supabase\migrations\20251205034639_ensure_feature_feedback_policies.sql (idempotent)
+  ✓ F:\Code\LettrSuggest\supabase\migrations\20251213020000_fix_feature_feedback_constraint.sql
+  ✓ F:\Code\LettrSuggest\supabase\migrations\20251213215036_fix_feature_feedback_constraint_proper_merge.sql
+  ✓ F:\Code\LettrSuggest\supabase\migrations\20260103000126_create_user_feature_feedback_table.sql (LATEST - RECOMMENDED)
+  ✓ F:\Code\LettrSuggest\supabase\migrations\20260103000212_fix_user_feature_feedback_duplicates_and_constraint.sql (CRITICAL FIX)
+
+  [Note: Multiple versions due to iterative development - migration 20260103000126 is the canonical latest]
+
+CODE FILES (Using the table):
+  ✓ F:\Code\LettrSuggest\src\lib\enrich.ts (13 references)
+    Line 519: SELECT positive_count, negative_count (read existing)
+    Line 539: UPSERT feature feedback after handling feedback
+    Line 1044: SELECT feature feedback data
+    Line 1059: UPSERT subgenre preferences
+    Line 1222: SELECT for learning analysis
+    Line 1409: SELECT actor preferences
+    Line 1477: SELECT keyword preferences
+    Line 1496: UPSERT after processing
+    Line 1690: SELECT for analysis
+    Line 1706: UPSERT with Bayesian calculation
+    Line 1747: Reference in feature extraction
+    Line 1933: Reference in learning function
+    Line 4375: Reference in extraction logic
+
+  ✓ F:\Code\LettrSuggest\src\lib\quizLearning.ts (6 references)
+    Line 597: SELECT feature feedback
+    Line 714: Reference in learning context
+    Line 1095: SELECT with feature type filter
+    Line 1108: UPSERT subgenre preference (updateSubgenrePreference)
+    Line 1142: SELECT before updating
+    Line 1155: UPSERT actor preference (updateActorPreference)
+
+TOTAL REFERENCES: 19 (7 migrations + 13 code operations)
+
+================================================================================
+
+MIGRATION DEPENDENCY CHAIN
+================================================================================
+
+For user_reason_preferences:
+  1. 20251202000000_reason_type_tracking.sql          [CREATE TABLE]
+     └─ Adds reason_types column to suggestion_feedback
+     └─ Creates user_reason_preferences table
+     └─ Enables RLS
+     └─ Creates indexes
+     └─ Creates policies (read, update, insert)
+
+  2. 20251210051459_fix_function_search_path.sql     [Related cleanup]
+     └─ Modifies delete_user_data function
+     └─ Updates to handle user_reason_preferences deletion
+
+For user_feature_feedback (CRITICAL - apply in this order):
+  1. 20251203000000_feature_level_feedback.sql       [v1 - CREATE TABLE]
+  2. 20251203065343_feature_level_feedback.sql       [v2 - updated schema]
+  3. 20251205034639_ensure_feature_feedback_policies.sql [idempotent]
+  4. 20260103000126_create_user_feature_feedback_table.sql [LATEST - final schema]
+     └─ Uses UPPERCASE SQL (standard)
+     └─ Defines final schema with BIGINT feature_id
+     └─ Includes all indexes and policies
+     
+  5. 20260103000212_fix_user_feature_feedback_duplicates_and_constraint.sql [CRITICAL]
+     └─ Removes duplicate rows (user_id, feature_type, feature_id)
+     └─ Drops incorrect unique constraint
+     └─ Adds correct unique constraint
+     └─ Makes feature_name nullable
+     └─ MUST be applied after #4
+
+================================================================================
+
+KEY OPERATIONS BY PATTERN
+================================================================================
+
+UPSERT Operations (writing data):
+  Pattern: .from('table').upsert({...}, { onConflict: 'columns' })
+  
+  user_reason_preferences upserts:
+    - enrich.ts line 487: onConflict: "user_id,reason_type"
+    - enrich.ts line 2301: onConflict: "user_id,reason_type"
+  
+  user_feature_feedback upserts:
+    - enrich.ts line 539: onConflict: "user_id,feature_type,feature_id"
+    - enrich.ts line 1059: onConflict: "user_id,feature_type,feature_id"
+    - enrich.ts line 1496: onConflict: "user_id,feature_type,feature_id"
+    - enrich.ts line 1706: onConflict: "user_id,feature_type,feature_id"
+    - quizLearning.ts line 1109: onConflict: 'user_id,feature_type,feature_id'
+    - quizLearning.ts line 1155+: onConflict: 'user_id,feature_type,feature_id'
+
+SELECT Operations (reading data):
+  - enrich.ts: Line 472, 519, 1044, 1222, 1409, 1477, 1690
+  - quizLearning.ts: Line 597, 1095, 1142
+
+DELETE Operations:
+  - delete_user_data.sql: Lines 41 (user_reason_preferences) + 68 (tracking)
+
+================================================================================
+
+FEATURE_TYPE VALUES EXPECTED IN CODE
+================================================================================
+
+user_feature_feedback.feature_type valid values:
+  'actor'      - Individual actors (TMDB person_id)
+  'keyword'    - Keywords/themes
+  'genre'      - TMDB genres
+  'subgenre'   - App-detected subgenres
+  'director'   - Individual directors
+  'decade'     - Decade of film
+  'collection' - Collection IDs
+  'era'        - Historical era
+
+user_reason_preferences.reason_type valid values:
+  'director'   - Director match
+  'genre'      - Genre match
+  'actor'      - Actor match
+  'keyword'    - Keyword match
+  'studio'     - Studio match
+  'collection' - Collection match
+  'decade'     - Decade match
+  'theme'      - Theme match
+  'recent'     - Recent suggestion
+
+================================================================================
+
+SCHEMA VERIFICATION COMMANDS
+================================================================================
+
+Check if tables exist:
+  SELECT EXISTS (SELECT 1 FROM information_schema.tables 
+                 WHERE table_name = 'user_reason_preferences');
+  
+  SELECT EXISTS (SELECT 1 FROM information_schema.tables 
+                 WHERE table_name = 'user_feature_feedback');
+
+Check table structure:
+  \d+ user_reason_preferences
+  \d+ user_feature_feedback
+
+Check RLS policies:
+  SELECT * FROM pg_policies 
+  WHERE tablename = 'user_reason_preferences';
+  
+  SELECT * FROM pg_policies 
+  WHERE tablename = 'user_feature_feedback';
+
+Check constraints:
+  SELECT constraint_name, constraint_type 
+  FROM information_schema.table_constraints 
+  WHERE table_name = 'user_feature_feedback';
+
+Check indexes:
+  SELECT indexname FROM pg_indexes 
+  WHERE tablename = 'user_feature_feedback';
+
+===================

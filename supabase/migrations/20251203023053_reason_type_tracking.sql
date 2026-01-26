@@ -42,4 +42,4 @@ create index if not exists user_reason_preferences_type_idx on user_reason_prefe
 
 -- Comment
 comment on table user_reason_preferences is 'Tracks which recommendation reason types (director match, genre match, etc.) work best for each user based on their feedback';
-comment on column suggestion_feedback.reason_types is 'Array of reason types that led to this suggestion (e.g., director, genre, actor)';
+comment on column suggestion_feedback.reason_types is 'Array of reason types that led to this suggestion (e.g., director, genre, actor)';;

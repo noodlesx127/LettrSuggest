@@ -14,28 +14,25 @@ create table if not exists user_adjacent_preferences (
   last_updated timestamp with time zone default timezone('utc'::text, now()) not null,
   unique(user_id, from_genre_id, to_genre_id)
 );
-
 -- Enable RLS
 alter table user_adjacent_preferences enable row level security;
-
 -- Policies
+drop policy if exists "Users can view own adjacent preferences" on user_adjacent_preferences;
 create policy "Users can view own adjacent preferences"
   on user_adjacent_preferences for select
   using (auth.uid() = user_id);
-
+drop policy if exists "Users can insert own adjacent preferences" on user_adjacent_preferences;
 create policy "Users can insert own adjacent preferences"
   on user_adjacent_preferences for insert
   with check (auth.uid() = user_id);
-
+drop policy if exists "Users can update own adjacent preferences" on user_adjacent_preferences;
 create policy "Users can update own adjacent preferences"
   on user_adjacent_preferences for update
   using (auth.uid() = user_id);
-
 -- Indexes for faster lookups
 create index if not exists user_adjacent_preferences_user_id_idx on user_adjacent_preferences (user_id);
 create index if not exists user_adjacent_preferences_from_genre_idx on user_adjacent_preferences (user_id, from_genre_id);
 create index if not exists user_adjacent_preferences_success_idx on user_adjacent_preferences (user_id, success_rate desc);
-
 -- Comments
 comment on table user_adjacent_preferences is 'Learns which adjacent genre transitions work best for each user';
 comment on column user_adjacent_preferences.from_genre_id is 'Genre ID the user already likes';
