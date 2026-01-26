@@ -127,7 +127,7 @@ ALTER TABLE IF EXISTS public.suggestion_feedback
 
 -- Fix INSERT policy to allow authenticated users
 DROP POLICY IF EXISTS "Users can insert their own feedback" ON public.suggestion_feedback;
-CREATE POLICY IF NOT EXISTS "Users can insert their own feedback"
+CREATE POLICY "Users can insert their own feedback"
   ON public.suggestion_feedback
   FOR INSERT
   TO authenticated
@@ -135,7 +135,7 @@ CREATE POLICY IF NOT EXISTS "Users can insert their own feedback"
 
 -- Ensure other policies exist
 DROP POLICY IF EXISTS "Users can read their own feedback" ON public.suggestion_feedback;
-CREATE POLICY IF NOT EXISTS "Users can read their own feedback"
+CREATE POLICY "Users can read their own feedback"
   ON public.suggestion_feedback
   FOR SELECT
   TO authenticated
