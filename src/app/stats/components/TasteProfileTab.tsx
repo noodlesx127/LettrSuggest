@@ -83,6 +83,15 @@ export default function TasteProfileTab({
     return buildWeightedTags(tasteProfile.topKeywords, 30);
   }, [tasteProfile]);
 
+  const subgenreTags = useMemo(() => {
+    if (!tasteProfile?.topKeywords?.length || !tasteProfile?.preferredSubgenreKeywordIds?.length) return [];
+
+    const subgenreIds = new Set(tasteProfile.preferredSubgenreKeywordIds);
+    const subgenres = tasteProfile.topKeywords.filter(k => subgenreIds.has(k.id));
+
+    return buildWeightedTags(subgenres, 20);
+  }, [tasteProfile]);
+
   const directorPeople = useMemo<Person[]>(() => {
     if (!tasteProfile?.topDirectors?.length) return [];
     return [...tasteProfile.topDirectors]
@@ -273,6 +282,20 @@ export default function TasteProfileTab({
       </SectionCard>
 
       <SectionCard
+        title="Top Subgenres"
+        subtitle="Your niche favorite topics"
+        icon={<Icon name="bookmark" />}
+      >
+        {subgenreTags.length > 0 ? (
+          <TagCloud tags={subgenreTags} maxTags={20} variant="solid" />
+        ) : (
+          <Body className="text-gray-500">
+            Niche subgenre insights will appear as you rate more movies.
+          </Body>
+        )}
+      </SectionCard>
+
+      <SectionCard
         title="Favorite Directors"
         subtitle="Weighted by ratings and repeat watches"
         icon={<Icon name="user" />}
@@ -431,12 +454,12 @@ export default function TasteProfileTab({
                   change={
                     runtimeStats.totalFilms > 0
                       ? {
-                          value: Math.round(
-                            (count / runtimeStats.totalFilms) * 100,
-                          ),
-                          trend: "neutral",
-                          label: "%",
-                        }
+                        value: Math.round(
+                          (count / runtimeStats.totalFilms) * 100,
+                        ),
+                        trend: "neutral",
+                        label: "%",
+                      }
                       : undefined
                   }
                 />

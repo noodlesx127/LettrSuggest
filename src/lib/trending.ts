@@ -844,7 +844,7 @@ export async function generateSmartCandidates(profile: {
   topStudios?: Array<{ id: number; name: string; weight: number }>;
   topDecades?: Array<{ decade: number; weight: number }>;
   excludeYearRange?: { min?: number; max?: number };
-  tmdbDetailsMap?: Map<number, { title?: string; imdb_id?: string }>;
+  tmdbDetailsMap?: Map<number, any>;
   // Issue #7: TuiMDB niche genre preferences
   nichePreferences?: {
     likesAnime: boolean;
@@ -952,6 +952,28 @@ export async function generateSmartCandidates(profile: {
       addSeedIds(shuffledHighlyRated.slice(0, maxHighlyRated), 1.0); // Past preferences
       addSeedIds(shuffledWatchlist.slice(0, maxWatchlist), 1.0); // Intent signals
       addSeedIds(shuffledSaved.slice(0, maxSaved), 1.5); // High-intent saved suggestions
+
+      // NEW: Extract highly rated films that match the user's preferred subgenres
+      if (profile.preferredSubgenreKeywordIds && profile.preferredSubgenreKeywordIds.length > 0) {
+        const subgenreSeeds: number[] = [];
+        for (const tmdbId of profile.highlyRatedIds) {
+          const details = profile.tmdbDetailsMap?.get(tmdbId);
+          if (details?.keywords) {
+            const ks = (details.keywords as any)?.keywords || (details.keywords as any)?.results || [];
+            if (ks.some((k: any) => profile.preferredSubgenreKeywordIds!.includes(k.id))) {
+              subgenreSeeds.push(tmdbId);
+            }
+          }
+        }
+        if (subgenreSeeds.length > 0) {
+          const shuffledSubgenreSeeds = subgenreSeeds.sort(() => Math.random() - 0.5);
+          // High weight (1.8) to heavily bias aggregator results towards subgenre taste
+          addSeedIds(shuffledSubgenreSeeds.slice(0, Math.min(10, subgenreSeeds.length)), 1.8);
+          if (process.env.NODE_ENV === "development") {
+            console.log("[SmartCandidates] Added subgenre seeds:", shuffledSubgenreSeeds.slice(0, 10));
+          }
+        }
+      }
 
       const uniqueSeedIds = Array.from(seedWeights.entries())
         .map(([tmdbId, meta]) => ({ tmdbId, ...meta }))
