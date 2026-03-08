@@ -250,40 +250,29 @@ export default function StatsOverview({
           title="Algorithm Baseline"
           subtitle="The baseline metrics used to weigh and normalize your preferences"
         >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
-              <Body className="text-sm font-semibold text-gray-900">
-                True Average Rating
-              </Body>
-              <Body className="text-xl font-semibold text-gray-900">
-                {tasteProfile.userStats.avgRating.toFixed(2)}★
-              </Body>
-              <Body className="text-xs text-gray-500">
-                Your historical center point. Films above this are weighed progressively higher.
-              </Body>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
-              <Body className="text-sm font-semibold text-gray-900">
-                Rating Variance (Standard Dev)
-              </Body>
-              <Body className="text-xl font-semibold text-gray-900">
-                ±{tasteProfile.userStats.stdDevRating.toFixed(2)}★
-              </Body>
-              <Body className="text-xs text-gray-500">
-                How wildly your ratings swing. Used to detect true standouts.
-              </Body>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
-              <Body className="text-sm font-semibold text-gray-900">
-                Rewatch Rate
-              </Body>
-              <Body className="text-xl font-semibold text-gray-900">
-                {formatPercent(tasteProfile.userStats.rewatchRate * 100)}
-              </Body>
-              <Body className="text-xs text-gray-500">
-                Rewatches apply a strong 1.8x multiplier to a film&apos;s attributes.
-              </Body>
-            </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatCard
+              title="True Average Rating"
+              value={`${tasteProfile.userStats.avgRating.toFixed(2)}★`}
+              icon="star"
+              change={{
+                value: 0,
+                trend: "neutral",
+                label: "baseline",
+              }}
+            />
+            <StatCard
+              title="Rating Variance"
+              value={`±${tasteProfile.userStats.stdDevRating.toFixed(2)}★`}
+              icon="arrow-up"
+              variant="subtle"
+            />
+            <StatCard
+              title="Rewatch Rate"
+              value={formatPercent(tasteProfile.userStats.rewatchRate * 100)}
+              icon="refresh"
+              variant="subtle"
+            />
           </div>
         </SectionCard>
       )}
