@@ -92,6 +92,48 @@ export default function TasteProfileTab({
     return buildWeightedTags(subgenres, 20);
   }, [tasteProfile]);
 
+  const countryTags = useMemo(() => {
+    if (!tasteProfile?.topCountries?.length) return [];
+    return buildWeightedTags(tasteProfile.topCountries.map(c => ({ name: c.name, weight: c.count, count: c.count })), 15);
+  }, [tasteProfile]);
+
+  const languageTags = useMemo(() => {
+    if (!tasteProfile?.topLanguages?.length) return [];
+    // Filter out English if it's the dominant language to highlight true worldly tastes
+    const isEnDominant = tasteProfile.topLanguages[0]?.name === "English";
+    const langs = isEnDominant ? tasteProfile.topLanguages.slice(1) : tasteProfile.topLanguages;
+    return buildWeightedTags(langs.map(l => ({ name: l.name, weight: l.count, count: l.count })), 10);
+  }, [tasteProfile]);
+
+  const MixedSignalBadges = ({ items, type }: { items: Array<{ name: string; liked: number; disliked: number }>, type: string }) => {
+    if (!items || items.length === 0) return null;
+
+    // Only show interesting mixed signals where they both liked and disliked a decent amount
+    const significant = items
+      .filter(i => i.liked >= 2 && i.disliked >= 2)
+      .sort((a, b) => (b.liked + b.disliked) - (a.liked + a.disliked))
+      .slice(0, 8);
+
+    if (significant.length === 0) return null;
+
+    return (
+      <div className="flex flex-wrap gap-2 mt-3">
+        {significant.map(item => {
+          const total = item.liked + item.disliked;
+          const likePct = Math.round((item.liked / total) * 100);
+          return (
+            <div key={item.name} className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs">
+              <span className="font-semibold text-gray-700">{item.name}</span>
+              <span className="text-gray-400">|</span>
+              <span className="text-green-600 font-medium" title={`${item.liked} liked`}>{likePct}% ♥</span>
+              <span className="text-red-500 font-medium" title={`${item.disliked} disliked`}>{100 - likePct}% 👎</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const directorPeople = useMemo<Person[]>(() => {
     if (!tasteProfile?.topDirectors?.length) return [];
     return [...tasteProfile.topDirectors]
@@ -272,13 +314,21 @@ export default function TasteProfileTab({
         subtitle="Your strongest genre signals"
         icon={<Icon name="film" />}
       >
-        {genreTags.length > 0 ? (
-          <TagCloud tags={genreTags} maxTags={20} variant="gradient" />
-        ) : (
-          <Body className="text-gray-500">
-            Genre insights will appear once TMDB enrichment finishes.
-          </Body>
-        )}
+        <div className="space-y-4">
+          {genreTags.length > 0 ? (
+            <TagCloud tags={genreTags} maxTags={20} variant="gradient" />
+          ) : (
+            <Body className="text-gray-500">
+              Genre insights will appear once TMDB enrichment finishes.
+            </Body>
+          )}
+          {tasteProfile?.mixedGenres && tasteProfile.mixedGenres.length > 0 && (
+            <div>
+              <Body className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Mixed Signals</Body>
+              <MixedSignalBadges items={tasteProfile.mixedGenres} type="genre" />
+            </div>
+          )}
+        </div>
       </SectionCard>
 
       <SectionCard
@@ -300,15 +350,23 @@ export default function TasteProfileTab({
         subtitle="Weighted by ratings and repeat watches"
         icon={<Icon name="user" />}
       >
-        {directorPeople.length > 0 ? (
-          <PersonGrid
-            people={directorPeople}
-            variant="detailed"
-            maxPeople={12}
-          />
-        ) : (
-          <Body className="text-gray-500">No director preferences yet.</Body>
-        )}
+        <div className="space-y-4">
+          {directorPeople.length > 0 ? (
+            <PersonGrid
+              people={directorPeople}
+              variant="detailed"
+              maxPeople={12}
+            />
+          ) : (
+            <Body className="text-gray-500">No director preferences yet.</Body>
+          )}
+          {tasteProfile?.mixedDirectors && tasteProfile.mixedDirectors.length > 0 && (
+            <div>
+              <Body className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Mixed Signals</Body>
+              <MixedSignalBadges items={tasteProfile.mixedDirectors} type="director" />
+            </div>
+          )}
+        </div>
       </SectionCard>
 
       <SectionCard
@@ -328,12 +386,82 @@ export default function TasteProfileTab({
         subtitle="Narrative elements that resonate most"
         icon={<Icon name="star" />}
       >
-        {keywordTags.length > 0 ? (
-          <TagCloud tags={keywordTags} maxTags={30} variant="gradient" />
-        ) : (
-          <Body className="text-gray-500">No keyword signals yet.</Body>
-        )}
+        <div className="space-y-4">
+          {keywordTags.length > 0 ? (
+            <TagCloud tags={keywordTags} maxTags={30} variant="gradient" />
+          ) : (
+            <Body className="text-gray-500">No keyword signals yet.</Body>
+          )}
+          {tasteProfile?.mixedKeywords && tasteProfile.mixedKeywords.length > 0 && (
+            <div>
+              <Body className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Mixed Signals</Body>
+              <MixedSignalBadges items={tasteProfile.mixedKeywords} type="keyword" />
+            </div>
+          )}
+        </div>
       </SectionCard>
+
+      <SectionCard
+        title="Global Reach"
+        subtitle="World cinema and language exposure"
+        icon={<Icon name="film" />}
+      >
+        <div className="grid gap-8 md:grid-cols-2">
+          <div className="space-y-3">
+            <Body className="text-sm font-semibold text-gray-900">Top Countries</Body>
+            {countryTags.length > 0 ? (
+              <TagCloud tags={countryTags} maxTags={15} variant="solid" />
+            ) : (
+              <Body className="text-sm text-gray-500">No country data available.</Body>
+            )}
+          </div>
+          <div className="space-y-3">
+            <Body className="text-sm font-semibold text-gray-900">Foreign Languages</Body>
+            {languageTags.length > 0 ? (
+              <TagCloud tags={languageTags} maxTags={10} variant="solid" />
+            ) : (
+              <Body className="text-sm text-gray-500">Mostly native language content watched.</Body>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+
+      {tasteProfile?.nichePreferences && (
+        <SectionCard
+          title="Niche Interests"
+          subtitle="Specific formatting or genre structures you enjoy"
+          icon={<Icon name="star" />}
+        >
+          <div className="flex flex-wrap gap-3">
+            {tasteProfile.nichePreferences.likesAnime && (
+              <div className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700">
+                <Icon name="star" className="h-4 w-4" /> Anime Content
+              </div>
+            )}
+            {tasteProfile.nichePreferences.likesStandUp && (
+              <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                <Icon name="user" className="h-4 w-4" /> Stand-up Comedy
+              </div>
+            )}
+            {tasteProfile.nichePreferences.likesFoodDocs && (
+              <div className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
+                <Icon name="heart" className="h-4 w-4" /> Culinary Docs
+              </div>
+            )}
+            {tasteProfile.nichePreferences.likesTravelDocs && (
+              <div className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700">
+                <Icon name="search" className="h-4 w-4" /> Travel Docs
+              </div>
+            )}
+            {!tasteProfile.nichePreferences.likesAnime &&
+              !tasteProfile.nichePreferences.likesStandUp &&
+              !tasteProfile.nichePreferences.likesFoodDocs &&
+              !tasteProfile.nichePreferences.likesTravelDocs && (
+                <Body className="text-sm text-gray-500">No strong niche signals detected yet.</Body>
+              )}
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard
         title="Production Companies"
