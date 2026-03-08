@@ -4933,6 +4933,7 @@ export async function suggestByOverlap(params: {
     watchlistGenres?: string[];
     watchlistKeywords?: string[];
     watchlistDirectors?: string[];
+    preferredSubgenreKeywordIds?: number[];
   };
   // Recent exposures for repeat penalty (Map of tmdbId -> days since exposure)
   recentExposures?: Map<number, number>;
@@ -6436,6 +6437,19 @@ export async function suggestByOverlap(params: {
 
         if (kHits.some((k) => watchlistKeywordSet.has(k))) {
           reasons.push("On your watchlist: themes you saved");
+        }
+
+        // Check for preferred subgenres using keyword IDs directly from the TMDBMovie object
+        const preferredSubgenres = params.enhancedProfile?.preferredSubgenreKeywordIds || [];
+        if (preferredSubgenres.length > 0) {
+          const tmdbKeywords = (m.keywords as any)?.keywords || (m.keywords as any)?.results || [];
+          const matchedSubgenres = tmdbKeywords.filter((k: any) => preferredSubgenres.includes(k.id));
+          if (matchedSubgenres.length > 0) {
+            const subgenreNames = matchedSubgenres.map((k: any) => k.name);
+            reasons.push(
+              `Matches your favorite niche subgenres: ${subgenreNames.slice(0, 3).join(", ")}`
+            );
+          }
         }
       }
 

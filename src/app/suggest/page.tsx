@@ -143,6 +143,7 @@ type CategorizedSuggestions = {
   quickWatches: MovieItem[];
   epicFilms: MovieItem[];
   criticallyAcclaimed: MovieItem[];
+  nicheMatches: MovieItem[];
   moreRecommendations: MovieItem[];
 };
 
@@ -175,12 +176,14 @@ const ALL_SECTION_KEYS: SectionKey[] = [
   "quickWatches",
   "epicFilms",
   "criticallyAcclaimed",
+  "nicheMatches",
   "moreRecommendations",
 ];
 
 const ALWAYS_VISIBLE_SECTIONS: SectionKey[] = [
   "watchlistPicks",
   "perfectMatches",
+  "nicheMatches",
   "recentWatchMatches",
   "seasonalPicks",
   "multiSourceConsensus",
@@ -810,6 +813,12 @@ export default function SuggestPage() {
         SECTION_ITEM_LIMIT,
       );
 
+      // 17.5. Niche Matches (Subgenres)
+      const nicheMatches = getNextItems(
+        (item) => item.reasons.some(r => r.toLowerCase().includes("niche") || r.toLowerCase().includes("subgenre")),
+        SECTION_ITEM_LIMIT,
+      );
+
       // 18. Deep Cuts: Films with specific theme/keyword matches
       const deepCuts = getNextItems(
         (item) => hasDeepCutThemes(item.reasons),
@@ -914,6 +923,7 @@ export default function SuggestPage() {
         quickWatches: sortByRating(quickWatches),
         epicFilms: sortByRating(epicFilms),
         criticallyAcclaimed: sortByRating(criticallyAcclaimed),
+        nicheMatches: sortByRating(nicheMatches),
         moreRecommendations: sortByRating(moreRecommendations),
       };
     },
@@ -2695,6 +2705,7 @@ export default function SuggestPage() {
             watchlistDirectors: tasteProfile.watchlistDirectors?.map(
               (w) => w.name,
             ),
+            preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
           },
           featureFeedback,
         });
@@ -2931,6 +2942,7 @@ export default function SuggestPage() {
             watchlistDirectors: tasteProfile.watchlistDirectors?.map(
               (w) => w.name,
             ),
+            preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
           },
           featureFeedback,
         });
