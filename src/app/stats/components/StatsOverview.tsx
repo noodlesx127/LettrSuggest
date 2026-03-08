@@ -101,11 +101,11 @@ export default function StatsOverview({
     const spanDays =
       latestDate && earliestDate
         ? Math.max(
-            1,
-            Math.round(
-              (latestDate.getTime() - earliestDate.getTime()) / DAY_MS,
-            ),
-          )
+          1,
+          Math.round(
+            (latestDate.getTime() - earliestDate.getTime()) / DAY_MS,
+          ),
+        )
         : null;
 
     const watchesPerMonth =
@@ -212,10 +212,10 @@ export default function StatsOverview({
           change={
             overviewMetrics.rewatchEntries > 0
               ? {
-                  value: overviewMetrics.rewatchEntries,
-                  trend: "neutral",
-                  label: "rewatches",
-                }
+                value: overviewMetrics.rewatchEntries,
+                trend: "neutral",
+                label: "rewatches",
+              }
               : undefined
           }
         />
@@ -230,10 +230,10 @@ export default function StatsOverview({
           change={
             overviewMetrics.ratedFilms > 0
               ? {
-                  value: overviewMetrics.ratedPercent,
-                  trend: "neutral",
-                  label: "rated",
-                }
+                value: overviewMetrics.ratedPercent,
+                trend: "neutral",
+                label: "rated",
+              }
               : undefined
           }
         />
@@ -244,6 +244,91 @@ export default function StatsOverview({
           variant="subtle"
         />
       </div>
+
+      {tasteProfile && tasteProfile.userStats && (
+        <SectionCard
+          title="Algorithm Baseline"
+          subtitle="The baseline metrics used to weigh and normalize your preferences"
+        >
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+              <Body className="text-sm font-semibold text-gray-900">
+                True Average Rating
+              </Body>
+              <Body className="text-xl font-semibold text-gray-900">
+                {tasteProfile.userStats.avgRating.toFixed(2)}★
+              </Body>
+              <Body className="text-xs text-gray-500">
+                Your historical center point. Films above this are weighed progressively higher.
+              </Body>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+              <Body className="text-sm font-semibold text-gray-900">
+                Rating Variance (Standard Dev)
+              </Body>
+              <Body className="text-xl font-semibold text-gray-900">
+                ±{tasteProfile.userStats.stdDevRating.toFixed(2)}★
+              </Body>
+              <Body className="text-xs text-gray-500">
+                How wildly your ratings swing. Used to detect true standouts.
+              </Body>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+              <Body className="text-sm font-semibold text-gray-900">
+                Rewatch Rate
+              </Body>
+              <Body className="text-xl font-semibold text-gray-900">
+                {formatPercent(tasteProfile.userStats.rewatchRate * 100)}
+              </Body>
+              <Body className="text-xs text-gray-500">
+                Rewatches apply a strong 1.8x multiplier to a film&apos;s attributes.
+              </Body>
+            </div>
+          </div>
+        </SectionCard>
+      )}
+
+      {tasteProfile && tasteProfile.tasteBins && (
+        <SectionCard
+          title="Taste Breakdown"
+          subtitle="How your positive signals are distributed"
+        >
+          <div className="space-y-4 max-w-2xl">
+            <ProgressBar
+              label={`Absolute Favorites (4.5★ - 5.0★)`}
+              value={tasteProfile.tasteBins.absoluteFavorites}
+              max={overviewMetrics.totalFilms || 1}
+              showPercentage
+              variant="success"
+              size="md"
+            />
+            <ProgressBar
+              label={`Highly Rated (3.5★ - 4.0★)`}
+              value={tasteProfile.tasteBins.highlyRated}
+              max={overviewMetrics.totalFilms || 1}
+              showPercentage
+              variant="default"
+              size="md"
+            />
+            <ProgressBar
+              label={`Liked (3.0★ or ♥ without top rating)`}
+              value={tasteProfile.tasteBins.liked}
+              max={overviewMetrics.totalFilms || 1}
+              showPercentage
+              variant="warning"
+              size="md"
+            />
+            <ProgressBar
+              label={`Guilty Pleasures (≤2.5★ but ♥)`}
+              value={tasteProfile.tasteBins.guiltyPleasures}
+              max={overviewMetrics.totalFilms || 1}
+              showPercentage
+              variant="danger"
+              size="md"
+            />
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard
         title="Data Coverage"
