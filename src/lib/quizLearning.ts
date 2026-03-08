@@ -1574,16 +1574,19 @@ export async function seedPreferencesFromHistory(
         // Very high rating (4.5-5)
         if (hasRating && rating >= 4.5) return { pos: 3, neg: 0 };
 
-        // Good rating (3.5-4.5) or liked
+        // Good rating (3.5-4) or liked
         if ((hasRating && rating >= 3.5) || film.liked) return { pos: 2, neg: 0 };
 
         // Average (3)
         if (hasRating && rating >= 3) return { pos: 1, neg: 0 };
 
-        // Low rating (1.5-2.5)
-        if (hasRating && rating >= 1.5) return { pos: 0, neg: 2 };
+        // Neutral/Meh (2-2.5)
+        if (hasRating && rating >= 2) return { pos: 0, neg: 0 };
 
-        // Very low rating (0.5-1)
+        // Low rating (1-1.5)
+        if (hasRating && rating >= 1) return { pos: 0, neg: 2 };
+
+        // Very low rating (0.5)
         if (hasRating && rating >= 0.5) return { pos: 0, neg: 3 };
 
         // No rating, no like - neutral, skip
