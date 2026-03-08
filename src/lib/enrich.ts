@@ -406,28 +406,34 @@ type FeedbackRow = {
 
 async function buildFeatureUpdates(
   features: MovieFeatures,
-): Promise<Array<{ type: FeatureType; id: number; name: string }>> {
-  const updates: Array<{ type: FeatureType; id: number; name: string }> = [];
+): Promise<Array<{ type: string; id: number; name: string }>> {
+  const updates: Array<{ type: string; id: number; name: string }> = [];
+
+  // Match updateFeaturePreferences logic exactly
   features.actors
     .slice(0, 3)
     .forEach((actor) =>
       updates.push({ type: "actor", id: actor.id, name: actor.name }),
     );
+
   features.keywords
-    .slice(0, 8)
+    .slice(0, 10)
     .forEach((keyword) =>
       updates.push({ type: "keyword", id: keyword.id, name: keyword.name }),
     );
+
   features.directors
-    .slice(0, 1)
+    .slice(0, 2)
     .forEach((director) =>
       updates.push({ type: "director", id: director.id, name: director.name }),
     );
+
   features.genres
-    .slice(0, 3)
+    .slice(0, 5)
     .forEach((genre) =>
       updates.push({ type: "genre", id: genre.id, name: genre.name }),
     );
+
   if (features.collection) {
     updates.push({
       type: "collection",
@@ -435,6 +441,19 @@ async function buildFeatureUpdates(
       name: features.collection.name,
     });
   }
+
+  if (features.subgenres && features.subgenres.length > 0) {
+    features.subgenres
+      .slice(0, 5)
+      .forEach((subgenre) => {
+        updates.push({
+          type: "subgenre",
+          id: subgenre.id,
+          name: subgenre.key,
+        });
+      });
+  }
+
   return updates;
 }
 
@@ -534,7 +553,8 @@ async function clearSuggestionFeedback(
           ? Math.max(0, negativeRaw - 1)
           : negativeRaw;
       const total = positive + negative;
-      const inferredPreference = total > 0 ? positive / total : 0.5;
+      // Bayesian win rate with a neutral prior (Laplace smoothing) to match updateFeaturePreferences
+      const inferredPreference = (positive + 1) / (total + 2);
 
       await supabase.from("user_feature_feedback").upsert(
         {
