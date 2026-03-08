@@ -160,7 +160,12 @@ export function scoreSignatureFilm(
   }
 
   // 3. Genre alignment (up to 1.5 points)
-  const topGenreIds = new Set(profile.topGenres.slice(0, 5).map((g) => g.id));
+  const topGenreIds = new Set(
+    [...profile.topGenres]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 5)
+      .map((g) => g.id),
+  );
   const filmGenres = film.genreIds || [];
   const matchingGenres = filmGenres.filter((gid) => topGenreIds.has(gid));
 
@@ -934,9 +939,19 @@ export async function generateSmartCandidates(profile: {
         }
       };
 
-      addSeedIds(profile.highlyRatedIds.slice(0, 20), 1.0); // Past preferences
-      addSeedIds(profile.watchlistIds?.slice(0, 10) ?? [], 1.0); // Intent signals
-      addSeedIds(savedSuggestionIds, 1.5); // High-intent saved suggestions
+      // Dynamically scale secondary seed limits based on available pool size
+      const maxWatchlist = profile.watchlistIds ? Math.min(Math.max(5, Math.floor(profile.watchlistIds.length * 0.15)), 25) : 10;
+      const maxSaved = savedSuggestionIds ? Math.min(Math.max(5, Math.floor(savedSuggestionIds.length * 0.15)), 25) : 10;
+      const maxHighlyRated = profile.highlyRatedIds ? Math.min(Math.max(10, Math.floor(profile.highlyRatedIds.length * 0.15)), 40) : 20;
+
+      // Shuffle lists before slicing to guarantee APIs get diverse, non-repeating seeds
+      const shuffledHighlyRated = [...(profile.highlyRatedIds || [])].sort(() => Math.random() - 0.5);
+      const shuffledWatchlist = [...(profile.watchlistIds || [])].sort(() => Math.random() - 0.5);
+      const shuffledSaved = [...(savedSuggestionIds || [])].sort(() => Math.random() - 0.5);
+
+      addSeedIds(shuffledHighlyRated.slice(0, maxHighlyRated), 1.0); // Past preferences
+      addSeedIds(shuffledWatchlist.slice(0, maxWatchlist), 1.0); // Intent signals
+      addSeedIds(shuffledSaved.slice(0, maxSaved), 1.5); // High-intent saved suggestions
 
       const uniqueSeedIds = Array.from(seedWeights.entries())
         .map(([tmdbId, meta]) => ({ tmdbId, ...meta }))
@@ -1225,13 +1240,13 @@ export async function generateSmartCandidates(profile: {
         console.log(
           "[SmartCandidates] Running preferred subgenre keyword discovery",
           {
-            keywordIds: profile.preferredSubgenreKeywordIds.slice(0, 5),
+            keywordIds: [...profile.preferredSubgenreKeywordIds].sort(() => Math.random() - 0.5).slice(0, 5),
           },
         );
       }
 
       const subgenreDiscovered = await discoverMoviesByProfile({
-        keywords: profile.preferredSubgenreKeywordIds.slice(0, 5),
+        keywords: [...profile.preferredSubgenreKeywordIds].sort(() => Math.random() - 0.5).slice(0, 5),
         sortBy: "vote_average.desc",
         minVotes: 50,
         limit: 75,
@@ -1251,7 +1266,7 @@ export async function generateSmartCandidates(profile: {
         profile.preferredSubgenreKeywordIds.length >= 3
       ) {
         const subgenrePopular = await discoverMoviesByProfile({
-          keywords: profile.preferredSubgenreKeywordIds.slice(0, 3),
+          keywords: [...profile.preferredSubgenreKeywordIds].sort(() => Math.random() - 0.5).slice(0, 3),
           sortBy: "popularity.desc",
           minVotes: 30,
           limit: 50,
@@ -1290,7 +1305,7 @@ export async function generateSmartCandidates(profile: {
       // Fetch more candidates from top genres for subgenre text filtering
       for (const sortBy of ["vote_average.desc", "popularity.desc"] as const) {
         const enhancedDiscovered = await discoverMoviesByProfile({
-          genres: profile.topGenres.slice(0, 3).map((g) => g.id),
+          genres: [...profile.topGenres].sort(() => Math.random() - 0.5).slice(0, 3).map((g) => g.id),
           genreMode: "OR",
           sortBy,
           minVotes: 50,
@@ -1517,7 +1532,7 @@ export async function generateSmartCandidates(profile: {
   // Detect and discover by genre pairs that the user frequently enjoys together
   try {
     if (profile.topGenres.length >= 2 && results.discovered.length < 450) {
-      const topGenreIds = profile.topGenres.slice(0, 4).map((g) => g.id);
+      const topGenreIds = [...profile.topGenres].sort(() => Math.random() - 0.5).slice(0, 4).map((g) => g.id);
 
       // Generate genre pairs from top genres
       const genrePairs: [number, number][] = [];
@@ -1597,7 +1612,7 @@ export async function generateSmartCandidates(profile: {
   try {
     // Use user's actual preferred decades from taste profile, with sensible defaults
     const userDecades =
-      profile.topDecades?.slice(0, 3).map((d) => d.decade) || [];
+      [...(profile.topDecades || [])].sort(() => Math.random() - 0.5).slice(0, 3).map((d) => d.decade) || [];
     const preferredDecades =
       userDecades.length > 0 ? userDecades : [2010, 2000, 1990]; // Default fallback if no decade preference
 

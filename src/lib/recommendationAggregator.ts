@@ -485,8 +485,10 @@ async function fetchTMDBRecommendations(
 ): Promise<SourceRecommendation[]> {
   const recommendations: SourceRecommendation[] = [];
 
-  // Use top 10 seeds for more diverse recommendations
-  const seeds = seedMovies.slice(0, 10);
+  // Dynamically scale limit based on seed pool size (5 to 25)
+  const dynamicLimit = Math.min(Math.max(5, Math.floor(seedMovies.length * 0.15)), 25);
+  // Randomly sample seeds for higher recommendation variety
+  const seeds = [...seedMovies].sort(() => Math.random() - 0.5).slice(0, dynamicLimit);
 
   console.log("[Aggregator] Fetching TMDB recommendations", {
     seedCount: seeds.length,
@@ -596,8 +598,10 @@ async function fetchTasteDiveRecommendations(
   const recommendations: SourceRecommendation[] = [];
 
   try {
-    // Use top 10 seed movies for TasteDive query for more diverse results
-    const seeds = seedMovies.slice(0, 10);
+    // Dynamically scale limit based on seed pool size (5 to 25)
+    const dynamicLimit = Math.min(Math.max(5, Math.floor(seedMovies.length * 0.15)), 25);
+    // Randomly sample seeds for higher recommendation variety
+    const seeds = [...seedMovies].sort(() => Math.random() - 0.5).slice(0, dynamicLimit);
     // Don't use movie: prefix - just use clean titles with type=movie parameter
     const query = seeds
       .map((s) => {
@@ -692,8 +696,10 @@ async function fetchTraktRecommendations(
   const recommendations: SourceRecommendation[] = [];
 
   try {
-    // Fetch related movies from Trakt for top 10 seeds for broader coverage
-    const seeds = seedMovies.slice(0, 10);
+    // Dynamically scale limit based on seed pool size (5 to 25)
+    const dynamicLimit = Math.min(Math.max(5, Math.floor(seedMovies.length * 0.15)), 25);
+    // Randomly sample seeds for higher recommendation variety
+    const seeds = [...seedMovies].sort(() => Math.random() - 0.5).slice(0, dynamicLimit);
 
     for (const seed of seeds) {
       try {
@@ -794,7 +800,10 @@ async function fetchVectorSimilarityRecommendations(
   const recommendations: SourceRecommendation[] = [];
 
   try {
-    const seeds = seedMovies.slice(0, 10);
+    // Dynamically scale limit based on seed pool size (5 to 25)
+    const dynamicLimit = Math.min(Math.max(5, Math.floor(seedMovies.length * 0.15)), 25);
+    // Randomly sample seeds for higher recommendation variety
+    const seeds = [...seedMovies].sort(() => Math.random() - 0.5).slice(0, dynamicLimit);
     const seedIds = seeds.map((s) => s.tmdbId).filter(Boolean);
     if (seedIds.length === 0) return recommendations;
 
