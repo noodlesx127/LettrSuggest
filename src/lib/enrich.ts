@@ -3257,7 +3257,8 @@ export async function buildTasteProfile(params: {
 
   // Enhanced weighting function with recency and rewatch signals
   const getEnhancedWeight = (film: (typeof params.films)[0]): number => {
-    const r = film.rating ?? avgRating;
+    const hasRealRating = film.rating != null && film.rating > 0;
+    const r = hasRealRating ? film.rating! : avgRating;
 
     // Normalize rating to user's scale (z-score), only positive weights
     const normalizedRating = (r - avgRating) / Math.max(stdDevRating, 0.5);
@@ -3662,10 +3663,10 @@ export async function buildTasteProfile(params: {
 
   for (const { movie, film } of pairedDisliked) {
     // Use a scaled weight based on how bad the rating is
-    // 0.5 stars = 1.0 weight, 1 star = 0.5 weight, 1.5 stars = 0 weight
+    // 0.5 stars = 1.5 weight, 1 star = 1.0 weight, 1.5 stars = 0.5 weight
     const negWeight = Math.max(
-      0,
-      (DISLIKE_THRESHOLD - (film.rating ?? DISLIKE_THRESHOLD)) * 1.0,
+      0.2, // provide a minimum penalty so even 1.5 star movies count as dislikes
+      (2.0 - (film.rating ?? DISLIKE_THRESHOLD)) * 1.0,
     );
     const feats = extractFeatures(movie);
 
