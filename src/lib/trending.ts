@@ -416,7 +416,14 @@ export function getWeightedSeedIds(
   const genreCounts = new Map<number, number>();
   const MAX_PER_GENRE = 4; // Max seeds from same genre
 
-  for (const film of scored) {
+  // Calculate how many top seeds we want to sample from
+  // We take a larger pool (e.g. up to 300) so we aren't picking the exact same 100 every time
+  const samplePool = scored.slice(0, Math.max(limit * 3, 100));
+
+  // Shuffle the sample pool to introduce deliberate randomness and prevent repeat suggestions
+  const shuffledPool = samplePool.sort(() => Math.random() - 0.5);
+
+  for (const film of shuffledPool) {
     if (selectedIds.length >= limit) break;
 
     // Check if we've hit genre cap for any of this film's genres
@@ -433,9 +440,9 @@ export function getWeightedSeedIds(
     }
   }
 
-  // If we didn't fill the limit due to diversity constraints, add more from top scorers
+  // If we didn't fill the limit due to diversity constraints, add more from the shuffled pool
   if (selectedIds.length < limit) {
-    for (const film of scored) {
+    for (const film of shuffledPool) {
       if (selectedIds.length >= limit) break;
       if (!selectedIds.includes(film.tmdbId)) {
         selectedIds.push(film.tmdbId);
@@ -707,9 +714,9 @@ export async function discoverMoviesByProfile(options: {
   yearMin?: number;
   yearMax?: number;
   sortBy?:
-    | "vote_average.desc"
-    | "popularity.desc"
-    | "primary_release_date.desc";
+  | "vote_average.desc"
+  | "popularity.desc"
+  | "primary_release_date.desc";
   minVotes?: number;
   limit?: number;
   randomizePage?: boolean; // Add random page offset for variety
@@ -1043,7 +1050,7 @@ export async function generateSmartCandidates(profile: {
       ];
       const temporalFilter =
         temporalStrategies[
-          Math.floor(Math.random() * temporalStrategies.length)
+        Math.floor(Math.random() * temporalStrategies.length)
         ];
 
       // Try 1: Genres + keywords with random temporal filter
@@ -1077,7 +1084,7 @@ export async function generateSmartCandidates(profile: {
       if (genreDiscovered.length < 30) {
         const altTemporalFilter =
           temporalStrategies[
-            Math.floor(Math.random() * temporalStrategies.length)
+          Math.floor(Math.random() * temporalStrategies.length)
           ];
 
         // Weighted sort selection: 60% quality, 25% popularity, 15% recency
@@ -1111,7 +1118,7 @@ export async function generateSmartCandidates(profile: {
       if (results.discovered.length < 100) {
         const altTemporalFilter =
           temporalStrategies[
-            Math.floor(Math.random() * temporalStrategies.length)
+          Math.floor(Math.random() * temporalStrategies.length)
           ];
         const popularDiscovered = await discoverMoviesByProfile({
           genres: shuffledGenres

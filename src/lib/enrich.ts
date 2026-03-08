@@ -881,11 +881,11 @@ export async function addFeedback(
         reasonTypes,
         features: movieFeatures
           ? {
-              actors: movieFeatures.actors?.slice(0, 3).map((a) => a.name),
-              keywords: movieFeatures.keywords?.slice(0, 5).map((k) => k.name),
-              collection: movieFeatures.collection?.name,
-              genres: movieFeatures.genres?.map((g) => g.name),
-            }
+            actors: movieFeatures.actors?.slice(0, 3).map((a) => a.name),
+            keywords: movieFeatures.keywords?.slice(0, 5).map((k) => k.name),
+            collection: movieFeatures.collection?.name,
+            genres: movieFeatures.genres?.map((g) => g.name),
+          }
           : "none",
         insights,
       },
@@ -960,12 +960,12 @@ function deriveContextMode(context?: SuggestContext): {
 
 type FeatureDelta = {
   feature_type:
-    | "actor"
-    | "keyword"
-    | "collection"
-    | "director"
-    | "genre"
-    | "subgenre";
+  | "actor"
+  | "keyword"
+  | "collection"
+  | "director"
+  | "genre"
+  | "subgenre";
   feature_id: number;
   feature_name: string;
   deltaPositive: number;
@@ -1591,9 +1591,9 @@ async function extractMovieFeatures(tmdbId: number): Promise<MovieFeatures> {
     })),
     collection: features.collection
       ? {
-          id: features.collection.id,
-          name: features.collection.name,
-        }
+        id: features.collection.id,
+        name: features.collection.name,
+      }
       : undefined,
     studios: features.productionCompanyIds.map((id, idx) => ({
       id,
@@ -2545,10 +2545,10 @@ function extractFeatures(movie: TMDBMovie) {
   // Extract collection info
   const collection = movie.belongs_to_collection
     ? {
-        id: movie.belongs_to_collection.id,
-        name: movie.belongs_to_collection.name,
-        poster_path: movie.belongs_to_collection.poster_path,
-      }
+      id: movie.belongs_to_collection.id,
+      name: movie.belongs_to_collection.name,
+      poster_path: movie.belongs_to_collection.poster_path,
+    }
     : null;
 
   // Extract video data (trailers, teasers, etc.)
@@ -2717,7 +2717,7 @@ export async function fetchTmdbMovieCached(
       const hasRecentOMDb =
         data.omdb_fetched_at &&
         Date.now() - new Date(data.omdb_fetched_at).getTime() <
-          7 * 24 * 60 * 60 * 1000; // 7 days
+        7 * 24 * 60 * 60 * 1000; // 7 days
 
       if (hasCompleteMetadata && (hasRecentOMDb || !cached.imdb_id)) {
         return cached;
@@ -3241,7 +3241,7 @@ export async function buildTasteProfile(params: {
   const variance =
     ratings.length > 0
       ? ratings.reduce((sum, r) => sum + Math.pow(r - avgRating, 2), 0) /
-        ratings.length
+      ratings.length
       : 1.0;
   const stdDevRating = Math.sqrt(variance);
   const rewatchCount = params.films.filter((f) => f.rewatch).length;
@@ -4508,11 +4508,11 @@ function applyDiversityFilter<
   },
 ): T[] {
   const defaults = {
-    maxSameDirector: 2,
-    maxSameGenre: 5,
-    maxSameDecade: 4,
-    maxSameStudio: 3,
-    maxSameActor: 3,
+    maxSameDirector: 4, // Increased to allow deep-dives into a filmmaker's catalog
+    maxSameGenre: 15, // Greatly increased to stop penalizing users who only like a few subgenres
+    maxSameDecade: 6, // Slightly increased
+    maxSameStudio: 5, // Slightly increased
+    maxSameActor: 5, // Increased to allow deep-dives into an actor's catalog
   };
 
   const limits = { ...defaults, ...options };
@@ -4653,8 +4653,10 @@ function applyMMRRerank<
   if (suggestions.length <= 1) return suggestions;
 
   // MMR lambda balances relevance (1.0) vs diversity (0.0)
-  // 0.35 provides better precision than previous 0.25, while maintaining variety
-  const lambda = options?.lambda ?? 0.35;
+  // 0.25 was previously deemed too diverse, but with our increased personal weighting,
+  // we want to strongly penalize *generic* similarity, so we enforce diversity here 
+  // to ensure varied, niche results rise to the top over standard blockbusters.
+  const lambda = options?.lambda ?? 0.25;
   const topK = Math.min(
     options?.topK ?? suggestions.length,
     suggestions.length,
@@ -5261,10 +5263,10 @@ export async function suggestByOverlap(params: {
   };
 
   const genreWeight = getFeatureWeight("genre", 1.2);
-  const directorWeight = getFeatureWeight("director", 1.0);
-  const actorWeight = getFeatureWeight("actor", 0.75);
-  const keywordWeight = getFeatureWeight("keyword", 1.0);
-  const studioWeight = getFeatureWeight("studio", 0.5);
+  const directorWeight = getFeatureWeight("director", 1.5); // Increased from 1.0 to prioritize specific filmmaker taste
+  const actorWeight = getFeatureWeight("actor", 1.2); // Increased from 0.75 to prioritize cast
+  const keywordWeight = getFeatureWeight("keyword", 1.5); // Increased from 1.0 to heavily boost specific subgenres
+  const studioWeight = getFeatureWeight("studio", 1.0); // Increased from 0.5 to recognize studio affinity (A24/Ghibli)
 
   const dynamicWeights = [
     genreWeight,
@@ -5881,8 +5883,8 @@ export async function suggestByOverlap(params: {
     params.enhancedProfile?.watchlistDirectors ?? [],
   );
 
-  const maxC = Math.min(params.maxCandidates ?? 120, finalCandidates.length);
-  const desired = Math.max(10, Math.min(500, params.desiredResults ?? 50)); // Increased max from 30 to 500 to support 24 sections
+  const maxC = Math.min(params.maxCandidates ?? 1200, finalCandidates.length);
+  const desired = Math.max(10, Math.min(1000, params.desiredResults ?? 600)); // Increased max from 500 to 1000 to support larger sections
 
   // Helper to fetch from cache first in bulk where possible
   async function fetchFromCache(id: number): Promise<TMDBMovie | null> {
@@ -5945,16 +5947,16 @@ export async function suggestByOverlap(params: {
       const favoriteFilmmakerName =
         (favoriteFilmmakerId != null
           ? favoriteDirectorNames.get(favoriteFilmmakerId) ||
-            favoriteActorNames.get(favoriteFilmmakerId)
+          favoriteActorNames.get(favoriteFilmmakerId)
           : undefined) ?? "Unknown";
       const isFavoriteFilmmaker = favoriteFilmmakerId != null;
 
       // Tiered thresholds based on content type and consensus
-      // Niche content: 30 votes, 6.0 rating
-      // Standard content with strong consensus: 50 votes, 6.5 rating
-      // Standard content with low consensus: 50 votes, 7.0 rating
-      const minVoteCount = isNiche ? 30 : 50;
-      const minVoteAverage = isNiche ? 6.0 : strongConsensus ? 6.5 : 7.0;
+      // Niche content: 20 votes, 5.8 rating
+      // Standard content with strong consensus: 40 votes, 6.3 rating
+      // Standard content with low consensus: 50 votes, 6.8 rating
+      const minVoteCount = isNiche ? 20 : strongConsensus ? 40 : 50;
+      const minVoteAverage = isNiche ? 5.8 : strongConsensus ? 6.3 : 6.8;
 
       if (
         feats.voteAverage < minVoteAverage ||
@@ -7529,9 +7531,9 @@ export async function suggestByOverlap(params: {
         const sources = sourceMeta.sources || [];
         const avgReliability = sources.length
           ? sources.reduce(
-              (sum, s) => sum + (reliabilityMap.get(s.toLowerCase()) ?? 1),
-              0,
-            ) / sources.length
+            (sum, s) => sum + (reliabilityMap.get(s.toLowerCase()) ?? 1),
+            0,
+          ) / sources.length
           : 1;
 
         const consensusBoost =
@@ -7574,16 +7576,16 @@ export async function suggestByOverlap(params: {
           let repeatPenalty = 1.0; // No penalty by default
           if (daysSince < 1) {
             // Shown today or yesterday: heavy penalty
-            repeatPenalty = 0.6; // -40%
+            repeatPenalty = 0.2; // -80% penalty for immediate repeats
           } else if (daysSince < 3) {
             // Shown in last 3 days: moderate penalty
-            repeatPenalty = 0.7; // -30%
+            repeatPenalty = 0.4; // -60%
           } else if (daysSince < 7) {
             // Shown in last week: light penalty
-            repeatPenalty = 0.85; // -15%
+            repeatPenalty = 0.6; // -40%
           } else if (daysSince < 14) {
             // Shown in last 2 weeks: minimal penalty
-            repeatPenalty = 0.95; // -5%
+            repeatPenalty = 0.8; // -20%
           }
 
           if (repeatPenalty < 1.0) {
