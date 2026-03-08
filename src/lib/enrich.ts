@@ -6104,12 +6104,12 @@ export async function suggestByOverlap(params: {
 
       const metadataCompleteness = computeMetadataCompleteness();
 
-      // Soft avoid: previously dismissed items get a strong penalty but are not fully removed
+      // Hard block: previously dismissed items are immediately removed from the candidate pool
       if (negativeFeedbackIds.has(cid)) {
-        score -= 4.0;
-        reasons.push(
-          "Previously dismissed — softened (undo via unblock if needed)",
-        );
+        if (process.env.NODE_ENV === "development") {
+          console.log(`[FeedbackFilter] Filtered "${m.title}" - Not Interested feedback`);
+        }
+        return null;
       }
 
       // QUALITY GATES: downrank items with missing metadata unless strong consensus

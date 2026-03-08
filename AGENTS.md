@@ -155,11 +155,23 @@ console.error("[Cache] Error:", error);
 2. Use `IF NOT EXISTS`, `DROP POLICY IF EXISTS` for idempotency
 3. Run `NOTIFY pgrst, 'reload schema'` after changes
 
+## Skills
+- When envoking the ui-designer sub agent, make sure to always use the frontend-design skill.
+- When envoking the code-reviewer sub agent, make sure to always use the code-review skill.
+- When envoking the debugger sub agent, make sure to always use the find-bugs or the systematic-debugging skill.
+- When envoking the git-workflow sub agent, make sure to always use the using-git-worktrees skill.
+- When envoking the react-specialist sub agent, make sure to always use the vercel-react-best-practices skill.
+- When receiving a code review from the code-reviewer or the debugger sub agents, make sure to always use the receiving-code-review skill.
+- When executing a plan, make sure to always use the executing-plans skill. 
+- When creating a plan, make sure to always use the ask-questions-if-underspecified skill when the plan is underspecified. 
+
 ## Does
 - All Documentation should live in the `/docs` folder.
 - All Plan Documentation should live in the `/Docs/plans` folder.
 - All Summary Documentation should live in the `/Docs/summary` folder.
 - The Primary must always assign sub agents to tasks and plans. The Primary should never do anything itself, unless there isn't a sub agent available for the task.
 - Always make sure to add a code review loop for bugs and issues that send that feedback back to the sub agent to fix them if needed. Once this each tasks passes and have a the the correct Sub Agent update the docs and do a commit.
+- Always commit after any bug fix or feature added via git-workflow sub agent.
+- Update documents when changes are made before doing commits.
 - When envoking the ui-designer sub agent, make sure to always add the frontend-design skill.
 - Use the correct skills when needed.
