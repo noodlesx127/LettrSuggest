@@ -219,7 +219,7 @@ export function useFeedbackAnalytics(uid: string, timeFilter: TimeFilter) {
           .map(([source, buckets]) => ({ source, ...buckets }))
           .filter(
             (entry) =>
-              entry.high.total + entry.medium.total + entry.low.total >= 5,
+              entry.high.total + entry.medium.total + entry.low.total >= 3,
           )
           .sort(
             (a, b) =>
