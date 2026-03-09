@@ -115,6 +115,7 @@ type MovieItem = {
     type: "sub" | "buy" | "rent" | "free";
     url?: string;
   }>;
+  keyword_names?: string[]; // NEW: Added for exact subgenre matching
 };
 
 type CategorizedSuggestions = {
@@ -2311,6 +2312,13 @@ export default function SuggestPage() {
               );
             }
 
+            // Extract keywords for subgenre matching
+            const keyword_names = (
+              movie.keywords?.keywords ||
+              movie.keywords?.results ||
+              []
+            ).map((k: any) => k.name);
+
             return {
               id: s.tmdbId,
               title: s.title ?? movie.title ?? `#${s.tmdbId}`,
@@ -2335,6 +2343,7 @@ export default function SuggestPage() {
               spoken_languages,
               production_countries,
               streamingSources, // P2.3 implementation
+              keyword_names, // NEW: Sub-genre matching improvement
             };
           }
         } catch (e) {
