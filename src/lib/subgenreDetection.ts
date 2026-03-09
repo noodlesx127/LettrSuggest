@@ -437,9 +437,15 @@ export function detectSubgenres(
   );
 
   for (const [subgenreKey, subgenreKeywords] of relevantMappings) {
-    const matches = subgenreKeywords.some(kw =>
-      text.includes(kw.toLowerCase()) || keywordsLower.some(k => k.includes(kw.toLowerCase()))
-    );
+    const matches = subgenreKeywords.some(kw => {
+      // Escape keyword for regex to prevent issues with special characters (like '-')
+      const escapedKw = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Use word boundaries (\b) to ensure exact word matches
+      // e.g. "spy" won't match "crispy" or "spyglass"
+      const regex = new RegExp(`\\b${escapedKw}\\b`, 'i');
+
+      return regex.test(text) || keywordsLower.some(k => regex.test(k));
+    });
 
     if (matches) {
       detected.add(subgenreKey);
@@ -552,7 +558,7 @@ export function shouldFilterBySubgenre(
     const candidateSubgenres = detectSubgenres(genre, allText, candidateKeywords, candidateKeywordIds);
 
     // Check if any detected subgenre is avoided
-    for (const subgenre of candidateSubgenres) {
+    for (const subgenre of Array.from(candidateSubgenres)) {
       // SKIP filtering if user explicitly selected this subgenre in the UI
       if (allowSet.has(subgenre)) {
         continue; // User wants this subgenre!

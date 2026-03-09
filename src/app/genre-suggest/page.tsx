@@ -82,6 +82,7 @@ type MovieItem = {
     url?: string;
   }>;
   keyword_ids?: number[]; // TMDB keyword IDs for sub-genre filtering
+  keyword_names?: string[]; // TMDB keyword names for exact sub-genre matching
 };
 
 type GenreSuggestions = {
@@ -884,7 +885,13 @@ export default function GenreSuggestPage() {
                 movie.keywords?.results ||
                 []
               ).map((k: any) => k.id),
-            } as MovieItem & { genre_ids: number[]; keyword_ids: number[] };
+              // Extract keyword Names for exact sub-genre matching
+              keyword_names: (
+                movie.keywords?.keywords ||
+                movie.keywords?.results ||
+                []
+              ).map((k: any) => k.name),
+            } as MovieItem & { genre_ids: number[]; keyword_ids: number[]; keyword_names: string[] };
           }
           return null;
         } catch (e) {
@@ -895,7 +902,7 @@ export default function GenreSuggestPage() {
 
       const detailResults = await Promise.all(detailPromises);
       const validMovies = detailResults.filter(
-        (m): m is MovieItem & { genre_ids: number[]; keyword_ids: number[] } =>
+        (m): m is MovieItem & { genre_ids: number[]; keyword_ids: number[]; keyword_names: string[] } =>
           m !== null,
       );
 
@@ -941,10 +948,11 @@ export default function GenreSuggestPage() {
             // Build text from title and overview, and keywords from movie
             const movieText = `${m.title} ${m.overview || ""}`.toLowerCase();
             // Get keyword names from the movie (we have keyword_ids, so we check via detection)
+            const movieKeywordNames = m.keyword_names || [];
             const detected = detectSubgenres(
               parentGenreName,
               movieText,
-              [],
+              movieKeywordNames,
               movieKeywordIds,
             );
             const textMatch = detected.has(subgenreKey);
@@ -988,6 +996,7 @@ export default function GenreSuggestPage() {
         let matchingMovies: (MovieItem & {
           genre_ids: number[];
           keyword_ids: number[];
+          keyword_names: string[];
         })[];
 
         if (genreInfo.source === "tuimdb") {
