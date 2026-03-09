@@ -1,0 +1,17 @@
+=== Test 1: /movies/27205/related (raw TMDB ID) ===
+HTTP status: 200 OK
+Results count: 0
+First 3: []
+
+=== Test 2: /movies/inception-2010/related (Trakt slug) ===
+HTTP status: 200 OK
+Results count: 3
+First 3: [
+  'The Matrix (tmdb:603)',
+  'Interstellar (tmdb:157336)',
+  'Memento (tmdb:77)'
+]
+
+=== Test 3: /search/tmdb/27205 (lookup TMDB->Trakt) ===
+HTTP status: 200 OK
+Title: Inception Slug: inception-2010 Trakt ID: 16662

@@ -9,6 +9,10 @@ const TRAKT_API_VERSION = '2';
  * Fetches related movies from Trakt API based on a TMDB movie ID.
  * This endpoint proxies requests to Trakt to keep the Client ID server-side.
  * 
+ * Flow:
+ * 1. Resolve TMDB ID → Trakt slug via /search/tmdb/{id}
+ * 2. Fetch related movies via /movies/{slug}/related
+ * 
  * Query Parameters:
  * - id: TMDB movie ID (required)
  * - limit: Number of related movies to return (optional, default: 10)
@@ -49,17 +53,50 @@ export async function GET(req: NextRequest) {
         );
     }
 
-    try {
-        console.log(`[Trakt] Fetching related movies for TMDB ID: ${tmdbId}`);
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'trakt-api-version': TRAKT_API_VERSION,
+        'trakt-api-key': clientId,
+    };
 
+    try {
+        // Step 1: Resolve TMDB ID to Trakt slug
+        // Trakt's /movies/{id}/related requires a Trakt slug or Trakt numeric ID,
+        // NOT a raw TMDB ID. Passing a TMDB ID silently returns 0 results.
+        console.log(`[Trakt] Looking up Trakt slug for TMDB ID: ${tmdbId}`);
+
+        const lookupResponse = await fetch(
+            `${TRAKT_API_BASE}/search/tmdb/${tmdbId}?type=movie`,
+            { headers }
+        );
+
+        if (!lookupResponse.ok) {
+            console.error(`[Trakt] Slug lookup failed: ${lookupResponse.status} ${lookupResponse.statusText}`);
+            return NextResponse.json(
+                { ok: false, error: `Trakt lookup error: ${lookupResponse.status}` },
+                { status: lookupResponse.status }
+            );
+        }
+
+        const lookupData = await lookupResponse.json();
+        const traktSlug = lookupData?.[0]?.movie?.ids?.slug;
+
+        if (!traktSlug) {
+            console.log(`[Trakt] No Trakt match found for TMDB ID: ${tmdbId}`);
+            return NextResponse.json({
+                ok: true,
+                ids: [],
+                count: 0,
+            });
+        }
+
+        console.log(`[Trakt] Resolved TMDB ${tmdbId} → slug "${traktSlug}"`);
+
+        // Step 2: Fetch related movies using the Trakt slug
         const response = await fetch(
-            `${TRAKT_API_BASE}/movies/${tmdbId}/related?limit=${limit}`,
+            `${TRAKT_API_BASE}/movies/${traktSlug}/related?limit=${limit}`,
             {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'trakt-api-version': TRAKT_API_VERSION,
-                    'trakt-api-key': clientId,
-                },
+                headers,
                 next: { revalidate: 3600 }, // Cache for 1 hour
             }
         );
@@ -80,7 +117,7 @@ export async function GET(req: NextRequest) {
             .map((movie: any) => movie.ids?.tmdb)
             .filter((id: number | undefined) => id != null && id > 0);
 
-        console.log(`[Trakt] Found ${tmdbIds.length} related movies for TMDB ID: ${tmdbId}`);
+        console.log(`[Trakt] Found ${tmdbIds.length} related movies for TMDB ID: ${tmdbId} (slug: ${traktSlug})`);
 
         return NextResponse.json({
             ok: true,
