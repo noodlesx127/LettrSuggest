@@ -888,12 +888,43 @@ export async function generateSmartCandidates(profile: {
     >(),
   };
 
-  // 1. Trending movies (randomize between day/week for variety)
-  try {
-    const period = Math.random() > 0.5 ? "day" : "week";
-    results.trending = await fetchTrendingIds(period, 100);
-  } catch (e) {
-    console.error("[SmartCandidates] Trending failed", e);
+  // 1. Tailored Fallback (ONLY IF USER LACKS SUFFICIENT DATA)
+  // We only pull generic baseline movies if the user has < 15 highly rated films and a small watchlist
+  const hasInsufficientData =
+    profile.highlyRatedIds.length < 15 &&
+    (profile.watchlistIds?.length ?? 0) < 5;
+
+  if (hasInsufficientData) {
+    try {
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[SmartCandidates] User lacks sufficient data, fetching tailored fallback",
+        );
+      }
+
+      if (profile.topGenres.length > 0) {
+        // Attempt to lightly personalize the fallback by tying it to the few genres we know they like
+        const fallbackDiscover = await discoverMoviesByProfile({
+          genres: profile.topGenres.slice(0, 2).map((g) => g.id),
+          genreMode: "OR",
+          sortBy: "popularity.desc",
+          limit: 100,
+        });
+        results.trending = fallbackDiscover;
+      } else {
+        // Absolute last resort (User has completely empty profile)
+        const period = Math.random() > 0.5 ? "day" : "week";
+        results.trending = await fetchTrendingIds(period, 100);
+      }
+    } catch (e) {
+      console.error("[SmartCandidates] Fallback failed", e);
+    }
+  } else {
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[SmartCandidates] User has sufficient data, skipping generic trending fallback",
+      );
+    }
   }
 
   const savedSuggestionIds = profile.savedSuggestionIds ?? [];
@@ -975,10 +1006,12 @@ export async function generateSmartCandidates(profile: {
         }
       }
 
+      // Scale seeds dynamically based on library size, cap at 50 to avoid API rate limits
+      const dynamicSeedLimit = Math.min(50, Math.max(25, Math.floor(profile.highlyRatedIds.length * 0.15)));
       const uniqueSeedIds = Array.from(seedWeights.entries())
         .map(([tmdbId, meta]) => ({ tmdbId, ...meta }))
         .sort((a, b) => b.weight - a.weight || a.order - b.order)
-        .slice(0, 25)
+        .slice(0, dynamicSeedLimit)
         .map((entry) => entry.tmdbId);
 
       const seedMovies = uniqueSeedIds.map((tmdbId) => {
@@ -1005,9 +1038,11 @@ export async function generateSmartCandidates(profile: {
         });
       }
 
+      // Scale aggregator output dynamically based on library size to capture more of the expanded seed pool
+      const dynamicAggrLimit = Math.min(250, 75 + Math.floor(profile.highlyRatedIds.length * 0.1));
       const aggregated = await getAggregatedRecommendations({
         seedMovies,
-        limit: 75, // Increased from 50 to surface more Trakt/TasteDive results
+        limit: dynamicAggrLimit,
       });
 
       // Add high-scoring recommendations and track source metadata
@@ -1090,6 +1125,9 @@ export async function generateSmartCandidates(profile: {
         Math.floor(Math.random() * temporalStrategies.length)
         ];
 
+      // Scale discover API pool dynamically based on library size
+      const dynamicDiscoverLimit = Math.min(300, Math.max(150, Math.floor(profile.highlyRatedIds.length * 0.5)));
+
       // Try 1: Genres + keywords with random temporal filter
       let genreDiscovered = await discoverMoviesByProfile({
         genres: shuffledGenres.slice(0, genreCount).map((g) => g.id),
@@ -1097,7 +1135,7 @@ export async function generateSmartCandidates(profile: {
         keywords: shuffledKeywords.slice(0, keywordCount).map((k) => k.id),
         sortBy: randomSort,
         minVotes: 100,
-        limit: 150,
+        limit: dynamicDiscoverLimit,
         ...temporalFilter,
       });
       results.discovered.push(...genreDiscovered);
@@ -1140,7 +1178,7 @@ export async function generateSmartCandidates(profile: {
           genreMode: "OR",
           sortBy: fallbackSort,
           minVotes: 50,
-          limit: 150,
+          limit: dynamicDiscoverLimit,
           ...altTemporalFilter,
         });
         results.discovered.push(...genreOnlyDiscovered);
@@ -1164,7 +1202,7 @@ export async function generateSmartCandidates(profile: {
           genreMode: "OR",
           sortBy: "popularity.desc",
           minVotes: 20,
-          limit: 150,
+          limit: dynamicDiscoverLimit,
           ...altTemporalFilter,
         });
         results.discovered.push(...popularDiscovered);
@@ -1189,11 +1227,12 @@ export async function generateSmartCandidates(profile: {
       );
 
       // Try with top directors (expanded from 3 to 8), no year filter
+      const dynamicDirectorLimit = Math.min(200, Math.max(100, Math.floor(profile.highlyRatedIds.length * 0.3)));
       const directorDiscovered = await discoverMoviesByProfile({
         people: shuffledDirectors.slice(0, 8).map((d) => d.id),
         peopleMode: "OR", // Match ANY of the top directors
         sortBy: "vote_average.desc",
-        limit: 100,
+        limit: dynamicDirectorLimit,
       });
       results.discovered.push(...directorDiscovered);
       if (process.env.NODE_ENV === "development") {
@@ -1210,7 +1249,7 @@ export async function generateSmartCandidates(profile: {
         const singleDirector = await discoverMoviesByProfile({
           people: [shuffledDirectors[0].id],
           sortBy: "vote_average.desc", // Quality-first for director discovery
-          limit: 50,
+          limit: Math.floor(dynamicDirectorLimit * 0.5), // Lower limit for single director fallback
         });
         results.discovered.push(...singleDirector);
         if (process.env.NODE_ENV === "development") {
@@ -1231,11 +1270,12 @@ export async function generateSmartCandidates(profile: {
       const shuffledKeywords = [...profile.topKeywords].sort(
         () => Math.random() - 0.5,
       );
+      const dynamicNicheLimit = Math.min(200, Math.max(100, Math.floor(profile.highlyRatedIds.length * 0.3)));
       const nicheDiscovered = await discoverMoviesByProfile({
         keywords: shuffledKeywords.slice(0, 2).map((k) => k.id),
         sortBy: "vote_average.desc", // Quality-first for niche discovery
         minVotes: 30,
-        limit: 100,
+        limit: dynamicNicheLimit,
       });
       results.discovered.push(...nicheDiscovered);
       if (process.env.NODE_ENV === "development") {
