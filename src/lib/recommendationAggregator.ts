@@ -602,29 +602,49 @@ async function fetchTasteDiveRecommendations(
     const dynamicLimit = Math.min(Math.max(5, Math.floor(seedMovies.length * 0.15)), 25);
     // Randomly sample seeds for higher recommendation variety
     const seeds = [...seedMovies].sort(() => Math.random() - 0.5).slice(0, dynamicLimit);
-    // Don't use movie: prefix - just use clean titles with type=movie parameter
-    const query = seeds
-      .map((s) => {
-        // Remove special characters that might cause API issues
-        return s.title
-          .replace(/[&+#:]/g, " ")
-          .replace(/\s+/g, " ")
-          .trim();
-      })
-      .join(", ");
 
-    console.log("[Aggregator] Fetching TasteDive recommendations", {
-      query,
-      seedCount: seeds.length,
+    console.log("[Aggregator] Fetching TasteDive recommendations in chunks", {
+      totalSeeds: seeds.length,
     });
 
-    const results = await getSimilarContent(query, {
-      type: "movie", // Type is required by TasteDive API
-      info: false,
-      limit: 20, // TasteDive max is 20
-    });
+    const allResults = [];
+    const chunkSize = 5; // Chunk size of 5 to maximize TasteDive's 20-limit response per chunk
 
-    for (const result of results) {
+    // Process in chunks concurrently
+    const chunkPromises = [];
+    for (let i = 0; i < seeds.length; i += chunkSize) {
+      const chunk = seeds.slice(i, i + chunkSize);
+      const query = chunk
+        .map((s) => s.title.replace(/[&+#:]/g, " ").replace(/\s+/g, " ").trim())
+        .join(", ");
+
+      chunkPromises.push(
+        getSimilarContent(query, {
+          type: "movie", // Type is required by TasteDive API
+          info: false,
+          limit: 20, // 20 per chunk yields a much higher total cap
+        }).catch((err: any) => {
+          console.warn(`[Aggregator] TasteDive chunk failed for query "${query}"`, err);
+          return [];
+        })
+      );
+    }
+
+    const chunkResults = await Promise.all(chunkPromises);
+    const seenTitles = new Set<string>();
+
+    for (const results of chunkResults) {
+      for (const result of results) {
+        if (!seenTitles.has(result.Name)) {
+          seenTitles.add(result.Name);
+          allResults.push(result);
+        }
+      }
+    }
+
+    console.log(`[Aggregator] TasteDive chunking complete. Found ${allResults.length} raw results.`);
+
+    for (const result of allResults) {
       // Search for TMDB ID by title
       const searchResults = await searchMovies({
         query: result.Name,

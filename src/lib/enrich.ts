@@ -5404,8 +5404,8 @@ export async function suggestByOverlap(params: {
   // Use filtered candidates for the rest of the function
   const finalCandidates = candidatesAfterWatchlistExclusion;
 
-  const likedCap = 800;
-  const dislikedCap = 400;
+  const likedCap = 1500;
+  const dislikedCap = 600;
   // If the user has an enormous number of liked films, bias towards
   // the most recent ones (assuming input films are roughly chronological).
   const likedIds =
@@ -5974,11 +5974,11 @@ export async function suggestByOverlap(params: {
       const isFavoriteFilmmaker = favoriteFilmmakerId != null;
 
       // Tiered thresholds based on content type and consensus
-      // Niche content: 20 votes, 5.8 rating
+      // Niche content: 20 votes, 5.0 rating (STRICT FLOOR: 2.5/5 stars to prevent trash tier movies)
       // Standard content with strong consensus: 40 votes, 6.3 rating
       // Standard content with low consensus: 50 votes, 6.8 rating
       const minVoteCount = isNiche ? 20 : strongConsensus ? 40 : 50;
-      const minVoteAverage = isNiche ? 5.8 : strongConsensus ? 6.3 : 6.8;
+      const minVoteAverage = isNiche ? 5.0 : strongConsensus ? 6.3 : 6.8;
 
       if (
         feats.voteAverage < minVoteAverage ||
@@ -6146,20 +6146,21 @@ export async function suggestByOverlap(params: {
 
       let qualityPenalty = 0;
       const qualityNotes: string[] = [];
+      const penaltyMultiplier = isNiche ? 0.5 : 1.0; // Reduce penalties for niche content
 
       if (!hasPoster) {
-        qualityPenalty -= strongConsensus ? 0.2 : 0.6;
+        qualityPenalty -= (strongConsensus ? 0.2 : 0.6) * penaltyMultiplier;
         qualityNotes.push("poster missing");
       }
       if (!hasBackdrop) {
-        qualityPenalty -= strongConsensus ? 0.1 : 0.3;
+        qualityPenalty -= (strongConsensus ? 0.1 : 0.3) * penaltyMultiplier;
       }
       if (!hasOverview) {
-        qualityPenalty -= strongConsensus ? 0.15 : 0.4;
+        qualityPenalty -= (strongConsensus ? 0.15 : 0.4) * penaltyMultiplier;
         qualityNotes.push("synopsis missing");
       }
       if (!hasTrailer) {
-        qualityPenalty -= strongConsensus ? 0.1 : 0.25;
+        qualityPenalty -= (strongConsensus ? 0.1 : 0.25) * penaltyMultiplier;
       }
 
       if (qualityPenalty < 0) {
@@ -6210,8 +6211,8 @@ export async function suggestByOverlap(params: {
       );
 
       if (crossGenreBoost.boost > 0) {
-        // Cap cross-genre boost at 3.0 to prevent over-stacking
-        const cappedCrossGenreBoost = Math.min(crossGenreBoost.boost, 3.0);
+        // Cap cross-genre boost at 4.0 to prevent over-stacking (Relaxed from 3.0)
+        const cappedCrossGenreBoost = Math.min(crossGenreBoost.boost, 4.0);
         score += cappedCrossGenreBoost;
         if (crossGenreBoost.reason) {
           reasons.push(crossGenreBoost.reason);
@@ -6350,7 +6351,7 @@ export async function suggestByOverlap(params: {
             pref.directors.get(firstMatch.likedDirector) ?? 0.8;
           const similarity = Math.min(1, firstMatch.sharedThemes.length / 4); // cap similarity
           let borrow = likedWeight * 0.25 * similarity; // borrow a fraction of strong signal
-          borrow = Math.min(0.6, borrow); // hard cap to keep gentle
+          borrow = Math.min(0.8, borrow); // hard cap to keep gentle (Relaxed from 0.6)
           // Light decay so borrowed signals fade if not reinforced elsewhere
           borrow *= 0.9;
 
@@ -6410,7 +6411,7 @@ export async function suggestByOverlap(params: {
           const likedWeight = pref.cast.get(firstMatch.likedActor) ?? 0.6;
           const similarity = Math.min(1, firstMatch.sharedThemes.length / 4);
           let borrow = likedWeight * 0.2 * similarity; // gentle borrow
-          borrow = Math.min(0.4, borrow);
+          borrow = Math.min(0.6, borrow); // Relaxed from 0.4
           borrow *= 0.9; // decay borrowed signal so it needs reinforcement
 
           score += borrow * weights.cast;
