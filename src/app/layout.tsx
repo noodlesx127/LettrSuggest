@@ -5,6 +5,7 @@ import { Outfit, Crimson_Pro } from "next/font/google";
 import { ImportDataProvider } from "@/lib/importStore";
 import { ThemeProvider } from "@/lib/themeStore";
 import NavBar from "@/components/NavBar";
+import { ToastProvider } from "@/components/Toast";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -57,10 +58,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body className="font-sans min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors">
         <ThemeProvider>
-          <NavBar />
-          <main className="mx-auto max-w-6xl px-4 py-6">
-            <ImportDataProvider>{children}</ImportDataProvider>
-          </main>
+          <ToastProvider>
+            <NavBar />
+            <main className="mx-auto max-w-6xl px-4 py-6">
+              <ImportDataProvider>{children}</ImportDataProvider>
+            </main>
+          </ToastProvider>
         </ThemeProvider>
       </body>
     </html>
