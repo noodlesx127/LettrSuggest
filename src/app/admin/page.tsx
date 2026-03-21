@@ -56,7 +56,7 @@ function ToolsSection() {
             } | null = null;
             try {
               const tuiResponse = await fetch(
-                `/api/tuimdb/movie?uid=${tmdbId}&_t=${Date.now()}`,
+                `/api/tuimdb/movie?tmdb_id=${tmdbId}&_t=${Date.now()}`,
               );
               if (tuiResponse.ok) {
                 const tuiData = (await tuiResponse.json()) as {
