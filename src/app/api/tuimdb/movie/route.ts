@@ -3,94 +3,24 @@ import { getTuiMDBMovie, searchTuiMDB, tuiMDBToTMDB } from "@/lib/tuimdb";
 import { getCachedTuiMDBUid, setCachedTuiMDBUid } from "@/lib/apiCache";
 
 /**
- * Resolve a TuiMDB UID from a TMDB ID.
- * Strategy:
- *  1. Check Supabase tuimdb_uid_cache
- *  2. If not cached, fetch the movie title/year from TMDB, search TuiMDB, cache result
+ * GET /api/tuimdb/movie
+ *
+ * Accepts either:
+ *   ?uid=<tuimdb_uid>   — direct TuiMDB UID fetch
+ *   ?id=<tmdb_id>       — resolve TuiMDB UID from TMDB ID (via cache or title search)
+ *
+ * Resolution flow for ?id=:
+ *   1. Check tuimdb_uid_cache for this TMDB ID (admin client to bypass RLS)
+ *   2. Cache miss → fetch TMDB to get title + year
+ *   3. Search TuiMDB by "title (year)"
+ *   4. Store resolved UID in cache (null if not found)
+ *   5. Fetch full TuiMDB movie by resolved UID
  */
-async function resolveTuiMDBUid(
-  tmdbId: number,
-  apiKey: string,
-): Promise<number | null> {
-  // 1. Cache lookup
-  const cached = await getCachedTuiMDBUid(tmdbId);
-  if (cached !== undefined) {
-    // cached can be a number (found) or null (previously confirmed not in TuiMDB)
-    return cached;
-  }
-
-  // 2. Fetch TMDB title/year so we can search TuiMDB
-  const tmdbApiKey = process.env.TMDB_API_KEY;
-  if (!tmdbApiKey) {
-    console.warn(
-      "[TuiMDB/movie] TMDB_API_KEY not set; cannot resolve TMDB ID to TuiMDB UID",
-    );
-    return null;
-  }
-
-  let title: string | null = null;
-  let year: number | undefined;
-
-  try {
-    const tmdbUrl = `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${tmdbApiKey}&language=en-US`;
-    const tmdbRes = await fetch(tmdbUrl, { cache: "no-store" });
-    if (tmdbRes.ok) {
-      const tmdbData = (await tmdbRes.json()) as {
-        title?: string;
-        release_date?: string;
-      };
-      title = tmdbData.title ?? null;
-      if (tmdbData.release_date) {
-        year = new Date(tmdbData.release_date).getFullYear();
-      }
-    } else {
-      console.warn(
-        `[TuiMDB/movie] TMDB fetch for ${tmdbId} returned ${tmdbRes.status}`,
-      );
-    }
-  } catch (e) {
-    console.error("[TuiMDB/movie] Error fetching TMDB details:", e);
-  }
-
-  if (!title) {
-    await setCachedTuiMDBUid(tmdbId, null);
-    return null;
-  }
-
-  // 3. Search TuiMDB by title/year
-  try {
-    const results = await searchTuiMDB(title, year, apiKey);
-    if (results.length > 0) {
-      // Prefer an exact title match + year match, then fall back to first result
-      const titleLower = title.toLowerCase();
-      const exactMatch = results.find((r) => {
-        const rTitle = r.Title?.toLowerCase();
-        const rYear = r.ReleaseDate
-          ? new Date(r.ReleaseDate).getFullYear()
-          : null;
-        return rTitle === titleLower && (!year || !rYear || rYear === year);
-      });
-
-      const best = exactMatch ?? results[0];
-      const uid = best.UID;
-      await setCachedTuiMDBUid(tmdbId, uid);
-      console.log(
-        `[TuiMDB/movie] Resolved TMDB ${tmdbId} -> TuiMDB UID ${uid}`,
-      );
-      return uid;
-    }
-  } catch (e) {
-    console.error("[TuiMDB/movie] TuiMDB search error:", e);
-  }
-
-  // Not found in TuiMDB – cache the negative result
-  await setCachedTuiMDBUid(tmdbId, null);
-  return null;
-}
-
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
+    const uid = url.searchParams.get("uid");
+    const tmdbId = url.searchParams.get("id");
 
     const apiKey = process.env.TUIMDB_API_KEY;
     if (!apiKey) {
@@ -100,55 +30,148 @@ export async function GET(req: Request) {
       );
     }
 
-    // Support both ?tmdb_id= (preferred, new callers) and ?uid= (legacy direct UID)
-    const tmdbIdParam = url.searchParams.get("tmdb_id");
-    const uidParam = url.searchParams.get("uid");
+    // --- Direct UID path ---
+    if (uid) {
+      const movie = await getTuiMDBMovie(parseInt(uid, 10), apiKey);
+      if (!movie) {
+        return NextResponse.json({ error: "Movie not found" }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, movie: tuiMDBToTMDB(movie) });
+    }
 
-    let tuiUid: number | null = null;
-
-    if (tmdbIdParam) {
-      const tmdbId = parseInt(tmdbIdParam, 10);
-      if (isNaN(tmdbId)) {
+    // --- TMDB ID resolution path ---
+    if (tmdbId) {
+      const tmdbIdNum = parseInt(tmdbId, 10);
+      if (isNaN(tmdbIdNum)) {
         return NextResponse.json(
-          { error: "Invalid tmdb_id parameter" },
+          { error: "Invalid id parameter" },
           { status: 400 },
         );
       }
-      tuiUid = await resolveTuiMDBUid(tmdbId, apiKey);
-    } else if (uidParam) {
-      tuiUid = parseInt(uidParam, 10);
-      if (isNaN(tuiUid)) {
+
+      // 1. Check cache
+      const cached = await getCachedTuiMDBUid(tmdbIdNum);
+
+      if (cached === null) {
+        // Cached as "not found in TuiMDB"
         return NextResponse.json(
-          { error: "Invalid uid parameter" },
-          { status: 400 },
+          { error: "Movie not found in TuiMDB" },
+          { status: 404 },
         );
       }
-    } else {
-      return NextResponse.json(
-        { error: "Missing required parameter: tmdb_id or uid" },
-        { status: 400 },
-      );
+
+      let resolvedUid: number | null = cached ?? null;
+
+      if (resolvedUid === null) {
+        // Cache miss — resolve via TMDB title lookup + TuiMDB search
+        const tmdbApiKey = process.env.TMDB_API_KEY;
+        if (!tmdbApiKey) {
+          return NextResponse.json(
+            { error: "TMDB_API_KEY not configured" },
+            { status: 500 },
+          );
+        }
+
+        // 2. Fetch TMDB to get title + year
+        let title: string | null = null;
+        let year: number | null = null;
+
+        try {
+          const tmdbUrl = `https://api.themoviedb.org/3/movie/${tmdbIdNum}?api_key=${tmdbApiKey}`;
+          const tmdbRes = await fetch(tmdbUrl, {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          });
+
+          if (tmdbRes.ok) {
+            const tmdbData = await tmdbRes.json();
+            title = tmdbData.title ?? tmdbData.original_title ?? null;
+            year = tmdbData.release_date
+              ? new Date(tmdbData.release_date).getFullYear()
+              : null;
+          } else {
+            console.warn(
+              `[TuiMDB Route] TMDB lookup failed for ${tmdbIdNum}: ${tmdbRes.status}`,
+            );
+          }
+        } catch (e) {
+          console.error("[TuiMDB Route] Error fetching TMDB metadata:", e);
+        }
+
+        if (!title) {
+          // Can't resolve without a title — cache as null to avoid repeated attempts
+          await setCachedTuiMDBUid(tmdbIdNum, null);
+          return NextResponse.json(
+            { error: "Could not resolve movie title from TMDB" },
+            { status: 404 },
+          );
+        }
+
+        // 3. Search TuiMDB
+        try {
+          const searchResults = await searchTuiMDB(
+            title,
+            year ?? undefined,
+            apiKey,
+          );
+
+          if (searchResults.length > 0) {
+            // Pick the best match: prefer exact title + year match
+            const titleLower = title.toLowerCase();
+            const exactMatch = searchResults.find((r) => {
+              const rTitleLower = r.Title?.toLowerCase();
+              const rYear = r.ReleaseDate
+                ? new Date(r.ReleaseDate).getFullYear()
+                : null;
+              const titleMatch = rTitleLower === titleLower;
+              const yearMatch = !year || !rYear || year === rYear;
+              return titleMatch && yearMatch;
+            });
+
+            resolvedUid = (exactMatch ?? searchResults[0]).UID;
+            console.log(
+              `[TuiMDB Route] Resolved TMDB ${tmdbIdNum} → TuiMDB UID ${resolvedUid} (title: "${title}")`,
+            );
+          } else {
+            console.log(
+              `[TuiMDB Route] No TuiMDB results for "${title}" (TMDB ${tmdbIdNum})`,
+            );
+            resolvedUid = null;
+          }
+        } catch (e) {
+          console.error("[TuiMDB Route] TuiMDB search error:", e);
+          resolvedUid = null;
+        }
+
+        // 4. Cache the resolved UID (or null = not found)
+        await setCachedTuiMDBUid(tmdbIdNum, resolvedUid);
+      }
+
+      if (resolvedUid === null) {
+        return NextResponse.json(
+          { error: "Movie not found in TuiMDB" },
+          { status: 404 },
+        );
+      }
+
+      // 5. Fetch full TuiMDB movie
+      const movie = await getTuiMDBMovie(resolvedUid, apiKey);
+      if (!movie) {
+        // UID resolved but movie fetch failed — invalidate cache entry
+        await setCachedTuiMDBUid(tmdbIdNum, null);
+        return NextResponse.json({ error: "Movie not found" }, { status: 404 });
+      }
+
+      return NextResponse.json({ ok: true, movie: tuiMDBToTMDB(movie) });
     }
 
-    if (tuiUid === null) {
-      return NextResponse.json(
-        { error: "Movie not found in TuiMDB" },
-        { status: 404 },
-      );
-    }
-
-    const movie = await getTuiMDBMovie(tuiUid, apiKey);
-
-    if (!movie) {
-      return NextResponse.json({ error: "Movie not found" }, { status: 404 });
-    }
-
-    // Convert to TMDB-compatible format for consistency
-    const tmdbFormat = tuiMDBToTMDB(movie);
-
-    return NextResponse.json({ ok: true, movie: tmdbFormat });
+    return NextResponse.json(
+      { error: "Missing uid or id parameter" },
+      { status: 400 },
+    );
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unexpected error";
+    console.error("[TuiMDB Route] Unhandled error:", e);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

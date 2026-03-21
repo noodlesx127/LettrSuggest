@@ -11,6 +11,7 @@
  */
 
 import { supabase } from "./supabaseClient";
+import { getSupabaseAdmin } from "./supabaseAdmin";
 
 /**
  * Check if a cache entry is still valid based on TTL
@@ -189,18 +190,15 @@ const TUIMDB_UID_CACHE_TTL_DAYS = 30;
 
 /**
  * Get cached TuiMDB UID for a TMDB ID
+ * Uses the admin client to bypass RLS restrictions on the cache table.
  * @returns TuiMDB UID (number), null if not found in TuiMDB, undefined if not in cache
  */
 export async function getCachedTuiMDBUid(
   tmdbId: number,
 ): Promise<number | null | undefined> {
-  if (!supabase) {
-    console.warn("[Cache] Supabase client not initialized");
-    return undefined;
-  }
-
   try {
-    const { data, error } = await supabase
+    const admin = getSupabaseAdmin();
+    const { data, error } = await admin
       .from("tuimdb_uid_cache")
       .select("tuimdb_uid, cached_at")
       .eq("tmdb_id", tmdbId)
@@ -228,19 +226,16 @@ export async function getCachedTuiMDBUid(
 
 /**
  * Store TuiMDB UID in cache
+ * Uses the admin client to bypass RLS restrictions on the cache table.
  * @param uid TuiMDB UID or null if movie not found in TuiMDB
  */
 export async function setCachedTuiMDBUid(
   tmdbId: number,
   uid: number | null,
 ): Promise<void> {
-  if (!supabase) {
-    console.warn("[Cache] Supabase client not initialized");
-    return;
-  }
-
   try {
-    const { error } = await supabase.from("tuimdb_uid_cache").upsert({
+    const admin = getSupabaseAdmin();
+    const { error } = await admin.from("tuimdb_uid_cache").upsert({
       tmdb_id: tmdbId,
       tuimdb_uid: uid,
       cached_at: new Date().toISOString(),

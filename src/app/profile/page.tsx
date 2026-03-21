@@ -1,40 +1,21 @@
-"use client";
-import AuthGate from "@/components/AuthGate";
-import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import {
-  getBlockedSuggestions,
-  unblockSuggestion,
-  getAllowedSuggestions,
-  removeAllowedSuggestion,
-} from "@/lib/enrich";
-import { useImportData } from "@/lib/importStore";
-import Image from "next/image";
+'use client';
+import AuthGate from '@/components/AuthGate';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import { getBlockedSuggestions, unblockSuggestion, getAllowedSuggestions, removeAllowedSuggestion } from '@/lib/enrich';
+import { useImportData } from '@/lib/importStore';
+import Image from 'next/image';
 
 export default function ProfilePage() {
   const { clear: clearImportStore } = useImportData();
   const [deleting, setDeleting] = useState(false);
-  const [confirmText, setConfirmText] = useState("");
+  const [confirmText, setConfirmText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [uid, setUid] = useState<string | null>(null);
-  const [blockedMovies, setBlockedMovies] = useState<
-    Array<{
-      tmdb_id: number;
-      title?: string;
-      poster_path?: string;
-      year?: string;
-    }>
-  >([]);
+  const [blockedMovies, setBlockedMovies] = useState<Array<{ tmdb_id: number; title?: string; poster_path?: string; year?: string }>>([]);
   const [loadingBlocked, setLoadingBlocked] = useState(false);
-  const [allowedMovies, setAllowedMovies] = useState<
-    Array<{
-      tmdb_id: number;
-      title?: string;
-      poster_path?: string;
-      year?: string;
-    }>
-  >([]);
+  const [allowedMovies, setAllowedMovies] = useState<Array<{ tmdb_id: number; title?: string; poster_path?: string; year?: string }>>([]);
   const [loadingAllowed, setLoadingAllowed] = useState(false);
 
   useEffect(() => {
@@ -43,11 +24,11 @@ export default function ProfilePage() {
       const { data } = await supabase.auth.getSession();
       const userId = data.session?.user?.id ?? null;
       setUid(userId);
-
+      
       if (userId) {
         await Promise.all([
           loadBlockedMovies(userId),
-          loadAllowedMovies(userId),
+          loadAllowedMovies(userId)
         ]);
       }
     };
@@ -58,24 +39,20 @@ export default function ProfilePage() {
     try {
       setLoadingBlocked(true);
       const blockedIds = await getBlockedSuggestions(userId);
-
+      
       // Fetch movie details for each blocked ID
       const detailsPromises = Array.from(blockedIds).map(async (tmdbId) => {
         try {
           // Try TuiMDB first, fallback to TMDB
           let data = null;
           try {
-            const tuiResponse = await fetch(
-              `/api/tuimdb/movie?tmdb_id=${tmdbId}&_t=${Date.now()}`,
-            );
+            const tuiResponse = await fetch(`/api/tuimdb/movie?uid=${tmdbId}&_t=${Date.now()}`);
             if (tuiResponse.ok) {
               const tuiData = await tuiResponse.json();
               if (tuiData.ok && tuiData.movie) data = tuiData.movie;
             }
-          } catch (e) {
-            /* fallback to TMDB */
-          }
-
+          } catch (e) { /* fallback to TMDB */ }
+          
           if (!data) {
             const response = await fetch(`/api/tmdb/movie/${tmdbId}`);
             if (response.ok) {
@@ -83,13 +60,13 @@ export default function ProfilePage() {
               if (tmdbData.ok && tmdbData.movie) data = tmdbData.movie;
             }
           }
-
+          
           if (data) {
             return {
               tmdb_id: tmdbId,
               title: data.title,
               poster_path: data.poster_path,
-              year: data.release_date?.slice(0, 4),
+              year: data.release_date?.slice(0, 4)
             };
           }
         } catch (e) {
@@ -97,11 +74,11 @@ export default function ProfilePage() {
         }
         return { tmdb_id: tmdbId };
       });
-
+      
       const details = await Promise.all(detailsPromises);
       setBlockedMovies(details);
     } catch (e) {
-      console.error("Failed to load blocked movies:", e);
+      console.error('Failed to load blocked movies:', e);
     } finally {
       setLoadingBlocked(false);
     }
@@ -111,24 +88,20 @@ export default function ProfilePage() {
     try {
       setLoadingAllowed(true);
       const allowedIds = await getAllowedSuggestions(userId);
-
+      
       // Fetch movie details for each allowed ID
       const detailsPromises = Array.from(allowedIds).map(async (tmdbId) => {
         try {
           // Try TuiMDB first, fallback to TMDB
           let data = null;
           try {
-            const tuiResponse = await fetch(
-              `/api/tuimdb/movie?tmdb_id=${tmdbId}&_t=${Date.now()}`,
-            );
+            const tuiResponse = await fetch(`/api/tuimdb/movie?uid=${tmdbId}&_t=${Date.now()}`);
             if (tuiResponse.ok) {
               const tuiData = await tuiResponse.json();
               if (tuiData.ok && tuiData.movie) data = tuiData.movie;
             }
-          } catch (e) {
-            /* fallback to TMDB */
-          }
-
+          } catch (e) { /* fallback to TMDB */ }
+          
           if (!data) {
             const response = await fetch(`/api/tmdb/movie/${tmdbId}`);
             if (response.ok) {
@@ -136,13 +109,13 @@ export default function ProfilePage() {
               if (tmdbData.ok && tmdbData.movie) data = tmdbData.movie;
             }
           }
-
+          
           if (data) {
             return {
               tmdb_id: tmdbId,
               title: data.title,
               poster_path: data.poster_path,
-              year: data.release_date?.slice(0, 4),
+              year: data.release_date?.slice(0, 4)
             };
           }
         } catch (e) {
@@ -150,11 +123,11 @@ export default function ProfilePage() {
         }
         return { tmdb_id: tmdbId };
       });
-
+      
       const details = await Promise.all(detailsPromises);
       setAllowedMovies(details);
     } catch (e) {
-      console.error("Failed to load allowed movies:", e);
+      console.error('Failed to load allowed movies:', e);
     } finally {
       setLoadingAllowed(false);
     }
@@ -164,14 +137,14 @@ export default function ProfilePage() {
     if (!uid) return;
     try {
       await unblockSuggestion(uid, tmdbId);
-      setBlockedMovies((prev) => prev.filter((m) => m.tmdb_id !== tmdbId));
-
+      setBlockedMovies(prev => prev.filter(m => m.tmdb_id !== tmdbId));
+      
       // Notify suggest page to refresh
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("lettr:blocked-updated"));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lettr:blocked-updated'));
       }
     } catch (e) {
-      console.error("Failed to unblock movie:", e);
+      console.error('Failed to unblock movie:', e);
     }
   };
 
@@ -179,25 +152,25 @@ export default function ProfilePage() {
     if (!uid) return;
     try {
       await removeAllowedSuggestion(uid, tmdbId);
-      setAllowedMovies((prev) => prev.filter((m) => m.tmdb_id !== tmdbId));
-
+      setAllowedMovies(prev => prev.filter(m => m.tmdb_id !== tmdbId));
+      
       // Notify suggest page to refresh
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("lettr:feedback-updated"));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lettr:feedback-updated'));
       }
     } catch (e) {
-      console.error("Failed to remove allowed movie:", e);
+      console.error('Failed to remove allowed movie:', e);
     }
   };
 
   const handleDeleteAll = async () => {
-    if (confirmText !== "DELETE ALL") {
+    if (confirmText !== 'DELETE ALL') {
       setError('Please type "DELETE ALL" to confirm');
       return;
     }
 
     if (!supabase) {
-      setError("Supabase not initialized");
+      setError('Supabase not initialized');
       return;
     }
 
@@ -206,27 +179,24 @@ export default function ProfilePage() {
       setError(null);
       setSuccess(null);
 
-      const { data: sessionRes, error: sessErr } =
-        await supabase.auth.getSession();
+      const { data: sessionRes, error: sessErr } = await supabase.auth.getSession();
       if (sessErr) throw sessErr;
       const uid = sessionRes.session?.user?.id;
-      if (!uid) throw new Error("Not signed in");
+      if (!uid) throw new Error('Not signed in');
 
-      console.log("[Profile] Starting delete for user:", uid);
+      console.log('[Profile] Starting delete for user:', uid);
 
       // Use database function to delete all data (bypasses RLS issues)
-      const { data: deleteResult, error: deleteError } = await supabase.rpc(
-        "delete_user_data",
-        { target_user_id: uid },
-      );
-
-      console.log("[Profile] Delete result:", deleteResult, deleteError);
+      const { data: deleteResult, error: deleteError } = await supabase
+        .rpc('delete_user_data', { target_user_id: uid });
+      
+      console.log('[Profile] Delete result:', deleteResult, deleteError);
       if (deleteError) throw deleteError;
 
       // Log what was deleted
       if (deleteResult?.deleted) {
         const d = deleteResult.deleted;
-        console.log("[Profile] Deleted data summary:", {
+        console.log('[Profile] Deleted data summary:', {
           filmEvents: d.film_events,
           filmMappings: d.film_tmdb_map,
           blockedSuggestions: d.blocked_suggestions,
@@ -241,44 +211,35 @@ export default function ProfilePage() {
 
       // Verify deletion
       const { count: remainingCount, error: countError } = await supabase
-        .from("film_events")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", uid);
-      console.log("[Profile] Verification query:", {
-        remainingCount,
-        countError,
-      });
+        .from('film_events')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', uid);
+      console.log('[Profile] Verification query:', { remainingCount, countError });
 
       // Clear local cache
       clearImportStore();
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem("lettr-import-v1");
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('lettr-import-v1');
         // Also clear any SWR cache
-        window.localStorage.removeItem("swr-cache");
+        window.localStorage.removeItem('swr-cache');
       }
 
       // Reset blocked and allowed movies state
       setBlockedMovies([]);
       setAllowedMovies([]);
 
-      const totalDeleted = deleteResult?.deleted
-        ? Object.values(deleteResult.deleted).reduce(
-            (sum: number, n) => sum + (typeof n === "number" ? n : 0),
-            0,
-          )
-        : 0;
-      setSuccess(
-        `All your data has been deleted (${totalDeleted} records). Reloading page...`,
-      );
-      setConfirmText("");
-
+      const totalDeleted = deleteResult?.deleted ? 
+        Object.values(deleteResult.deleted).reduce((sum: number, n) => sum + (typeof n === 'number' ? n : 0), 0) : 0;
+      setSuccess(`All your data has been deleted (${totalDeleted} records). Reloading page...`);
+      setConfirmText('');
+      
       // Reload page to clear all cached data and state
       setTimeout(() => {
         window.location.reload();
       }, 1000);
     } catch (e: any) {
-      console.error("[Profile] Delete all error:", e);
-      setError(e?.message ?? "Failed to delete data");
+      console.error('[Profile] Delete all error:', e);
+      setError(e?.message ?? 'Failed to delete data');
     } finally {
       setDeleting(false);
     }
@@ -299,10 +260,9 @@ export default function ProfilePage() {
         <div className="bg-white rounded-lg border p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">Blocked Suggestions</h2>
           <p className="text-sm text-gray-600 mb-4">
-            Movies you&apos;ve removed from your suggestions. Click to add them
-            back.
+            Movies you&apos;ve removed from your suggestions. Click to add them back.
           </p>
-
+          
           {loadingBlocked ? (
             <p className="text-sm text-gray-500">Loading blocked movies...</p>
           ) : blockedMovies.length === 0 ? (
@@ -315,7 +275,7 @@ export default function ProfilePage() {
                     {movie.poster_path ? (
                       <Image
                         src={`https://image.tmdb.org/t/p/w342${movie.poster_path}`}
-                        alt={movie.title || "Movie poster"}
+                        alt={movie.title || 'Movie poster'}
                         fill
                         className="object-cover"
                         sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
@@ -348,10 +308,9 @@ export default function ProfilePage() {
         <div className="bg-white rounded-lg border p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">Liked Suggestions</h2>
           <p className="text-sm text-gray-600 mb-4">
-            Movies you&apos;ve marked as &quot;More Like This&quot;. Click to
-            remove them from your preferences.
+            Movies you&apos;ve marked as &quot;More Like This&quot;. Click to remove them from your preferences.
           </p>
-
+          
           {loadingAllowed ? (
             <p className="text-sm text-gray-500">Loading liked movies...</p>
           ) : allowedMovies.length === 0 ? (
@@ -364,7 +323,7 @@ export default function ProfilePage() {
                     {movie.poster_path ? (
                       <Image
                         src={`https://image.tmdb.org/t/p/w342${movie.poster_path}`}
-                        alt={movie.title || "Movie poster"}
+                        alt={movie.title || 'Movie poster'}
                         fill
                         className="object-cover"
                         sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
@@ -395,12 +354,9 @@ export default function ProfilePage() {
         </div>
 
         <div className="bg-red-50 rounded-lg border border-red-200 p-6">
-          <h2 className="text-xl font-semibold text-red-900 mb-2">
-            Danger Zone
-          </h2>
+          <h2 className="text-xl font-semibold text-red-900 mb-2">Danger Zone</h2>
           <p className="text-sm text-red-700 mb-4">
-            This action will permanently delete all your imported data,
-            including:
+            This action will permanently delete all your imported data, including:
           </p>
           <ul className="text-sm text-red-700 mb-4 list-disc list-inside space-y-1">
             <li>All film entries and ratings</li>
@@ -409,15 +365,12 @@ export default function ProfilePage() {
             <li>Watchlist items</li>
           </ul>
           <p className="text-sm text-red-700 mb-4 font-semibold">
-            This cannot be undone. You will need to re-import your Letterboxd
-            data to restore it.
+            This cannot be undone. You will need to re-import your Letterboxd data to restore it.
           </p>
 
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Type{" "}
-              <span className="font-mono bg-gray-100 px-1">DELETE ALL</span> to
-              confirm:
+              Type <span className="font-mono bg-gray-100 px-1">DELETE ALL</span> to confirm:
             </label>
             <input
               type="text"
@@ -443,10 +396,10 @@ export default function ProfilePage() {
 
           <button
             onClick={handleDeleteAll}
-            disabled={deleting || confirmText !== "DELETE ALL"}
+            disabled={deleting || confirmText !== 'DELETE ALL'}
             className="w-full px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
           >
-            {deleting ? "Deleting..." : "Delete All My Data"}
+            {deleting ? 'Deleting...' : 'Delete All My Data'}
           </button>
         </div>
       </div>
