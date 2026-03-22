@@ -134,6 +134,7 @@ export async function POST(req: Request) {
       const summary = summaryMap.get(row.tmdb_id);
 
       return apiSuccess({
+        blocked: true,
         ...row,
         title: body.title ?? summary?.title ?? null,
         year: summary?.year ?? null,

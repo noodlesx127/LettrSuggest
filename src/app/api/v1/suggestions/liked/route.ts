@@ -111,6 +111,7 @@ async function fetchSavedSuggestionById(
     .select("id, tmdb_id, title, year, poster_path, order_index, created_at")
     .eq("id", id)
     .eq("user_id", userId)
+    .eq("liked", true)
     .maybeSingle();
 
   if (error) {
@@ -143,6 +144,7 @@ export async function GET(req: Request) {
           },
         )
         .eq("user_id", auth.userId)
+        .eq("liked", true)
         .order("created_at", { ascending: false })
         .range(offset, offset + perPage - 1);
 

@@ -8,9 +8,16 @@ import { apiPaginated, ApiError } from "../../_lib/responseEnvelope";
 import { supabaseAdmin } from "../../_lib/supabaseAdmin";
 
 interface DiaryEntryRow {
+  uri: string;
+  title: string;
+  year: number | null;
   tmdb_id: number;
   watched_at: string | null;
   rating: number | null;
+  watch_count: number | null;
+  rewatch: boolean | null;
+  liked: boolean | null;
+  on_watchlist: boolean | null;
 }
 
 interface FilmDiaryFallbackRow {
@@ -34,7 +41,10 @@ async function fetchFromDiaryView(
 ) {
   let query = supabaseAdmin
     .from("film_diary_events_enriched")
-    .select("tmdb_id, watched_at, rating", { count: "exact" })
+    .select(
+      "uri, title, year, tmdb_id, watched_at, rating, watch_count, rewatch, liked, on_watchlist",
+      { count: "exact" },
+    )
     .eq("user_id", userId);
 
   if (year) {
@@ -51,8 +61,21 @@ async function fetchFromDiaryView(
     throw error;
   }
 
+  const entries = ((data as DiaryEntryRow[] | null) ?? []).map((row) => ({
+    uri: row.uri,
+    tmdb_id: row.tmdb_id,
+    title: row.title,
+    year: row.year,
+    rating: row.rating,
+    watched_at: row.watched_at,
+    watch_count: row.watch_count,
+    rewatch: row.rewatch,
+    liked: row.liked,
+    on_watchlist: row.on_watchlist,
+  }));
+
   return {
-    data: (data as DiaryEntryRow[] | null) ?? [],
+    data: entries,
     count: count ?? 0,
     pagination: buildPagination(page, perPage, count ?? 0),
   };

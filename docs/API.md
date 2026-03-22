@@ -417,7 +417,7 @@ Returns detailed information for a specific movie from TMDB, including credits, 
 
 #### `GET /api/v1/suggestions`
 
-Lists the authenticated user's saved movie suggestions, ordered by creation date (newest first).
+Lists the authenticated user's saved-for-later movie suggestions, ordered by creation date (newest first).
 
 **Authentication:** Any valid API key or JWT.
 
@@ -527,7 +527,7 @@ Unblocks a previously blocked movie.
 
 #### `GET /api/v1/suggestions/liked`
 
-Lists movies the user has liked/saved, ordered by `order_index`.
+Lists movies the user has explicitly liked, ordered by creation date (newest first).
 
 **Authentication:** Any valid API key or JWT.
 
@@ -682,7 +682,7 @@ Lists the authenticated user's imported film events.
       "rewatch": false,
       "watch_count": 2,
       "on_watchlist": false,
-      "last_date": "2024-12-01T00:00:00.000Z"
+      "last_date": "2024-12-01"
     }
   ]
 }
@@ -708,9 +708,27 @@ Lists the user's diary entries (watch history), ordered by date descending. Uses
 
 **Authentication:** Any valid API key or JWT.
 
-**Query Parameters:** Supports `page` and `per_page`.
+**Query Parameters:** Supports `page`, `per_page`, and optional `year`.
 
-**Response:** Same shape as `GET /api/v1/profile/films`, filtered to entries with a watch date.
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "uri": "letterboxd.com/film/inception",
+      "title": "Inception",
+      "year": 2010,
+      "rating": 4.5,
+      "watched_at": "2024-12-01",
+      "watch_count": 2,
+      "rewatch": false,
+      "liked": true,
+      "on_watchlist": false
+    }
+  ]
+}
+```
 
 ---
 
