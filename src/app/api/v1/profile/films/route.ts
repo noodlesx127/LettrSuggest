@@ -51,14 +51,14 @@ export async function GET(req: Request) {
         .range(offset, offset + perPage - 1);
 
       if (error) {
-        // PGRST103 = "Requested range not satisfiable" (offset beyond total rows)
-        // Return empty page with correct total count instead of crashing.
-        if ((error as { code?: string }).code === "PGRST103") {
-          const { count: totalCount } = await supabaseAdmin
-            .from("film_events")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", auth.userId);
+        // On range error (offset beyond total rows), fall back to a count-only
+        // query to return an empty paginated response instead of crashing.
+        const { count: totalCount, error: countError } = await supabaseAdmin
+          .from("film_events")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", auth.userId);
 
+        if (!countError && (totalCount ?? 0) <= offset) {
           return apiPaginated(
             [],
             buildPagination(page, perPage, totalCount ?? 0),

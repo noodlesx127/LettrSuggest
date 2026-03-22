@@ -34,13 +34,13 @@ export async function GET(req: Request) {
         .range(offset, offset + perPage - 1);
 
       if (error) {
-        if ((error as { code?: string }).code === "PGRST103") {
-          const { count: totalCount } = await supabaseAdmin
-            .from("film_events")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", auth.userId)
-            .eq("on_watchlist", true);
+        const { count: totalCount, error: countError } = await supabaseAdmin
+          .from("film_events")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", auth.userId)
+          .eq("on_watchlist", true);
 
+        if (!countError && (totalCount ?? 0) <= offset) {
           return apiPaginated(
             [],
             buildPagination(page, perPage, totalCount ?? 0),
