@@ -29,7 +29,7 @@ export async function GET(req: Request) {
         .select("id, email, created_at, suspended_at, user_roles(role)", {
           count: "exact",
         })
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false, nullsFirst: false });
 
       if (query) {
         usersQuery = usersQuery.ilike("email", `%${escapeLikePattern(query)}%`);

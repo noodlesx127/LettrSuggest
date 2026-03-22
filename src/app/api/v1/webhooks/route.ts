@@ -120,7 +120,7 @@ export async function GET(req: Request) {
           count: "exact",
         })
         .eq("user_id", auth.userId)
-        .order("created_at", { ascending: false })
+        .order("created_at", { ascending: false, nullsFirst: false })
         .range(offset, offset + perPage - 1);
 
       if (error) {

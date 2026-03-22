@@ -27,7 +27,7 @@ export async function GET(req: Request) {
       ] = await Promise.all([
         supabaseAdmin
           .from("profiles")
-          .select("*", { count: "exact", head: true }),
+          .select("id", { count: "exact", head: true }),
         supabaseAdmin
           .from("api_keys")
           .select("*", { count: "exact", head: true })
@@ -56,11 +56,6 @@ export async function GET(req: Request) {
           filmEventsError: filmEventsResult.error,
           activeUsersError: activeUserRows.error,
         });
-        throw new ApiError(
-          500,
-          "INTERNAL_ERROR",
-          "Failed to fetch diagnostics",
-        );
       }
 
       const activeUsers = new Set(
