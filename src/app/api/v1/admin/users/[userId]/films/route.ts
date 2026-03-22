@@ -66,7 +66,7 @@ export async function GET(req: Request, { params }: RouteContext) {
           { count: "exact" },
         )
         .eq("user_id", userId)
-        .order(sort, { ascending: order === "asc" })
+        .order(sort, { ascending: order === "asc", nullsFirst: false })
         .range(offset, offset + perPage - 1);
 
       if (error) {
