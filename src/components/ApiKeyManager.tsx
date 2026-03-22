@@ -473,10 +473,11 @@ function CreateKeyModal({
         return;
       }
 
+      const expiresAt = computeExpiry();
       const payload: CreateKeyPayload = {
         key_type: keyType,
         ...(label.trim() && { label: label.trim() }),
-        expires_at: computeExpiry(),
+        ...(expiresAt !== null && { expires_at: expiresAt }),
       };
 
       const res = await fetch("/api/v1/keys", {
