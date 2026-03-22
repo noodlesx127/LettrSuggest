@@ -122,7 +122,7 @@ export async function GET(req: Request) {
         "id, key_prefix, label, key_type, created_at, last_used_at, expires_at, revoked_at",
       )
       .eq("user_id", auth.userId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false, nullsFirst: false });
 
     if (error) {
       console.error("[API v1] Failed to list API keys", error);

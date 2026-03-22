@@ -30,7 +30,7 @@ export async function GET(req: Request) {
         )
         .eq("user_id", auth.userId)
         .eq("on_watchlist", true)
-        .order("last_date", { ascending: false })
+        .order("last_date", { ascending: false, nullsFirst: false })
         .range(offset, offset + perPage - 1);
 
       if (error) {

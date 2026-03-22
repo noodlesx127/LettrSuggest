@@ -39,7 +39,10 @@ export async function GET(req: Request) {
             )
             .eq("user_id", auth.userId)
             .eq("feature_type", "genre")
-            .order("inferred_preference", { ascending: false })
+            .order("inferred_preference", {
+              ascending: false,
+              nullsFirst: false,
+            })
             .limit(10),
         ]);
 

@@ -54,7 +54,7 @@ async function fetchFromDiaryView(
   }
 
   const { data, error, count } = await query
-    .order("watched_at", { ascending: false })
+    .order("watched_at", { ascending: false, nullsFirst: false })
     .range(offset, offset + perPage - 1);
 
   if (error) {
@@ -102,7 +102,7 @@ async function fetchFromFilmEvents(
   }
 
   const { data, error, count } = await query
-    .order("last_date", { ascending: false })
+    .order("last_date", { ascending: false, nullsFirst: false })
     .range(offset, offset + perPage - 1);
 
   if (error) {

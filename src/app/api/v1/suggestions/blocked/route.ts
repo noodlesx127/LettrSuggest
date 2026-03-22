@@ -73,7 +73,7 @@ export async function GET(req: Request) {
         .from("blocked_suggestions")
         .select("tmdb_id, blocked_at", { count: "exact" })
         .eq("user_id", auth.userId)
-        .order("blocked_at", { ascending: false })
+        .order("blocked_at", { ascending: false, nullsFirst: false })
         .range(offset, offset + perPage - 1);
 
       if (error) {
