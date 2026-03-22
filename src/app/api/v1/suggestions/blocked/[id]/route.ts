@@ -35,7 +35,7 @@ export async function DELETE(req: Request, { params }: RouteContext) {
         throw new ApiError(404, "NOT_FOUND", "Blocked suggestion not found");
       }
 
-      return apiSuccess({ deleted: true });
+      return apiSuccess({ unblocked: true });
     } catch (error) {
       console.error("[v1/suggestions/blocked/[id]] Error:", error);
       if (error instanceof ApiError) {

@@ -97,7 +97,7 @@ export async function DELETE(
     const existingKey = await getOwnedKeyOrThrow(auth.userId, params.keyId);
 
     if (existingKey.revoked_at) {
-      return apiSuccess(toKeyResponse(existingKey));
+      return apiSuccess({ revoked: true, ...toKeyResponse(existingKey) });
     }
 
     const revokedAt = new Date().toISOString();
@@ -116,6 +116,9 @@ export async function DELETE(
       throw new ApiError(500, "INTERNAL_ERROR", "Failed to revoke API key");
     }
 
-    return apiSuccess(toKeyResponse(data as ApiKeySummaryRow));
+    return apiSuccess({
+      revoked: true,
+      ...toKeyResponse(data as ApiKeySummaryRow),
+    });
   });
 }

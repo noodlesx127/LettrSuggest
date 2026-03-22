@@ -28,6 +28,7 @@ export async function GET(req: Request) {
           },
         )
         .eq("user_id", auth.userId)
+        .eq("liked", false)
         .order("created_at", { ascending: false })
         .range(offset, offset + perPage - 1);
 

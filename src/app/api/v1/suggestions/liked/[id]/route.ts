@@ -23,6 +23,7 @@ export async function DELETE(req: Request, { params }: RouteContext) {
         .delete()
         .eq("id", id)
         .eq("user_id", auth.userId)
+        .eq("liked", true)
         .select("id")
         .maybeSingle();
 

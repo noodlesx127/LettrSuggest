@@ -647,10 +647,10 @@ export default function SuggestPage() {
         // Check genres if available
         const genreMatch = item.genres
           ? seasonalConfig.keywords.some((kw) =>
-            item.genres!.some((g) =>
-              g.toLowerCase().includes(kw.toLowerCase()),
-            ),
-          )
+              item.genres!.some((g) =>
+                g.toLowerCase().includes(kw.toLowerCase()),
+              ),
+            )
           : false;
 
         // Also check reasons for genre mentions that match seasonal config
@@ -753,7 +753,10 @@ export default function SuggestPage() {
       }, SECTION_ITEM_LIMIT);
 
       // 8. From Collections: Films in same collections/franchises (specific metadata)
-      const fromCollections = getNextItems((item) => !!item.collectionName, SECTION_ITEM_LIMIT);
+      const fromCollections = getNextItems(
+        (item) => !!item.collectionName,
+        SECTION_ITEM_LIMIT,
+      );
 
       // ============================================
       // PHASE 2: VOTE CATEGORY SECTIONS (moderately specific)
@@ -816,7 +819,12 @@ export default function SuggestPage() {
 
       // 17.5. Niche Matches (Subgenres)
       const nicheMatches = getNextItems(
-        (item) => item.reasons.some(r => r.toLowerCase().includes("niche") || r.toLowerCase().includes("subgenre")),
+        (item) =>
+          item.reasons.some(
+            (r) =>
+              r.toLowerCase().includes("niche") ||
+              r.toLowerCase().includes("subgenre"),
+          ),
         SECTION_ITEM_LIMIT,
       );
 
@@ -833,9 +841,9 @@ export default function SuggestPage() {
       // 19. Best of the [Decade]s
       const decadeMatches = topDecade
         ? getNextItems((item) => {
-          const year = parseInt(item.year || "0");
-          return year >= topDecade && year < topDecade + 10;
-        }, SECTION_ITEM_LIMIT)
+            const year = parseInt(item.year || "0");
+            return year >= topDecade && year < topDecade + 10;
+          }, SECTION_ITEM_LIMIT)
         : [];
 
       // 20. New & Trending: Recent releases (2023+)
@@ -858,7 +866,10 @@ export default function SuggestPage() {
       const perfectMatches = getNextItems(() => true, SECTION_ITEM_LIMIT);
 
       // 23. More Recommendations: Any remaining films
-      const moreRecommendations = getNextItems(() => true, SECTION_ITEM_LIMIT * 2); // Increased to catch more
+      const moreRecommendations = getNextItems(
+        () => true,
+        SECTION_ITEM_LIMIT * 2,
+      ); // Increased to catch more
 
       // Helper to sort by rating
       const sortByRating = (items: MovieItem[]) => {
@@ -1030,10 +1041,10 @@ export default function SuggestPage() {
         );
         const genreMatch = item.genres
           ? seasonalConfig.keywords.some((kw: string) =>
-            item.genres!.some((g) =>
-              g.toLowerCase().includes(kw.toLowerCase()),
-            ),
-          )
+              item.genres!.some((g) =>
+                g.toLowerCase().includes(kw.toLowerCase()),
+              ),
+            )
           : false;
         const reasonsMatch = item.reasons.some((r) => {
           const lower = r.toLowerCase();
@@ -2714,7 +2725,8 @@ export default function SuggestPage() {
             watchlistDirectors: tasteProfile.watchlistDirectors?.map(
               (w) => w.name,
             ),
-            preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
+            preferredSubgenreKeywordIds:
+              tasteProfile.preferredSubgenreKeywordIds,
           },
           featureFeedback,
         });
@@ -2951,7 +2963,8 @@ export default function SuggestPage() {
             watchlistDirectors: tasteProfile.watchlistDirectors?.map(
               (w) => w.name,
             ),
-            preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
+            preferredSubgenreKeywordIds:
+              tasteProfile.preferredSubgenreKeywordIds,
           },
           featureFeedback,
         });
@@ -3223,12 +3236,12 @@ export default function SuggestPage() {
       effective >= 6 ? "Strong" : effective >= 3 ? "Solid" : "Light";
     const days = data.lastUpdated
       ? Math.max(
-        0,
-        Math.round(
-          (Date.now() - new Date(data.lastUpdated).getTime()) /
-          (1000 * 60 * 60 * 24),
-        ),
-      )
+          0,
+          Math.round(
+            (Date.now() - new Date(data.lastUpdated).getTime()) /
+              (1000 * 60 * 60 * 24),
+          ),
+        )
       : null;
     const recency = days === null ? "stale" : days === 0 ? "<1d" : `${days}d`;
     return {
@@ -3331,19 +3344,19 @@ export default function SuggestPage() {
           })),
           ...(movieFeatures.franchise
             ? [
-              {
-                type: "collection" as FeatureType,
-                name: movieFeatures.franchise,
-              },
-            ]
+                {
+                  type: "collection" as FeatureType,
+                  name: movieFeatures.franchise,
+                },
+              ]
             : []),
           ...(movieFeatures.director
             ? [
-              {
-                type: "director" as FeatureType,
-                name: movieFeatures.director,
-              },
-            ]
+                {
+                  type: "director" as FeatureType,
+                  name: movieFeatures.director,
+                },
+              ]
             : []),
         ]);
 
@@ -3452,19 +3465,19 @@ export default function SuggestPage() {
           })),
           ...(movieFeatures.franchise
             ? [
-              {
-                type: "collection" as FeatureType,
-                name: movieFeatures.franchise,
-              },
-            ]
+                {
+                  type: "collection" as FeatureType,
+                  name: movieFeatures.franchise,
+                },
+              ]
             : []),
           ...(movieFeatures.director
             ? [
-              {
-                type: "director" as FeatureType,
-                name: movieFeatures.director,
-              },
-            ]
+                {
+                  type: "director" as FeatureType,
+                  name: movieFeatures.director,
+                },
+              ]
             : []),
         ]);
 
@@ -3752,9 +3765,9 @@ export default function SuggestPage() {
           setCategorizedSuggestions((prev) =>
             prev
               ? {
-                ...prev,
-                watchlistPicks: shuffled,
-              }
+                  ...prev,
+                  watchlistPicks: shuffled,
+                }
               : null,
           );
         }
@@ -5101,27 +5114,27 @@ export default function SuggestPage() {
                             )
                               ? "🎄"
                               : categorizedSuggestions.seasonalConfig.title.includes(
-                                "Halloween",
-                              )
+                                    "Halloween",
+                                  )
                                 ? "🎃"
                                 : categorizedSuggestions.seasonalConfig.title.includes(
-                                  "Thanksgiving",
-                                )
+                                      "Thanksgiving",
+                                    )
                                   ? "🦃"
                                   : categorizedSuggestions.seasonalConfig.title.includes(
-                                    "Valentine",
-                                  )
+                                        "Valentine",
+                                      )
                                     ? "💝"
                                     : categorizedSuggestions.seasonalConfig.title.includes(
-                                      "Fourth",
-                                    ) ||
-                                      categorizedSuggestions.seasonalConfig.title.includes(
-                                        "Independence",
-                                      )
+                                          "Fourth",
+                                        ) ||
+                                        categorizedSuggestions.seasonalConfig.title.includes(
+                                          "Independence",
+                                        )
                                       ? "🎆"
                                       : categorizedSuggestions.seasonalConfig.title.includes(
-                                        "Easter",
-                                      )
+                                            "Easter",
+                                          )
                                         ? "🐰"
                                         : "📅"}
                           </span>
