@@ -896,6 +896,239 @@ function ConfirmRevokeModal({
 }
 
 // ============================================================================
+// QUICK START
+// ============================================================================
+
+const QUICK_START_SNIPPETS = {
+  baseUrl: "https://lettrsuggest.netlify.app/api/v1",
+  authHeader: "Authorization: Bearer <YOUR_API_KEY>",
+  curlExample: `curl https://lettrsuggest.netlify.app/api/v1/auth/me \\
+  -H "Authorization: Bearer <YOUR_API_KEY>"`,
+} as const;
+
+interface CodeBlockProps {
+  code: string;
+  label: string;
+}
+
+function CodeBlock({ code, label }: CodeBlockProps) {
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = code;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    setCopied(true);
+    toast({ message: `${label} copied to clipboard`, type: "success" });
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  return (
+    <div className="relative group">
+      <pre
+        className={cn(
+          "p-4 rounded-xl font-mono text-[13px] leading-relaxed overflow-x-auto",
+          "bg-gray-900 dark:bg-black",
+          "text-emerald-400",
+          "border border-gray-700 dark:border-gray-600",
+        )}
+      >
+        {code}
+      </pre>
+      <button
+        onClick={handleCopy}
+        className={cn(
+          "absolute top-2 right-2 p-2 rounded-lg transition-all duration-150",
+          copied
+            ? "bg-emerald-600 text-white"
+            : "bg-gray-700/80 hover:bg-gray-600 text-gray-300 hover:text-white",
+          "backdrop-blur-sm opacity-0 group-hover:opacity-100 focus:opacity-100",
+        )}
+        title="Copy to clipboard"
+      >
+        {copied ? (
+          <Icon name="check" size="sm" />
+        ) : (
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+            />
+          </svg>
+        )}
+      </button>
+    </div>
+  );
+}
+
+function ApiQuickStart() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+      {/* Header / Toggle */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "w-full flex items-center justify-between p-6 text-left",
+          "hover:bg-gray-50/60 dark:hover:bg-gray-700/30 transition-colors duration-100",
+        )}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className={cn(
+              "w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0",
+              "bg-gradient-to-br from-emerald-100 to-teal-100",
+              "dark:from-emerald-900/40 dark:to-teal-900/40",
+              "border border-emerald-200/60 dark:border-emerald-700/40",
+            )}
+          >
+            <svg
+              className="w-4 h-4 text-emerald-600 dark:text-emerald-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z"
+              />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Quick Start
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              How to use your API key
+            </p>
+          </div>
+        </div>
+        <svg
+          className={cn(
+            "w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200",
+            open && "rotate-180",
+          )}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+
+      {/* Collapsible content using CSS grid trick */}
+      <div
+        className={cn(
+          "grid transition-all duration-200 ease-in-out",
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        )}
+      >
+        <div className="overflow-hidden">
+          <div className="px-6 pb-6 space-y-6 border-t border-gray-100 dark:border-gray-700/50 pt-5">
+            {/* Base URL */}
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                Base URL
+              </p>
+              <CodeBlock code={QUICK_START_SNIPPETS.baseUrl} label="Base URL" />
+            </div>
+
+            {/* Authentication */}
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                Authentication
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 leading-relaxed">
+                Include your API key in the{" "}
+                <code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono">
+                  Authorization
+                </code>{" "}
+                header on every request:
+              </p>
+              <CodeBlock
+                code={QUICK_START_SNIPPETS.authHeader}
+                label="Auth header"
+              />
+            </div>
+
+            {/* Example Request */}
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">
+                Example Request
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 leading-relaxed">
+                Verify your key is working by calling{" "}
+                <code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-xs font-mono">
+                  /auth/me
+                </code>
+                :
+              </p>
+              <CodeBlock
+                code={QUICK_START_SNIPPETS.curlExample}
+                label="Example request"
+              />
+            </div>
+
+            {/* Docs link */}
+            <div className="pt-1">
+              <a
+                href="#"
+                className={cn(
+                  "inline-flex items-center gap-1.5 text-sm font-medium",
+                  "text-violet-600 dark:text-violet-400",
+                  "hover:text-violet-700 dark:hover:text-violet-300 transition-colors",
+                )}
+              >
+                View full API docs
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                  />
+                </svg>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
@@ -1202,6 +1435,8 @@ export default function ApiKeyManager() {
           </>
         )}
       </div>
+
+      <ApiQuickStart />
 
       {/* Modals */}
       <CreateKeyModal
