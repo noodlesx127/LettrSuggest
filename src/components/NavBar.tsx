@@ -21,11 +21,16 @@ export default function NavBar() {
       // Check admin role
       const userId = session?.user?.id;
       if (userId) {
-        const { data: roleData } = await supabase
+        const { data: roleData, error: roleError } = await supabase
           .from("user_roles")
           .select("role")
           .eq("user_id", userId)
           .single();
+        if (roleError)
+          console.error(
+            "[NavBar] Failed to check admin role:",
+            roleError.message,
+          );
         setIsAdmin(roleData?.role === "admin");
       } else {
         setIsAdmin(false);
@@ -41,11 +46,16 @@ export default function NavBar() {
         setUser(session?.user ?? null);
         const userId = session?.user?.id;
         if (userId && supabase) {
-          const { data: roleData } = await supabase
+          const { data: roleData, error: roleError } = await supabase
             .from("user_roles")
             .select("role")
             .eq("user_id", userId)
             .single();
+          if (roleError)
+            console.error(
+              "[NavBar] Failed to check admin role:",
+              roleError.message,
+            );
           setIsAdmin(roleData?.role === "admin");
         } else {
           setIsAdmin(false);
