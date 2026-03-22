@@ -57,7 +57,8 @@ export default function AdminGate({ children }: { children: ReactNode }) {
     void check();
 
     if (supabase) {
-      const { data } = supabase.auth.onAuthStateChange(() => {
+      const { data } = supabase.auth.onAuthStateChange((event, _session) => {
+        if (event === "INITIAL_SESSION") return; // already handled by initial check()
         setState({ status: "loading" });
         void check();
       });
