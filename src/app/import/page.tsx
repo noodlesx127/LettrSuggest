@@ -694,8 +694,8 @@ export default function ImportPage() {
               console.log("[Import] upsertDiaryEvents done");
             }
           }
-        } catch {
-          // ignore diary upsert errors (table may not exist yet)
+        } catch (diaryErr) {
+          console.warn("[Import] diary upsert failed (non-fatal):", diaryErr);
         }
 
         // Save complete, move to enrich
