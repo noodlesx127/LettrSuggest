@@ -563,7 +563,7 @@ export async function getUserDetail(
       ),
       safeCount(
         supabaseAdmin
-          .from("film_diary_events")
+          .from("film_diary_events_raw")
           .select("*", { count: "exact", head: true })
           .eq("user_id", userId),
       ),

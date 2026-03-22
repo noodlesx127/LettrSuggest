@@ -47,7 +47,7 @@ begin
 
   -- Delete diary events (may not exist)
   begin
-    delete from public.film_diary_events where user_id = target_user_id;
+    delete from public.film_diary_events_raw where user_id = target_user_id;
     get diagnostics deleted_diary = row_count;
   exception when undefined_table then
     deleted_diary := 0;
