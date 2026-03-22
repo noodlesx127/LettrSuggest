@@ -51,6 +51,20 @@ export async function GET(req: Request) {
         .range(offset, offset + perPage - 1);
 
       if (error) {
+        // PGRST103 = "Requested range not satisfiable" (offset beyond total rows)
+        // Return empty page with correct total count instead of crashing.
+        if ((error as { code?: string }).code === "PGRST103") {
+          const { count: totalCount } = await supabaseAdmin
+            .from("film_events")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", auth.userId);
+
+          return apiPaginated(
+            [],
+            buildPagination(page, perPage, totalCount ?? 0),
+          );
+        }
+
         throw new ApiError(500, "INTERNAL_ERROR", "Failed to fetch films");
       }
 
