@@ -175,7 +175,25 @@ export async function POST(req: Request) {
   return withApiAuth(req, async (auth) => {
     try {
       const body = await parseLikedSuggestionBody(req);
-      const movieSummary = await getMovieSummary(body.tmdb_id);
+
+      // Attempt TMDB enrichment but fall back gracefully if the movie is not
+      // found — the caller may have already provided a title in the body.
+      let movieSummary: {
+        title: string | null;
+        year: string | null;
+        poster_path: string | null;
+      } = { title: null, year: null, poster_path: null };
+      try {
+        movieSummary = await getMovieSummary(body.tmdb_id);
+      } catch (tmdbErr) {
+        if (!(tmdbErr instanceof ApiError && tmdbErr.status === 404)) {
+          throw tmdbErr;
+        }
+        console.warn(
+          `[v1/suggestions/liked] TMDB movie ${body.tmdb_id} not found, using body-provided data`,
+        );
+      }
+
       const title = body.title ?? movieSummary.title;
       const year = movieSummary.year
         ? Number.parseInt(movieSummary.year, 10)
