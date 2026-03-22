@@ -1,4 +1,4 @@
-import { withApiAuth } from "../../_lib/apiKeyAuth";
+﻿import { withApiAuth } from "../../_lib/apiKeyAuth";
 import { buildPagination, getPaginationParams } from "../../_lib/pagination";
 import { apiPaginated, ApiError } from "../../_lib/responseEnvelope";
 import { supabaseAdmin } from "../../_lib/supabaseAdmin";
@@ -47,7 +47,7 @@ export async function GET(req: Request) {
           { count: "exact" },
         )
         .eq("user_id", auth.userId)
-        .order(sort, { ascending: order === "asc" })
+        .order(sort, { ascending: order === "asc", nullsFirst: false })
         .range(offset, offset + perPage - 1);
 
       if (error) {
