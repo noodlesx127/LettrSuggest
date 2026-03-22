@@ -462,6 +462,11 @@ function CreateKeyModal({
   };
 
   const handleCreate = async () => {
+    if (expiryOption === "custom" && !customExpiry) {
+      setError("Please select an expiration date for the custom option.");
+      return;
+    }
+
     setCreating(true);
     setError(null);
 
@@ -643,7 +648,9 @@ function CreateKeyModal({
                 type="date"
                 value={customExpiry}
                 onChange={(e) => setCustomExpiry(e.target.value)}
-                min={new Date().toISOString().split("T")[0]}
+                min={
+                  new Date(Date.now() + 86400000).toISOString().split("T")[0]
+                }
                 className={cn(
                   "w-full h-10 px-3 text-sm rounded-xl border transition-all duration-150",
                   "bg-white dark:bg-gray-800",
