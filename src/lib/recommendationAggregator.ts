@@ -12,6 +12,8 @@
  * Strategy: More sources agreeing = higher confidence = better recommendation
  */
 
+import pLimit from "p-limit";
+
 import { searchMovies } from "./movieAPI";
 import { getSimilarContent } from "./tastedive";
 import { getTrendingTitles } from "./watchmode";
@@ -53,9 +55,30 @@ export async function aggregateRecommendations(params: {
   seedMovies: Array<{ tmdbId: number; title: string; imdbId?: string }>;
   limit?: number;
   sourceReliability?: Map<string, number>;
+  deadlineMs?: number;
 }): Promise<AggregatedRecommendation[]> {
-  const { seedMovies, limit = 50, sourceReliability } = params;
+  const { seedMovies, limit = 50, sourceReliability, deadlineMs } = params;
   const startTime = Date.now();
+
+  const withDeadline = <T>(p: Promise<T>, label: string): Promise<T> => {
+    if (!deadlineMs) return p;
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(
+          new Error(`[Aggregator] ${label} timed out after ${deadlineMs}ms`),
+        );
+      }, deadlineMs);
+    });
+
+    return Promise.race([p, timeoutPromise]).finally(() => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    });
+  };
 
   console.log("[Aggregator] Starting multi-source aggregation", {
     seedCount: seedMovies.length,
@@ -66,11 +89,11 @@ export async function aggregateRecommendations(params: {
   const sourceFetchStart = Date.now();
   const [tmdbRecs, tastediveRecs, traktRecs, watchmodeRecs, vectorRecs] =
     await Promise.allSettled([
-      fetchTMDBRecommendations(seedMovies),
-      fetchTasteDiveRecommendations(seedMovies),
-      fetchTraktRecommendations(seedMovies),
-      fetchWatchmodeTrending(),
-      fetchVectorSimilarityRecommendations(seedMovies),
+      withDeadline(fetchTMDBRecommendations(seedMovies), "TMDB"),
+      withDeadline(fetchTasteDiveRecommendations(seedMovies), "TasteDive"),
+      withDeadline(fetchTraktRecommendations(seedMovies), "Trakt"),
+      withDeadline(fetchWatchmodeTrending(), "Watchmode"),
+      withDeadline(fetchVectorSimilarityRecommendations(seedMovies), "Vector"),
     ]);
   const sourceFetchElapsed = Date.now() - sourceFetchStart;
 
@@ -486,69 +509,87 @@ async function fetchTMDBRecommendations(
   const recommendations: SourceRecommendation[] = [];
 
   // Dynamically scale limit based on seed pool size (5 to 25)
-  const dynamicLimit = Math.min(Math.max(5, Math.floor(seedMovies.length * 0.15)), 25);
+  const dynamicLimit = Math.min(
+    Math.max(5, Math.floor(seedMovies.length * 0.15)),
+    25,
+  );
   // Randomly sample seeds for higher recommendation variety
-  const seeds = [...seedMovies].sort(() => Math.random() - 0.5).slice(0, dynamicLimit);
+  const seeds = [...seedMovies]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, dynamicLimit);
 
   console.log("[Aggregator] Fetching TMDB recommendations", {
     seedCount: seeds.length,
     seeds: seeds.map((s) => s.title),
   });
 
-  for (const seed of seeds) {
-    try {
-      // Fetch from our TMDB movie endpoint which includes similar/recommendations
-      const baseUrl =
-        typeof window === "undefined"
-          ? process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
-          : typeof self !== "undefined" && self.location
-            ? self.location.origin
-            : "http://localhost:3000";
-      const u = new URL("/api/tmdb/movie", baseUrl);
-      u.searchParams.set("id", String(seed.tmdbId));
-      u.searchParams.set("append_to_response", "similar,recommendations");
+  const tmdbLimit = pLimit(5);
 
-      const response = await fetch(u.toString());
-      if (!response.ok) continue;
+  const seedResults = await Promise.allSettled(
+    seeds.map((seed) =>
+      tmdbLimit(async () => {
+        // Fetch from our TMDB movie endpoint which includes similar/recommendations
+        const baseUrl =
+          typeof window === "undefined"
+            ? process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
+            : typeof self !== "undefined" && self.location
+              ? self.location.origin
+              : "http://localhost:3000";
+        const u = new URL("/api/tmdb/movie", baseUrl);
+        u.searchParams.set("id", String(seed.tmdbId));
+        u.searchParams.set("append_to_response", "similar,recommendations");
 
-      const data = await response.json();
-      if (!data.ok || !data.movie) continue;
+        const response = await fetch(u.toString());
+        if (!response.ok) return [];
 
-      const movie = data.movie;
+        const data = await response.json();
+        if (!data.ok || !data.movie) return [];
 
-      // Process similar movies
-      const similarMovies = movie.similar?.results || [];
-      for (const similar of similarMovies.slice(0, 10)) {
-        recommendations.push({
-          source: "tmdb" as const,
-          tmdbId: similar.id,
-          title: similar.title,
-          confidence: 0.85,
-          reason: `Similar to "${seed.title}"`,
-        });
-      }
+        const movie = data.movie;
+        const recs: SourceRecommendation[] = [];
 
-      // Process recommended movies
-      const recommendedMovies = movie.recommendations?.results || [];
-      for (const rec of recommendedMovies.slice(0, 10)) {
-        // Avoid duplicates
-        if (!recommendations.some((r) => r.tmdbId === rec.id)) {
-          recommendations.push({
+        // Process similar movies
+        const similarMovies = movie.similar?.results || [];
+        for (const similar of similarMovies.slice(0, 10)) {
+          recs.push({
             source: "tmdb" as const,
-            tmdbId: rec.id,
-            title: rec.title,
-            confidence: 0.9, // Recommendations are slightly more reliable
-            reason: `Recommended based on "${seed.title}"`,
+            tmdbId: similar.id,
+            title: similar.title,
+            confidence: 0.85,
+            reason: `Similar to "${seed.title}"`,
           });
         }
-      }
 
-      console.log("[Aggregator] TMDB recommendations for:", seed.title, {
-        similar: similarMovies.length,
-        recommended: recommendedMovies.length,
-      });
-    } catch (error) {
-      console.error("[Aggregator] TMDB fetch error:", error);
+        // Process recommended movies
+        const recommendedMovies = movie.recommendations?.results || [];
+        for (const rec of recommendedMovies.slice(0, 10)) {
+          // Avoid duplicates
+          if (!recs.some((r) => r.tmdbId === rec.id)) {
+            recs.push({
+              source: "tmdb" as const,
+              tmdbId: rec.id,
+              title: rec.title,
+              confidence: 0.9, // Recommendations are slightly more reliable
+              reason: `Recommended based on "${seed.title}"`,
+            });
+          }
+        }
+
+        console.log("[Aggregator] TMDB recommendations for:", seed.title, {
+          similar: similarMovies.length,
+          recommended: recommendedMovies.length,
+        });
+
+        return recs;
+      }),
+    ),
+  );
+
+  for (const result of seedResults) {
+    if (result.status === "fulfilled") {
+      recommendations.push(...result.value);
+    } else {
+      console.error("[Aggregator] TMDB fetch error:", result.reason);
     }
   }
 
@@ -599,15 +640,20 @@ async function fetchTasteDiveRecommendations(
 
   try {
     // Dynamically scale limit based on seed pool size (5 to 25)
-    const dynamicLimit = Math.min(Math.max(5, Math.floor(seedMovies.length * 0.15)), 25);
+    const dynamicLimit = Math.min(
+      Math.max(5, Math.floor(seedMovies.length * 0.15)),
+      25,
+    );
     // Randomly sample seeds for higher recommendation variety
-    const seeds = [...seedMovies].sort(() => Math.random() - 0.5).slice(0, dynamicLimit);
+    const seeds = [...seedMovies]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, dynamicLimit);
 
     console.log("[Aggregator] Fetching TasteDive recommendations in chunks", {
       totalSeeds: seeds.length,
     });
 
-    const allResults = [];
+    const allResults: Array<{ Name: string }> = [];
     const chunkSize = 5; // Chunk size of 5 to maximize TasteDive's 20-limit response per chunk
 
     // Process in chunks concurrently
@@ -615,7 +661,12 @@ async function fetchTasteDiveRecommendations(
     for (let i = 0; i < seeds.length; i += chunkSize) {
       const chunk = seeds.slice(i, i + chunkSize);
       const query = chunk
-        .map((s) => s.title.replace(/[&+#:]/g, " ").replace(/\s+/g, " ").trim())
+        .map((s) =>
+          s.title
+            .replace(/[&+#:]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim(),
+        )
         .join(", ");
 
       chunkPromises.push(
@@ -624,9 +675,12 @@ async function fetchTasteDiveRecommendations(
           info: false,
           limit: 20, // 20 per chunk yields a much higher total cap
         }).catch((err: any) => {
-          console.warn(`[Aggregator] TasteDive chunk failed for query "${query}"`, err);
+          console.warn(
+            `[Aggregator] TasteDive chunk failed for query "${query}"`,
+            err,
+          );
           return [];
-        })
+        }),
       );
     }
 
@@ -642,14 +696,33 @@ async function fetchTasteDiveRecommendations(
       }
     }
 
-    console.log(`[Aggregator] TasteDive chunking complete. Found ${allResults.length} raw results.`);
+    console.log(
+      `[Aggregator] TasteDive chunking complete. Found ${allResults.length} raw results.`,
+    );
 
-    for (const result of allResults) {
-      // Search for TMDB ID by title
-      const searchResults = await searchMovies({
-        query: result.Name,
-        preferTuiMDB: false,
-      });
+    const searchLimit = pLimit(5);
+
+    const resolvedResults = await Promise.allSettled(
+      allResults.map((result) =>
+        searchLimit(async () => {
+          const searchResults = await searchMovies({
+            query: result.Name,
+            preferTuiMDB: false,
+          });
+          return { result, searchResults };
+        }),
+      ),
+    );
+
+    for (const resolved of resolvedResults) {
+      if (resolved.status === "rejected") {
+        console.warn(
+          "[Aggregator] TasteDive ID resolution failed:",
+          resolved.reason,
+        );
+        continue;
+      }
+      const { result, searchResults } = resolved.value;
 
       if (searchResults.length > 0) {
         const tmdbMatch = searchResults[0];
@@ -717,47 +790,62 @@ async function fetchTraktRecommendations(
 
   try {
     // Dynamically scale limit based on seed pool size (5 to 25)
-    const dynamicLimit = Math.min(Math.max(5, Math.floor(seedMovies.length * 0.15)), 25);
+    const dynamicLimit = Math.min(
+      Math.max(5, Math.floor(seedMovies.length * 0.15)),
+      25,
+    );
     // Randomly sample seeds for higher recommendation variety
-    const seeds = [...seedMovies].sort(() => Math.random() - 0.5).slice(0, dynamicLimit);
+    const seeds = [...seedMovies]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, dynamicLimit);
 
-    for (const seed of seeds) {
-      try {
-        const baseUrl =
-          typeof window === "undefined"
-            ? process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
-            : typeof self !== "undefined" && self.location
-              ? self.location.origin
-              : "http://localhost:3000";
-        const u = new URL("/api/trakt/related", baseUrl);
-        u.searchParams.set("id", String(seed.tmdbId));
-        u.searchParams.set("limit", "15"); // Increased from 10
+    const traktLimit = pLimit(5);
 
-        const response = await fetch(u.toString());
-        if (!response.ok) continue;
+    const traktResults = await Promise.allSettled(
+      seeds.map((seed) =>
+        traktLimit(async () => {
+          const baseUrl =
+            typeof window === "undefined"
+              ? process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
+              : typeof self !== "undefined" && self.location
+                ? self.location.origin
+                : "http://localhost:3000";
+          const u = new URL("/api/trakt/related", baseUrl);
+          u.searchParams.set("id", String(seed.tmdbId));
+          u.searchParams.set("limit", "15"); // Increased from 10
 
-        const data = await response.json();
-        if (!data.ok || !data.ids) continue;
+          const response = await fetch(u.toString());
+          if (!response.ok) return { seed, ids: [] as number[] };
 
-        // Trakt returns TMDB IDs directly
-        for (const tmdbId of data.ids) {
-          // Avoid duplicates
-          if (!recommendations.some((r) => r.tmdbId === tmdbId)) {
-            recommendations.push({
-              source: "trakt" as const,
-              tmdbId,
-              title: "", // We don't have the title from Trakt API response
-              confidence: 0.9, // Community-driven (boosted - Trakt has best quality recs)
-              reason: `Related to "${seed.title}" (Trakt community)`,
-            });
-          }
+          const data = await response.json();
+          if (!data.ok || !data.ids) return { seed, ids: [] as number[] };
+
+          console.log("[Aggregator] Trakt related for:", seed.title, {
+            count: data.ids?.length || 0,
+          });
+
+          return { seed, ids: data.ids as number[] };
+        }),
+      ),
+    );
+
+    const seenTraktIds = new Set<number>();
+    for (const result of traktResults) {
+      if (result.status === "rejected") {
+        console.error("[Aggregator] Trakt error for seed:", result.reason);
+        continue;
+      }
+      for (const tmdbId of result.value.ids) {
+        if (!seenTraktIds.has(tmdbId)) {
+          seenTraktIds.add(tmdbId);
+          recommendations.push({
+            source: "trakt" as const,
+            tmdbId,
+            title: "", // We don't have the title from Trakt API response
+            confidence: 0.9, // Community-driven (boosted - Trakt has best quality recs)
+            reason: `Related to "${result.value.seed.title}" (Trakt community)`,
+          });
         }
-
-        console.log("[Aggregator] Trakt related for:", seed.title, {
-          count: data.ids?.length || 0,
-        });
-      } catch (err) {
-        console.error("[Aggregator] Trakt error for seed:", seed.title, err);
       }
     }
 
@@ -821,9 +909,14 @@ async function fetchVectorSimilarityRecommendations(
 
   try {
     // Dynamically scale limit based on seed pool size (5 to 25)
-    const dynamicLimit = Math.min(Math.max(5, Math.floor(seedMovies.length * 0.15)), 25);
+    const dynamicLimit = Math.min(
+      Math.max(5, Math.floor(seedMovies.length * 0.15)),
+      25,
+    );
     // Randomly sample seeds for higher recommendation variety
-    const seeds = [...seedMovies].sort(() => Math.random() - 0.5).slice(0, dynamicLimit);
+    const seeds = [...seedMovies]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, dynamicLimit);
     const seedIds = seeds.map((s) => s.tmdbId).filter(Boolean);
     if (seedIds.length === 0) return recommendations;
 
