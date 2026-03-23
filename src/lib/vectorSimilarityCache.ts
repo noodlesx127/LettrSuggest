@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isCacheValid } from "@/lib/apiCache";
 
 const VECTOR_SIMILARITY_CACHE_TTL_DAYS = 7;
@@ -6,10 +6,8 @@ const VECTOR_SIMILARITY_CACHE_TTL_DAYS = 7;
 export async function getCachedVectorSimilarity(
   tmdbId: number,
 ): Promise<number[] | null> {
-  if (!supabase) return null;
-
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("vector_similarity_cache")
       .select("related_ids, cached_at")
       .eq("tmdb_id", tmdbId)
@@ -33,14 +31,14 @@ export async function setCachedVectorSimilarity(
   tmdbId: number,
   relatedIds: number[],
 ): Promise<void> {
-  if (!supabase) return;
-
   try {
-    const { error } = await supabase.from("vector_similarity_cache").upsert({
-      tmdb_id: tmdbId,
-      related_ids: relatedIds,
-      cached_at: new Date().toISOString(),
-    });
+    const { error } = await supabaseAdmin
+      .from("vector_similarity_cache")
+      .upsert({
+        tmdb_id: tmdbId,
+        related_ids: relatedIds,
+        cached_at: new Date().toISOString(),
+      });
 
     if (error) {
       console.error("[Cache] Error writing vector similarity cache:", error);

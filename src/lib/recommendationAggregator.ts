@@ -17,7 +17,7 @@ import pLimit from "p-limit";
 
 import { generateMovieEmbeddingById } from "./embeddings";
 import { searchMovies } from "./movieAPI";
-import { supabase } from "./supabaseClient";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSimilarContent } from "./tastedive";
 import {
   getCachedVectorSimilarity,
@@ -999,13 +999,6 @@ async function fetchVectorSimilarityRecommendations(
     const seedIds = seeds.map((s) => s.tmdbId).filter(Boolean);
     if (seedIds.length === 0) return recommendations;
 
-    if (!supabase) {
-      console.warn(
-        "[Aggregator] Vector similarity: Supabase client not initialized",
-      );
-      return recommendations;
-    }
-
     const limit = 20;
     const aggregated = new Map<number, { score: number; count: number }>();
 
@@ -1028,10 +1021,13 @@ async function fetchVectorSimilarityRecommendations(
         }
 
         try {
-          const { data, error } = await supabase.rpc("match_movie_embeddings", {
-            query_embedding: embedding,
-            match_count: limit,
-          });
+          const { data, error } = await supabaseAdmin.rpc(
+            "match_movie_embeddings",
+            {
+              query_embedding: embedding,
+              match_count: limit,
+            },
+          );
           if (!error && Array.isArray(data)) {
             neighbors = data.map((row: Record<string, unknown>) => ({
               tmdbId: Number(row.tmdb_id),
