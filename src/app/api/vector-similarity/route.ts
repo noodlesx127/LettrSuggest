@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabaseClient";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { generateMovieEmbeddingById } from "@/lib/embeddings";
 import {
   getCachedVectorSimilarity,
@@ -18,10 +18,8 @@ async function getNeighborIds(
   embedding: number[],
   limit: number,
 ): Promise<SimilarityResult[]> {
-  if (!supabase) return [];
-
   try {
-    const { data, error } = await supabase.rpc("match_movie_embeddings", {
+    const { data, error } = await supabaseAdmin.rpc("match_movie_embeddings", {
       query_embedding: embedding,
       match_count: limit,
     });
@@ -65,11 +63,6 @@ export async function POST(req: Request) {
         { ok: false, error: "Missing tmdbIds" },
         { status: 400 },
       );
-    }
-
-    if (!supabase) {
-      console.warn("[VectorSimilarity] Supabase client not initialized");
-      return NextResponse.json({ ok: true, results: [] });
     }
 
     console.log("[VectorSimilarity] Request", {

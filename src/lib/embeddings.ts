@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { type TMDBMovie, fetchTmdbMovieCached } from "@/lib/enrich";
 
 const OPENAI_EMBEDDINGS_MODEL = "text-embedding-ada-002";
@@ -163,10 +163,8 @@ async function getCachedEmbedding(
   tmdbId: number,
   modelVersion: string,
 ): Promise<number[] | null> {
-  if (!supabase) return null;
-
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("movie_embeddings")
       .select("embedding, model_version")
       .eq("tmdb_id", tmdbId)
@@ -186,8 +184,6 @@ async function setCachedEmbedding(
   embedding: number[],
   modelVersion: string,
 ): Promise<void> {
-  if (!supabase) return;
-
   try {
     const payload: MovieEmbeddingRow = {
       tmdb_id: tmdbId,
@@ -196,7 +192,7 @@ async function setCachedEmbedding(
       updated_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("movie_embeddings")
       .upsert(payload, { onConflict: "tmdb_id" });
 
