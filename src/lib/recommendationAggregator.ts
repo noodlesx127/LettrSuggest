@@ -1,11 +1,12 @@
 /**
  * Multi-Source Recommendation Aggregator
  *
- * Combines recommendations from 4 active sources:
+ * Combines recommendations from 5 active sources:
  * 1. TMDB - Similar/recommended movies
  * 2. TasteDive - Cross-media similar content
  * 3. Trakt - Community-driven related movies
  * 4. Watchmode - Trending content
+ * 5. Vector Similarity - Semantic embedding neighbors
  *
  * Note: TuiMDB is defined in the type for future use but not yet implemented.
  *
@@ -14,8 +15,14 @@
 
 import pLimit from "p-limit";
 
+import { generateMovieEmbeddingById } from "./embeddings";
 import { searchMovies } from "./movieAPI";
+import { supabase } from "./supabaseClient";
 import { getSimilarContent } from "./tastedive";
+import {
+  getCachedVectorSimilarity,
+  setCachedVectorSimilarity,
+} from "./vectorSimilarityCache";
 import { getTrendingTitles } from "./watchmode";
 
 // Note: 'tuimdb' is defined for future use but not yet implemented in aggregation
@@ -523,64 +530,87 @@ async function fetchTMDBRecommendations(
     seeds: seeds.map((s) => s.title),
   });
 
+  const apiKey = process.env.TMDB_API_KEY;
+  if (!apiKey) {
+    console.error("[Aggregator] TMDB_API_KEY not configured");
+    return recommendations;
+  }
+
   const tmdbLimit = pLimit(5);
 
   const seedResults = await Promise.allSettled(
     seeds.map((seed) =>
       tmdbLimit(async () => {
-        // Fetch from our TMDB movie endpoint which includes similar/recommendations
-        const baseUrl =
-          typeof window === "undefined"
-            ? process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
-            : typeof self !== "undefined" && self.location
-              ? self.location.origin
-              : "http://localhost:3000";
-        const u = new URL("/api/tmdb/movie", baseUrl);
-        u.searchParams.set("id", String(seed.tmdbId));
-        u.searchParams.set("append_to_response", "similar,recommendations");
+        const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(String(seed.tmdbId))}?api_key=${apiKey}&append_to_response=similar,recommendations`;
+        const redactedTmdbUrl = tmdbUrl.replace(
+          /api_key=[^&]+/,
+          "api_key=REDACTED",
+        );
 
-        const response = await fetch(u.toString());
-        if (!response.ok) return [];
-
-        const data = await response.json();
-        if (!data.ok || !data.movie) return [];
-
-        const movie = data.movie;
-        const recs: SourceRecommendation[] = [];
-
-        // Process similar movies
-        const similarMovies = movie.similar?.results || [];
-        for (const similar of similarMovies.slice(0, 10)) {
-          recs.push({
-            source: "tmdb" as const,
-            tmdbId: similar.id,
-            title: similar.title,
-            confidence: 0.85,
-            reason: `Similar to "${seed.title}"`,
+        try {
+          const response = await fetch(tmdbUrl, {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
           });
-        }
+          if (!response.ok) {
+            if (response.status === 404) {
+              console.warn(`[Aggregator] TMDB movie not found: ${seed.tmdbId}`);
+            } else {
+              console.warn(
+                `[Aggregator] TMDB fetch failed for ${seed.tmdbId}: HTTP ${response.status}`,
+              );
+            }
+            return [];
+          }
 
-        // Process recommended movies
-        const recommendedMovies = movie.recommendations?.results || [];
-        for (const rec of recommendedMovies.slice(0, 10)) {
-          // Avoid duplicates
-          if (!recs.some((r) => r.tmdbId === rec.id)) {
+          const movie = await response.json();
+          if (!movie || movie.success === false) return [];
+          const recs: SourceRecommendation[] = [];
+
+          // Process similar movies
+          const similarMovies = movie.similar?.results || [];
+          for (const similar of similarMovies.slice(0, 10)) {
             recs.push({
               source: "tmdb" as const,
-              tmdbId: rec.id,
-              title: rec.title,
-              confidence: 0.9, // Recommendations are slightly more reliable
-              reason: `Recommended based on "${seed.title}"`,
+              tmdbId: similar.id,
+              title: similar.title,
+              confidence: 0.85,
+              reason: `Similar to "${seed.title}"`,
             });
           }
+
+          // Process recommended movies
+          const recommendedMovies = movie.recommendations?.results || [];
+          for (const rec of recommendedMovies.slice(0, 10)) {
+            // Avoid duplicates
+            if (!recs.some((r) => r.tmdbId === rec.id)) {
+              recs.push({
+                source: "tmdb" as const,
+                tmdbId: rec.id,
+                title: rec.title,
+                confidence: 0.9, // Recommendations are slightly more reliable
+                reason: `Recommended based on "${seed.title}"`,
+              });
+            }
+          }
+
+          console.log("[Aggregator] TMDB recommendations for:", seed.title, {
+            similar: similarMovies.length,
+            recommended: recommendedMovies.length,
+          });
+
+          return recs;
+        } catch (error) {
+          if (error instanceof Error) {
+            throw new Error(
+              error.message
+                .replace(tmdbUrl, redactedTmdbUrl)
+                .replace(/api_key=[^&\s]+/, "api_key=REDACTED"),
+            );
+          }
+
+          throw error;
         }
-
-        console.log("[Aggregator] TMDB recommendations for:", seed.title, {
-          similar: similarMovies.length,
-          recommended: recommendedMovies.length,
-        });
-
-        return recs;
       }),
     ),
   );
@@ -589,7 +619,12 @@ async function fetchTMDBRecommendations(
     if (result.status === "fulfilled") {
       recommendations.push(...result.value);
     } else {
-      console.error("[Aggregator] TMDB fetch error:", result.reason);
+      console.error(
+        "[Aggregator] TMDB fetch error:",
+        result.reason instanceof Error
+          ? result.reason.message.replace(/api_key=[^&\s]+/, "api_key=REDACTED")
+          : result.reason,
+      );
     }
   }
 
@@ -799,32 +834,78 @@ async function fetchTraktRecommendations(
       .sort(() => Math.random() - 0.5)
       .slice(0, dynamicLimit);
 
+    const clientId = process.env.TRAKT_CLIENT_ID;
+    if (!clientId) {
+      console.error("[Aggregator] TRAKT_CLIENT_ID not configured");
+      return recommendations;
+    }
+
     const traktLimit = pLimit(5);
 
     const traktResults = await Promise.allSettled(
       seeds.map((seed) =>
         traktLimit(async () => {
-          const baseUrl =
-            typeof window === "undefined"
-              ? process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
-              : typeof self !== "undefined" && self.location
-                ? self.location.origin
-                : "http://localhost:3000";
-          const u = new URL("/api/trakt/related", baseUrl);
-          u.searchParams.set("id", String(seed.tmdbId));
-          u.searchParams.set("limit", "15"); // Increased from 10
+          const traktHeaders = {
+            "Content-Type": "application/json",
+            "trakt-api-version": "2",
+            "trakt-api-key": clientId,
+          };
 
-          const response = await fetch(u.toString());
-          if (!response.ok) return { seed, ids: [] as number[] };
+          const lookupResp = await fetch(
+            `https://api.trakt.tv/search/tmdb/${seed.tmdbId}?type=movie`,
+            { headers: traktHeaders },
+          );
+          if (!lookupResp.ok) {
+            if (lookupResp.status === 429) {
+              const retryAfter = lookupResp.headers.get("Retry-After");
+              console.warn(
+                `[Aggregator] Trakt rate-limited on lookup (seed: ${seed.tmdbId}). Retry-After: ${retryAfter ?? "unknown"}s`,
+              );
+            } else {
+              console.warn(
+                `[Aggregator] Trakt lookup failed for TMDB ${seed.tmdbId}: HTTP ${lookupResp.status}`,
+              );
+            }
+            return { seed, ids: [] as number[] };
+          }
 
-          const data = await response.json();
-          if (!data.ok || !data.ids) return { seed, ids: [] as number[] };
+          const lookupData = await lookupResp.json();
+          const traktSlug = lookupData?.[0]?.movie?.ids?.slug;
+          if (!traktSlug) {
+            console.log(
+              `[Aggregator] Trakt: no slug found for TMDB ${seed.tmdbId}`,
+            );
+            return { seed, ids: [] as number[] };
+          }
+
+          const relatedResp = await fetch(
+            `https://api.trakt.tv/movies/${encodeURIComponent(traktSlug)}/related?limit=15`,
+            { headers: traktHeaders },
+          );
+          if (!relatedResp.ok) {
+            if (relatedResp.status === 429) {
+              const retryAfter = relatedResp.headers.get("Retry-After");
+              console.warn(
+                `[Aggregator] Trakt rate-limited on related fetch (slug: ${traktSlug}). Retry-After: ${retryAfter ?? "unknown"}s`,
+              );
+            } else {
+              console.warn(
+                `[Aggregator] Trakt related fetch failed for slug "${traktSlug}": HTTP ${relatedResp.status}`,
+              );
+            }
+            return { seed, ids: [] as number[] };
+          }
+
+          const relatedData = await relatedResp.json();
+          const ids = (relatedData as Array<{ ids?: { tmdb?: number } }>)
+            .map((m) => m.ids?.tmdb)
+            .filter((id): id is number => id != null && id > 0);
 
           console.log("[Aggregator] Trakt related for:", seed.title, {
-            count: data.ids?.length || 0,
+            count: ids.length,
           });
 
-          return { seed, ids: data.ids as number[] };
+          return { seed, ids };
         }),
       ),
     );
@@ -908,47 +989,97 @@ async function fetchVectorSimilarityRecommendations(
   const recommendations: SourceRecommendation[] = [];
 
   try {
-    // Dynamically scale limit based on seed pool size (5 to 25)
     const dynamicLimit = Math.min(
       Math.max(5, Math.floor(seedMovies.length * 0.15)),
       25,
     );
-    // Randomly sample seeds for higher recommendation variety
     const seeds = [...seedMovies]
       .sort(() => Math.random() - 0.5)
       .slice(0, dynamicLimit);
     const seedIds = seeds.map((s) => s.tmdbId).filter(Boolean);
     if (seedIds.length === 0) return recommendations;
 
-    const baseUrl =
-      typeof window === "undefined"
-        ? process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
-        : typeof self !== "undefined" && self.location
-          ? self.location.origin
-          : "http://localhost:3000";
+    if (!supabase) {
+      console.warn(
+        "[Aggregator] Vector similarity: Supabase client not initialized",
+      );
+      return recommendations;
+    }
 
-    const response = await fetch(`${baseUrl}/api/vector-similarity`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tmdbIds: seedIds, limit: 20 }),
-      cache: "no-store",
-    });
+    const limit = 20;
+    const aggregated = new Map<number, { score: number; count: number }>();
 
-    if (!response.ok) return recommendations;
-    const data = await response.json();
-    if (!data?.ok || !Array.isArray(data?.results)) return recommendations;
+    for (const tmdbId of seedIds) {
+      const cachedNeighbors = await getCachedVectorSimilarity(tmdbId);
+      let neighbors: Array<{ tmdbId: number; similarity: number }> = [];
 
-    for (const rec of data.results) {
-      const tmdbId = Number(rec.tmdbId ?? rec.tmdb_id);
-      if (!tmdbId || seedIds.includes(tmdbId)) continue;
+      if (cachedNeighbors) {
+        neighbors = cachedNeighbors.map((id) => ({
+          tmdbId: id,
+          similarity: 0,
+        }));
+      } else {
+        const embedding = await generateMovieEmbeddingById(tmdbId);
+        if (!embedding.length) {
+          console.log("[Aggregator] Vector similarity: missing embedding", {
+            tmdbId,
+          });
+          continue;
+        }
 
-      recommendations.push({
-        source: "vector-similarity",
-        tmdbId,
-        title: "",
-        confidence: 0.8,
-        reason: "Similar vibe (vector match)",
-      });
+        try {
+          const { data, error } = await supabase.rpc("match_movie_embeddings", {
+            query_embedding: embedding,
+            match_count: limit,
+          });
+          if (!error && Array.isArray(data)) {
+            neighbors = data.map((row: Record<string, unknown>) => ({
+              tmdbId: Number(row.tmdb_id),
+              similarity: Number(row.similarity ?? 0),
+            }));
+            await setCachedVectorSimilarity(
+              tmdbId,
+              neighbors.map((n) => n.tmdbId),
+            );
+          }
+        } catch (e) {
+          console.error(
+            "[Aggregator] Vector similarity neighbor lookup failed",
+            e,
+          );
+        }
+      }
+
+      for (const neighbor of neighbors) {
+        if (neighbor.tmdbId === tmdbId) continue;
+        const current = aggregated.get(neighbor.tmdbId) ?? {
+          score: 0,
+          count: 0,
+        };
+        current.score += neighbor.similarity || 0;
+        current.count += 1;
+        aggregated.set(neighbor.tmdbId, current);
+      }
+    }
+
+    const sorted = Array.from(aggregated.entries())
+      .map(([id, data]) => ({
+        tmdbId: id,
+        score: data.score + data.count * 0.05,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    for (const rec of sorted) {
+      if (!seedIds.includes(rec.tmdbId)) {
+        recommendations.push({
+          source: "vector-similarity",
+          tmdbId: rec.tmdbId,
+          title: "",
+          confidence: 0.8,
+          reason: "Similar vibe (vector match)",
+        });
+      }
     }
 
     console.log("[Aggregator] Vector similarity fetched", {
