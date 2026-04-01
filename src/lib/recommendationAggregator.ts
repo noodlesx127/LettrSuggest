@@ -58,12 +58,22 @@ export type AggregatedRecommendation = {
  * Aggregate recommendations from multiple sources
  * More sources = higher confidence = higher ranking
  */
+export type SourceDebug = Record<
+  string,
+  { status: string; count: number; error?: string }
+>;
+
+export type AggregateRecommendationsResult = {
+  recommendations: AggregatedRecommendation[];
+  sourceDebug: SourceDebug;
+};
+
 export async function aggregateRecommendations(params: {
   seedMovies: Array<{ tmdbId: number; title: string; imdbId?: string }>;
   limit?: number;
   sourceReliability?: Map<string, number>;
   deadlineMs?: number;
-}): Promise<AggregatedRecommendation[]> {
+}): Promise<AggregateRecommendationsResult> {
   const { seedMovies, limit = 50, sourceReliability, deadlineMs } = params;
   const startTime = Date.now();
 
@@ -103,6 +113,14 @@ export async function aggregateRecommendations(params: {
       withDeadline(fetchVectorSimilarityRecommendations(seedMovies), "Vector"),
     ]);
   const sourceFetchElapsed = Date.now() - sourceFetchStart;
+
+  const sourceDebug: SourceDebug = {
+    tmdb:      { status: tmdbRecs.status,      count: tmdbRecs.status      === "fulfilled" ? tmdbRecs.value.length      : 0, ...(tmdbRecs.status      === "rejected" ? { error: String(tmdbRecs.reason)      } : {}) },
+    tastedive: { status: tastediveRecs.status, count: tastediveRecs.status === "fulfilled" ? tastediveRecs.value.length : 0, ...(tastediveRecs.status === "rejected" ? { error: String(tastediveRecs.reason) } : {}) },
+    trakt:     { status: traktRecs.status,     count: traktRecs.status     === "fulfilled" ? traktRecs.value.length     : 0, ...(traktRecs.status     === "rejected" ? { error: String(traktRecs.reason)     } : {}) },
+    watchmode: { status: watchmodeRecs.status, count: watchmodeRecs.status === "fulfilled" ? watchmodeRecs.value.length : 0, ...(watchmodeRecs.status === "rejected" ? { error: String(watchmodeRecs.reason) } : {}) },
+    vector:    { status: vectorRecs.status,    count: vectorRecs.status    === "fulfilled" ? vectorRecs.value.length    : 0, ...(vectorRecs.status    === "rejected" ? { error: String(vectorRecs.reason)    } : {}) },
+  };
 
   // Collect all recommendations
   const allRecs: SourceRecommendation[] = [];
@@ -200,7 +218,7 @@ export async function aggregateRecommendations(params: {
     `[Aggregator] Completed in ${elapsed}ms with ${scored.length} recommendations`,
   );
 
-  return scored;
+  return { recommendations: scored, sourceDebug };
 }
 
 /**
