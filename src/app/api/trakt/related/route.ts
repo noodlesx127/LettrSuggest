@@ -11,6 +11,7 @@ const TRAKT_API_VERSION = "2";
  *
  * Flow:
  * 1. Resolve TMDB ID → Trakt slug via /search/tmdb/{id}
+ *    (KNOWN ISSUE: this endpoint often returns empty results; needs title-search fix)
  * 2. Fetch related movies via /movies/{slug}/related
  *
  * Query Parameters:
@@ -61,9 +62,19 @@ export async function GET(req: NextRequest) {
 
   try {
     // Step 1: Resolve TMDB ID to Trakt slug
-    // Trakt's /movies/{id}/related requires a Trakt slug or Trakt numeric ID,
-    // NOT a raw TMDB ID. Passing a TMDB ID silently returns 0 results.
+    // NOTE: The /search/tmdb/{id} endpoint is known to return empty results for many
+    // valid TMDB IDs. The proper fix is to use the title-search approach
+    // (/search/movie?query={title}&limit=1) with a TMDB ID cross-validation guard,
+    // as implemented in recommendationAggregator.ts. However, this route currently
+    // only receives a TMDB ID (no movie title), so it cannot use the title-search
+    // fallback. To fully fix this, a "title" query parameter must be added to this
+    // route and its callers updated accordingly.
     console.log(`[Trakt] Looking up Trakt slug for TMDB ID: ${tmdbId}`);
+    console.warn(
+      `[Trakt] Using /search/tmdb/${tmdbId} endpoint which is known to return ` +
+        `empty results for many valid TMDB IDs. This route needs a "title" query ` +
+        `parameter to switch to the title-search approach with TMDB ID validation.`,
+    );
 
     const lookupResponse = await fetch(
       `${TRAKT_API_BASE}/search/tmdb/${tmdbId}?type=movie`,

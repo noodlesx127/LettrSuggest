@@ -869,29 +869,42 @@ async function fetchTraktRecommendations(
             "trakt-api-key": clientId,
           };
 
+          const query = encodeURIComponent(seed.title);
           const lookupResp = await fetch(
-            `https://api.trakt.tv/search/tmdb/${seed.tmdbId}?type=movie`,
+            `https://api.trakt.tv/search/movie?query=${query}&limit=1`,
             { headers: traktHeaders },
           );
           if (!lookupResp.ok) {
             if (lookupResp.status === 429) {
               const retryAfter = lookupResp.headers.get("Retry-After");
               console.warn(
-                `[Aggregator] Trakt rate-limited on lookup (seed: ${seed.tmdbId}). Retry-After: ${retryAfter ?? "unknown"}s`,
+                `[Aggregator] Trakt rate-limited on lookup (title=${seed.title}, tmdb_id=${seed.tmdbId}). Retry-After: ${retryAfter ?? "unknown"}s`,
               );
             } else {
               console.warn(
-                `[Aggregator] Trakt lookup failed for TMDB ${seed.tmdbId}: HTTP ${lookupResp.status}`,
+                `[Aggregator] Trakt lookup failed for title=${seed.title}, tmdb_id=${seed.tmdbId}: HTTP ${lookupResp.status}`,
               );
             }
             return { seed, ids: [] as number[] };
           }
 
           const lookupData = await lookupResp.json();
-          const traktSlug = lookupData?.[0]?.movie?.ids?.slug;
+          const matchedMovie = lookupData?.[0]?.movie;
+          const traktSlug = matchedMovie?.ids?.slug;
+          const returnedTmdbId = matchedMovie?.ids?.tmdb;
+
+          // Validate we got the right movie, not a title collision
+          if (traktSlug && returnedTmdbId !== seed.tmdbId) {
+            console.warn(
+              `[Aggregator] Trakt title search returned wrong movie for "${seed.title}" ` +
+              `(expected tmdb=${seed.tmdbId}, got tmdb=${returnedTmdbId}, slug=${traktSlug}). Skipping.`,
+            );
+            return { seed, ids: [] as number[] };
+          }
+
           if (!traktSlug) {
             console.warn(
-              `[Aggregator] Trakt: no slug found for tmdb_id=${seed.tmdbId}`,
+              `[Aggregator] Trakt: no slug found for title=${seed.title}, tmdb_id=${seed.tmdbId}`,
               {
                 lookupDataType: typeof lookupData,
                 isArray: Array.isArray(lookupData),
