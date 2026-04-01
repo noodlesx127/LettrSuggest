@@ -890,8 +890,15 @@ async function fetchTraktRecommendations(
           const lookupData = await lookupResp.json();
           const traktSlug = lookupData?.[0]?.movie?.ids?.slug;
           if (!traktSlug) {
-            console.log(
-              `[Aggregator] Trakt: no slug found for TMDB ${seed.tmdbId}`,
+            console.warn(
+              `[Aggregator] Trakt: no slug found for tmdb_id=${seed.tmdbId}`,
+              {
+                lookupDataType: typeof lookupData,
+                isArray: Array.isArray(lookupData),
+                length: Array.isArray(lookupData) ? lookupData.length : "N/A",
+                firstEntry: JSON.stringify(lookupData?.[0])?.slice(0, 300),
+                rawPreview: JSON.stringify(lookupData)?.slice(0, 500),
+              },
             );
             return { seed, ids: [] as number[] };
           }
@@ -915,12 +922,26 @@ async function fetchTraktRecommendations(
           }
 
           const relatedData = await relatedResp.json();
-          const ids = (relatedData as Array<{ ids?: { tmdb?: number } }>)
-            .map((m) => m.ids?.tmdb)
+
+          if (!Array.isArray(relatedData)) {
+            console.warn(
+              `[Aggregator] Trakt related response is not an array for slug "${traktSlug}" (seed: ${seed.tmdbId})`,
+              {
+                type: typeof relatedData,
+                preview: JSON.stringify(relatedData)?.slice(0, 500),
+              },
+            );
+            return { seed, ids: [] as number[] };
+          }
+
+          const ids = relatedData
+            .map((m: { ids?: { tmdb?: number } }) => m.ids?.tmdb)
             .filter((id): id is number => id != null && id > 0);
 
           console.log("[Aggregator] Trakt related for:", seed.title, {
-            count: ids.length,
+            slug: traktSlug,
+            rawCount: relatedData.length,
+            tmdbIdCount: ids.length,
           });
 
           return { seed, ids };
