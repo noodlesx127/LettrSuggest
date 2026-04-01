@@ -12,7 +12,8 @@ export async function getAggregatedRecommendations(params: {
 }): Promise<AggregatedRecommendation[]> {
     try {
         console.log('[RecommendationsAction] Fetching aggregated recommendations', { seedCount: params.seedMovies.length });
-        return await aggregateRecommendations(params);
+        const { recommendations } = await aggregateRecommendations(params);
+        return recommendations;
     } catch (error) {
         console.error('[RecommendationsAction] Failed to fetch recommendations:', error);
         return [];

@@ -172,7 +172,7 @@ export async function POST(req: Request) {
       const excludeSet = new Set(body.exclude_tmdb_ids);
       const seedSet = new Set(body.seed_tmdb_ids);
       const internalLimit = Math.min(body.limit + excludeSet.size + 20, 200);
-      const recommendations = await aggregateRecommendations({
+      const { recommendations, sourceDebug } = await aggregateRecommendations({
         seedMovies,
         limit: internalLimit,
         deadlineMs: 7500,
@@ -211,6 +211,7 @@ export async function POST(req: Request) {
           requestId,
           seed_count: seedMovies.length,
           result_count: data.length,
+          source_debug: sourceDebug,
         },
         error: null,
       });
