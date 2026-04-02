@@ -162,7 +162,7 @@ See `/docs/summary/database-performance-fixes-2026-01-25.md`:
 
 **Current Problem**:
 
-- Source weights are hardcoded: TMDB (0.85), TasteDive (1.3), Trakt (1.25), Watchmode (0.9)
+- Source weights are hardcoded: TMDB (0.85), TasteDive (1.3), Watchmode (0.9)
 - `sourceReliability` is calculated from user feedback but NOT used
 
 **Required Changes**:
@@ -440,7 +440,7 @@ See `/docs/summary/database-performance-fixes-2026-01-25.md`:
 
 **Current Problem**:
 
-- Movies come from multiple sources (TMDB, Trakt, TasteDive, Watchmode)
+- Movies come from multiple sources (TMDB, TasteDive, Watchmode)
 - `sources` array exists but isn't displayed
 - Users don't know if recommendation has "consensus"
 
@@ -448,7 +448,7 @@ See `/docs/summary/database-performance-fixes-2026-01-25.md`:
 
 1. Add source badges showing recommendation provenance:
    - Single source: "🎯 TMDB Recommendation"
-   - Multiple: "✨ High Consensus (TMDB + Trakt + TasteDive)"
+   - Multiple: "✨ High Consensus (TMDB + TasteDive)"
    - Trending: "📈 Trending"
 2. Tooltip explaining what each source means
 3. Visual priority: High consensus = more prominent

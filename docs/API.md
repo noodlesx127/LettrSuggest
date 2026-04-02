@@ -917,11 +917,6 @@ Returns statistics for all clearable cache tables (row count and expired row cou
 {
   "data": [
     {
-      "name": "trakt_related_cache",
-      "count": 1204,
-      "expiredCount": 87
-    },
-    {
       "name": "tmdb_similar_cache",
       "count": 3401,
       "expiredCount": 120
@@ -957,13 +952,12 @@ Clears one or more cache tables. Only whitelisted tables can be cleared.
 
 ```json
 {
-  "tables": ["trakt_related_cache", "tastedive_cache"]
+  "tables": ["tastedive_cache"]
 }
 ```
 
 **Valid table names:**
 
-- `trakt_related_cache`
 - `tmdb_similar_cache`
 - `tuimdb_uid_cache`
 - `tastedive_cache`
@@ -973,10 +967,7 @@ Clears one or more cache tables. Only whitelisted tables can be cleared.
 
 ```json
 {
-  "data": [
-    { "table": "trakt_related_cache", "deletedCount": 1204 },
-    { "table": "tastedive_cache", "deletedCount": 542 }
-  ]
+  "data": [{ "table": "tastedive_cache", "deletedCount": 542 }]
 }
 ```
 
