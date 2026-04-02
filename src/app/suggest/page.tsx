@@ -1906,7 +1906,7 @@ export default function SuggestPage() {
         current: 4,
         total: 7,
         stage: "discover",
-        details: "Searching across TMDB, TasteDive, Trakt, and more...",
+        details: "Searching across TMDB, TasteDive, and more...",
       });
       const smartCandidates = await generateSmartCandidates({
         highlyRatedIds: highlyRated,
@@ -2012,7 +2012,7 @@ export default function SuggestPage() {
       candidatesRaw.push(...listCandidates); // Add list-discovered candidates
       candidatesRaw.push(...exploratoryPicks); // Add exploratory picks
 
-      const sourceSummary = `TMDB: ${smartCandidates.trending.length + smartCandidates.similar.length + smartCandidates.discovered.length}, Trakt: ${decadeCandidates.length}, TasteDive: ${discoveryCandidates.length}`;
+      const sourceSummary = `TMDB: ${smartCandidates.trending.length + smartCandidates.similar.length + smartCandidates.discovered.length}, Decades: ${decadeCandidates.length}, TasteDive: ${discoveryCandidates.length}`;
       setProgress({
         current: 4,
         total: 7,
@@ -6530,8 +6530,7 @@ export default function SuggestPage() {
                               Multi-Source Consensus
                             </h2>
                             <p className="text-xs text-gray-600">
-                              Recommended by multiple sources (TMDB, TasteDive,
-                              Trakt)
+                              Recommended by multiple sources (TMDB, TasteDive, TuiMDB)
                             </p>
                           </div>
                         </div>

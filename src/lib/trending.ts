@@ -1,6 +1,4 @@
 import {
-  getCachedTraktRelated,
-  setCachedTraktRelated,
   getCachedTMDBSimilar,
   setCachedTMDBSimilar,
 } from "./apiCache";
@@ -585,59 +583,9 @@ export async function fetchTrendingIds(
 }
 
 /**
- * Fetch related movies from Trakt API for a single seed movie
- * This supplements TMDB's similar/recommendations with community-driven data
- * Uses cache-first strategy to reduce API calls
- */
-async function fetchTraktRelatedIds(
-  seedId: number,
-  limit = 10,
-): Promise<number[]> {
-  // Check cache first
-  const cached = await getCachedTraktRelated(seedId);
-  if (cached !== null) {
-    return cached;
-  }
-
-  // Cache miss - fetch from API
-  try {
-    const u = new URL("/api/trakt/related", getBaseUrl());
-    u.searchParams.set("id", String(seedId));
-    u.searchParams.set("limit", String(limit));
-    u.searchParams.set("_t", String(Date.now())); // Cache buster
-
-    const r = await fetch(u.toString(), { cache: "no-store" });
-    const j = await r.json();
-
-    if (j.ok && j.ids) {
-      const ids = j.ids as number[];
-      if (process.env.NODE_ENV === "development") {
-        console.log(
-          `[Trakt] API fetch: Found ${ids.length} related movies for ${seedId}`,
-        );
-      }
-
-      // Store in cache for future use
-      await setCachedTraktRelated(seedId, ids);
-
-      return ids;
-    } else {
-      console.warn(
-        `[Trakt] No related movies for ${seedId}:`,
-        j.error || "Unknown error",
-      );
-      return [];
-    }
-  } catch (e) {
-    console.error(`[Trakt] Failed to fetch related for ${seedId}`, e);
-    return [];
-  }
-}
-
-/**
  * Fetch similar/recommended movies for a set of seed movie IDs
  * This provides more personalized candidates based on specific films the user liked
- * Now combines TMDB similar/recommendations with Trakt related movies for better diversity
+ * Uses TMDB similar/recommendations for personalized candidates
  */
 export async function fetchSimilarMovieIds(
   seedIds: number[],
@@ -688,10 +636,6 @@ export async function fetchSimilarMovieIds(
             .forEach((id) => allIds.add(id));
         }
       }
-
-      // 2. Fetch Trakt related movies (with caching)
-      const traktIds = await fetchTraktRelatedIds(seedId, limitPerSeed);
-      traktIds.forEach((id) => allIds.add(id));
     } catch (e) {
       console.error(`[TMDB] Failed to fetch similar for ${seedId}`, e);
     }
@@ -699,7 +643,7 @@ export async function fetchSimilarMovieIds(
 
   if (process.env.NODE_ENV === "development") {
     console.log(
-      `[Discovery] Combined similar movies from TMDB + Trakt: ${allIds.size} unique candidates`,
+      `[Discovery] Combined similar movies from TMDB: ${allIds.size} unique candidates`,
     );
   }
   return Array.from(allIds);
@@ -936,7 +880,7 @@ export async function generateSmartCandidates(profile: {
     );
   }
 
-  // 2. Multi-Source Aggregation (REPLACES old TMDB+Trakt similar fetching)
+  // 2. Multi-Source Aggregation (REPLACES old TMDB similar fetching)
   // This is now the PRIMARY source for similar movie recommendations
   try {
     if (profile.highlyRatedIds.length > 0) {
@@ -1351,7 +1295,7 @@ export async function generateSmartCandidates(profile: {
   // 5b. CROSS-API COMPATIBLE: Enhanced preferred genre discovery
   // Instead of relying on sparse TMDB keyword IDs, we fetch more genre candidates
   // Text-based detectSubgenres() will filter these to matching subgenres later
-  // This approach works with Trakt, TasteDive, and any other recommendation source
+  // This approach works with TasteDive and any other recommendation source
   try {
     if (profile.topGenres.length > 0 && results.discovered.length < 300) {
       if (process.env.NODE_ENV === "development") {

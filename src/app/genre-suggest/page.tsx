@@ -570,7 +570,7 @@ export default function GenreSuggestPage() {
 
       // CROSS-API COMPATIBLE: Enhanced genre-based discovery instead of sparse TMDB keywords
       // Text-based detectSubgenres() will filter for specific subgenres regardless of API source
-      // This approach works with Trakt, TasteDive, and any other recommendation source
+      // This approach works with TasteDive and any other recommendation source
       if (selectedSubgenres.length > 0) {
         console.log(
           "[GenreSuggest] Running enhanced genre discovery for subgenre filtering:",

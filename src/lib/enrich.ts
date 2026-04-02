@@ -7557,7 +7557,6 @@ export async function suggestByOverlap(params: {
       if (sourceMeta) {
         const defaultReliability = new Map<string, number>([
           ["tmdb", 1.0],
-          ["trakt", 1.02],
           ["tastedive", 0.98],
           ["watchmode", 0.99],
           ["tuimdb", 0.98],

@@ -67,7 +67,6 @@ function applySourceWeights(
   const defaultWeights: Record<string, number> = {
     tmdb: 0.9,
     tastedive: 1.35,
-    trakt: 1.4,
     tuimdb: 0.85,
     watchmode: 0.6,
   };
