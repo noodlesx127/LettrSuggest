@@ -2,7 +2,7 @@
  * Multi-Source Recommendation Aggregator
  *
  * Combines recommendations from 4 active sources:
- * 1. TMDB - Similar/recommended movies
+ * 1. TMDB - Recommended movies (collaborative filtering via /recommendations endpoint)
  * 2. TasteDive - Cross-media similar content
  * 3. Watchmode - Trending content
  * 4. Vector Similarity - Semantic embedding neighbors
@@ -112,10 +112,36 @@ export async function aggregateRecommendations(params: {
   const sourceFetchElapsed = Date.now() - sourceFetchStart;
 
   const sourceDebug: SourceDebug = {
-    tmdb:      { status: tmdbRecs.status,      count: tmdbRecs.status      === "fulfilled" ? tmdbRecs.value.length      : 0, ...(tmdbRecs.status      === "rejected" ? { error: String(tmdbRecs.reason)      } : {}) },
-    tastedive: { status: tastediveRecs.status, count: tastediveRecs.status === "fulfilled" ? tastediveRecs.value.length : 0, ...(tastediveRecs.status === "rejected" ? { error: String(tastediveRecs.reason) } : {}) },
-    watchmode: { status: watchmodeRecs.status, count: watchmodeRecs.status === "fulfilled" ? watchmodeRecs.value.length : 0, ...(watchmodeRecs.status === "rejected" ? { error: String(watchmodeRecs.reason) } : {}) },
-    vector:    { status: vectorRecs.status,    count: vectorRecs.status    === "fulfilled" ? vectorRecs.value.length    : 0, ...(vectorRecs.status    === "rejected" ? { error: String(vectorRecs.reason)    } : {}) },
+    tmdb: {
+      status: tmdbRecs.status,
+      count: tmdbRecs.status === "fulfilled" ? tmdbRecs.value.length : 0,
+      ...(tmdbRecs.status === "rejected"
+        ? { error: String(tmdbRecs.reason) }
+        : {}),
+    },
+    tastedive: {
+      status: tastediveRecs.status,
+      count:
+        tastediveRecs.status === "fulfilled" ? tastediveRecs.value.length : 0,
+      ...(tastediveRecs.status === "rejected"
+        ? { error: String(tastediveRecs.reason) }
+        : {}),
+    },
+    watchmode: {
+      status: watchmodeRecs.status,
+      count:
+        watchmodeRecs.status === "fulfilled" ? watchmodeRecs.value.length : 0,
+      ...(watchmodeRecs.status === "rejected"
+        ? { error: String(watchmodeRecs.reason) }
+        : {}),
+    },
+    vector: {
+      status: vectorRecs.status,
+      count: vectorRecs.status === "fulfilled" ? vectorRecs.value.length : 0,
+      ...(vectorRecs.status === "rejected"
+        ? { error: String(vectorRecs.reason) }
+        : {}),
+    },
   };
 
   // Collect all recommendations
@@ -170,7 +196,7 @@ export async function aggregateRecommendations(params: {
 
   // Filter out Watchmode-only entries - these are generic trending content
   // without any personalization signal. Only keep Watchmode recs that also
-  // appear in at least one personalized source (TMDB similar, TasteDive)
+  // appear in at least one personalized source (TMDB, TasteDive)
   const aggregated = mergedRecs.filter((rec) => {
     const isWatchmodeOnly =
       rec.sources.length === 1 && rec.sources[0].source === "watchmode";
@@ -508,7 +534,7 @@ function getConsensusLevel(sourceCount: number): "high" | "medium" | "low" {
 
 /**
  * Fetch TMDB recommendations for seed movies
- * Uses TMDB's similar/recommended endpoints
+ * Uses TMDB's /recommendations endpoint (collaborative filtering)
  */
 async function fetchTMDBRecommendations(
   seedMovies: Array<{ tmdbId: number; title: string }>,
@@ -541,7 +567,7 @@ async function fetchTMDBRecommendations(
   const seedResults = await Promise.allSettled(
     seeds.map((seed) =>
       tmdbLimit(async () => {
-        const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(String(seed.tmdbId))}?api_key=${apiKey}&append_to_response=similar,recommendations`;
+        const tmdbUrl = `https://api.themoviedb.org/3/movie/${encodeURIComponent(String(seed.tmdbId))}?api_key=${apiKey}&append_to_response=recommendations`;
         const redactedTmdbUrl = tmdbUrl.replace(
           /api_key=[^&]+/,
           "api_key=REDACTED",
@@ -567,35 +593,21 @@ async function fetchTMDBRecommendations(
           if (!movie || movie.success === false) return [];
           const recs: SourceRecommendation[] = [];
 
-          // Process similar movies
-          const similarMovies = movie.similar?.results || [];
-          for (const similar of similarMovies.slice(0, 10)) {
+          // Only use recommendations (collaborative filtering) — not similar (metadata matching).
+          // TMDB's /similar endpoint returns unrelated films based on incidental metadata overlap.
+          // /recommendations uses real user behaviour and is significantly more reliable.
+          const recommendedMovies = movie.recommendations?.results || [];
+          for (const rec of recommendedMovies.slice(0, 20)) {
             recs.push({
               source: "tmdb" as const,
-              tmdbId: similar.id,
-              title: similar.title,
-              confidence: 0.85,
-              reason: `Similar to "${seed.title}"`,
+              tmdbId: rec.id,
+              title: rec.title,
+              confidence: 0.9,
+              reason: `Recommended based on "${seed.title}"`,
             });
           }
 
-          // Process recommended movies
-          const recommendedMovies = movie.recommendations?.results || [];
-          for (const rec of recommendedMovies.slice(0, 10)) {
-            // Avoid duplicates
-            if (!recs.some((r) => r.tmdbId === rec.id)) {
-              recs.push({
-                source: "tmdb" as const,
-                tmdbId: rec.id,
-                title: rec.title,
-                confidence: 0.9, // Recommendations are slightly more reliable
-                reason: `Recommended based on "${seed.title}"`,
-              });
-            }
-          }
-
           console.log("[Aggregator] TMDB recommendations for:", seed.title, {
-            similar: similarMovies.length,
             recommended: recommendedMovies.length,
           });
 
