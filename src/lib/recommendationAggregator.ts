@@ -1,12 +1,11 @@
 /**
  * Multi-Source Recommendation Aggregator
  *
- * Combines recommendations from 5 active sources:
+ * Combines recommendations from 4 active sources:
  * 1. TMDB - Similar/recommended movies
  * 2. TasteDive - Cross-media similar content
- * 3. Trakt - Community-driven related movies
- * 4. Watchmode - Trending content
- * 5. Vector Similarity - Semantic embedding neighbors
+ * 3. Watchmode - Trending content
+ * 4. Vector Similarity - Semantic embedding neighbors
  *
  * Note: TuiMDB is defined in the type for future use but not yet implemented.
  *
@@ -29,7 +28,6 @@ import { getTrendingTitles } from "./watchmode";
 export type RecommendationSource =
   | "tmdb"
   | "tastedive"
-  | "trakt"
   | "tuimdb"
   | "watchmode"
   | "vector-similarity";
@@ -104,11 +102,10 @@ export async function aggregateRecommendations(params: {
 
   // Fetch from all sources in parallel
   const sourceFetchStart = Date.now();
-  const [tmdbRecs, tastediveRecs, traktRecs, watchmodeRecs, vectorRecs] =
+  const [tmdbRecs, tastediveRecs, watchmodeRecs, vectorRecs] =
     await Promise.allSettled([
       withDeadline(fetchTMDBRecommendations(seedMovies), "TMDB"),
       withDeadline(fetchTasteDiveRecommendations(seedMovies), "TasteDive"),
-      withDeadline(fetchTraktRecommendations(seedMovies), "Trakt"),
       withDeadline(fetchWatchmodeTrending(), "Watchmode"),
       withDeadline(fetchVectorSimilarityRecommendations(seedMovies), "Vector"),
     ]);
@@ -117,7 +114,6 @@ export async function aggregateRecommendations(params: {
   const sourceDebug: SourceDebug = {
     tmdb:      { status: tmdbRecs.status,      count: tmdbRecs.status      === "fulfilled" ? tmdbRecs.value.length      : 0, ...(tmdbRecs.status      === "rejected" ? { error: String(tmdbRecs.reason)      } : {}) },
     tastedive: { status: tastediveRecs.status, count: tastediveRecs.status === "fulfilled" ? tastediveRecs.value.length : 0, ...(tastediveRecs.status === "rejected" ? { error: String(tastediveRecs.reason) } : {}) },
-    trakt:     { status: traktRecs.status,     count: traktRecs.status     === "fulfilled" ? traktRecs.value.length     : 0, ...(traktRecs.status     === "rejected" ? { error: String(traktRecs.reason)     } : {}) },
     watchmode: { status: watchmodeRecs.status, count: watchmodeRecs.status === "fulfilled" ? watchmodeRecs.value.length : 0, ...(watchmodeRecs.status === "rejected" ? { error: String(watchmodeRecs.reason) } : {}) },
     vector:    { status: vectorRecs.status,    count: vectorRecs.status    === "fulfilled" ? vectorRecs.value.length    : 0, ...(vectorRecs.status    === "rejected" ? { error: String(vectorRecs.reason)    } : {}) },
   };
@@ -140,13 +136,6 @@ export async function aggregateRecommendations(params: {
     );
   } else {
     console.error("[Aggregator] TasteDive fetch failed:", tastediveRecs.reason);
-  }
-
-  if (traktRecs.status === "fulfilled") {
-    allRecs.push(...traktRecs.value);
-    console.log("[Aggregator] Trakt recommendations:", traktRecs.value.length);
-  } else {
-    console.error("[Aggregator] Trakt fetch failed:", traktRecs.reason);
   }
 
   if (watchmodeRecs.status === "fulfilled") {
@@ -181,7 +170,7 @@ export async function aggregateRecommendations(params: {
 
   // Filter out Watchmode-only entries - these are generic trending content
   // without any personalization signal. Only keep Watchmode recs that also
-  // appear in at least one personalized source (TMDB similar, TasteDive, Trakt)
+  // appear in at least one personalized source (TMDB similar, TasteDive)
   const aggregated = mergedRecs.filter((rec) => {
     const isWatchmodeOnly =
       rec.sources.length === 1 && rec.sources[0].source === "watchmode";
@@ -269,15 +258,13 @@ function logSourceDistribution(recommendations: AggregatedRecommendation[]) {
     low: recommendations.filter((r) => r.consensusLevel === "low").length,
   });
 
-  // Check if we're meeting the goal: TasteDive/Trakt > 40%
+  // Check if we're meeting the goal: TasteDive > 40%
   const tastediveCount = sourceCount["tastedive"] || 0;
-  const traktCount = sourceCount["trakt"] || 0;
-  const qualitySourceTotal = tastediveCount + traktCount;
+  const qualitySourceTotal = tastediveCount;
   const qualitySourceRate = (qualitySourceTotal / (total * 2)) * 100; // Divide by total*2 since each rec can have both
 
   console.log("[Aggregator] Quality Source Metrics:", {
     tastedive: tastediveCount,
-    trakt: traktCount,
     qualitySourceRate: qualitySourceRate.toFixed(1) + "%",
     goalMet: qualitySourceRate > 40 ? "✓ YES" : "✗ NO (goal: >40%)",
   });
@@ -296,7 +283,7 @@ function logReasonQuality(recommendations: AggregatedRecommendation[]) {
   const reasonStats = {
     personalized: 0, // "Because you loved X", "Similar to X"
     generic: 0, // "Trending", "Popular"
-    sourceSpecific: 0, // "Via TasteDive", "Trakt community pick"
+    sourceSpecific: 0, // "Via TasteDive", "Related to"
     noReason: 0,
   };
 
@@ -319,7 +306,6 @@ function logReasonQuality(recommendations: AggregatedRecommendation[]) {
         hasGeneric = true;
       } else if (
         reason.includes("TasteDive") ||
-        reason.includes("Trakt community") ||
         reason.includes("Related to")
       ) {
         hasSourceSpecific = true;
@@ -392,7 +378,6 @@ function mergeRecommendations(
     const existing = grouped.get(rec.tmdbId);
 
     if (existing) {
-      // Prefer non-empty title (Trakt returns empty titles)
       if (!existing.title && rec.title) {
         existing.title = rec.title;
       }
@@ -404,7 +389,6 @@ function mergeRecommendations(
       });
     } else {
       // Create new aggregated recommendation
-      // Note: Title may be empty (e.g., Trakt) - will be filled when other sources add same movie
       grouped.set(rec.tmdbId, {
         tmdbId: rec.tmdbId,
         title: rec.title,
@@ -426,7 +410,7 @@ function mergeRecommendations(
 
 // Number of actually implemented recommendation sources
 // Update this constant if TuiMDB or other sources are added/removed
-const ACTIVE_SOURCE_COUNT = 5; // tmdb, tastedive, trakt, watchmode, vector-similarity
+const ACTIVE_SOURCE_COUNT = 4; // tmdb, tastedive, watchmode, vector-similarity
 
 /**
  * Calculate weighted score based on:
@@ -442,7 +426,6 @@ function calculateAggregateScore(
   const baseWeights: Record<RecommendationSource, number> = {
     tmdb: 0.85, // Reduced - already dominant, favors mainstream
     tastedive: 1.3, // Boosted - excellent at finding niche/non-obvious matches
-    trakt: 1.25, // Boosted - community-driven curation, quality signal
     tuimdb: 1.05, // Slight boost if implemented
     watchmode: 0.9, // Reduced - trending = generic, not personalized
     "vector-similarity": 1.0, // Semantic similarity signal
@@ -490,19 +473,18 @@ function calculateAggregateScore(
   const consensusBonus =
     Math.min(rec.sources.length / ACTIVE_SOURCE_COUNT, 1.0) * 0.3;
 
-  // Quality source bonus (TasteDive/Trakt are better for personalized niche finds)
+  // Quality source bonus (TasteDive is better for personalized niche finds)
   // Combined with the uniqueness bonus below, this ensures niche sources compete with consensus
   const sourceNames = rec.sources.map((s) => s.source);
-  const hasTrakt = sourceNames.includes("trakt");
   const hasTasteDive = sourceNames.includes("tastedive");
-  const qualitySourceBonus = (hasTrakt ? 0.05 : 0) + (hasTasteDive ? 0.05 : 0);
+  const qualitySourceBonus = hasTasteDive ? 0.05 : 0;
 
   // Uniqueness bonus: Single-source discoveries are often niche finds worth surfacing
-  // Particularly valuable when the source is TasteDive or Trakt
+  // Particularly valuable when the source is TasteDive
   const isUniqueFind = rec.sources.length === 1;
   const uniqueSource = isUniqueFind ? rec.sources[0].source : null;
   const uniquenessBonus = isUniqueFind
-    ? uniqueSource === "tastedive" || uniqueSource === "trakt"
+    ? uniqueSource === "tastedive"
       ? 0.2
       : 0.1
     : 0;
@@ -827,189 +809,6 @@ async function fetchTasteDiveRecommendations(
     console.log("[Aggregator] TasteDive found:", recommendations.length);
   } catch (error) {
     console.error("[Aggregator] TasteDive fetch error:", error);
-  }
-
-  return recommendations;
-}
-
-/**
- * Fetch Trakt recommendations for seed movies
- * Uses existing Trakt related movies functionality
- */
-async function fetchTraktRecommendations(
-  seedMovies: Array<{ tmdbId: number; title: string }>,
-): Promise<SourceRecommendation[]> {
-  const recommendations: SourceRecommendation[] = [];
-
-  try {
-    // Dynamically scale limit based on seed pool size (5 to 25)
-    const dynamicLimit = Math.min(
-      Math.max(5, Math.floor(seedMovies.length * 0.15)),
-      25,
-    );
-    // Randomly sample seeds for higher recommendation variety
-    const seeds = [...seedMovies]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, dynamicLimit);
-
-    const clientId = process.env.TRAKT_CLIENT_ID;
-    if (!clientId) {
-      console.error("[Aggregator] TRAKT_CLIENT_ID not configured");
-      return recommendations;
-    }
-
-    const traktLimit = pLimit(5);
-    console.log("[Aggregator] Trakt: starting lookup for", seeds.length, "seeds");
-
-    const traktResults = await Promise.allSettled(
-      seeds.map((seed) =>
-        traktLimit(async () => {
-          const traktHeaders = {
-            "Content-Type": "application/json",
-            "trakt-api-version": "2",
-            "trakt-api-key": clientId,
-          };
-
-          const lookupResp = await fetch(
-            `https://api.trakt.tv/search/tmdb/${seed.tmdbId}`,
-            { headers: traktHeaders },
-          );
-          console.log(`[Aggregator] Trakt: /search/tmdb/${seed.tmdbId} → HTTP ${lookupResp.status}`);
-          if (!lookupResp.ok) {
-            if (lookupResp.status === 429) {
-              const retryAfter = lookupResp.headers.get("Retry-After");
-              console.warn(
-                `[Aggregator] Trakt rate-limited on lookup (tmdb_id=${seed.tmdbId}). Retry-After: ${retryAfter ?? "unknown"}s`,
-              );
-            } else {
-              console.warn(
-                `[Aggregator] Trakt lookup failed for tmdb_id=${seed.tmdbId}: HTTP ${lookupResp.status}`,
-              );
-            }
-            return { seed, ids: [] as number[] };
-          }
-
-          const lookupData = await lookupResp.json();
-          if (!Array.isArray(lookupData)) {
-            console.warn(
-              `[Aggregator] Trakt: unexpected response shape for tmdb_id=${seed.tmdbId}`,
-            );
-            return { seed, ids: [] as number[] };
-          }
-
-          // Filter client-side for type=movie (?type=movie param is unreliable on Netlify)
-          type TraktSearchResult = {
-            type: string;
-            movie?: {
-              ids?: {
-                slug?: string;
-                trakt?: number;
-                tmdb?: number;
-                imdb?: string;
-              };
-            };
-          };
-          const types = [
-            ...new Set(lookupData.map((i: TraktSearchResult) => i.type)),
-          ].join(",");
-          console.log(
-            `[Aggregator] Trakt: tmdb_id=${seed.tmdbId} returned ${lookupData.length} results (types: ${types})`,
-          );
-          const movieResult = lookupData.find(
-            (item: TraktSearchResult) => item.type === "movie",
-          );
-          const traktSlug = movieResult?.movie?.ids?.slug;
-
-          // No cross-validation needed — TMDB ID lookup guarantees correct film
-          if (!traktSlug) {
-            console.warn(
-              `[Aggregator] Trakt: no movie result for tmdb_id=${seed.tmdbId}`,
-            );
-            return { seed, ids: [] as number[] };
-          }
-
-          const relatedResp = await fetch(
-            `https://api.trakt.tv/movies/${encodeURIComponent(traktSlug)}/related?limit=15`,
-            { headers: traktHeaders },
-          );
-          if (!relatedResp.ok) {
-            if (relatedResp.status === 429) {
-              const retryAfter = relatedResp.headers.get("Retry-After");
-              console.warn(
-                `[Aggregator] Trakt rate-limited on related fetch (slug: ${traktSlug}). Retry-After: ${retryAfter ?? "unknown"}s`,
-              );
-            } else {
-              console.warn(
-                `[Aggregator] Trakt related fetch failed for slug "${traktSlug}": HTTP ${relatedResp.status}`,
-              );
-            }
-            return { seed, ids: [] as number[] };
-          }
-
-          const relatedData = await relatedResp.json();
-
-          if (!Array.isArray(relatedData)) {
-            console.warn(
-              `[Aggregator] Trakt related response is not an array for slug "${traktSlug}" (seed: ${seed.tmdbId})`,
-              {
-                type: typeof relatedData,
-                preview: JSON.stringify(relatedData)?.slice(0, 500),
-              },
-            );
-            return { seed, ids: [] as number[] };
-          }
-
-          const ids = relatedData
-            .map((m: { ids?: { tmdb?: number } }) => m.ids?.tmdb)
-            .filter((id): id is number => id != null && id > 0);
-
-          console.log("[Aggregator] Trakt related for:", seed.title, {
-            slug: traktSlug,
-            rawCount: relatedData.length,
-            tmdbIdCount: ids.length,
-          });
-
-          return { seed, ids };
-        }),
-      ),
-    );
-
-    const fulfilledResults = traktResults.filter(
-      (r): r is PromiseFulfilledResult<{ seed: { tmdbId: number; title: string }; ids: number[] }> =>
-        r.status === "fulfilled",
-    );
-    const rejectedCount = traktResults.length - fulfilledResults.length;
-    const resultsWithIds = fulfilledResults.filter((r) => r.value.ids.length > 0);
-    console.log(
-      `[Aggregator] Trakt: ${seeds.length} seeds → ${fulfilledResults.length} fulfilled, ${rejectedCount} rejected, ${resultsWithIds.length} returned IDs`,
-    );
-
-    const seenTraktIds = new Set<number>();
-    for (const result of traktResults) {
-      if (result.status === "rejected") {
-        console.error("[Aggregator] Trakt error for seed:", result.reason);
-        continue;
-      }
-      for (const tmdbId of result.value.ids) {
-        if (!seenTraktIds.has(tmdbId)) {
-          seenTraktIds.add(tmdbId);
-          recommendations.push({
-            source: "trakt" as const,
-            tmdbId,
-            title: "", // We don't have the title from Trakt API response
-            confidence: 0.9, // Community-driven (boosted - Trakt has best quality recs)
-            reason: `Related to "${result.value.seed.title}" (Trakt community)`,
-          });
-        }
-      }
-    }
-
-    console.log(
-      "[Aggregator] Trakt total recommendations:",
-      recommendations.length,
-    );
-  } catch (error) {
-    console.error("[Aggregator] Trakt fetch error:", error);
   }
 
   return recommendations;
