@@ -859,6 +859,7 @@ async function fetchTraktRecommendations(
     }
 
     const traktLimit = pLimit(5);
+    console.log("[Aggregator] Trakt: starting lookup for", seeds.length, "seeds");
 
     const traktResults = await Promise.allSettled(
       seeds.map((seed) =>
@@ -873,6 +874,7 @@ async function fetchTraktRecommendations(
             `https://api.trakt.tv/search/tmdb/${seed.tmdbId}`,
             { headers: traktHeaders },
           );
+          console.log(`[Aggregator] Trakt: /search/tmdb/${seed.tmdbId} → HTTP ${lookupResp.status}`);
           if (!lookupResp.ok) {
             if (lookupResp.status === 429) {
               const retryAfter = lookupResp.headers.get("Retry-After");
@@ -907,6 +909,12 @@ async function fetchTraktRecommendations(
               };
             };
           };
+          const types = [
+            ...new Set(lookupData.map((i: TraktSearchResult) => i.type)),
+          ].join(",");
+          console.log(
+            `[Aggregator] Trakt: tmdb_id=${seed.tmdbId} returned ${lookupData.length} results (types: ${types})`,
+          );
           const movieResult = lookupData.find(
             (item: TraktSearchResult) => item.type === "movie",
           );
@@ -964,6 +972,16 @@ async function fetchTraktRecommendations(
           return { seed, ids };
         }),
       ),
+    );
+
+    const fulfilledResults = traktResults.filter(
+      (r): r is PromiseFulfilledResult<{ seed: { tmdbId: number; title: string }; ids: number[] }> =>
+        r.status === "fulfilled",
+    );
+    const rejectedCount = traktResults.length - fulfilledResults.length;
+    const resultsWithIds = fulfilledResults.filter((r) => r.value.ids.length > 0);
+    console.log(
+      `[Aggregator] Trakt: ${seeds.length} seeds → ${fulfilledResults.length} fulfilled, ${rejectedCount} rejected, ${resultsWithIds.length} returned IDs`,
     );
 
     const seenTraktIds = new Set<number>();
