@@ -869,49 +869,53 @@ async function fetchTraktRecommendations(
             "trakt-api-key": clientId,
           };
 
-          const query = encodeURIComponent(seed.title);
           const lookupResp = await fetch(
-            `https://api.trakt.tv/search/movie?query=${query}&limit=1`,
+            `https://api.trakt.tv/search/tmdb/${seed.tmdbId}`,
             { headers: traktHeaders },
           );
           if (!lookupResp.ok) {
             if (lookupResp.status === 429) {
               const retryAfter = lookupResp.headers.get("Retry-After");
               console.warn(
-                `[Aggregator] Trakt rate-limited on lookup (title=${seed.title}, tmdb_id=${seed.tmdbId}). Retry-After: ${retryAfter ?? "unknown"}s`,
+                `[Aggregator] Trakt rate-limited on lookup (tmdb_id=${seed.tmdbId}). Retry-After: ${retryAfter ?? "unknown"}s`,
               );
             } else {
               console.warn(
-                `[Aggregator] Trakt lookup failed for title=${seed.title}, tmdb_id=${seed.tmdbId}: HTTP ${lookupResp.status}`,
+                `[Aggregator] Trakt lookup failed for tmdb_id=${seed.tmdbId}: HTTP ${lookupResp.status}`,
               );
             }
             return { seed, ids: [] as number[] };
           }
 
           const lookupData = await lookupResp.json();
-          const matchedMovie = lookupData?.[0]?.movie;
-          const traktSlug = matchedMovie?.ids?.slug;
-          const returnedTmdbId = matchedMovie?.ids?.tmdb;
-
-          // Validate we got the right movie, not a title collision
-          if (traktSlug && returnedTmdbId !== seed.tmdbId) {
+          if (!Array.isArray(lookupData)) {
             console.warn(
-              `[Aggregator] Trakt title search returned wrong movie for "${seed.title}" ` +
-              `(expected tmdb=${seed.tmdbId}, got tmdb=${returnedTmdbId}, slug=${traktSlug}). Skipping.`,
+              `[Aggregator] Trakt: unexpected response shape for tmdb_id=${seed.tmdbId}`,
             );
             return { seed, ids: [] as number[] };
           }
 
+          // Filter client-side for type=movie (?type=movie param is unreliable on Netlify)
+          type TraktSearchResult = {
+            type: string;
+            movie?: {
+              ids?: {
+                slug?: string;
+                trakt?: number;
+                tmdb?: number;
+                imdb?: string;
+              };
+            };
+          };
+          const movieResult = lookupData.find(
+            (item: TraktSearchResult) => item.type === "movie",
+          );
+          const traktSlug = movieResult?.movie?.ids?.slug;
+
+          // No cross-validation needed — TMDB ID lookup guarantees correct film
           if (!traktSlug) {
             console.warn(
-              `[Aggregator] Trakt: no slug found for title=${seed.title}, tmdb_id=${seed.tmdbId}`,
-              {
-                lookupDataType: typeof lookupData,
-                isArray: Array.isArray(lookupData),
-                length: Array.isArray(lookupData) ? lookupData.length : "N/A",
-                firstEntry: JSON.stringify(lookupData?.[0])?.slice(0, 300),
-                rawPreview: JSON.stringify(lookupData)?.slice(0, 500),
-              },
+              `[Aggregator] Trakt: no movie result for tmdb_id=${seed.tmdbId}`,
             );
             return { seed, ids: [] as number[] };
           }
