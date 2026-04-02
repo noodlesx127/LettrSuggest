@@ -1,6 +1,6 @@
 # Research Report: Modern Recommendation System Best Practices
 
-This report outlines modern techniques for movie recommendation systems, specifically tailored for the **LettrSuggest** stack (Next.js, Supabase, TMDB/Trakt data).
+This report outlines modern techniques for movie recommendation systems, specifically tailored for the **LettrSuggest** stack (Next.js, Supabase, TMDB data).
 
 ---
 
@@ -51,7 +51,7 @@ This report outlines modern techniques for movie recommendation systems, specifi
 **Description:** Providing "Transparent Proof" for why a movie was recommended.
 
 - **Industry Examples:** Amazon ("Because you bought..."), Netflix ("98% Match", "Gritty, Suspenseful").
-- **Application to LettrSuggest:** Explicitly label movies with their provenance: "Matches your love for _Denis Villeneuve_", "Top pick from _Trakt Community_", or "Matches 4 of your Watchlist films".
+- **Application to LettrSuggest:** Explicitly label movies with their provenance: "Matches your love for _Denis Villeneuve_", "Top TasteDive community pick", or "Matches 4 of your Watchlist films".
 - **Complexity:** Low (UI-based change).
 - **Impact:** Medium (Increases user trust and click-through rate).
 
@@ -85,7 +85,7 @@ To measure if our recommendations are actually improving:
 ### The "Two-Stage" Pipeline
 
 1.  **Candidate Generation (Retrieval):**
-    - Pull 100-200 candidates from various sources (TMDB, Trakt, Vector Search).
+    - Pull 100-200 candidates from various sources (TMDB, TasteDive, Vector Search).
     - Goal: High recall, low latency.
 2.  **Ranking (Scoring):**
     - Apply the complex scoring algorithm (overlap, popularity, temporal decay).

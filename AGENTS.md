@@ -59,7 +59,7 @@ import { supabase } from "@/lib/supabaseClient";
 | Files (libraries)  | camelCase            | `apiCache.ts`              |
 | Functions          | camelCase verbs      | `fetchTmdbMovie`           |
 | Types/Interfaces   | PascalCase           | `AggregatedRecommendation` |
-| Constants          | SCREAMING_SNAKE_CASE | `TRAKT_CACHE_TTL_DAYS`     |
+| Constants          | SCREAMING_SNAKE_CASE | `TMDB_CACHE_TTL_DAYS`      |
 | Event Handlers     | `handle` prefix      | `handleClick`              |
 
 ### TypeScript
@@ -129,7 +129,7 @@ console.error("[Cache] Error:", error);
 
 - Never commit secrets - use `.env.local` locally, Netlify env vars for prod
 - `NEXT_PUBLIC_*` exposed to browser; API keys stay server-side only
-- Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `TMDB_API_KEY`, `TUIMDB_API_KEY`, `TRAKT_CLIENT_ID`
+- Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `TMDB_API_KEY`, `TUIMDB_API_KEY`
 
 ---
 
@@ -156,16 +156,18 @@ console.error("[Cache] Error:", error);
 3. Run `NOTIFY pgrst, 'reload schema'` after changes
 
 ## Skills
+
 - When envoking the ui-designer sub agent, make sure to always use the frontend-design skill.
 - When envoking the code-reviewer sub agent, make sure to always use the code-review skill.
 - When envoking the debugger sub agent, make sure to always use the find-bugs or the systematic-debugging skill.
 - When envoking the git-workflow sub agent, make sure to always use the using-git-worktrees skill.
 - When envoking the react-specialist sub agent, make sure to always use the vercel-react-best-practices skill.
 - When receiving a code review from the code-reviewer or the debugger sub agents, make sure to always use the receiving-code-review skill.
-- When executing a plan, make sure to always use the executing-plans skill. 
-- When creating a plan, make sure to always use the ask-questions-if-underspecified skill when the plan is underspecified. 
+- When executing a plan, make sure to always use the executing-plans skill.
+- When creating a plan, make sure to always use the ask-questions-if-underspecified skill when the plan is underspecified.
 
 ## Does
+
 - All Documentation should live in the `/docs` folder.
 - All Plan Documentation should live in the `/Docs/plans` folder.
 - All Summary Documentation should live in the `/Docs/summary` folder.

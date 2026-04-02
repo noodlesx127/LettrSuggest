@@ -18,5 +18,5 @@
 
 ## Phase 4: UI/UX (Explanation)
 
-- [ ] Update `MovieCard` to show "Why this?" labels (e.g., "Matched via Director", "Trending on Trakt").
+- [ ] Update `MovieCard` to show "Why this?" labels (e.g., "Matched via Director", "Trending on TasteDive").
 - [ ] Add "More like this" button to each recommendation.
