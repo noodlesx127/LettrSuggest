@@ -1,7 +1,7 @@
 /**
  * API Response Caching Utilities
  *
- * Provides caching layer for external API calls (Trakt, TMDB, TuiMDB)
+ * Provides caching layer for external API calls (TMDB, TuiMDB)
  * to reduce API usage and improve performance.
  *
  * Cache Strategy:
@@ -22,80 +22,6 @@ export function isCacheValid(cachedAt: string, ttlDays: number): boolean {
     cacheDate.getTime() + ttlDays * 24 * 60 * 60 * 1000,
   );
   return new Date() < expiryDate;
-}
-
-// ============================================================================
-// Trakt Related Movies Cache
-// ============================================================================
-
-const TRAKT_CACHE_TTL_DAYS = 7;
-
-/**
- * Get cached Trakt related movies for a seed movie
- * @returns Array of TMDB IDs if cache hit, null if cache miss
- */
-export async function getCachedTraktRelated(
-  tmdbId: number,
-): Promise<number[] | null> {
-  if (!supabase) {
-    console.warn("[Cache] Supabase client not initialized");
-    return null;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from("trakt_related_cache")
-      .select("related_ids, cached_at")
-      .eq("tmdb_id", tmdbId)
-      .single();
-
-    if (error || !data) {
-      return null; // Cache miss
-    }
-
-    // Check if cache is still valid
-    if (!isCacheValid(data.cached_at, TRAKT_CACHE_TTL_DAYS)) {
-      console.log(`[Cache] Trakt cache expired for ${tmdbId}`);
-      return null; // Cache expired
-    }
-
-    console.log(`[Cache] Trakt cache HIT for ${tmdbId}`);
-    return data.related_ids as number[];
-  } catch (e) {
-    console.error("[Cache] Error reading Trakt cache:", e);
-    return null;
-  }
-}
-
-/**
- * Store Trakt related movies in cache
- */
-export async function setCachedTraktRelated(
-  tmdbId: number,
-  relatedIds: number[],
-): Promise<void> {
-  if (!supabase) {
-    console.warn("[Cache] Supabase client not initialized");
-    return;
-  }
-
-  try {
-    const { error } = await supabase.from("trakt_related_cache").upsert({
-      tmdb_id: tmdbId,
-      related_ids: relatedIds,
-      cached_at: new Date().toISOString(),
-    });
-
-    if (error) {
-      console.error("[Cache] Error writing Trakt cache:", error);
-    } else {
-      console.log(
-        `[Cache] Trakt cache SET for ${tmdbId} (${relatedIds.length} IDs)`,
-      );
-    }
-  } catch (e) {
-    console.error("[Cache] Exception writing Trakt cache:", e);
-  }
 }
 
 // ============================================================================
@@ -258,7 +184,6 @@ export async function setCachedTuiMDBUid(
 // ============================================================================
 
 export interface CacheStats {
-  traktCacheSize: number;
   tmdbSimilarCacheSize: number;
   tuimdbUidCacheSize: number;
 }
@@ -273,10 +198,7 @@ export async function getCacheStats(): Promise<CacheStats | null> {
   }
 
   try {
-    const [trakt, tmdbSimilar, tuimdb] = await Promise.all([
-      supabase
-        .from("trakt_related_cache")
-        .select("tmdb_id", { count: "exact", head: true }),
+    const [tmdbSimilar, tuimdb] = await Promise.all([
       supabase
         .from("tmdb_similar_cache")
         .select("tmdb_id", { count: "exact", head: true }),
@@ -286,7 +208,6 @@ export async function getCacheStats(): Promise<CacheStats | null> {
     ]);
 
     return {
-      traktCacheSize: trakt.count ?? 0,
       tmdbSimilarCacheSize: tmdbSimilar.count ?? 0,
       tuimdbUidCacheSize: tuimdb.count ?? 0,
     };

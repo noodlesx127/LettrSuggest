@@ -69,48 +69,6 @@ async function testTuiMDB() {
     }
 }
 
-// ── Trakt ─────────────────────────────────────────
-async function testTrakt() {
-    const key = process.env.TRAKT_CLIENT_ID;
-    if (!key) return log('Trakt', false, 'TRAKT_CLIENT_ID not set');
-    try {
-        // The app route uses /movies/{tmdbId}/related — Trakt will accept slug OR numeric Trakt ID
-        // First look up the Trakt slug via their search endpoint
-        const lookupRes = await fetch(`https://api.trakt.tv/search/tmdb/27205?type=movie`, {
-            headers: {
-                'trakt-api-key': key,
-                'trakt-api-version': '2',
-                'Content-Type': 'application/json'
-            }
-        });
-        if (!lookupRes.ok) throw new Error(`Lookup HTTP ${lookupRes.status}`);
-        const lookupData = await lookupRes.json();
-        const traktSlug = lookupData?.[0]?.movie?.ids?.slug;
-        const traktId = lookupData?.[0]?.movie?.ids?.trakt;
-
-        if (!traktSlug) {
-            log('Trakt', false, 'Could not resolve TMDB 27205 to Trakt slug');
-            return;
-        }
-
-        // Now fetch related using slug
-        const relatedRes = await fetch(`https://api.trakt.tv/movies/${traktSlug}/related?limit=10`, {
-            headers: {
-                'trakt-api-key': key,
-                'trakt-api-version': '2',
-                'Content-Type': 'application/json'
-            }
-        });
-        if (!relatedRes.ok) throw new Error(`Related HTTP ${relatedRes.status}`);
-        const relatedData = await relatedRes.json();
-        const tmdbIds = relatedData.map((m: any) => m.ids?.tmdb).filter(Boolean);
-
-        log('Trakt', true, `Lookup OK (slug: ${traktSlug}) | Related: ${tmdbIds.length} movies`);
-    } catch (e: any) {
-        log('Trakt', false, e.message);
-    }
-}
-
 // ── TasteDive ─────────────────────────────────────
 async function testTasteDive() {
     const key = process.env.TASTEDIVE_API_KEY;
@@ -156,7 +114,6 @@ async function runTests() {
     console.log('=== LettrSuggest API Verification ===\n');
     await testTMDB();
     await testTuiMDB();
-    await testTrakt();
     await testTasteDive();
     await testWatchmode();
 

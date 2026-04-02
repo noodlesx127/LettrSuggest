@@ -503,7 +503,6 @@ type MovieCardProps = {
 const SOURCE_LABELS: Record<string, string> = {
   tmdb: "TMDB",
   tastedive: "TasteDive",
-  trakt: "Trakt",
   tuimdb: "TuiMDB",
   watchmode: "Watchmode",
 };
@@ -517,7 +516,6 @@ const SOURCE_LABELS: Record<string, string> = {
 const SOURCE_ICONS: Record<string, { icon: string; specialty: string }> = {
   tmdb: { icon: "🎬", specialty: "Collaborative filtering & user ratings" },
   tastedive: { icon: "🎯", specialty: "Taste pattern analysis" },
-  trakt: { icon: "📊", specialty: "Community watch trends" },
   tuimdb: { icon: "🔍", specialty: "Deep catalog search" },
   watchmode: { icon: "📺", specialty: "Streaming availability intelligence" },
 };

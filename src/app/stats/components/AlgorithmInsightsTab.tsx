@@ -25,7 +25,6 @@ const formatSourceName = (source: string) => {
   const normalized = source.trim();
   const lower = normalized.toLowerCase();
   if (lower === "tmdb") return "TMDB";
-  if (lower === "trakt") return "Trakt";
   if (lower === "tuimdb") return "TuIMDb";
   if (lower === "letterboxd") return "Letterboxd";
   return normalized.replace(/\b\w/g, (char) => char.toUpperCase());

@@ -2,7 +2,6 @@ import { ApiError } from "./responseEnvelope";
 import { supabaseAdmin } from "./supabaseAdmin";
 
 export const CLEARABLE_TABLES = [
-  "trakt_related_cache",
   "tmdb_similar_cache",
   "tuimdb_uid_cache",
   "tastedive_cache",
