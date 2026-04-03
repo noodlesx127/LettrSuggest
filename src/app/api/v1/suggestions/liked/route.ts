@@ -26,6 +26,7 @@ interface SavedSuggestionRow {
 interface LikedSuggestionBody {
   tmdb_id: number;
   title?: string;
+  year?: number;
 }
 
 interface ExistingLikedSuggestionRpcResult {
@@ -56,12 +57,35 @@ async function parseLikedSuggestionBody(
     throw new ApiError(400, "BAD_REQUEST", "Request body must be an object");
   }
 
+  const parsedYear = parseOptionalYear(body.year);
+
   return {
     tmdb_id: parsePositiveInteger(String(body.tmdb_id ?? ""), "tmdb_id"),
     ...(typeof body.title === "string" && body.title.trim() !== ""
       ? { title: body.title.trim() }
       : {}),
+    ...(parsedYear !== undefined ? { year: parsedYear } : {}),
   };
+}
+
+function parseOptionalYear(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? value : undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmedValue = value.trim();
+
+  if (trimmedValue === "") {
+    return undefined;
+  }
+
+  const parsedYear = Number(trimmedValue);
+
+  return Number.isInteger(parsedYear) ? parsedYear : undefined;
 }
 
 function isSavedSuggestionRow(value: unknown): value is SavedSuggestionRow {
@@ -197,7 +221,7 @@ export async function POST(req: Request) {
       const title = body.title ?? movieSummary.title;
       const year = movieSummary.year
         ? Number.parseInt(movieSummary.year, 10)
-        : null;
+        : (body.year ?? null);
 
       if (!title) {
         throw new ApiError(400, "BAD_REQUEST", "Unable to resolve movie title");

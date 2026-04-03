@@ -175,5 +175,4 @@ console.error("[Cache] Error:", error);
 - Always make sure to add a code review loop for bugs and issues that send that feedback back to the sub agent to fix them if needed. Once this each tasks passes and have a the the correct Sub Agent update the docs and do a commit.
 - Always commit after any bug fix or feature added via git-workflow sub agent.
 - Update documents when changes are made before doing commits.
-- When envoking the ui-designer sub agent, make sure to always add the frontend-design skill.
 - Use the correct skills when needed.

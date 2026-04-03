@@ -54,10 +54,23 @@ export async function GET(req: Request) {
         on_watchlist: 0,
       };
 
+      const explorationStats =
+        (explorationStatsResult.data as ExplorationStatsRow | null) ?? null;
+
+      // Defensive cap: exploratory_films_rated cannot exceed total_rated
+      const exploratoryFilmsRated = Math.min(
+        explorationStats?.exploratory_films_rated ?? 0,
+        filmStats.total_rated ?? 0,
+      );
+
       return apiSuccess({
         filmStats,
-        explorationStats:
-          (explorationStatsResult.data as ExplorationStatsRow | null) ?? null,
+        explorationStats: explorationStats
+          ? {
+              ...explorationStats,
+              exploratory_films_rated: exploratoryFilmsRated,
+            }
+          : null,
       });
     } catch (error) {
       console.error("[v1/stats] Error:", error);
