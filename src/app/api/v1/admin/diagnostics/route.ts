@@ -43,7 +43,7 @@ export async function GET(req: Request) {
         getCacheTableStats(),
       ]);
 
-      const dbStatus = usersResult.error ? "error" : "ok";
+      const dbStatus = usersResult.error ? "error" : "connected";
       if (
         usersResult.error ||
         activeKeysResult.error ||

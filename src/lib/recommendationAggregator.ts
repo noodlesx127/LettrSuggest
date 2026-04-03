@@ -497,30 +497,17 @@ function calculateAggregateScore(
   // Bonus for consensus (multiple sources agreeing)
   // Divide by ACTIVE_SOURCE_COUNT so movies appearing in all active sources get full bonus
   const consensusBonus =
-    Math.min(rec.sources.length / ACTIVE_SOURCE_COUNT, 1.0) * 0.3;
+    Math.min(rec.sources.length / ACTIVE_SOURCE_COUNT, 1.0) * 0.5;
 
   // Quality source bonus (TasteDive is better for personalized niche finds)
-  // Combined with the uniqueness bonus below, this ensures niche sources compete with consensus
+  // Gives a small edge to recommendations that include high-quality niche sources
   const sourceNames = rec.sources.map((s) => s.source);
   const hasTasteDive = sourceNames.includes("tastedive");
   const qualitySourceBonus = hasTasteDive ? 0.05 : 0;
 
-  // Uniqueness bonus: Single-source discoveries are often niche finds worth surfacing
-  // Particularly valuable when the source is TasteDive
-  const isUniqueFind = rec.sources.length === 1;
-  const uniqueSource = isUniqueFind ? rec.sources[0].source : null;
-  const uniquenessBonus = isUniqueFind
-    ? uniqueSource === "tastedive"
-      ? 0.2
-      : 0.1
-    : 0;
-
-  return (
-    totalScore / totalWeight +
-    consensusBonus +
-    qualitySourceBonus +
-    uniquenessBonus
-  );
+  // No uniqueness bonus — single-source finds should not outrank multi-source consensus.
+  // The quality of a recommendation is validated by source agreement, not scarcity.
+  return totalScore / totalWeight + consensusBonus + qualitySourceBonus;
 }
 
 /**
