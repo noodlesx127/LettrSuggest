@@ -443,15 +443,13 @@ async function buildFeatureUpdates(
   }
 
   if (features.subgenres && features.subgenres.length > 0) {
-    features.subgenres
-      .slice(0, 5)
-      .forEach((subgenre) => {
-        updates.push({
-          type: "subgenre",
-          id: subgenre.id,
-          name: subgenre.key,
-        });
+    features.subgenres.slice(0, 5).forEach((subgenre) => {
+      updates.push({
+        type: "subgenre",
+        id: subgenre.id,
+        name: subgenre.key,
       });
+    });
   }
 
   return updates;
@@ -901,11 +899,11 @@ export async function addFeedback(
         reasonTypes,
         features: movieFeatures
           ? {
-            actors: movieFeatures.actors?.slice(0, 3).map((a) => a.name),
-            keywords: movieFeatures.keywords?.slice(0, 5).map((k) => k.name),
-            collection: movieFeatures.collection?.name,
-            genres: movieFeatures.genres?.map((g) => g.name),
-          }
+              actors: movieFeatures.actors?.slice(0, 3).map((a) => a.name),
+              keywords: movieFeatures.keywords?.slice(0, 5).map((k) => k.name),
+              collection: movieFeatures.collection?.name,
+              genres: movieFeatures.genres?.map((g) => g.name),
+            }
           : "none",
         insights,
       },
@@ -980,12 +978,12 @@ function deriveContextMode(context?: SuggestContext): {
 
 type FeatureDelta = {
   feature_type:
-  | "actor"
-  | "keyword"
-  | "collection"
-  | "director"
-  | "genre"
-  | "subgenre";
+    | "actor"
+    | "keyword"
+    | "collection"
+    | "director"
+    | "genre"
+    | "subgenre";
   feature_id: number;
   feature_name: string;
   deltaPositive: number;
@@ -1611,9 +1609,9 @@ async function extractMovieFeatures(tmdbId: number): Promise<MovieFeatures> {
     })),
     collection: features.collection
       ? {
-        id: features.collection.id,
-        name: features.collection.name,
-      }
+          id: features.collection.id,
+          name: features.collection.name,
+        }
       : undefined,
     studios: features.productionCompanyIds.map((id, idx) => ({
       id,
@@ -2565,10 +2563,10 @@ function extractFeatures(movie: TMDBMovie) {
   // Extract collection info
   const collection = movie.belongs_to_collection
     ? {
-      id: movie.belongs_to_collection.id,
-      name: movie.belongs_to_collection.name,
-      poster_path: movie.belongs_to_collection.poster_path,
-    }
+        id: movie.belongs_to_collection.id,
+        name: movie.belongs_to_collection.name,
+        poster_path: movie.belongs_to_collection.poster_path,
+      }
     : null;
 
   // Extract video data (trailers, teasers, etc.)
@@ -2737,7 +2735,7 @@ export async function fetchTmdbMovieCached(
       const hasRecentOMDb =
         data.omdb_fetched_at &&
         Date.now() - new Date(data.omdb_fetched_at).getTime() <
-        7 * 24 * 60 * 60 * 1000; // 7 days
+          7 * 24 * 60 * 60 * 1000; // 7 days
 
       if (hasCompleteMetadata && (hasRecentOMDb || !cached.imdb_id)) {
         return cached;
@@ -3261,7 +3259,7 @@ export async function buildTasteProfile(params: {
   const variance =
     ratings.length > 0
       ? ratings.reduce((sum, r) => sum + Math.pow(r - avgRating, 2), 0) /
-      ratings.length
+        ratings.length
       : 1.0;
   const stdDevRating = Math.sqrt(variance);
   const rewatchCount = params.films.filter((f) => f.rewatch).length;
@@ -4675,7 +4673,7 @@ function applyMMRRerank<
 
   // MMR lambda balances relevance (1.0) vs diversity (0.0)
   // 0.25 was previously deemed too diverse, but with our increased personal weighting,
-  // we want to strongly penalize *generic* similarity, so we enforce diversity here 
+  // we want to strongly penalize *generic* similarity, so we enforce diversity here
   // to ensure varied, niche results rise to the top over standard blockbusters.
   const lambda = options?.lambda ?? 0.25;
   const topK = Math.min(
@@ -5969,7 +5967,7 @@ export async function suggestByOverlap(params: {
       const favoriteFilmmakerName =
         (favoriteFilmmakerId != null
           ? favoriteDirectorNames.get(favoriteFilmmakerId) ||
-          favoriteActorNames.get(favoriteFilmmakerId)
+            favoriteActorNames.get(favoriteFilmmakerId)
           : undefined) ?? "Unknown";
       const isFavoriteFilmmaker = favoriteFilmmakerId != null;
 
@@ -6129,7 +6127,9 @@ export async function suggestByOverlap(params: {
       // Hard block: previously dismissed items are immediately removed from the candidate pool
       if (negativeFeedbackIds.has(cid)) {
         if (process.env.NODE_ENV === "development") {
-          console.log(`[FeedbackFilter] Filtered "${m.title}" - Not Interested feedback`);
+          console.log(
+            `[FeedbackFilter] Filtered "${m.title}" - Not Interested feedback`,
+          );
         }
         return null;
       }
@@ -6461,14 +6461,18 @@ export async function suggestByOverlap(params: {
         }
 
         // Check for preferred subgenres using keyword IDs directly from the TMDBMovie object
-        const preferredSubgenres = params.enhancedProfile?.preferredSubgenreKeywordIds || [];
+        const preferredSubgenres =
+          params.enhancedProfile?.preferredSubgenreKeywordIds || [];
         if (preferredSubgenres.length > 0) {
-          const tmdbKeywords = (m.keywords as any)?.keywords || (m.keywords as any)?.results || [];
-          const matchedSubgenres = tmdbKeywords.filter((k: any) => preferredSubgenres.includes(k.id));
+          const tmdbKeywords =
+            (m.keywords as any)?.keywords || (m.keywords as any)?.results || [];
+          const matchedSubgenres = tmdbKeywords.filter((k: any) =>
+            preferredSubgenres.includes(k.id),
+          );
           if (matchedSubgenres.length > 0) {
             const subgenreNames = matchedSubgenres.map((k: any) => k.name);
             reasons.push(
-              `Matches your favorite niche subgenres: ${subgenreNames.slice(0, 3).join(", ")}`
+              `Matches your favorite niche subgenres: ${subgenreNames.slice(0, 3).join(", ")}`,
             );
           }
         }
@@ -7566,9 +7570,9 @@ export async function suggestByOverlap(params: {
         const sources = sourceMeta.sources || [];
         const avgReliability = sources.length
           ? sources.reduce(
-            (sum, s) => sum + (reliabilityMap.get(s.toLowerCase()) ?? 1),
-            0,
-          ) / sources.length
+              (sum, s) => sum + (reliabilityMap.get(s.toLowerCase()) ?? 1),
+              0,
+            ) / sources.length
           : 1;
 
         const consensusBoost =
@@ -8255,7 +8259,22 @@ export async function learnFromHistoricalData(userId: string) {
       return filmGenres.some((g) => !topGenreIds.has(g.id));
     });
 
-    if (exploratory.length > 0) {
+    const { data: currentStats, error: currentStatsError } = await supabase
+      .from("user_exploration_stats")
+      .select("exploratory_films_rated")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (currentStatsError) {
+      console.error(
+        "[BatchLearning] Failed to fetch current exploration stats",
+        currentStatsError,
+      );
+    }
+
+    // Only seed if no exploration stats row exists yet.
+    // If a row already exists, respect incremental updates even when the count is 0.
+    if (exploratory.length > 0 && !currentStats) {
       const exploratoryAvg =
         exploratory.reduce((sum, f) => sum + (f.rating ?? 0), 0) /
         exploratory.length;
@@ -8275,6 +8294,15 @@ export async function learnFromHistoricalData(userId: string) {
           avgRating: exploratoryAvg.toFixed(2),
         });
       }
+    } else if (
+      exploratory.length > 0 &&
+      process.env.NODE_ENV === "development"
+    ) {
+      console.log("[BatchLearning] Skipped exploration stats seed", {
+        exploratoryFilms: exploratory.length,
+        existingExploratoryFilmsRated:
+          currentStats?.exploratory_films_rated ?? 0,
+      });
     }
 
     if (process.env.NODE_ENV === "development") {

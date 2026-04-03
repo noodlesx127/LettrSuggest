@@ -194,23 +194,14 @@ export async function aggregateRecommendations(params: {
   // Merge and deduplicate by TMDB ID
   const mergedRecs = mergeRecommendations(allRecs);
 
-  // Filter out Watchmode-only entries - these are generic trending content
-  // without any personalization signal. Only keep Watchmode recs that also
-  // appear in at least one personalized source (TMDB, TasteDive)
-  const aggregated = mergedRecs.filter((rec) => {
-    const isWatchmodeOnly =
-      rec.sources.length === 1 && rec.sources[0].source === "watchmode";
-    if (isWatchmodeOnly) {
-      console.log("[Aggregator] Filtering Watchmode-only:", rec.title);
-    }
-    return !isWatchmodeOnly;
-  });
+  // Watchmode-only entries are kept but naturally deprioritized by their lower
+  // confidence score (0.35) and base weight (0.9), so they only surface when
+  // there are gaps after TMDB, TasteDive, and Vector results.
+  const aggregated = mergedRecs;
 
-  console.log("[Aggregator] After Watchmode filter:", {
-    beforeFilter: mergedRecs.length,
-    afterFilter: aggregated.length,
-    filtered: mergedRecs.length - aggregated.length,
-  });
+  console.log(
+    `[Aggregator] Watchmode items included (deprioritized): ${mergedRecs.filter((r) => r.sources.length === 1 && r.sources[0].source === "watchmode").length}`,
+  );
 
   // Calculate consensus scores and sort
   const scored = aggregated
@@ -834,7 +825,9 @@ async function fetchWatchmodeTrending(): Promise<SourceRecommendation[]> {
           source: "watchmode",
           tmdbId: title.tmdb_id,
           title: title.title,
-          confidence: 0.6, // Trending is less personalized
+          confidence: title.popularity_score
+            ? Math.min(0.35 + title.popularity_score * 0.05, 0.5)
+            : 0.35,
           reason: "Trending on streaming services",
         });
       }

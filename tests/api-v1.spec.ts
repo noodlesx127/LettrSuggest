@@ -588,6 +588,18 @@ test.describe("Authenticated tests", () => {
       expect(typeof filmStats.avg_rating).toBe("number");
       expect(typeof filmStats.total_liked).toBe("number");
       expect(typeof filmStats.on_watchlist).toBe("number");
+
+      const explorationStats = data.explorationStats as Record<
+        string,
+        unknown
+      > | null;
+
+      if (explorationStats) {
+        expect(typeof explorationStats.exploratory_films_rated).toBe("number");
+        expect(
+          explorationStats.exploratory_films_rated as number,
+        ).toBeLessThanOrEqual(filmStats.total_rated as number);
+      }
     });
   });
 

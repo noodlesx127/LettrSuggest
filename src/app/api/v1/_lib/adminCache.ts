@@ -1,3 +1,9 @@
+import {
+  TASTEDIVE_CACHE_TTL_DAYS,
+  TMDB_SIMILAR_CACHE_TTL_DAYS,
+  TUIMDB_UID_CACHE_TTL_DAYS,
+  WATCHMODE_CACHE_TTL_HOURS,
+} from "@/lib/apiCache";
 import { ApiError } from "./responseEnvelope";
 import { supabaseAdmin } from "./supabaseAdmin";
 
@@ -22,7 +28,15 @@ export interface ClearedCacheTableResult {
 }
 
 const CACHE_DELETE_FLOOR = "1970-01-01T00:00:00.000Z";
-const SEVEN_DAYS_IN_MS = 7 * 24 * 60 * 60 * 1000;
+const HOURS_IN_MS = 60 * 60 * 1000;
+const DAYS_IN_MS = 24 * HOURS_IN_MS;
+
+const CACHE_TABLE_TTL_MS: Record<ClearableCacheTable, number> = {
+  tmdb_similar_cache: TMDB_SIMILAR_CACHE_TTL_DAYS * DAYS_IN_MS,
+  tuimdb_uid_cache: TUIMDB_UID_CACHE_TTL_DAYS * DAYS_IN_MS,
+  tastedive_cache: TASTEDIVE_CACHE_TTL_DAYS * DAYS_IN_MS,
+  watchmode_cache: WATCHMODE_CACHE_TTL_HOURS * HOURS_IN_MS,
+};
 
 export function isClearableCacheTable(
   value: string,
@@ -31,10 +45,12 @@ export function isClearableCacheTable(
 }
 
 export async function getCacheTableStats(): Promise<CacheTableStats[]> {
-  const expiredBefore = new Date(Date.now() - SEVEN_DAYS_IN_MS).toISOString();
-
   return Promise.all(
     CLEARABLE_TABLES.map(async (tableName) => {
+      const expiredBefore = new Date(
+        Date.now() - CACHE_TABLE_TTL_MS[tableName],
+      ).toISOString();
+
       const [countResult, expiredResult] = await Promise.all([
         supabaseAdmin
           .from(tableName)
