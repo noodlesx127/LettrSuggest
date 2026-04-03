@@ -67,10 +67,11 @@ export async function GET(req: Request, { params }: RouteContext) {
         )
         .eq("user_id", userId)
         .order(sort, { ascending: order === "asc", nullsFirst: false })
+        .order("uri", { ascending: true })
         .range(offset, offset + perPage - 1);
 
       if (error) {
-        console.error("[API v1] Failed to fetch admin user films", error);
+        console.error("[v1/admin/users/[userId]/films] Query error:", error);
         throw new ApiError(500, "INTERNAL_ERROR", "Failed to fetch films");
       }
 

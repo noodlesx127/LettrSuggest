@@ -48,9 +48,11 @@ export async function GET(req: Request) {
         )
         .eq("user_id", auth.userId)
         .order(sort, { ascending: order === "asc", nullsFirst: false })
+        .order("uri", { ascending: true })
         .range(offset, offset + perPage - 1);
 
       if (error) {
+        console.error("[v1/profile/films] Query error:", error);
         // On range error (offset beyond total rows), fall back to a count-only
         // query to return an empty paginated response instead of crashing.
         const { count: totalCount, error: countError } = await supabaseAdmin
