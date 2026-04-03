@@ -680,7 +680,7 @@ test.describe("Authenticated tests", () => {
       );
       expect(status).toBe(200);
       const data = body.data as Record<string, unknown>;
-      expect(data.db).toBe("ok");
+      expect(data.db).toBe("connected");
       expect(typeof data.timestamp).toBe("string");
 
       const stats = data.stats as Record<string, unknown>;

@@ -68,10 +68,15 @@ export async function GET(req: Request) {
         throw new ApiError(500, "INTERNAL_ERROR", "Failed to fetch films");
       }
 
-      return apiPaginated(
-        (data as FilmEventRow[] | null) ?? [],
-        buildPagination(page, perPage, count ?? 0),
-      );
+      const coerced = ((data as FilmEventRow[] | null) ?? []).map((row) => ({
+        ...row,
+        liked: row.liked ?? false,
+        rewatch: row.rewatch ?? false,
+        watch_count: row.watch_count ?? 0,
+        on_watchlist: row.on_watchlist ?? false,
+      }));
+
+      return apiPaginated(coerced, buildPagination(page, perPage, count ?? 0));
     } catch (error) {
       console.error("[v1/profile/films] Error:", error);
       if (error instanceof ApiError) {
