@@ -31,9 +31,11 @@ export async function GET(req: Request) {
         .eq("user_id", auth.userId)
         .eq("on_watchlist", true)
         .order("last_date", { ascending: false, nullsFirst: false })
+        .order("uri", { ascending: true })
         .range(offset, offset + perPage - 1);
 
       if (error) {
+        console.error("[v1/profile/watchlist] Query error:", error);
         const { count: totalCount, error: countError } = await supabaseAdmin
           .from("film_events")
           .select("*", { count: "exact", head: true })
