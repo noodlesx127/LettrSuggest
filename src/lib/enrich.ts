@@ -5854,9 +5854,15 @@ export async function suggestByOverlap(params: {
   );
   const moviesForAnalysis = await mapLimit(mappedIds, 10, async (id) => {
     try {
+      if (params.tmdbDetailsCache?.has(id)) {
+        return params.tmdbDetailsCache.get(id)!;
+      }
       return await fetchTmdbMovieCached(id);
     } catch (e) {
-      console.error(`[SuggestByOverlap] Analysis fetch failed for ${id}`, e);
+      console.error("[Overlap] Error fetching movie for analysis", {
+        id,
+        error: e,
+      });
       return null;
     }
   });

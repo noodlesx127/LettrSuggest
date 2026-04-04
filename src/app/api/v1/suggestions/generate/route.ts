@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { getBulkTmdbDetails, suggestByOverlap } from "@/lib/enrich";
+import { suggestByOverlap } from "@/lib/enrich";
 import {
   buildAdjacentGenreMap,
   buildFeatureFeedbackFromRows,
   buildTasteProfileServer,
   generateServerCandidates,
+  loadCachedTmdbDetails,
   loadUserContext,
 } from "@/lib/serverSuggestionsEngine";
 
@@ -142,8 +143,15 @@ export async function POST(req: Request) {
         (id) => !excludeSet.has(id),
       );
 
-      // Batch pre-load TMDB details for all candidates to avoid N+1 fetches in suggestByOverlap
-      const candidateTmdbCache = await getBulkTmdbDetails(filteredCandidates);
+      // Batch pre-load TMDB details for candidates + user's mapped films to avoid N+1 fetches
+      // Covers: candidate scoring loop, subgenre analysis loop, liked/disliked movie fetches
+      const allIdsToCache = [
+        ...new Set([
+          ...filteredCandidates,
+          ...Array.from(userContext.mappings.values()),
+        ]),
+      ];
+      const candidateTmdbCache = await loadCachedTmdbDetails(allIdsToCache);
 
       if (filteredCandidates.length === 0) {
         const warning =
