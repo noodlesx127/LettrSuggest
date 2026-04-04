@@ -301,7 +301,7 @@ function buildTasteProfileFilms(
   }));
 }
 
-async function loadCachedTmdbDetails(
+export async function loadCachedTmdbDetails(
   tmdbIds: number[],
 ): Promise<Map<number, TMDBMovie>> {
   const db = getSupabaseAdmin();
@@ -320,7 +320,11 @@ async function loadCachedTmdbDetails(
 
     for (const row of (data ?? []) as TmdbMovieCacheRow[]) {
       if (row.data) {
-        tmdbDetailsMap.set(row.tmdb_id, row.data);
+        const movie = row.data;
+        // Only cache entries with complete metadata — consistent with fetchTmdbMovieCached behavior
+        if (movie.credits?.cast && movie.credits?.crew && movie.keywords) {
+          tmdbDetailsMap.set(row.tmdb_id, movie);
+        }
       }
     }
   }
