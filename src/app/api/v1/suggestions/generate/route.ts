@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { suggestByOverlap } from "@/lib/enrich";
+import { getBulkTmdbDetails, suggestByOverlap } from "@/lib/enrich";
 import {
   buildAdjacentGenreMap,
   buildFeatureFeedbackFromRows,
@@ -142,6 +142,9 @@ export async function POST(req: Request) {
         (id) => !excludeSet.has(id),
       );
 
+      // Batch pre-load TMDB details for all candidates to avoid N+1 fetches in suggestByOverlap
+      const candidateTmdbCache = await getBulkTmdbDetails(filteredCandidates);
+
       if (filteredCandidates.length === 0) {
         const warning =
           candidateIds.length === 0
@@ -251,6 +254,7 @@ export async function POST(req: Request) {
         },
         recentExposures: userContext.recentExposures,
         enhancedProfile,
+        tmdbDetailsCache: candidateTmdbCache,
       });
 
       const data = scored.slice(0, body.limit).map((item) => ({
