@@ -248,7 +248,7 @@ function scoreSeedFilm(film: FilmEventRow): number {
 }
 
 function getTopSeedTmdbIds(userContext: UserContext, limit = 8): number[] {
-  return userContext.films
+  const scored = userContext.films
     .filter(
       (film) =>
         userContext.mappings.has(film.uri) &&
@@ -257,8 +257,19 @@ function getTopSeedTmdbIds(userContext: UserContext, limit = 8): number[] {
     .sort((left, right) => scoreSeedFilm(right) - scoreSeedFilm(left))
     .map((film) => userContext.mappings.get(film.uri))
     .filter((tmdbId): tmdbId is number => isFiniteNumber(tmdbId))
-    .filter((tmdbId, index, ids) => ids.indexOf(tmdbId) === index)
-    .slice(0, limit);
+    .filter((tmdbId, index, ids) => ids.indexOf(tmdbId) === index);
+
+  // Sample from a larger pool to ensure variety across runs.
+  // Take top 30 candidates, shuffle them, then slice to limit.
+  const poolSize = Math.max(limit, Math.min(scored.length, 30));
+  const pool = scored.slice(0, poolSize);
+
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+
+  return pool.slice(0, limit);
 }
 
 function getRelevantTasteTmdbIds(userContext: UserContext): number[] {
@@ -777,9 +788,9 @@ export async function generateServerCandidates(
       fetchTmdb<TmdbListResult>("/discover/movie", {
         with_genres: discoverGenreIds.join("|"),
         include_adult: "false",
-        sort_by: "popularity.desc",
-        "vote_count.gte": 150,
-        page: 1,
+        sort_by: "vote_average.desc",
+        "vote_count.gte": 200,
+        page: String(Math.floor(Math.random() * 5) + 1),
       })
         .then((result) => ({
           source: "discover-top-genres",

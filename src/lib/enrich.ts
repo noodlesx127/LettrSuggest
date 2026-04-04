@@ -364,7 +364,11 @@ export async function getBulkTmdbDetails(
 
       for (const row of data ?? []) {
         if (row.tmdb_id && row.data) {
-          detailsMap.set(row.tmdb_id, row.data as TMDBMovie);
+          const movie = row.data as TMDBMovie;
+          // Only cache entries with complete metadata — consistent with fetchTmdbMovieCached behavior
+          if (movie.credits?.cast && movie.credits?.crew && movie.keywords) {
+            detailsMap.set(row.tmdb_id, movie);
+          }
         }
       }
     }
@@ -1164,6 +1168,19 @@ const sourceReliabilityCache = new Map<
 const SOURCE_RELIABILITY_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const keywordIdfCache = new Map<number, number>();
 
+function pruneCache<K, V>(cache: Map<K, V>, maxSize: number): void {
+  if (cache.size <= maxSize) return;
+
+  const toDelete = cache.size - maxSize;
+  let deleted = 0;
+
+  for (const key of cache.keys()) {
+    if (deleted >= toDelete) break;
+    cache.delete(key);
+    deleted++;
+  }
+}
+
 export async function fetchSourceReliability(
   userId: string,
 ): Promise<Map<string, number>> {
@@ -1211,6 +1228,7 @@ export async function fetchSourceReliability(
       reliability.set(src, multiplier);
     }
 
+    pruneCache(sourceReliabilityCache, 200);
     sourceReliabilityCache.set(userId, { at: Date.now(), data: reliability });
     return reliability;
   } catch (e) {
@@ -2730,7 +2748,9 @@ export async function fetchTmdbMovieCached(
 
       // If cached has credits/keywords AND recent OMDb data, use it directly
       const hasCompleteMetadata =
-        (cached.credits && cached.credits.cast && cached.credits.crew) ||
+        cached.credits &&
+        cached.credits.cast &&
+        cached.credits.crew &&
         cached.keywords;
       const hasRecentOMDb =
         data.omdb_fetched_at &&
@@ -3993,6 +4013,7 @@ export async function buildTasteProfile(params: {
           const idf = Math.log(
             (totalFilmsCount + 1) / ((filmsWithKeyword ?? 0) + 1),
           );
+          pruneCache(keywordIdfCache, 1000);
           keywordIdfCache.set(keywordId, idf);
           return { id: keywordId, idf };
         },
@@ -4527,11 +4548,11 @@ function applyDiversityFilter<
   },
 ): T[] {
   const defaults = {
-    maxSameDirector: 4, // Increased to allow deep-dives into a filmmaker's catalog
-    maxSameGenre: 15, // Greatly increased to stop penalizing users who only like a few subgenres
-    maxSameDecade: 6, // Slightly increased
-    maxSameStudio: 5, // Slightly increased
-    maxSameActor: 5, // Increased to allow deep-dives into an actor's catalog
+    maxSameDirector: 3,
+    maxSameGenre: 5,
+    maxSameDecade: 8,
+    maxSameStudio: 4,
+    maxSameActor: 4,
   };
 
   const limits = { ...defaults, ...options };
@@ -4846,6 +4867,7 @@ export async function suggestByOverlap(params: {
   films: FilmEventLite[];
   mappings: Map<string, number>;
   candidates: number[]; // tmdb ids to consider (e.g., from watchlist mapping or popular)
+  tmdbDetailsCache?: Map<number, TMDBMovie>;
   excludeGenres?: Set<string>;
   maxCandidates?: number;
   concurrency?: number;
@@ -5424,6 +5446,9 @@ export async function suggestByOverlap(params: {
 
   const likedMovies = await mapLimit(likedIds, 10, async (id) => {
     try {
+      if (params.tmdbDetailsCache?.has(id)) {
+        return params.tmdbDetailsCache.get(id)!;
+      }
       return await fetchTmdbMovieCached(id);
     } catch (e) {
       console.error(`[SuggestByOverlap] Failed to fetch liked movie ${id}`, e);
@@ -5432,6 +5457,9 @@ export async function suggestByOverlap(params: {
   });
   const dislikedMovies = await mapLimit(dislikedIds, 10, async (id) => {
     try {
+      if (params.tmdbDetailsCache?.has(id)) {
+        return params.tmdbDetailsCache.get(id)!;
+      }
       return await fetchTmdbMovieCached(id);
     } catch (e) {
       console.error(
@@ -5910,6 +5938,9 @@ export async function suggestByOverlap(params: {
 
   // Helper to fetch from cache first in bulk where possible
   async function fetchFromCache(id: number): Promise<TMDBMovie | null> {
+    if (params.tmdbDetailsCache?.has(id)) {
+      return params.tmdbDetailsCache.get(id)!;
+    }
     return await fetchTmdbMovieCached(id);
   }
 
@@ -7714,7 +7745,7 @@ export async function suggestByOverlap(params: {
   // Phase 3b: Apply diversity filtering (tightened to reduce common-genre saturation)
   const diversified = applyDiversityFilter(mmrReranked, {
     maxSameDirector: 3,
-    maxSameGenre: 8,
+    maxSameGenre: 5,
     maxSameDecade: 8,
     maxSameStudio: 4,
     maxSameActor: 4,
