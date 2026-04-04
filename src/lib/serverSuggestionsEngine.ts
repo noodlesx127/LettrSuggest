@@ -761,31 +761,49 @@ export async function generateServerCandidates(
     );
   }
 
-  const topSeedTmdbIds = getTopSeedTmdbIds(userContext, 8);
+  const topSeedTmdbIds = getTopSeedTmdbIds(userContext, 12);
   const discoverGenreIds = tasteProfile.topGenres
     .slice(0, 3)
     .map((genre) => genre.id);
 
-  const requests: Array<Promise<{ source: string; ids: number[] }>> = [
-    fetchTmdb<TmdbListResult>("/trending/movie/day")
+  const requests: Array<Promise<{ source: string; ids: number[] }>> = [];
+  const useDayTrending = Math.random() > 0.5;
+
+  requests.push(
+    fetchTmdb<TmdbListResult>(
+      useDayTrending ? "/trending/movie/day" : "/trending/movie/week",
+    )
       .then((result) => ({
-        source: "trending-day",
+        source: useDayTrending ? "trending-day" : "trending-week",
         ids: (result.results ?? []).map((movie) => movie.id),
       }))
       .catch((error) => {
-        console.error("[ServerEngine] trending/day error:", error);
-        return { source: "trending-day", ids: [] };
+        console.error("[ServerEngine] trending error:", error);
+        return {
+          source: useDayTrending ? "trending-day" : "trending-week",
+          ids: [],
+        };
       }),
-    fetchTmdb<TmdbListResult>("/trending/movie/week")
-      .then((result) => ({
-        source: "trending-week",
-        ids: (result.results ?? []).map((movie) => movie.id),
-      }))
-      .catch((error) => {
-        console.error("[ServerEngine] trending/week error:", error);
-        return { source: "trending-week", ids: [] };
-      }),
-  ];
+  );
+
+  if (topSeedTmdbIds.length < 4) {
+    requests.push(
+      fetchTmdb<TmdbListResult>(
+        useDayTrending ? "/trending/movie/week" : "/trending/movie/day",
+      )
+        .then((result) => ({
+          source: useDayTrending ? "trending-week" : "trending-day",
+          ids: (result.results ?? []).map((movie) => movie.id),
+        }))
+        .catch((error) => {
+          console.error("[ServerEngine] trending alternate error:", error);
+          return {
+            source: useDayTrending ? "trending-week" : "trending-day",
+            ids: [],
+          };
+        }),
+    );
+  }
 
   if (discoverGenreIds.length > 0) {
     requests.push(
@@ -856,8 +874,47 @@ export async function generateServerCandidates(
     return rightScore - leftScore;
   });
 
+  const SOURCE_CAPS: Record<string, number> = {
+    "trending-day": 10,
+    "trending-week": 10,
+    "discover-top-genres": 15,
+  };
+
+  const sourceCounts = new Map<string, number>();
+  const cappedCandidateOrder: number[] = [];
+
+  for (const tmdbId of orderedCandidates) {
+    const meta = sourceMetadata.get(tmdbId);
+    if (!meta) {
+      cappedCandidateOrder.push(tmdbId);
+      continue;
+    }
+
+    const canAdd = meta.sources.some((source) => {
+      const cap = SOURCE_CAPS[source];
+      if (cap === undefined) return true;
+      const count = sourceCounts.get(source) ?? 0;
+      return count < cap;
+    });
+
+    if (canAdd) {
+      cappedCandidateOrder.push(tmdbId);
+      for (const source of meta.sources) {
+        if (SOURCE_CAPS[source] !== undefined) {
+          sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
+        }
+      }
+    }
+  }
+
+  console.log("[ServerEngine] source caps applied", {
+    before: orderedCandidates.length,
+    after: cappedCandidateOrder.length,
+    dropped: orderedCandidates.length - cappedCandidateOrder.length,
+  });
+
   return {
-    candidateIds: orderedCandidates,
+    candidateIds: cappedCandidateOrder,
     sourceMetadata,
   };
 }
