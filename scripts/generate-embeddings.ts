@@ -6,8 +6,6 @@ const MAX_MOVIES = 5000;
 
 type TmdbRow = {
   tmdb_id: number;
-  popularity?: number | null;
-  vote_count?: number | null;
 };
 
 async function getTopTmdbIds(offset: number, limit: number): Promise<number[]> {
@@ -15,9 +13,9 @@ async function getTopTmdbIds(offset: number, limit: number): Promise<number[]> {
 
   const { data, error } = await supabase
     .from("tmdb_movies")
-    .select("tmdb_id, popularity, vote_count")
-    .order("popularity", { ascending: false })
-    .order("vote_count", { ascending: false })
+    .select("tmdb_id")
+    .order("imdb_votes", { ascending: false })
+    .order("imdb_rating", { ascending: false })
     .range(offset, offset + limit - 1);
 
   if (error) {
