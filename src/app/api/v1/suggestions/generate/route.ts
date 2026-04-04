@@ -1,22 +1,22 @@
 import { NextResponse } from "next/server";
 
-import { aggregateRecommendations } from "@/lib/recommendationAggregator";
+import { suggestByOverlap } from "@/lib/enrich";
+import {
+  buildAdjacentGenreMap,
+  buildFeatureFeedbackFromRows,
+  buildTasteProfileServer,
+  generateServerCandidates,
+  loadUserContext,
+} from "@/lib/serverSuggestionsEngine";
 
 import { withApiAuth } from "../../_lib/apiKeyAuth";
 import { isRecord } from "../../_lib/pagination";
 import { ApiError, generateRequestId } from "../../_lib/responseEnvelope";
-import { fetchTmdb } from "../../_lib/tmdb";
 
 interface GenerateSuggestionsBody {
   seed_tmdb_ids: number[];
   limit: number;
   exclude_tmdb_ids: number[];
-}
-
-interface ResolvedSeedMovie {
-  tmdbId: number;
-  title: string;
-  imdbId?: string;
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -95,7 +95,7 @@ async function parseGenerateSuggestionsBody(
       body.seed_tmdb_ids,
       "seed_tmdb_ids",
       {
-        required: true,
+        required: false,
         maxItems: 15,
       },
     ),
@@ -108,26 +108,6 @@ async function parseGenerateSuggestionsBody(
   };
 }
 
-async function resolveSeedMovie(tmdbId: number): Promise<ResolvedSeedMovie> {
-  const movie = await fetchTmdb<Record<string, unknown>>(`/movie/${tmdbId}`);
-
-  if (typeof movie.title !== "string" || movie.title.trim() === "") {
-    throw new ApiError(
-      422,
-      "UNPROCESSABLE_ENTITY",
-      `TMDB movie ${tmdbId} is missing a valid title`,
-    );
-  }
-
-  const imdbId = typeof movie.imdb_id === "string" ? movie.imdb_id : undefined;
-
-  return {
-    tmdbId,
-    title: movie.title.trim(),
-    ...(imdbId ? { imdbId } : {}),
-  };
-}
-
 export async function POST(req: Request) {
   return withApiAuth(req, async (auth) => {
     try {
@@ -137,70 +117,163 @@ export async function POST(req: Request) {
       console.log("[v1/suggestions/generate] Starting generation", {
         requestId,
         userId: auth.userId,
-        seedCount: body.seed_tmdb_ids.length,
+        hasSeedBias: body.seed_tmdb_ids.length > 0,
         excludeCount: body.exclude_tmdb_ids.length,
         limit: body.limit,
       });
 
-      const resolvedSeedResults = await Promise.allSettled(
-        body.seed_tmdb_ids.map((tmdbId) => resolveSeedMovie(tmdbId)),
+      const userContext = await loadUserContext(auth.userId);
+      const tasteProfile = await buildTasteProfileServer(
+        auth.userId,
+        userContext,
+      );
+      const { candidateIds, sourceMetadata } = await generateServerCandidates(
+        auth.userId,
+        userContext,
+        tasteProfile,
+        body.seed_tmdb_ids,
       );
 
-      const seedMovies = resolvedSeedResults.flatMap((result) =>
-        result.status === "fulfilled" ? [result.value] : [],
+      const excludeSet = new Set([
+        ...body.exclude_tmdb_ids,
+        ...Array.from(userContext.blockedIds),
+      ]);
+      const filteredCandidates = candidateIds.filter(
+        (id) => !excludeSet.has(id),
       );
 
-      const failedSeedIds = resolvedSeedResults.flatMap((result, index) =>
-        result.status === "rejected" ? [body.seed_tmdb_ids[index]] : [],
-      );
+      if (filteredCandidates.length === 0) {
+        const warning =
+          candidateIds.length === 0
+            ? "no_candidates_generated"
+            : "all_candidates_excluded";
 
-      console.log("[v1/suggestions/generate] Seed resolution completed", {
-        requestId,
-        resolvedCount: seedMovies.length,
-        failedCount: failedSeedIds.length,
-        failedSeedIds,
-      });
+        console.warn("[v1/suggestions/generate] No candidates available", {
+          requestId,
+          candidateIds: candidateIds.length,
+          warning,
+        });
 
-      if (seedMovies.length === 0) {
-        throw new ApiError(
-          422,
-          "UNPROCESSABLE_ENTITY",
-          "None of the provided seed_tmdb_ids could be resolved",
-        );
+        return NextResponse.json({
+          data: [],
+          meta: {
+            timestamp: new Date().toISOString(),
+            requestId,
+            seed_count: body.seed_tmdb_ids.length,
+            result_count: 0,
+            candidate_count: 0,
+            engine: "personalized",
+            warning,
+          },
+          error: null,
+        });
       }
 
-      const excludeSet = new Set(body.exclude_tmdb_ids);
-      const seedSet = new Set(body.seed_tmdb_ids);
-      const internalLimit = Math.min(body.limit + excludeSet.size + 20, 200);
-      const { recommendations, sourceDebug } = await aggregateRecommendations({
-        seedMovies,
-        limit: internalLimit,
-        deadlineMs: 7500,
+      const adjacentGenresMap = buildAdjacentGenreMap(
+        userContext.adjacentGenres,
+      );
+      const enhancedProfile = {
+        topActors: tasteProfile.topActors ?? [],
+        topStudios: tasteProfile.topStudios ?? [],
+        topKeywords: tasteProfile.topKeywords,
+        topCountries: tasteProfile.topCountries,
+        topLanguages: tasteProfile.topLanguages,
+        avoidGenres: tasteProfile.avoidGenres ?? [],
+        avoidKeywords: tasteProfile.avoidKeywords ?? [],
+        avoidDirectors: tasteProfile.avoidDirectors ?? [],
+        preferredSubgenreKeywordIds:
+          tasteProfile.preferredSubgenreKeywordIds ?? [],
+        topDecades: tasteProfile.topDecades,
+        adjacentGenres: adjacentGenresMap,
+        watchlistGenres: (tasteProfile.watchlistGenres ?? []).map(
+          (genre: { name: string }) => genre.name,
+        ),
+        watchlistKeywords: (tasteProfile.watchlistKeywords ?? []).map(
+          (keyword: { name: string }) => keyword.name,
+        ),
+        watchlistDirectors: (tasteProfile.watchlistDirectors ?? []).map(
+          (director: { name: string }) => director.name,
+        ),
+      };
+
+      const featureFeedback = buildFeatureFeedbackFromRows(
+        userContext.feedback,
+      );
+
+      const watchlistEntries = userContext.films
+        .filter((film) => film.on_watchlist)
+        .map((film) => ({
+          tmdbId: userContext.mappings.get(film.uri),
+          addedAt: film.last_date ?? null,
+        }))
+        .filter(
+          (
+            entry,
+          ): entry is {
+            tmdbId: number;
+            addedAt: string | null;
+          } => typeof entry.tmdbId === "number" && entry.tmdbId > 0,
+        );
+
+      const liteFilms = userContext.films.map((film) => ({
+        uri: film.uri,
+        title: film.title,
+        year: film.year,
+        ...(film.rating != null ? { rating: film.rating } : {}),
+        ...(film.liked != null ? { liked: film.liked } : {}),
+      }));
+
+      const explorationRate = Number.isFinite(userContext.explorationRate)
+        ? userContext.explorationRate
+        : 0.15;
+      const mmrLambda = Math.max(
+        0.3,
+        Math.min(0.7, 0.3 + (explorationRate / 0.3) * 0.4),
+      );
+
+      const scored = await suggestByOverlap({
+        userId: auth.userId,
+        films: liteFilms,
+        mappings: userContext.mappings,
+        candidates: filteredCandidates,
+        maxCandidates: Math.min(filteredCandidates.length, 1200),
+        concurrency: 6,
+        excludeWatchedIds: new Set(userContext.mappings.values()),
+        desiredResults: Math.min(body.limit * 4, 200),
+        sourceMetadata,
+        mmrLambda,
+        mmrTopKFactor: 2.5,
+        featureFeedback,
+        watchlistEntries,
+        context: {
+          mode: "background" as const,
+          localHour: null,
+        },
+        recentExposures: userContext.recentExposures,
+        enhancedProfile,
       });
 
-      const data = recommendations
-        .filter(
-          (recommendation) =>
-            !excludeSet.has(recommendation.tmdbId) &&
-            !seedSet.has(recommendation.tmdbId),
-        )
-        .slice(0, body.limit)
-        .map((recommendation) => ({
-          tmdb_id: recommendation.tmdbId,
-          title: recommendation.title,
-          score: Math.round(recommendation.score * 1000) / 1000,
-          consensus_level: recommendation.consensusLevel,
-          sources: recommendation.sources.map((source) => ({
-            source: source.source,
-            confidence: source.confidence,
-            ...(source.reason ? { reason: source.reason } : {}),
-          })),
-        }));
+      const data = scored.slice(0, body.limit).map((item) => ({
+        tmdb_id: item.tmdbId,
+        title: item.title ?? "",
+        score: Math.round(item.score * 1000) / 1000,
+        consensus_level: item.consensusLevel ?? "low",
+        sources: (
+          sourceMetadata.get(item.tmdbId)?.sources ??
+          item.sources ??
+          []
+        ).map((source: string) => ({ source, confidence: 1.0 })),
+        reasons: item.reasons ?? [],
+        genres: item.genres ?? [],
+        year: item.release_date?.slice(0, 4) ?? null,
+        poster_path: item.poster_path ?? null,
+        vote_category: item.voteCategory ?? null,
+      }));
 
       console.log("[v1/suggestions/generate] Generation completed", {
         requestId,
+        candidateCount: filteredCandidates.length,
         requestedLimit: body.limit,
-        internalLimit,
         resultCount: data.length,
       });
 
@@ -209,9 +282,10 @@ export async function POST(req: Request) {
         meta: {
           timestamp: new Date().toISOString(),
           requestId,
-          seed_count: seedMovies.length,
+          seed_count: body.seed_tmdb_ids.length,
           result_count: data.length,
-          source_debug: sourceDebug,
+          candidate_count: filteredCandidates.length,
+          engine: "personalized",
         },
         error: null,
       });
