@@ -425,6 +425,25 @@ export async function POST(req: Request) {
         }
       }
 
+      // Apply minimum score threshold when genre filter is active.
+      // Prevents low-relevance genre-discovery candidates from padding filtered results.
+      // Threshold of 15 is calibrated from live data: legitimate matches score 19+,
+      // filler films (no taste connection beyond genre tag) score 8–14.
+      if (body.genre_ids?.length && genreFiltered !== scored) {
+        const MIN_GENRE_SCORE = 15.0;
+        const thresholded = genreFiltered.filter(
+          (item) => item.score >= MIN_GENRE_SCORE,
+        );
+        // Only apply if threshold leaves at least 3 results — prevents empty responses
+        if (thresholded.length >= 3) {
+          genreFiltered = thresholded;
+        } else {
+          console.warn(
+            `[GenreFilter] Score threshold would leave ${thresholded.length} results — skipping threshold`,
+          );
+        }
+      }
+
       const personalizationFiltered = genreFiltered.filter((item) => {
         const candidate = buildFilteringCandidate(item, candidateTmdbCache);
 
