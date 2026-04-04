@@ -5960,8 +5960,8 @@ export async function suggestByOverlap(params: {
     poster_path?: string | null;
     contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
   }> = [];
-  const MAX_GENRE_WEIGHT = 15.0;
-  const MAX_COMBO_WEIGHT = 10.0;
+  const MAX_GENRE_WEIGHT = 8.0;
+  const MAX_COMBO_WEIGHT = 6.0;
   const MAX_DIRECTOR_WEIGHT = 8.0;
   const MAX_ACTOR_WEIGHT = 8.0;
   const MAX_STUDIO_WEIGHT = 10.0;

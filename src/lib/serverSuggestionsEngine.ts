@@ -827,13 +827,27 @@ export async function generateServerCandidates(
 
   for (const tmdbId of topSeedTmdbIds) {
     requests.push(
-      fetchTmdb<TmdbListResult>(`/movie/${tmdbId}/similar`, { page: 1 })
-        .then((result) => ({
-          source: `similar:${tmdbId}`,
-          ids: (result.results ?? []).map((movie) => movie.id),
-        }))
+      fetchTmdb<TmdbListResult>(`/movie/${tmdbId}/recommendations`, { page: 1 })
+        .catch(() => ({ results: [] as Array<{ id: number }> }))
+        .then(async (result) => {
+          const ids = (result.results ?? []).map((movie) => movie.id);
+          // /recommendations returns fewer results for obscure films.
+          // Fall back to /similar only when recommendations is empty.
+          if (ids.length === 0) {
+            const fallback = await fetchTmdb<TmdbListResult>(
+              `/movie/${tmdbId}/similar`,
+              { page: 1 },
+            ).catch(() => ({ results: [] as Array<{ id: number }> }));
+            return {
+              source: `similar:${tmdbId}`,
+              ids: (fallback.results ?? []).map((movie) => movie.id),
+            };
+          }
+          // Keep label as `similar:` for backward compatibility — downstream consumers depend on this label.
+          return { source: `similar:${tmdbId}`, ids };
+        })
         .catch((error) => {
-          console.error("[ServerEngine] similar fetch error:", {
+          console.error("[ServerEngine] recommendations fetch error:", {
             tmdbId,
             error,
           });
