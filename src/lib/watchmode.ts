@@ -241,7 +241,7 @@ export async function getStreamingSources(
  */
 export async function getTitleDetails(
   watchmodeId: number,
-  options?: { appendSources?: boolean },
+  options?: { appendSources?: boolean; appendSimilarTitles?: boolean },
 ): Promise<WatchmodeTitleDetails | null> {
   const apiKey = process.env.WATCHMODE_API_KEY;
 
@@ -255,8 +255,18 @@ export async function getTitleDetails(
       apiKey,
     });
 
+    const appendToResponse: string[] = [];
+
     if (options?.appendSources) {
-      params.append("append_to_response", "sources");
+      appendToResponse.push("sources");
+    }
+
+    if (options?.appendSimilarTitles) {
+      appendToResponse.push("similar_titles");
+    }
+
+    if (appendToResponse.length > 0) {
+      params.append("append_to_response", appendToResponse.join(","));
     }
 
     console.log("[Watchmode] Fetching details for ID:", watchmodeId);
