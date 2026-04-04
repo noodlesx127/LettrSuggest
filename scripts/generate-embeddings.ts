@@ -112,11 +112,10 @@ async function run() {
   }
 
   if (!process.env.OPENAI_API_KEY) {
-    console.error(
-      "[Embeddings] OPENAI_API_KEY is not set in .env.local. " +
-        "Cannot generate embeddings.",
+    console.warn(
+      "[Embeddings] OPENAI_API_KEY is not set — embedding generation will be " +
+        "skipped. Script will still process movies for cache/metadata purposes.",
     );
-    return;
   }
 
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
