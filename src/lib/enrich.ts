@@ -5960,6 +5960,12 @@ export async function suggestByOverlap(params: {
     poster_path?: string | null;
     contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
   }> = [];
+  const MAX_GENRE_WEIGHT = 15.0;
+  const MAX_COMBO_WEIGHT = 10.0;
+  const MAX_DIRECTOR_WEIGHT = 8.0;
+  const MAX_ACTOR_WEIGHT = 8.0;
+  const MAX_STUDIO_WEIGHT = 10.0;
+  const MAX_KEYWORD_WEIGHT = 10.0;
   const pool = await mapLimit(
     finalCandidates.slice(0, maxC),
     params.concurrency ?? 8,
@@ -6299,7 +6305,10 @@ export async function suggestByOverlap(params: {
 
       // Genre combo matching (more specific than individual genres)
       if (feats.genreCombo && pref.genreCombos.has(feats.genreCombo)) {
-        const comboWeight = pref.genreCombos.get(feats.genreCombo) ?? 1;
+        const comboWeight = Math.min(
+          pref.genreCombos.get(feats.genreCombo) ?? 1,
+          MAX_COMBO_WEIGHT,
+        );
         score += comboWeight * weights.genreCombo;
         const comboCountRounded = Math.round(comboWeight);
         const strength = reasonStrengthLabel(comboWeight);
@@ -6311,7 +6320,8 @@ export async function suggestByOverlap(params: {
         const gHits = feats.genres.filter((g) => pref.genres.has(g));
         if (gHits.length) {
           const totalGenreWeight = gHits.reduce(
-            (sum, g) => sum + (pref.genres.get(g) ?? 0),
+            (sum, g) =>
+              sum + Math.min(pref.genres.get(g) ?? 0, MAX_GENRE_WEIGHT),
             0,
           );
           score += totalGenreWeight * weights.genre;
@@ -6337,7 +6347,8 @@ export async function suggestByOverlap(params: {
       const dHits = feats.directors.filter((d) => pref.directors.has(d));
       if (dHits.length) {
         const totalDirWeight = dHits.reduce(
-          (sum, d) => sum + (pref.directors.get(d) ?? 0),
+          (sum, d) =>
+            sum + Math.min(pref.directors.get(d) ?? 0, MAX_DIRECTOR_WEIGHT),
           0,
         );
         score += totalDirWeight * weights.director;
@@ -6403,7 +6414,10 @@ export async function suggestByOverlap(params: {
       if (cHits.length) {
         const totalCastWeight = cHits
           .slice(0, 3)
-          .reduce((sum, c) => sum + (pref.cast.get(c) ?? 0), 0);
+          .reduce(
+            (sum, c) => sum + Math.min(pref.cast.get(c) ?? 0, MAX_ACTOR_WEIGHT),
+            0,
+          );
         score += totalCastWeight * weights.cast;
         const topCastWeight = Math.max(
           ...cHits.map((c) => pref.cast.get(c) ?? 0),
@@ -6474,7 +6488,8 @@ export async function suggestByOverlap(params: {
 
         const topKeywords = sortedKHits.slice(0, 5);
         const keywordScore = topKeywords.reduce((sum, k) => {
-          const clamped = Math.max(0, k.weight);
+          const cappedWeight = Math.min(k.weight, MAX_KEYWORD_WEIGHT);
+          const clamped = Math.max(0, cappedWeight);
           return sum + Math.log(clamped + 1);
         }, 0);
         score += keywordScore * weights.keyword;
@@ -6527,7 +6542,9 @@ export async function suggestByOverlap(params: {
 
       if (studioHits.length && !hasEnhancedStudioData) {
         const totalStudioWeight = studioHits.reduce(
-          (sum, s) => sum + (pref.productionCompanies.get(s) ?? 0),
+          (sum, s) =>
+            sum +
+            Math.min(pref.productionCompanies.get(s) ?? 0, MAX_STUDIO_WEIGHT),
           0,
         );
         score += totalStudioWeight * weights.studio; // Use weights.studio for consistency
@@ -6601,6 +6618,7 @@ export async function suggestByOverlap(params: {
       }
 
       if (params.enhancedProfile?.topStudios?.length) {
+        let totalEnhancedStudioBoost = 0;
         for (const studio of m.production_companies || []) {
           const name = studio.name;
           if (!name) continue;
@@ -6608,11 +6626,14 @@ export async function suggestByOverlap(params: {
             (s) => s.name === name,
           );
           if (studioMatch) {
-            const boost = studioMatch.count * 0.7;
-            score += boost;
+            totalEnhancedStudioBoost += Math.min(
+              studioMatch.count * 0.7,
+              MAX_STUDIO_WEIGHT,
+            );
             reasons.push(`Studio match: ${studioMatch.name}`);
           }
         }
+        score += Math.min(totalEnhancedStudioBoost, MAX_STUDIO_WEIGHT);
       }
 
       // PHASE 2: Enhanced actor matching using taste profile
@@ -6630,7 +6651,9 @@ export async function suggestByOverlap(params: {
               castMember && castMember.order != null
                 ? 1 / (castMember.order + 1)
                 : 0.5;
-            return sum + actor.weight * billingBonus;
+            return (
+              sum + Math.min(actor.weight, MAX_ACTOR_WEIGHT) * billingBonus
+            );
           }, 0);
 
           score += actorScore * weights.actor;
