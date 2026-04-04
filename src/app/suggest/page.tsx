@@ -69,6 +69,7 @@ import type { FilmEvent } from "@/lib/normalize";
 
 // Global config for suggestions
 const SECTION_ITEM_LIMIT = 24;
+const MIN_SCORE_FOR_OVERFLOW = 0.5;
 
 /**
  * Helper to get the base URL for internal API calls
@@ -863,11 +864,14 @@ export default function SuggestPage() {
       // ============================================
 
       // 22. Perfect Matches: Top scoring films that haven't been categorized yet
-      const perfectMatches = getNextItems(() => true, SECTION_ITEM_LIMIT);
+      const perfectMatches = getNextItems(
+        (item) => item.score >= MIN_SCORE_FOR_OVERFLOW,
+        SECTION_ITEM_LIMIT,
+      );
 
-      // 23. More Recommendations: Any remaining films
+      // 23. More Recommendations: Any remaining films with some taste signal
       const moreRecommendations = getNextItems(
-        () => true,
+        (item) => item.score >= MIN_SCORE_FOR_OVERFLOW * 0.5,
         SECTION_ITEM_LIMIT * 2,
       ); // Increased to catch more
 
@@ -1109,8 +1113,9 @@ export default function SuggestPage() {
           const metaScore = parseInt(item.metacritic || "0");
           return imdbRating >= 8.0 || rtScore >= 90 || metaScore >= 80;
         },
-        perfectMatches: () => true,
-        moreRecommendations: () => true,
+        perfectMatches: (item) => item.score >= MIN_SCORE_FOR_OVERFLOW,
+        moreRecommendations: (item) =>
+          item.score >= MIN_SCORE_FOR_OVERFLOW * 0.5,
       };
 
       return filters[sectionName] || (() => true);
@@ -1872,7 +1877,11 @@ export default function SuggestPage() {
               .get(mappings.get(f.uri)!)
               ?.genres?.map((g: any) => g.id) || [],
         }));
-      const highlyRated = getWeightedSeedIds(filmsForSeeding, 100, true);
+      const highlyRated = getWeightedSeedIds(filmsForSeeding, 100, true, {
+        topGenres: tasteProfile.topGenres,
+        topDecades: tasteProfile.topDecades,
+        useSignatureScoring: true,
+      });
 
       // Get watchlist film IDs for intent-based discovery (P1.3 improvement)
       const watchlistIdArray = filteredFilms
@@ -6530,7 +6539,8 @@ export default function SuggestPage() {
                               Multi-Source Consensus
                             </h2>
                             <p className="text-xs text-gray-600">
-                              Recommended by multiple sources (TMDB, TasteDive, TuiMDB)
+                              Recommended by multiple sources (TMDB, TasteDive,
+                              TuiMDB)
                             </p>
                           </div>
                         </div>
