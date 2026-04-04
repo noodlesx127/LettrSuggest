@@ -3299,20 +3299,20 @@ export async function buildTasteProfile(params: {
   // === IMPORTANT LOGIC FOR LIKED/DISLIKED ===
   // Letterboxd ratings scale:
   //   0.5-1.5 stars = Bad/Poor (DISLIKE)
-  //   2-2.5 stars = Meh/Average (NEUTRAL - not enough signal)
-  //   3+ stars = Good (LIKE)
+  //   2-3 stars = Meh/Average (NEUTRAL - not enough signal)
+  //   3.5+ stars = Good (LIKE)
   //
   // CRITICAL: rating = 0 means "no rating" (not "0 stars") - treat same as null!
   // This happens when Letterboxd exports unrated films as 0 instead of empty.
   //
   // A film is considered "liked" if:
   //   1. User clicked the "like" heart, OR
-  //   2. User rated it >= 3 stars
+  //   2. User rated it >= 3.5 stars
   // A film is considered "disliked" if:
   //   1. User rated it 0.5-1.5 stars AND did NOT click "like"
   // A film is NEUTRAL (ignored) if:
   //   1. Just logged without rating or like (rating = null or 0)
-  //   2. Rated 2-2.5 stars - "meh" not strong signal
+  //   2. Rated 2-3 stars without a like - "meh" not strong signal
 
   const DISLIKE_THRESHOLD = 1.5;
 
@@ -3325,7 +3325,7 @@ export async function buildTasteProfile(params: {
   const likedFilms = params.films.filter(
     (f) =>
       params.mappings.has(f.uri) &&
-      (f.liked || (hasRealRating(f.rating) && f.rating! >= 3)),
+      (f.liked || (hasRealRating(f.rating) && f.rating! >= 3.5)),
   );
 
   // Get low-rated films for negative signals
@@ -3355,7 +3355,7 @@ export async function buildTasteProfile(params: {
       params.mappings.has(f.uri) &&
       !f.liked &&
       (!hasRealRating(f.rating) ||
-        (f.rating! > DISLIKE_THRESHOLD && f.rating! < 3)),
+        (f.rating! > DISLIKE_THRESHOLD && f.rating! < 3.5)),
   );
 
   if (process.env.NODE_ENV === "development") {
@@ -5620,9 +5620,11 @@ export async function suggestByOverlap(params: {
     // - 5 stars, not liked = 1.5 (strong rating but no explicit like)
     // - 4 stars + liked = 1.5
     // - 4 stars, not liked = 1.2
-    // - 3 stars + liked = 1.0 (liked but mediocre rating - respect the like)
-    // - 2 stars + liked = 0.7 (edge case: low rating but liked - nuanced preference)
-    // - 1 star + liked = 0.5 (very rare edge case)
+    // - 3 stars + liked = 0.8 (liked but mediocre rating - respect the like)
+    // - 3 stars, not liked = 0.0 (mediocre without explicit like = no signal)
+    // - 2 stars + liked = 0.5 (edge case: low rating but liked - nuanced preference)
+    // - 1 star + liked = 0.3 (very rare edge case)
+    // - Any < 3.5 stars, not liked = 0.0 (no positive signal)
 
     const r = rating ?? 3; // Default to 3 if no rating
     let weight = 0.0;
@@ -5632,11 +5634,11 @@ export async function suggestByOverlap(params: {
     } else if (r >= 3.5) {
       weight = isLiked ? 1.5 : 1.2;
     } else if (r >= 2.5) {
-      weight = isLiked ? 1.0 : 0.3; // Mediocre rating: liked matters more
+      weight = isLiked ? 0.8 : 0.0; // Mediocre rating: liked matters more
     } else if (r >= 1.5) {
-      weight = isLiked ? 0.7 : 0.1; // Low rating but liked: nuanced taste
+      weight = isLiked ? 0.5 : 0.0; // Low rating but liked: nuanced taste
     } else {
-      weight = isLiked ? 0.5 : 0.0; // Very low: only count if explicitly liked
+      weight = isLiked ? 0.3 : 0.0; // Very low: only count if explicitly liked
     }
 
     return weight;
@@ -7479,23 +7481,7 @@ export async function suggestByOverlap(params: {
         }
       }
 
-      // Give base score to quality films even without direct taste matches
-      // This allows hidden gems, crowd pleasers, and trending films to appear
-      if (score <= 0) {
-        // Award small base score for high-quality films (hidden gems, crowd pleasers, cult classics)
-        if (feats.voteCategory === "hidden-gem") {
-          score = 0.3; // Hidden gems get small boost to ensure they appear
-          reasons.push("Highly-rated hidden gem worth discovering");
-        } else if (feats.voteCategory === "crowd-pleaser") {
-          score = 0.2; // Crowd pleasers get small boost
-          reasons.push("Widely loved crowd-pleaser");
-        } else if (feats.voteCategory === "cult-classic") {
-          score = 0.25; // Cult classics get small boost
-          reasons.push("Cult classic with dedicated following");
-        }
-        // If still no score, filter out standard films with no taste matches
-        if (score <= 0) return null;
-      }
+      if (score <= 0) return null;
 
       // Build contributingFilms map for this suggestion
       // Map each matched feature to the user's films that have that feature
@@ -7639,24 +7625,15 @@ export async function suggestByOverlap(params: {
         }
       }
 
-      // QUALITY MULTIPLIER: Apply multiplicative quality boost after all additive scoring
-      // This scales the match score rather than dominating it with additive points
-      // Formula: 1 + (rating - 6.0) * 0.05, capped at 1.2x
-      const qualityMultiplier = Math.min(
-        1.2,
-        Math.max(1.0, 1 + (feats.voteAverage - 6.0) * 0.05),
-      );
+      // Niche quality bonus: only boost well-rated films that aren't mainstream
+      const isUndervoted =
+        (feats.voteCount ?? 0) < 500 && (feats.voteAverage ?? 0) >= 7.0;
+      const qualityMultiplier = isUndervoted ? 1.1 : 1.0;
       if (qualityMultiplier > 1.0) {
-        const oldScore = score;
         score = score * qualityMultiplier;
         reasons.push(
-          `Quality bonus: ${qualityMultiplier.toFixed(2)}x for ${feats.voteAverage.toFixed(1)}/10 rating`,
+          `Niche quality bonus: ${qualityMultiplier.toFixed(2)}x for well-rated undiscovered film`,
         );
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            `[QualityMultiplier] "${m.title}": ${oldScore.toFixed(2)} -> ${score.toFixed(2)} (${qualityMultiplier.toFixed(2)}x for ${feats.voteAverage.toFixed(1)}/10)`,
-          );
-        }
       }
 
       // FAVORITE FILMMAKER BOOST: Nudge ranking without bypassing quality gates
@@ -7734,16 +7711,44 @@ export async function suggestByOverlap(params: {
     ),
   });
 
-  // Phase 3b: Apply diversity filtering (limits increased for 24-section UI)
+  // Phase 3b: Apply diversity filtering (tightened to reduce common-genre saturation)
   const diversified = applyDiversityFilter(mmrReranked, {
-    maxSameDirector: 4,
-    maxSameGenre: 15,
-    maxSameDecade: 10,
-    maxSameStudio: 6,
-    maxSameActor: 6,
+    maxSameDirector: 3,
+    maxSameGenre: 8,
+    maxSameDecade: 8,
+    maxSameStudio: 4,
+    maxSameActor: 4,
   });
 
-  return diversified.slice(0, desired);
+  // Enforce niche content ratio: at least 35% of results should be non-mainstream
+  // (films with fewer than 1000 TMDB votes), interleaved throughout results
+  const mainstream = diversified.filter((r) => (r.voteCount ?? 0) >= 1000);
+  const niche = diversified.filter((r) => (r.voteCount ?? 0) < 1000);
+  const targetNicheRatio = 0.35;
+  const targetNicheCount = Math.floor(diversified.length * targetNicheRatio);
+
+  let nicheEnforced = diversified;
+  if (niche.length >= targetNicheCount) {
+    // Interleave niche and mainstream: every 3rd film is a niche pick
+    const rebalanced: typeof diversified = [];
+    let ni = 0,
+      mi = 0;
+    while (rebalanced.length < diversified.length) {
+      if (
+        ni < niche.length &&
+        (rebalanced.length % 3 === 2 || mi >= mainstream.length)
+      ) {
+        rebalanced.push(niche[ni++]);
+      } else if (mi < mainstream.length) {
+        rebalanced.push(mainstream[mi++]);
+      } else {
+        rebalanced.push(niche[ni++]);
+      }
+    }
+    nicheEnforced = rebalanced;
+  }
+
+  return nicheEnforced.slice(0, desired);
 }
 
 export async function deleteFilmMapping(userId: string, uri: string) {
