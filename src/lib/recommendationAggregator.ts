@@ -22,7 +22,11 @@ import {
   getCachedVectorSimilarity,
   setCachedVectorSimilarity,
 } from "./vectorSimilarityCache";
-import { getTrendingTitles } from "./watchmode";
+import {
+  getTitleDetails,
+  getTrendingTitles,
+  searchWatchmode,
+} from "./watchmode";
 
 // Note: 'tuimdb' is defined for future use but not yet implemented in aggregation
 export type RecommendationSource =
@@ -30,6 +34,7 @@ export type RecommendationSource =
   | "tastedive"
   | "tuimdb"
   | "watchmode"
+  | "watchmode-similar"
   | "vector-similarity";
 
 export type SourceRecommendation = {
@@ -106,7 +111,12 @@ export async function aggregateRecommendations(params: {
     await Promise.allSettled([
       withDeadline(fetchTMDBRecommendations(seedMovies), "TMDB"),
       withDeadline(fetchTasteDiveRecommendations(seedMovies), "TasteDive"),
-      withDeadline(fetchWatchmodeTrending(), "Watchmode"),
+      withDeadline(
+        fetchWatchmodeSimilar(seedMovies).then((results) =>
+          results.length > 0 ? results : fetchWatchmodeTrending(),
+        ),
+        "Watchmode",
+      ),
       withDeadline(fetchVectorSimilarityRecommendations(seedMovies), "Vector"),
     ]);
   const sourceFetchElapsed = Date.now() - sourceFetchStart;
@@ -195,8 +205,8 @@ export async function aggregateRecommendations(params: {
   const mergedRecs = mergeRecommendations(allRecs);
 
   // Watchmode-only entries are kept but naturally deprioritized by their lower
-  // confidence score (0.35) and base weight (0.9), so they only surface when
-  // there are gaps after TMDB, TasteDive, and Vector results.
+  // confidence score and base weight, so they only surface when there are gaps
+  // after TMDB, TasteDive, and Vector results.
   const aggregated = mergedRecs;
 
   console.log(
@@ -445,6 +455,7 @@ function calculateAggregateScore(
     tastedive: 1.3, // Boosted - excellent at finding niche/non-obvious matches
     tuimdb: 1.05, // Slight boost if implemented
     watchmode: 0.9, // Reduced - trending = generic, not personalized
+    "watchmode-similar": 1.0, // Personalized seed-based related titles
     "vector-similarity": 1.0, // Semantic similarity signal
   };
 
@@ -802,6 +813,85 @@ async function fetchTasteDiveRecommendations(
   }
 
   return recommendations;
+}
+
+async function fetchWatchmodeSimilar(
+  seedMovies: Array<{ tmdbId: number; title: string }>,
+): Promise<SourceRecommendation[]> {
+  const limit = pLimit(2);
+  const results: SourceRecommendation[] = [];
+  const seedsToProcess = seedMovies.slice(0, 3);
+
+  await Promise.allSettled(
+    seedsToProcess.map((seed) =>
+      limit(async () => {
+        try {
+          const searchResults = await searchWatchmode(String(seed.tmdbId), {
+            searchField: "tmdb_id",
+            type: "movie",
+          });
+          const watchmodeId = searchResults[0]?.id;
+
+          if (!watchmodeId) {
+            return;
+          }
+
+          const details = await getTitleDetails(watchmodeId, {
+            appendSimilarTitles: true,
+          });
+          const similarIds = details?.similar_titles ?? [];
+
+          if (similarIds.length === 0) {
+            return;
+          }
+
+          const resolveLimit = pLimit(2);
+          await Promise.allSettled(
+            similarIds.slice(0, 8).map((wId) =>
+              resolveLimit(async () => {
+                try {
+                  const d = await getTitleDetails(wId);
+
+                  if (d?.tmdb_id) {
+                    results.push({
+                      tmdbId: d.tmdb_id,
+                      title: d.title,
+                      source: "watchmode-similar",
+                      confidence: 0.6,
+                      reason: `Similar to ${seed.title} (Watchmode)`,
+                    });
+                  }
+                } catch (e) {
+                  console.warn(
+                    "[Watchmode-Similar] Failed resolving similar title wId:",
+                    wId,
+                    e,
+                  );
+                }
+              }),
+            ),
+          );
+        } catch (e) {
+          console.warn(
+            "[Watchmode-Similar] Failed processing seed tmdbId:",
+            seed.tmdbId,
+            e,
+          );
+        }
+      }),
+    ),
+  );
+
+  const seen = new Set<number>();
+  const seedTmdbIds = new Set(seedMovies.map((s) => s.tmdbId));
+  return results.filter((r) => {
+    if (seen.has(r.tmdbId) || seedTmdbIds.has(r.tmdbId)) {
+      return false;
+    }
+
+    seen.add(r.tmdbId);
+    return true;
+  });
 }
 
 /**

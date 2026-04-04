@@ -10,7 +10,12 @@ export type TuiMDBGenre = {
 
 export type EnhancedGenreProfile = {
   // Core genres with weights
-  coreGenres: Array<{ id: number; name: string; weight: number; source: 'tmdb' | 'tuimdb' | 'both' }>;
+  coreGenres: Array<{
+    id: number;
+    name: string;
+    weight: number;
+    source: "tmdb" | "tuimdb" | "both";
+  }>;
 
   // Granular TuiMDB genres
   holidayGenres: Array<{ id: number; name: string; weight: number }>;
@@ -30,13 +35,13 @@ export type EnhancedGenreProfile = {
 // to avoid ID collisions (e.g., TMDB Western = 37, old TuiMDB Travel = 37)
 export const TUIMDB_GENRES = {
   // TuiMDB-unique genres (use 90000+ to avoid collision with TMDB IDs)
-  ANIME: 90001,     // Unique to TuiMDB
-  FOOD: 90002,      // Unique to TuiMDB
-  TRAVEL: 90003,    // Unique to TuiMDB (was 37, collided with TMDB Western!)
-  STAND_UP: 90004,  // Unique to TuiMDB
-  SPORTS: 90005,    // Unique to TuiMDB
-  KIDS: 90006,      // Unique to TuiMDB (similar to Family)
-  MUSICAL: 90007,   // Unique to TuiMDB (no direct TMDB equivalent)
+  ANIME: 90001, // Unique to TuiMDB
+  FOOD: 90002, // Unique to TuiMDB
+  TRAVEL: 90003, // Unique to TuiMDB (was 37, collided with TMDB Western!)
+  STAND_UP: 90004, // Unique to TuiMDB
+  SPORTS: 90005, // Unique to TuiMDB
+  KIDS: 90006, // Unique to TuiMDB (similar to Family)
+  MUSICAL: 90007, // Unique to TuiMDB (no direct TMDB equivalent)
 
   // Holiday genres (unique to TuiMDB)
   CHRISTMAS: 90043,
@@ -61,28 +66,51 @@ export const TUIMDB_GENRES = {
   FATHERS_DAY: 90062,
 } as const;
 
-
 // Map TMDB genre IDs to names
 export const TMDB_GENRE_MAP: Record<number, string> = {
-  28: 'Action',
-  12: 'Adventure',
-  16: 'Animation',
-  35: 'Comedy',
-  80: 'Crime',
-  99: 'Documentary',
-  18: 'Drama',
-  10751: 'Family',
-  14: 'Fantasy',
-  36: 'History',
-  27: 'Horror',
-  10402: 'Music',
-  9648: 'Mystery',
-  10749: 'Romance',
-  878: 'Science Fiction',
-  10770: 'TV Movie',
-  53: 'Thriller',
-  10752: 'War',
-  37: 'Western',
+  28: "Action",
+  12: "Adventure",
+  16: "Animation",
+  35: "Comedy",
+  80: "Crime",
+  99: "Documentary",
+  18: "Drama",
+  10751: "Family",
+  14: "Fantasy",
+  36: "History",
+  27: "Horror",
+  10402: "Music",
+  9648: "Mystery",
+  10749: "Romance",
+  878: "Science Fiction",
+  10770: "TV Movie",
+  53: "Thriller",
+  10752: "War",
+  37: "Western",
+};
+
+// Reverse map: genre name → TMDB genre ID (for genre filtering)
+export const TMDB_GENRE_NAME_TO_ID: Record<string, number> = Object.fromEntries(
+  Object.entries(TMDB_GENRE_MAP).map(([id, name]) => [
+    name.toLowerCase(),
+    Number(id),
+  ]),
+);
+
+// Common genre aliases for user-typed values
+export const GENRE_ALIASES: Record<string, string> = {
+  "sci-fi": "science fiction",
+  scifi: "science fiction",
+  sf: "science fiction",
+  "rom-com": "romance",
+  romcom: "romance",
+  doc: "documentary",
+  docs: "documentary",
+  anim: "animation",
+  animated: "animation",
+  western: "western",
+  "war film": "war",
+  "war movie": "war",
 };
 
 // Map TuiMDB to TMDB where they overlap
@@ -94,7 +122,7 @@ export const TUIMDB_TO_TMDB_MAP: Record<number, number | null> = {
   [TUIMDB_GENRES.TRAVEL]: null,
   [TUIMDB_GENRES.STAND_UP]: null,
   [TUIMDB_GENRES.SPORTS]: null,
-  [TUIMDB_GENRES.KIDS]: 10751,  // Maps loosely to Family
+  [TUIMDB_GENRES.KIDS]: 10751, // Maps loosely to Family
   [TUIMDB_GENRES.MUSICAL]: null,
   // Holiday genres all have no TMDB equivalent
   [TUIMDB_GENRES.CHRISTMAS]: null,
@@ -110,7 +138,11 @@ export const TUIMDB_TO_TMDB_MAP: Record<number, number | null> = {
 /**
  * Get current season and relevant seasonal genres
  */
-export function getCurrentSeasonalGenres(): { season: string; genres: number[]; labels: string[] } {
+export function getCurrentSeasonalGenres(): {
+  season: string;
+  genres: number[];
+  labels: string[];
+} {
   const now = new Date();
   const month = now.getMonth(); // 0-11
   const day = now.getDate();
@@ -121,19 +153,19 @@ export function getCurrentSeasonalGenres(): { season: string; genres: number[]; 
   // Halloween season (October)
   if (month === 9) {
     seasonalGenres.push(TUIMDB_GENRES.HALLOWEEN);
-    labels.push('Halloween');
+    labels.push("Halloween");
   }
 
   // Thanksgiving (November)
   if (month === 10) {
     seasonalGenres.push(TUIMDB_GENRES.THANKSGIVING);
-    labels.push('Thanksgiving');
+    labels.push("Thanksgiving");
   }
 
   // Christmas season (November 20 - December 31)
   if ((month === 10 && day >= 20) || month === 11) {
     seasonalGenres.push(TUIMDB_GENRES.CHRISTMAS);
-    labels.push('Christmas');
+    labels.push("Christmas");
   }
 
   // New Year's (late December - early January)
@@ -157,20 +189,26 @@ export function getCurrentSeasonalGenres(): { season: string; genres: number[]; 
   // Easter (March-April, approximate)
   if (month === 2 || month === 3) {
     seasonalGenres.push(TUIMDB_GENRES.EASTER);
-    labels.push('Easter');
+    labels.push("Easter");
   }
 
   // Independence Day / Fourth of July (June-July)
   if (month === 5 || month === 6) {
-    seasonalGenres.push(TUIMDB_GENRES.INDEPENDENCE_DAY, TUIMDB_GENRES.FOURTH_OF_JULY);
-    labels.push('Fourth of July', 'Independence Day');
+    seasonalGenres.push(
+      TUIMDB_GENRES.INDEPENDENCE_DAY,
+      TUIMDB_GENRES.FOURTH_OF_JULY,
+    );
+    labels.push("Fourth of July", "Independence Day");
   }
 
   const seasonName =
-    month >= 2 && month <= 4 ? 'Spring' :
-      month >= 5 && month <= 7 ? 'Summer' :
-        month >= 8 && month <= 10 ? 'Fall' :
-          'Winter';
+    month >= 2 && month <= 4
+      ? "Spring"
+      : month >= 5 && month <= 7
+        ? "Summer"
+        : month >= 8 && month <= 10
+          ? "Fall"
+          : "Winter";
 
   return { season: seasonName, genres: seasonalGenres, labels };
 }
@@ -178,22 +216,24 @@ export function getCurrentSeasonalGenres(): { season: string; genres: number[]; 
 /**
  * Check if user likes holiday movies based on their history
  */
-export function detectHolidayPreferences(userFilms: Array<{
-  title: string;
-  rating?: number;
-  liked?: boolean;
-}>): {
+export function detectHolidayPreferences(
+  userFilms: Array<{
+    title: string;
+    rating?: number;
+    liked?: boolean;
+  }>,
+): {
   likesHolidayMovies: boolean;
   likedHolidays: string[];
   dislikedHolidays: string[];
 } {
   const holidayKeywords: Record<string, string[]> = {
-    christmas: ['christmas', 'santa', 'xmas', 'holiday'],
-    halloween: ['halloween', 'trick or treat', 'spooky'],
-    thanksgiving: ['thanksgiving', 'turkey day'],
-    valentines: ['valentine', 'love day'],
-    easter: ['easter', 'bunny'],
-    'new years': ['new year', 'nye'],
+    christmas: ["christmas", "santa", "xmas", "holiday"],
+    halloween: ["halloween", "trick or treat", "spooky"],
+    thanksgiving: ["thanksgiving", "turkey day"],
+    valentines: ["valentine", "love day"],
+    easter: ["easter", "bunny"],
+    "new years": ["new year", "nye"],
   };
 
   const holidayLikes: Record<string, number> = {};
@@ -203,7 +243,7 @@ export function detectHolidayPreferences(userFilms: Array<{
     const titleLower = film.title.toLowerCase();
 
     for (const [holiday, keywords] of Object.entries(holidayKeywords)) {
-      const matches = keywords.some(kw => titleLower.includes(kw));
+      const matches = keywords.some((kw) => titleLower.includes(kw));
       if (!matches) continue;
 
       if ((film.rating ?? 0) >= 4 || film.liked) {
@@ -219,7 +259,9 @@ export function detectHolidayPreferences(userFilms: Array<{
     .map(([holiday]) => holiday);
 
   const dislikedHolidays = Object.entries(holidayDislikes)
-    .filter(([holiday, count]) => count >= 2 && (holidayLikes[holiday] || 0) < count)
+    .filter(
+      ([holiday, count]) => count >= 2 && (holidayLikes[holiday] || 0) < count,
+    )
     .map(([holiday]) => holiday);
 
   return {
@@ -232,12 +274,14 @@ export function detectHolidayPreferences(userFilms: Array<{
 /**
  * Detect niche genre preferences (Anime, Stand Up, Food/Travel docs)
  */
-export function detectNicheGenres(userFilms: Array<{
-  title: string;
-  genres?: string[];
-  rating?: number;
-  liked?: boolean;
-}>): {
+export function detectNicheGenres(
+  userFilms: Array<{
+    title: string;
+    genres?: string[];
+    rating?: number;
+    liked?: boolean;
+  }>,
+): {
   likesAnime: boolean;
   likesStandUp: boolean;
   likesFoodDocs: boolean;
@@ -254,31 +298,39 @@ export function detectNicheGenres(userFilms: Array<{
     totalCount++;
 
     const titleLower = film.title.toLowerCase();
-    const genresLower = (film.genres || []).map(g => g.toLowerCase());
+    const genresLower = (film.genres || []).map((g) => g.toLowerCase());
 
     // Anime detection
-    if (genresLower.includes('anime') ||
-      titleLower.includes('anime') ||
-      /anime|manga|otaku/.test(titleLower)) {
+    if (
+      genresLower.includes("anime") ||
+      titleLower.includes("anime") ||
+      /anime|manga|otaku/.test(titleLower)
+    ) {
       animeCount++;
     }
 
     // Stand up detection
-    if (titleLower.includes('stand up') ||
-      titleLower.includes('stand-up') ||
-      titleLower.includes('comedy special')) {
+    if (
+      titleLower.includes("stand up") ||
+      titleLower.includes("stand-up") ||
+      titleLower.includes("comedy special")
+    ) {
       standUpCount++;
     }
 
     // Food documentary detection
-    if ((genresLower.includes('documentary') &&
-      /food|chef|cook|restaurant|cuisine|culinary/.test(titleLower))) {
+    if (
+      genresLower.includes("documentary") &&
+      /food|chef|cook|restaurant|cuisine|culinary/.test(titleLower)
+    ) {
       foodCount++;
     }
 
     // Travel documentary detection
-    if ((genresLower.includes('documentary') &&
-      /travel|journey|adventure|world|expedition/.test(titleLower))) {
+    if (
+      genresLower.includes("documentary") &&
+      /travel|journey|adventure|world|expedition/.test(titleLower)
+    ) {
       travelCount++;
     }
   }
@@ -286,10 +338,10 @@ export function detectNicheGenres(userFilms: Array<{
   const threshold = 0.05; // 5% of library
 
   return {
-    likesAnime: totalCount > 20 && (animeCount / totalCount) >= threshold,
-    likesStandUp: totalCount > 20 && (standUpCount / totalCount) >= threshold,
-    likesFoodDocs: totalCount > 20 && (foodCount / totalCount) >= threshold,
-    likesTravelDocs: totalCount > 20 && (travelCount / totalCount) >= threshold,
+    likesAnime: totalCount > 20 && animeCount / totalCount >= threshold,
+    likesStandUp: totalCount > 20 && standUpCount / totalCount >= threshold,
+    likesFoodDocs: totalCount > 20 && foodCount / totalCount >= threshold,
+    likesTravelDocs: totalCount > 20 && travelCount / totalCount >= threshold,
   };
 }
 
@@ -317,9 +369,9 @@ export function getSeasonalRecommendationConfig(): {
 
   return {
     title: labels.length === 1 ? `${labels[0]} Movies` : `Watch This Month`,
-    description: `Perfect for ${labels.join(' & ')}`,
+    description: `Perfect for ${labels.join(" & ")}`,
     genres,
-    keywords: labels.map(l => l.toLowerCase()),
+    keywords: labels.map((l) => l.toLowerCase()),
     boost: 1.5, // Boost seasonal relevance
   };
 }
@@ -330,14 +382,18 @@ export function getSeasonalRecommendationConfig(): {
  */
 export function mergeEnhancedGenres(
   tmdbGenres: Array<{ id: number; name: string }>,
-  tuimdbGenres: Array<{ id: number; name: string }>
-): Array<{ id: number; name: string; source: 'tmdb' | 'tuimdb' }> {
-  const enhanced: Array<{ id: number; name: string; source: 'tmdb' | 'tuimdb' }> = [];
+  tuimdbGenres: Array<{ id: number; name: string }>,
+): Array<{ id: number; name: string; source: "tmdb" | "tuimdb" }> {
+  const enhanced: Array<{
+    id: number;
+    name: string;
+    source: "tmdb" | "tuimdb";
+  }> = [];
   const seenIds = new Set<number>();
 
   // Add all TMDB genres first
   for (const genre of tmdbGenres) {
-    enhanced.push({ ...genre, source: 'tmdb' });
+    enhanced.push({ ...genre, source: "tmdb" });
     seenIds.add(genre.id);
   }
 
@@ -353,7 +409,7 @@ export function mergeEnhancedGenres(
 
     if (!seenIds.has(genre.id)) {
       // This is a unique TuiMDB genre (like seasonal, anime, food, etc.)
-      enhanced.push({ ...genre, source: 'tuimdb' });
+      enhanced.push({ ...genre, source: "tuimdb" });
       seenIds.add(genre.id);
     }
   }
@@ -367,7 +423,7 @@ export function mergeEnhancedGenres(
 export function boostSeasonalGenres(
   score: number,
   movieGenreIds: number[],
-  boost: number = 1.3
+  boost: number = 1.3,
 ): number {
   const { genres: seasonalGenres } = getCurrentSeasonalGenres();
 
@@ -375,7 +431,9 @@ export function boostSeasonalGenres(
     return score; // No active seasonal boost
   }
 
-  const hasSeasonalGenre = movieGenreIds.some(id => seasonalGenres.includes(id));
+  const hasSeasonalGenre = movieGenreIds.some((id) =>
+    seasonalGenres.includes(id),
+  );
 
   if (hasSeasonalGenre) {
     return score * boost;

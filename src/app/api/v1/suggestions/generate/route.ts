@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 
+import {
+  applyAdvancedFiltering,
+  applyNegativeFiltering,
+} from "@/lib/advancedFiltering";
 import { suggestByOverlap } from "@/lib/enrich";
+import type { TMDBMovie } from "@/lib/enrich";
+import type { EnhancedTasteProfile } from "@/lib/enhancedProfile";
+import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import {
   buildAdjacentGenreMap,
   buildFeatureFeedbackFromRows,
@@ -18,6 +25,7 @@ interface GenerateSuggestionsBody {
   seed_tmdb_ids: number[];
   limit: number;
   exclude_tmdb_ids: number[];
+  genre_ids?: number[];
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -106,6 +114,128 @@ async function parseGenerateSuggestionsBody(
       "exclude_tmdb_ids",
       { maxItems: 500 },
     ),
+    genre_ids:
+      body.genre_ids !== undefined
+        ? parsePositiveIntegerArray(body.genre_ids, "genre_ids", {
+            maxItems: 5,
+          })
+        : undefined,
+  };
+}
+
+function buildMinimalEnhancedTasteProfile(params: {
+  tasteProfile: Awaited<ReturnType<typeof buildTasteProfileServer>>;
+  watchedFilms: Array<{ rating?: number; liked?: boolean | null }>;
+}): EnhancedTasteProfile {
+  const { tasteProfile, watchedFilms } = params;
+
+  const genreProfile: EnhancedTasteProfile["genreProfile"] = {
+    coreGenres: (tasteProfile.topGenres ?? []).map((genre) => ({
+      id: genre.id,
+      name: genre.name,
+      weight: genre.weight,
+      source: "tmdb" as const,
+    })),
+    holidayGenres: [],
+    nicheGenres: [],
+    avoidedGenres: (tasteProfile.avoidGenres ?? []).map((genre) => ({
+      id: genre.id,
+      name: genre.name,
+      reason: "User avoidance signal",
+    })),
+    avoidedHolidays: [],
+    currentSeason: "unknown",
+    seasonalGenres: [],
+  };
+
+  return {
+    topGenres: (tasteProfile.topGenres ?? []).map((genre) => ({
+      id: genre.id,
+      name: genre.name,
+      weight: genre.weight,
+      source: "tmdb" as const,
+    })),
+    topKeywords: (tasteProfile.topKeywords ?? []).map((keyword) => ({
+      id: keyword.id,
+      name: keyword.name,
+      weight: keyword.weight,
+    })),
+    topDirectors: (tasteProfile.topDirectors ?? []).map((director) => ({
+      id: director.id,
+      name: director.name,
+      weight: director.weight,
+    })),
+    topCast: (tasteProfile.topActors ?? []).map((actor) => ({
+      id: actor.id,
+      name: actor.name,
+      weight: actor.weight,
+    })),
+    genreProfile,
+    preferredEras: (tasteProfile.topDecades ?? []).map((decade) => ({
+      decade: `${decade.decade}s`,
+      weight: decade.weight,
+    })),
+    runtimePreferences: { min: 0, max: 0, avg: 0 },
+    languagePreferences: (tasteProfile.topLanguages ?? []).map((language) => ({
+      language: language.name,
+      weight: language.count,
+    })),
+    avoidedGenres: new Set(
+      (tasteProfile.avoidGenres ?? []).map((genre) => genre.name.toLowerCase()),
+    ),
+    avoidedKeywords: new Set(
+      (tasteProfile.avoidKeywords ?? []).map((keyword) =>
+        keyword.name.toLowerCase(),
+      ),
+    ),
+    avoidedGenreCombos: new Set<string>(),
+    seasonalBoost: { genres: [], weight: 1 },
+    holidayPreferences: {
+      likesHolidays: false,
+      likedHolidays: [],
+      avoidHolidays: [],
+    },
+    nichePreferences: {
+      likesAnime: tasteProfile.nichePreferences?.likesAnime ?? false,
+      likesStandUp: tasteProfile.nichePreferences?.likesStandUp ?? false,
+      likesFoodDocs: tasteProfile.nichePreferences?.likesFoodDocs ?? false,
+      likesTravelDocs: tasteProfile.nichePreferences?.likesTravelDocs ?? false,
+    },
+    watchlistGenres: tasteProfile.watchlistGenres ?? [],
+    watchlistDirectors: tasteProfile.watchlistDirectors ?? [],
+    subgenrePatterns: new Map(),
+    crossGenrePatterns: new Map(),
+    totalWatched: tasteProfile.userStats?.totalFilms ?? watchedFilms.length,
+    totalRated: watchedFilms.filter((film) => film.rating != null).length,
+    totalLiked: watchedFilms.filter((film) => film.liked === true).length,
+    avgRating: tasteProfile.userStats?.avgRating ?? 0,
+    highlyRatedCount: tasteProfile.tasteBins?.highlyRated ?? 0,
+    absoluteFavorites: tasteProfile.tasteBins?.absoluteFavorites ?? 0,
+  };
+}
+
+function buildFilteringCandidate(
+  item: {
+    tmdbId: number;
+    title?: string;
+    genres?: string[];
+  },
+  tmdbDetailsCache: Map<number, TMDBMovie>,
+): TMDBMovie {
+  const cachedMovie = tmdbDetailsCache.get(item.tmdbId);
+
+  if (cachedMovie) {
+    return cachedMovie;
+  }
+
+  return {
+    id: item.tmdbId,
+    title: item.title ?? "",
+    genres: (item.genres ?? []).map((genreName) => ({
+      id: 0,
+      name: genreName,
+    })),
+    keywords: { results: [] },
   };
 }
 
@@ -234,6 +364,14 @@ export async function POST(req: Request) {
         ...(film.liked != null ? { liked: film.liked } : {}),
       }));
 
+      const minimalEnhancedProfile = buildMinimalEnhancedTasteProfile({
+        tasteProfile,
+        watchedFilms: userContext.films.map((film) => ({
+          rating: film.rating ?? undefined,
+          liked: film.liked,
+        })),
+      });
+
       const explorationRate = Number.isFinite(userContext.explorationRate)
         ? userContext.explorationRate
         : 0.15;
@@ -265,7 +403,48 @@ export async function POST(req: Request) {
         tmdbDetailsCache: candidateTmdbCache,
       });
 
-      const data = scored.slice(0, body.limit).map((item) => ({
+      // Apply genre filter if requested — filter before slicing to limit
+      let genreFiltered = scored;
+      if (body.genre_ids?.length) {
+        const filtered = scored.filter((item) => {
+          const itemGenres = (item.genres ?? []).map((g: string) =>
+            g.toLowerCase(),
+          );
+          return body.genre_ids!.some((gid) => {
+            const canonicalName = TMDB_GENRE_MAP[gid]?.toLowerCase();
+            return canonicalName ? itemGenres.includes(canonicalName) : false;
+          });
+        });
+
+        if (filtered.length > 0) {
+          genreFiltered = filtered;
+        } else {
+          console.warn(
+            "[GenreFilter] Genre filter removed all results, returning unfiltered",
+          );
+        }
+      }
+
+      const personalizationFiltered = genreFiltered.filter((item) => {
+        const candidate = buildFilteringCandidate(item, candidateTmdbCache);
+
+        const negativeFilter = applyNegativeFiltering(
+          candidate,
+          minimalEnhancedProfile,
+        );
+        if (negativeFilter.shouldFilter) {
+          return false;
+        }
+
+        const advancedFilter = applyAdvancedFiltering(
+          candidate,
+          minimalEnhancedProfile,
+        );
+
+        return !advancedFilter.shouldFilter;
+      });
+
+      const data = personalizationFiltered.slice(0, body.limit).map((item) => ({
         tmdb_id: item.tmdbId,
         title: item.title ?? "",
         score: Math.round(item.score * 1000) / 1000,

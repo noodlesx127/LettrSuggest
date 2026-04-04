@@ -6225,9 +6225,7 @@ export async function suggestByOverlap(params: {
       if (contextBias.delta !== 0) {
         score += contextBias.delta;
       }
-      if (contextBias.reasons.length) {
-        reasons.push(...contextBias.reasons);
-      }
+      const deferredContextReasons = contextBias.reasons;
 
       // WATCHLIST INTENT: prioritize movies the user explicitly saved (recency-weighted)
       const watchlistIntent = watchlistIntentMap.get(cid);
@@ -7687,6 +7685,11 @@ export async function suggestByOverlap(params: {
             m.title,
           );
         }
+      }
+
+      // Append context reasons last — after all personalization signals
+      if (deferredContextReasons.length) {
+        reasons.push(...deferredContextReasons);
       }
 
       const r = {
