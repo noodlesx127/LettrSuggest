@@ -24,6 +24,9 @@ export async function GET(req: Request) {
         filmEventsResult,
         activeUserRows,
         cacheTables,
+        tasteProfileResult,
+        feedbackCountResult,
+        exposureCountResult,
       ] = await Promise.all([
         supabaseAdmin
           .from("profiles")
@@ -41,6 +44,19 @@ export async function GET(req: Request) {
           .is("revoked_at", null)
           .gte("last_used_at", activeUserCutoff),
         getCacheTableStats(),
+        supabaseAdmin
+          .from("user_taste_profile_cache")
+          .select("user_id, film_count, computed_at")
+          .eq("user_id", auth.userId)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("user_feature_feedback")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", auth.userId),
+        supabaseAdmin
+          .from("suggestion_exposure_log")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", auth.userId),
       ]);
 
       const dbStatus = usersResult.error ? "error" : "connected";
@@ -48,16 +64,25 @@ export async function GET(req: Request) {
         usersResult.error ||
         activeKeysResult.error ||
         filmEventsResult.error ||
-        activeUserRows.error
+        activeUserRows.error ||
+        tasteProfileResult.error ||
+        feedbackCountResult.error ||
+        exposureCountResult.error
       ) {
         console.error("[API v1] Failed to fetch admin diagnostics", {
           usersError: usersResult.error,
           activeKeysError: activeKeysResult.error,
           filmEventsError: filmEventsResult.error,
           activeUsersError: activeUserRows.error,
+          tasteProfileError: tasteProfileResult.error,
+          feedbackCountError: feedbackCountResult.error,
+          exposureCountError: exposureCountResult.error,
         });
       }
 
+      const tasteProfileRow = tasteProfileResult.data;
+      const feedbackCount = feedbackCountResult.count;
+      const exposureCount = exposureCountResult.count;
       const activeUsers = new Set(
         ((activeUserRows.data as ApiKeyUsageRow[] | null) ?? []).map(
           (row) => row.user_id,
@@ -77,6 +102,18 @@ export async function GET(req: Request) {
           activeKeys: activeKeysResult.count ?? 0,
           cacheTableRows,
           totalFilmEvents: filmEventsResult.count ?? 0,
+        },
+        engine_health: {
+          taste_profile_cached: !!tasteProfileRow,
+          taste_profile_age_hours: tasteProfileRow?.computed_at
+            ? Math.round(
+                (Date.now() - new Date(tasteProfileRow.computed_at).getTime()) /
+                  3600000,
+              )
+            : null,
+          taste_profile_film_count: tasteProfileRow?.film_count ?? null,
+          feedback_signal_count: feedbackCount ?? 0,
+          exposure_log_count: exposureCount ?? 0,
         },
       });
     } catch (error) {
