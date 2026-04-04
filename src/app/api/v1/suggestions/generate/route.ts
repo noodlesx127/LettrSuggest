@@ -26,6 +26,7 @@ interface GenerateSuggestionsBody {
   limit: number;
   exclude_tmdb_ids: number[];
   genre_ids?: number[];
+  debug?: boolean;
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -99,6 +100,8 @@ async function parseGenerateSuggestionsBody(
     throw new ApiError(400, "BAD_REQUEST", "Request body must be an object");
   }
 
+  const debug = typeof body.debug === "boolean" ? body.debug : false;
+
   return {
     seed_tmdb_ids: parsePositiveIntegerArray(
       body.seed_tmdb_ids,
@@ -120,6 +123,7 @@ async function parseGenerateSuggestionsBody(
             maxItems: 5,
           })
         : undefined,
+    debug,
   };
 }
 
@@ -244,6 +248,7 @@ export async function POST(req: Request) {
     try {
       const requestId = generateRequestId();
       const body = await parseGenerateSuggestionsBody(req);
+      const { debug } = body;
 
       console.log("[v1/suggestions/generate] Starting generation", {
         requestId,
@@ -463,6 +468,19 @@ export async function POST(req: Request) {
         return !advancedFilter.shouldFilter;
       });
 
+      // Debug: summarize candidate counts by source
+      const sourceDebugSummary = debug
+        ? (() => {
+            const counts: Record<string, number> = {};
+            for (const [, meta] of sourceMetadata.entries()) {
+              for (const source of meta.sources) {
+                counts[source] = (counts[source] ?? 0) + 1;
+              }
+            }
+            return counts;
+          })()
+        : undefined;
+
       const data = personalizationFiltered.slice(0, body.limit).map((item) => ({
         tmdb_id: item.tmdbId,
         title: item.title ?? "",
@@ -496,6 +514,19 @@ export async function POST(req: Request) {
           result_count: data.length,
           candidate_count: filteredCandidates.length,
           engine: "personalized",
+          ...(debug
+            ? {
+                source_candidate_counts: sourceDebugSummary,
+                seeds_used: body.seed_tmdb_ids,
+                genre_filter_applied: body.genre_ids?.length
+                  ? body.genre_ids
+                  : null,
+                candidates_before_genre_filter: scored.length,
+                candidates_after_genre_filter: genreFiltered.length,
+                candidates_after_personalization_filter:
+                  personalizationFiltered.length,
+              }
+            : {}),
         },
         error: null,
       });
