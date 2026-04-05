@@ -1614,9 +1614,10 @@ export function analyzeSubgenrePatterns(
       // REMOVED: the "rarely watched" condition - that's not evidence of dislike!
       // A user not watching many spy movies doesn't mean they AVOID spy movies
       //
-      // New criteria: Must have watched at least 10 films AND actively disliked most (< 20% like ratio)
-      // This ensures we only filter subgenres the user has TRIED and consistently disliked
-      if (stats.watched >= 10 && likeRatio < 0.2) {
+      // Require stronger evidence for avoidance: at least 15 watched AND < 15% like ratio.
+      // The previous threshold (10 watched, < 20%) was too loose for subgenres with a
+      // moderate sample where a few low-rated films skew the ratio.
+      if (stats.watched >= 15 && likeRatio < 0.15) {
         pattern.avoidedSubgenres.add(subgenre);
       }
     }

@@ -27,4 +27,4 @@ export const TECHNICAL_METADATA_KEYWORDS = new Set([
  * When a user has explicitly liked this many films in a subgenre, that
  * explicit preference overrides the pattern-analysis avoidance signal.
  */
-export const SUBGENRE_PREFER_OVERRIDE_THRESHOLD = 10;
+export const SUBGENRE_PREFER_OVERRIDE_THRESHOLD = 5;
