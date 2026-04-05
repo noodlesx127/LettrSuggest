@@ -1,3 +1,7 @@
+import {
+  SUBGENRE_PREFER_OVERRIDE_THRESHOLD,
+  TECHNICAL_METADATA_KEYWORDS,
+} from "@/lib/feedbackConstants";
 import { supabase } from "./supabaseClient";
 import { searchMovies } from "./movieAPI";
 import {
@@ -421,6 +425,7 @@ async function buildFeatureUpdates(
     );
 
   features.keywords
+    .filter((kw) => !TECHNICAL_METADATA_KEYWORDS.has(kw.name.toLowerCase()))
     .slice(0, 10)
     .forEach((keyword) =>
       updates.push({ type: "keyword", id: keyword.id, name: keyword.name }),
@@ -1666,13 +1671,16 @@ async function updateFeaturePreferences(
   });
 
   // Track keywords/themes (top 10) - these indicate content type
-  features.keywords.slice(0, 10).forEach((keyword) => {
-    updates.push({
-      feature_type: "keyword",
-      feature_id: keyword.id,
-      feature_name: keyword.name,
+  features.keywords
+    .filter((kw) => !TECHNICAL_METADATA_KEYWORDS.has(kw.name.toLowerCase()))
+    .slice(0, 10)
+    .forEach((keyword) => {
+      updates.push({
+        feature_type: "keyword",
+        feature_id: keyword.id,
+        feature_name: keyword.name,
+      });
     });
-  });
 
   // Track top directors (strong stylistic signal)
   features.directors.slice(0, 2).forEach((director) => {
@@ -2559,12 +2567,11 @@ function extractFeatures(movie: TMDBMovie) {
   const cast = (movie.credits?.cast || []).slice(0, 5).map((c) => c.name);
   const keywordsList =
     movie.keywords?.keywords || movie.keywords?.results || [];
-  const keywords = (keywordsList as Array<{ id: number; name: string }>).map(
-    (k) => k.name,
-  );
-  const keywordIds = (keywordsList as Array<{ id: number; name: string }>).map(
-    (k) => k.id,
-  );
+  const filteredKeywordsList = (
+    keywordsList as Array<{ id: number; name: string }>
+  ).filter((k) => !TECHNICAL_METADATA_KEYWORDS.has(k.name.toLowerCase()));
+  const keywords = filteredKeywordsList.map((k) => k.name);
+  const keywordIds = filteredKeywordsList.map((k) => k.id);
   const original_language = (movie as any).original_language as
     | string
     | undefined;
@@ -6077,6 +6084,7 @@ export async function suggestByOverlap(params: {
         m.title || "",
         subgenrePatterns,
         params.allowSubgenres, // User-selected subgenres are never filtered
+        params.featureFeedback?.preferSubgenres,
       );
 
       if (subgenreCheck.shouldFilter) {
@@ -6864,8 +6872,15 @@ export async function suggestByOverlap(params: {
             // BUT: skip penalty if user explicitly selected this subgenre in the UI
             const dislikedCount = subInfo ? subInfo.watched - subInfo.liked : 0;
             const isUserSelected = params.allowSubgenres?.includes(subgenre);
+            const preferOverride =
+              params.featureFeedback?.preferSubgenres?.find(
+                (s) =>
+                  s.key === subgenre &&
+                  s.count >= SUBGENRE_PREFER_OVERRIDE_THRESHOLD,
+              );
             if (
               !isUserSelected &&
+              !preferOverride &&
               (pattern.avoidedSubgenres.has(subgenre) ||
                 (subInfo &&
                   subInfo.weight < -1.0 &&

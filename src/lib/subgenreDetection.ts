@@ -3,7 +3,8 @@
  * Detects nuanced preferences like "action but not superhero" or "sci-fi space but not anime sci-fi"
  */
 
-import { getSubgenreFromKeywordId } from './tmdbKeywordIds';
+import { SUBGENRE_PREFER_OVERRIDE_THRESHOLD } from "@/lib/feedbackConstants";
+import { getSubgenreFromKeywordId } from "./tmdbKeywordIds";
 
 /**
  * Generate a stable numeric ID from a string key
@@ -14,7 +15,7 @@ export function stringHash(str: string): number {
   if (str.length === 0) return hash;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
+    hash = (hash << 5) - hash + char;
     hash = hash & hash; // Convert to 32bit integer
   }
   return Math.abs(hash);
@@ -22,12 +23,15 @@ export function stringHash(str: string): number {
 
 export type SubgenrePattern = {
   parentGenre: string;
-  subgenres: Map<string, {
-    watched: number;
-    liked: number;
-    avgRating: number;
-    weight: number;
-  }>;
+  subgenres: Map<
+    string,
+    {
+      watched: number;
+      liked: number;
+      avgRating: number;
+      weight: number;
+    }
+  >;
   avoidedSubgenres: Set<string>;
   preferredSubgenres: Set<string>;
 };
@@ -50,257 +54,1475 @@ export const SUBGENRE_KEYWORDS = {
   // ============================================
   // HORROR SUBGENRES (25+)
   // ============================================
-  HORROR_SUPERNATURAL: ['supernatural', 'ghost', 'demon', 'possession', 'haunted', 'paranormal', 'spirit', 'poltergeist', 'séance', 'ouija', 'exorcism'],
-  HORROR_PSYCHOLOGICAL: ['psychological horror', 'mind games', 'mental breakdown', 'madness', 'insanity', 'unreliable narrator', 'hallucination', 'paranoia'],
-  HORROR_SLASHER: ['slasher', 'serial killer', 'masked killer', 'massacre', 'stalker', 'final girl', 'body count'],
-  HORROR_ZOMBIE: ['zombie', 'living dead', 'walking dead', 'zombie outbreak', 'zombie apocalypse', 'reanimated corpse', 'undead horde'],
-  HORROR_BODY: ['body horror', 'body transformation', 'grotesque body', 'flesh horror', 'cronenberg', 'metamorphosis', 'deformity', 'body mutation', 'parasitic horror', 'bio-horror', 'the fly', 'tetsuo', 'videodrome', 'society', 'necrotic', 'disfigured', 'mutilation', 'bodily', 'visceral', 'surgical horror'],
-  HORROR_FOLK: ['folk horror', 'pagan', 'ritual', 'cult', 'rural horror', 'isolated community', 'wicker man', 'midsommar', 'ancient ritual', 'countryside terror'],
-  HORROR_WITCH: ['witch', 'witchcraft', 'coven', 'black magic', 'salem', 'witches', 'sorceress', 'dark magic', 'curse'],
-  HORROR_COSMIC: ['cosmic horror', 'lovecraft', 'lovecraftian', 'eldritch', 'cthulhu', 'unknowable', 'existential horror', 'cosmic dread', 'ancient evil', 'elder gods'],
-  HORROR_OCCULT: ['occult', 'satanic', 'devil', 'demonic ritual', 'black mass', 'satanism', 'antichrist', 'lucifer', 'infernal'],
-  HORROR_GOTHIC: ['gothic horror', 'dark castle', 'victorian horror', 'romantic horror', 'aristocratic horror', 'haunted castle', 'haunted manor', 'gothic atmosphere'],
-  HORROR_FOUND_FOOTAGE: ['found footage', 'mockumentary horror', 'handheld', 'documentary style', 'pov horror', 'first person'],
-  HORROR_GIALLO: ['giallo', 'italian horror', 'stylized violence', 'argento', 'bava', 'murder mystery horror'],
-  HORROR_REVENGE: ['revenge horror', 'home invasion', 'survival horror', 'last house', 'torture revenge', 'vigilante horror'],
-  HORROR_MONSTER: ['monster horror', 'creature horror', 'monster movie', 'creature feature', 'creature of the night', 'monster attack'],
-  HORROR_VAMPIRE: ['vampire', 'nosferatu', 'bloodsucker', 'dracula', 'vampiric', 'vampire hunter', 'blood drinking', 'vampire lore'],
-  HORROR_WEREWOLF: ['werewolf', 'lycanthrope', 'lycanthropy', 'full moon curse', 'werewolf transformation', 'man into wolf', 'wolf man'],
-  HORROR_RELIGIOUS: ['religious horror', 'exorcism', 'biblical', 'apocalyptic horror', 'christian horror', 'demonic', 'the omen', 'prophecy'],
-  HORROR_COMEDY: ['horror comedy', 'comedy horror', 'campy', 'splatter comedy', 'zom-com', 'funny horror'],
-  HORROR_EXTREME: ['extreme horror', 'torture porn', 'disturbing horror', 'graphic horror violence', 'transgressive horror', 'brutal horror', 'shocking gore'],
-  HORROR_ELEVATED: ['elevated horror', 'arthouse horror', 'prestige horror', 'slow burn horror', 'a24 horror', 'literary horror', 'art horror', 'ari aster', 'robert eggers', 'hereditary', 'midsommar', 'the witch', 'the lighthouse', 'it comes at night', 'atmospheric dread', 'psychological dread', 'unsettling', 'unnerving', 'blumhouse', 'neon', 'saint maud', 'the babadook', 'under the skin'],
-  HORROR_ANALOG: ['analog horror', 'vhs aesthetic', 'broadcast horror', 'local 58', 'mandela catalogue', 'retro horror'],
-  HORROR_SCIFI: ['sci-fi horror', 'space horror', 'alien horror', 'event horizon', 'science fiction horror'],
-  HORROR_ECO: ['eco-horror', 'environmental horror', 'nature horror', 'plant horror', 'animal horror', 'ecological terror'],
-  HORROR_TECH: ['techno horror', 'killer ai', 'evil technology', 'cyber horror', 'haunted technology', 'cursed video'],
-  HORROR_HOLIDAY: ['holiday horror', 'christmas horror', 'halloween horror', 'krampus', 'black christmas'],
-  HORROR_PERIOD: ['period horror', 'historical horror', 'medieval horror', 'victorian horror', 'colonial horror', 'period piece horror'],
+  HORROR_SUPERNATURAL: [
+    "supernatural",
+    "ghost",
+    "demon",
+    "possession",
+    "haunted",
+    "paranormal",
+    "spirit",
+    "poltergeist",
+    "séance",
+    "ouija",
+    "exorcism",
+  ],
+  HORROR_PSYCHOLOGICAL: [
+    "psychological horror",
+    "mind games",
+    "mental breakdown",
+    "madness",
+    "insanity",
+    "unreliable narrator",
+    "hallucination",
+    "paranoia",
+  ],
+  HORROR_SLASHER: [
+    "slasher",
+    "serial killer",
+    "masked killer",
+    "massacre",
+    "stalker",
+    "final girl",
+    "body count",
+  ],
+  HORROR_ZOMBIE: [
+    "zombie",
+    "living dead",
+    "walking dead",
+    "zombie outbreak",
+    "zombie apocalypse",
+    "reanimated corpse",
+    "undead horde",
+  ],
+  HORROR_BODY: [
+    "body horror",
+    "body transformation",
+    "grotesque body",
+    "flesh horror",
+    "cronenberg",
+    "metamorphosis",
+    "deformity",
+    "body mutation",
+    "parasitic horror",
+    "bio-horror",
+    "the fly",
+    "tetsuo",
+    "videodrome",
+    "society",
+    "necrotic",
+    "disfigured",
+    "mutilation",
+    "bodily",
+    "visceral",
+    "surgical horror",
+  ],
+  HORROR_FOLK: [
+    "folk horror",
+    "pagan",
+    "ritual",
+    "cult",
+    "rural horror",
+    "isolated community",
+    "wicker man",
+    "midsommar",
+    "ancient ritual",
+    "countryside terror",
+  ],
+  HORROR_WITCH: [
+    "witch",
+    "witchcraft",
+    "coven",
+    "black magic",
+    "salem",
+    "witches",
+    "sorceress",
+    "dark magic",
+    "curse",
+  ],
+  HORROR_COSMIC: [
+    "cosmic horror",
+    "lovecraft",
+    "lovecraftian",
+    "eldritch",
+    "cthulhu",
+    "unknowable",
+    "existential horror",
+    "cosmic dread",
+    "ancient evil",
+    "elder gods",
+  ],
+  HORROR_OCCULT: [
+    "occult",
+    "satanic",
+    "devil",
+    "demonic ritual",
+    "black mass",
+    "satanism",
+    "antichrist",
+    "lucifer",
+    "infernal",
+  ],
+  HORROR_GOTHIC: [
+    "gothic horror",
+    "dark castle",
+    "victorian horror",
+    "romantic horror",
+    "aristocratic horror",
+    "haunted castle",
+    "haunted manor",
+    "gothic atmosphere",
+  ],
+  HORROR_FOUND_FOOTAGE: [
+    "found footage",
+    "mockumentary horror",
+    "handheld",
+    "documentary style",
+    "pov horror",
+    "first person",
+  ],
+  HORROR_GIALLO: [
+    "giallo",
+    "italian horror",
+    "stylized violence",
+    "argento",
+    "bava",
+    "murder mystery horror",
+  ],
+  HORROR_REVENGE: [
+    "revenge horror",
+    "home invasion",
+    "survival horror",
+    "last house",
+    "torture revenge",
+    "vigilante horror",
+  ],
+  HORROR_MONSTER: [
+    "monster horror",
+    "creature horror",
+    "monster movie",
+    "creature feature",
+    "creature of the night",
+    "monster attack",
+  ],
+  HORROR_VAMPIRE: [
+    "vampire",
+    "nosferatu",
+    "bloodsucker",
+    "dracula",
+    "vampiric",
+    "vampire hunter",
+    "blood drinking",
+    "vampire lore",
+  ],
+  HORROR_WEREWOLF: [
+    "werewolf",
+    "lycanthrope",
+    "lycanthropy",
+    "full moon curse",
+    "werewolf transformation",
+    "man into wolf",
+    "wolf man",
+  ],
+  HORROR_RELIGIOUS: [
+    "religious horror",
+    "exorcism",
+    "biblical",
+    "apocalyptic horror",
+    "christian horror",
+    "demonic",
+    "the omen",
+    "prophecy",
+  ],
+  HORROR_COMEDY: [
+    "horror comedy",
+    "comedy horror",
+    "campy",
+    "splatter comedy",
+    "zom-com",
+    "funny horror",
+  ],
+  HORROR_EXTREME: [
+    "extreme horror",
+    "torture porn",
+    "disturbing horror",
+    "graphic horror violence",
+    "transgressive horror",
+    "brutal horror",
+    "shocking gore",
+  ],
+  HORROR_ELEVATED: [
+    "elevated horror",
+    "arthouse horror",
+    "prestige horror",
+    "slow burn horror",
+    "a24 horror",
+    "literary horror",
+    "art horror",
+    "ari aster",
+    "robert eggers",
+    "hereditary",
+    "midsommar",
+    "the witch",
+    "the lighthouse",
+    "it comes at night",
+    "atmospheric dread",
+    "psychological dread",
+    "unsettling",
+    "unnerving",
+    "blumhouse",
+    "neon",
+    "saint maud",
+    "the babadook",
+    "under the skin",
+  ],
+  HORROR_ANALOG: [
+    "analog horror",
+    "vhs aesthetic",
+    "broadcast horror",
+    "local 58",
+    "mandela catalogue",
+    "retro horror",
+  ],
+  HORROR_SCIFI: [
+    "sci-fi horror",
+    "space horror",
+    "alien horror",
+    "event horizon",
+    "science fiction horror",
+  ],
+  HORROR_ECO: [
+    "eco-horror",
+    "environmental horror",
+    "nature horror",
+    "plant horror",
+    "animal horror",
+    "ecological terror",
+  ],
+  HORROR_TECH: [
+    "techno horror",
+    "killer ai",
+    "evil technology",
+    "cyber horror",
+    "haunted technology",
+    "cursed video",
+  ],
+  HORROR_HOLIDAY: [
+    "holiday horror",
+    "christmas horror",
+    "halloween horror",
+    "krampus",
+    "black christmas",
+  ],
+  HORROR_PERIOD: [
+    "period horror",
+    "historical horror",
+    "medieval horror",
+    "victorian horror",
+    "colonial horror",
+    "period piece horror",
+  ],
 
   // ============================================
   // THRILLER SUBGENRES (15+)
   // ============================================
-  THRILLER_PSYCHOLOGICAL: ['psychological thriller', 'mind games', 'unreliable narrator', 'twist ending', 'mental', 'paranoid thriller', 'manipulation'],
-  THRILLER_CONSPIRACY: ['conspiracy', 'cover-up', 'paranoid thriller', 'deep state', 'secret organization', 'government conspiracy'],
-  THRILLER_CRIME: ['crime thriller', 'detective', 'investigation', 'murder mystery', 'whodunit', 'police thriller', 'noir'],
-  THRILLER_NEO_NOIR: ['neo-noir', 'noir', 'femme fatale', 'hard-boiled', 'neo noir', 'crime noir', 'dark thriller', 'moody'],
-  THRILLER_LEGAL: ['legal thriller', 'courtroom thriller', 'lawyer', 'trial', 'legal drama', 'the firm'],
-  THRILLER_POLITICAL: ['political thriller', 'government', 'assassination', 'political intrigue', 'washington', 'presidency'],
-  THRILLER_EROTIC: ['erotic thriller', 'sensual', 'seduction', 'sexual thriller', 'noir romance', 'dangerous attraction'],
-  THRILLER_SPY: ['spy thriller', 'espionage thriller', 'intelligence', 'cia', 'mi6', 'cold war thriller', 'spy game'],
-  THRILLER_MEDICAL: ['medical thriller', 'virus', 'outbreak', 'epidemic', 'pandemic', 'hospital thriller', 'disease'],
-  THRILLER_TECH: ['techno thriller', 'hacker', 'cyber thriller', 'technology', 'digital', 'surveillance'],
-  THRILLER_DISASTER: ['disaster thriller', 'survival thriller', 'catastrophe', 'natural disaster', 'emergency'],
-  THRILLER_FINANCIAL: ['financial thriller', 'wall street', 'corporate thriller', 'fraud', 'banking', 'white collar crime'],
-  THRILLER_RELIGIOUS: ['religious thriller', 'da vinci code', 'church conspiracy', 'Vatican', 'religious mystery'],
-  THRILLER_REVENGE: ['revenge thriller', 'vigilante', 'payback', 'retribution', 'vengeance thriller'],
-  THRILLER_ACTION: ['action thriller', 'high octane', 'chase', 'explosive'],
+  THRILLER_PSYCHOLOGICAL: [
+    "psychological thriller",
+    "mind games",
+    "unreliable narrator",
+    "twist ending",
+    "mental",
+    "paranoid thriller",
+    "manipulation",
+  ],
+  THRILLER_CONSPIRACY: [
+    "conspiracy",
+    "cover-up",
+    "paranoid thriller",
+    "deep state",
+    "secret organization",
+    "government conspiracy",
+  ],
+  THRILLER_CRIME: [
+    "crime thriller",
+    "detective",
+    "investigation",
+    "murder mystery",
+    "whodunit",
+    "police thriller",
+    "noir",
+  ],
+  THRILLER_NEO_NOIR: [
+    "neo-noir",
+    "noir",
+    "femme fatale",
+    "hard-boiled",
+    "neo noir",
+    "crime noir",
+    "dark thriller",
+    "moody",
+  ],
+  THRILLER_LEGAL: [
+    "legal thriller",
+    "courtroom thriller",
+    "lawyer",
+    "trial",
+    "legal drama",
+    "the firm",
+  ],
+  THRILLER_POLITICAL: [
+    "political thriller",
+    "government",
+    "assassination",
+    "political intrigue",
+    "washington",
+    "presidency",
+  ],
+  THRILLER_EROTIC: [
+    "erotic thriller",
+    "sensual",
+    "seduction",
+    "sexual thriller",
+    "noir romance",
+    "dangerous attraction",
+  ],
+  THRILLER_SPY: [
+    "spy thriller",
+    "espionage thriller",
+    "intelligence",
+    "cia",
+    "mi6",
+    "cold war thriller",
+    "spy game",
+  ],
+  THRILLER_MEDICAL: [
+    "medical thriller",
+    "virus",
+    "outbreak",
+    "epidemic",
+    "pandemic",
+    "hospital thriller",
+    "disease",
+  ],
+  THRILLER_TECH: [
+    "techno thriller",
+    "hacker",
+    "cyber thriller",
+    "technology",
+    "digital",
+    "surveillance",
+  ],
+  THRILLER_DISASTER: [
+    "disaster thriller",
+    "survival thriller",
+    "catastrophe",
+    "natural disaster",
+    "emergency",
+  ],
+  THRILLER_FINANCIAL: [
+    "financial thriller",
+    "wall street",
+    "corporate thriller",
+    "fraud",
+    "banking",
+    "white collar crime",
+  ],
+  THRILLER_RELIGIOUS: [
+    "religious thriller",
+    "da vinci code",
+    "church conspiracy",
+    "Vatican",
+    "religious mystery",
+  ],
+  THRILLER_REVENGE: [
+    "revenge thriller",
+    "vigilante",
+    "payback",
+    "retribution",
+    "vengeance thriller",
+  ],
+  THRILLER_ACTION: ["action thriller", "high octane", "chase", "explosive"],
 
   // ============================================
   // DRAMA SUBGENRES (20+)
   // ============================================
-  DRAMA_PSYCHOLOGICAL: ['psychological drama', 'character study', 'internal conflict', 'mental health', 'emotional'],
-  DRAMA_SURREAL: ['surreal', 'surrealism', 'dreamlike', 'abstract', 'david lynch', 'lynchian', 'avant-garde', 'experimental', 'bizarre', 'strange'],
-  DRAMA_ARTHOUSE: ['arthouse', 'art house', 'experimental', 'avant-garde', 'art film', 'independent', 'auteur', 'festival film'],
-  DRAMA_SLOW_BURN: ['slow burn', 'atmospheric', 'meditative', 'contemplative', 'deliberate pace', 'character driven'],
-  DRAMA_HISTORICAL: ['historical', 'period piece', 'based on true story', 'biography', 'biopic', 'historical drama'],
-  DRAMA_FAMILY: ['family drama', 'generational', 'dysfunctional family', 'family conflict', 'domestic drama', 'siblings'],
-  DRAMA_COMING_OF_AGE: ['coming of age', 'teenager', 'adolescence', 'growing up', 'youth', 'high school', 'teen drama'],
-  DRAMA_ROMANTIC: ['romantic drama', 'love story', 'romance', 'relationship', 'heartbreak', 'tragic love'],
-  DRAMA_SOCIAL: ['social drama', 'social commentary', 'inequality', 'class struggle', 'poverty', 'social issues', 'realist'],
-  DRAMA_COURTROOM: ['courtroom drama', 'trial', 'justice', 'legal drama', 'verdict', 'jury'],
-  DRAMA_MEDICAL: ['medical drama', 'illness', 'doctor', 'hospital', 'disease', 'dying', 'terminal'],
-  DRAMA_SPORTS: ['sports drama', 'underdog', 'championship', 'athlete', 'coach', 'team', 'competition'],
-  DRAMA_WAR: ['war drama', 'anti-war', 'soldier', 'battlefield', 'military drama', 'veteran', 'ptsd'],
-  DRAMA_POLITICAL: ['political drama', 'election', 'government', 'presidency', 'politics', 'power'],
-  DRAMA_BIOGRAPHICAL: ['biography', 'biopic', 'true story', 'real life story', 'biographical drama', 'life story of', 'based on true events'],
-  DRAMA_TRAGEDY: ['tragedy', 'tragic', 'downfall', 'greek tragedy', 'shakespearean', 'fate', 'doom'],
-  DRAMA_MELODRAMA: ['melodrama', 'emotional', 'sentimental', 'weepy', 'tearjerker', 'romantic melodrama'],
-  DRAMA_MUSICAL: ['musical drama', 'music', 'musician', 'singer', 'band', 'concert', 'performance'],
-  DRAMA_EXISTENTIAL: ['existential', 'philosophical', 'meaning of life', 'nihilism', 'absurdist', 'identity crisis'],
-  DRAMA_RELIGIOUS: ['religious drama', 'faith', 'spiritual', 'church', 'priest', 'crisis of faith'],
-  DRAMA_PRISON: ['prison drama', 'incarceration', 'escape', 'penitentiary', 'death row', 'convict'],
+  DRAMA_PSYCHOLOGICAL: [
+    "psychological drama",
+    "character study",
+    "internal conflict",
+    "mental health",
+    "emotional",
+  ],
+  DRAMA_SURREAL: [
+    "surreal",
+    "surrealism",
+    "dreamlike",
+    "abstract",
+    "david lynch",
+    "lynchian",
+    "avant-garde",
+    "experimental",
+    "bizarre",
+    "strange",
+  ],
+  DRAMA_ARTHOUSE: [
+    "arthouse",
+    "art house",
+    "experimental",
+    "avant-garde",
+    "art film",
+    "independent",
+    "auteur",
+    "festival film",
+  ],
+  DRAMA_SLOW_BURN: [
+    "slow burn",
+    "atmospheric",
+    "meditative",
+    "contemplative",
+    "deliberate pace",
+    "character driven",
+  ],
+  DRAMA_HISTORICAL: [
+    "historical",
+    "period piece",
+    "based on true story",
+    "biography",
+    "biopic",
+    "historical drama",
+  ],
+  DRAMA_FAMILY: [
+    "family drama",
+    "generational",
+    "dysfunctional family",
+    "family conflict",
+    "domestic drama",
+    "siblings",
+  ],
+  DRAMA_COMING_OF_AGE: [
+    "coming of age",
+    "teenager",
+    "adolescence",
+    "growing up",
+    "youth",
+    "high school",
+    "teen drama",
+  ],
+  DRAMA_ROMANTIC: [
+    "romantic drama",
+    "love story",
+    "romance",
+    "relationship",
+    "heartbreak",
+    "tragic love",
+  ],
+  DRAMA_SOCIAL: [
+    "social drama",
+    "social commentary",
+    "inequality",
+    "class struggle",
+    "poverty",
+    "social issues",
+    "realist",
+  ],
+  DRAMA_COURTROOM: [
+    "courtroom drama",
+    "trial",
+    "justice",
+    "legal drama",
+    "verdict",
+    "jury",
+  ],
+  DRAMA_MEDICAL: [
+    "medical drama",
+    "illness",
+    "doctor",
+    "hospital",
+    "disease",
+    "dying",
+    "terminal",
+  ],
+  DRAMA_SPORTS: [
+    "sports drama",
+    "underdog",
+    "championship",
+    "athlete",
+    "coach",
+    "team",
+    "competition",
+  ],
+  DRAMA_WAR: [
+    "war drama",
+    "anti-war",
+    "soldier",
+    "battlefield",
+    "military drama",
+    "veteran",
+    "ptsd",
+  ],
+  DRAMA_POLITICAL: [
+    "political drama",
+    "election",
+    "government",
+    "presidency",
+    "politics",
+    "power",
+  ],
+  DRAMA_BIOGRAPHICAL: [
+    "biography",
+    "biopic",
+    "true story",
+    "real life story",
+    "biographical drama",
+    "life story of",
+    "based on true events",
+  ],
+  DRAMA_TRAGEDY: [
+    "tragedy",
+    "tragic",
+    "downfall",
+    "greek tragedy",
+    "shakespearean",
+    "fate",
+    "doom",
+  ],
+  DRAMA_MELODRAMA: [
+    "melodrama",
+    "emotional",
+    "sentimental",
+    "weepy",
+    "tearjerker",
+    "romantic melodrama",
+  ],
+  DRAMA_MUSICAL: [
+    "musical drama",
+    "music",
+    "musician",
+    "singer",
+    "band",
+    "concert",
+    "performance",
+  ],
+  DRAMA_EXISTENTIAL: [
+    "existential",
+    "philosophical",
+    "meaning of life",
+    "nihilism",
+    "absurdist",
+    "identity crisis",
+  ],
+  DRAMA_RELIGIOUS: [
+    "religious drama",
+    "faith",
+    "spiritual",
+    "church",
+    "priest",
+    "crisis of faith",
+  ],
+  DRAMA_PRISON: [
+    "prison drama",
+    "incarceration",
+    "escape",
+    "penitentiary",
+    "death row",
+    "convict",
+  ],
 
   // ============================================
   // SCI-FI SUBGENRES (20+)
   // ============================================
-  SCIFI_SPACE: ['outer space', 'spaceship', 'space travel', 'galaxy', 'astronaut', 'space station', 'interstellar', 'star wars', 'star trek', 'space exploration'],
-  SCIFI_CYBERPUNK: ['cyberpunk', 'cyber', 'neon', 'hacker', 'corporate dystopia', 'blade runner', 'high tech low life', 'neural'],
-  SCIFI_TIME_TRAVEL: ['time travel', 'time loop', 'time machine', 'parallel universe', 'alternate timeline', 'temporal', 'paradox'],
-  SCIFI_ALIEN: ['alien', 'extraterrestrial', 'ufo', 'alien invasion', 'first contact', 'close encounters'],
-  SCIFI_POST_APOCALYPTIC: ['post-apocalyptic', 'apocalypse', 'end of world', 'survival', 'wasteland', 'nuclear', 'fallout'],
-  SCIFI_DYSTOPIA: ['dystopia', 'dystopian', 'authoritarian', 'totalitarian', 'orwellian', 'surveillance state', 'oppressive society'],
-  SCIFI_UTOPIA: ['utopia', 'utopian', 'future society', 'idealistic', 'perfect world'],
-  SCIFI_HARD: ['hard science fiction', 'hard sci-fi', 'realistic', 'physics', 'engineering', 'scientific accuracy'],
-  SCIFI_SOFT: ['soft sci-fi', 'social science fiction', 'philosophical sci-fi', 'sociological'],
-  SCIFI_SPACE_OPERA: ['space opera', 'epic', 'galactic', 'empire', 'rebellion', 'star wars', 'dune', 'epic space'],
-  SCIFI_BIOPUNK: ['biopunk', 'genetic engineering', 'biotech', 'biotechnology', 'cloning', 'gattaca', 'dna'],
-  SCIFI_STEAMPUNK: ['steampunk', 'victorian', 'clockwork', 'steam-powered', 'retro-futurism', 'airship'],
-  SCIFI_DIESELPUNK: ['dieselpunk', 'retro-futurism', '1940s', 'art deco', 'diesel', 'pulp', 'noir sci-fi'],
-  SCIFI_ROBOT: ['robot', 'android', 'ai', 'artificial intelligence', 'sentient machine', 'cyborg', 'automation'],
-  SCIFI_VIRTUAL_REALITY: ['virtual reality', 'simulation', 'metaverse', 'matrix', 'vr', 'simulated world', 'digital reality'],
-  SCIFI_KAIJU: ['kaiju', 'giant monster', 'godzilla', 'pacific rim', 'titan', 'colossal creature'],
-  SCIFI_MILITARY: ['military sci-fi', 'space marines', 'starship troopers', 'space war', 'galactic military'],
-  SCIFI_INVASION: ['alien invasion', 'war of the worlds', 'independence day', 'extraterrestrial threat', 'invasion'],
-  SCIFI_TECH_NOIR: ['tech noir', 'future noir', 'neo-noir sci-fi', 'blade runner', 'dark city', 'moody sci-fi'],
-  SCIFI_CLONE: ['clone', 'identity', 'duplicate', 'replicant', 'copy', 'multiplicity'],
-  SCIFI_SOLARPUNK: ['solarpunk', 'eco-futurism', 'sustainable future', 'green technology', 'optimistic sci-fi'],
+  SCIFI_SPACE: [
+    "outer space",
+    "spaceship",
+    "space travel",
+    "galaxy",
+    "astronaut",
+    "space station",
+    "interstellar",
+    "star wars",
+    "star trek",
+    "space exploration",
+  ],
+  SCIFI_CYBERPUNK: [
+    "cyberpunk",
+    "cyber",
+    "neon",
+    "hacker",
+    "corporate dystopia",
+    "blade runner",
+    "high tech low life",
+    "neural",
+  ],
+  SCIFI_TIME_TRAVEL: [
+    "time travel",
+    "time loop",
+    "time machine",
+    "parallel universe",
+    "alternate timeline",
+    "temporal",
+    "paradox",
+  ],
+  SCIFI_ALIEN: [
+    "alien",
+    "extraterrestrial",
+    "ufo",
+    "alien invasion",
+    "first contact",
+    "close encounters",
+  ],
+  SCIFI_POST_APOCALYPTIC: [
+    "post-apocalyptic",
+    "apocalypse",
+    "end of world",
+    "survival",
+    "wasteland",
+    "nuclear",
+    "fallout",
+  ],
+  SCIFI_DYSTOPIA: [
+    "dystopia",
+    "dystopian",
+    "authoritarian",
+    "totalitarian",
+    "orwellian",
+    "surveillance state",
+    "oppressive society",
+  ],
+  SCIFI_UTOPIA: [
+    "utopia",
+    "utopian",
+    "future society",
+    "idealistic",
+    "perfect world",
+  ],
+  SCIFI_HARD: [
+    "hard science fiction",
+    "hard sci-fi",
+    "realistic",
+    "physics",
+    "engineering",
+    "scientific accuracy",
+  ],
+  SCIFI_SOFT: [
+    "soft sci-fi",
+    "social science fiction",
+    "philosophical sci-fi",
+    "sociological",
+  ],
+  SCIFI_SPACE_OPERA: [
+    "space opera",
+    "epic",
+    "galactic",
+    "empire",
+    "rebellion",
+    "star wars",
+    "dune",
+    "epic space",
+  ],
+  SCIFI_BIOPUNK: [
+    "biopunk",
+    "genetic engineering",
+    "biotech",
+    "biotechnology",
+    "cloning",
+    "gattaca",
+    "dna",
+  ],
+  SCIFI_STEAMPUNK: [
+    "steampunk",
+    "victorian",
+    "clockwork",
+    "steam-powered",
+    "retro-futurism",
+    "airship",
+  ],
+  SCIFI_DIESELPUNK: [
+    "dieselpunk",
+    "retro-futurism",
+    "1940s",
+    "art deco",
+    "diesel",
+    "pulp",
+    "noir sci-fi",
+  ],
+  SCIFI_ROBOT: [
+    "robot",
+    "android",
+    "ai",
+    "artificial intelligence",
+    "sentient machine",
+    "cyborg",
+    "automation",
+  ],
+  SCIFI_VIRTUAL_REALITY: [
+    "virtual reality",
+    "simulation",
+    "metaverse",
+    "matrix",
+    "vr",
+    "simulated world",
+    "digital reality",
+  ],
+  SCIFI_KAIJU: [
+    "kaiju",
+    "giant monster",
+    "godzilla",
+    "pacific rim",
+    "titan",
+    "colossal creature",
+  ],
+  SCIFI_MILITARY: [
+    "military sci-fi",
+    "space marines",
+    "starship troopers",
+    "space war",
+    "galactic military",
+  ],
+  SCIFI_INVASION: [
+    "alien invasion",
+    "war of the worlds",
+    "independence day",
+    "extraterrestrial threat",
+    "invasion",
+  ],
+  SCIFI_TECH_NOIR: [
+    "tech noir",
+    "future noir",
+    "neo-noir sci-fi",
+    "blade runner",
+    "dark city",
+    "moody sci-fi",
+  ],
+  SCIFI_CLONE: [
+    "clone",
+    "identity",
+    "duplicate",
+    "replicant",
+    "copy",
+    "multiplicity",
+  ],
+  SCIFI_SOLARPUNK: [
+    "solarpunk",
+    "eco-futurism",
+    "sustainable future",
+    "green technology",
+    "optimistic sci-fi",
+  ],
 
   // ============================================
   // COMEDY SUBGENRES (15+)
   // ============================================
-  COMEDY_ROMANTIC: ['romantic comedy', 'rom-com', 'romance', 'love story', 'dating', 'meet cute'],
-  COMEDY_DARK: ['dark comedy', 'black comedy', 'morbid humor', 'gallows humor', 'twisted comedy', 'macabre'],
-  COMEDY_SATIRE: ['satire', 'political satire', 'social satire', 'satirical', 'lampoon', 'parody of society'],
-  COMEDY_PARODY: ['parody', 'spoof', 'mockumentary', 'genre parody', 'send-up', 'pastiche'],
-  COMEDY_SLAPSTICK: ['slapstick', 'physical comedy', 'farce', 'pratfall', 'visual gags', 'broad comedy'],
-  COMEDY_BUDDY: ['buddy comedy', 'buddy cop', 'duo', 'odd couple', 'friendship', 'partners'],
-  COMEDY_SCREWBALL: ['screwball comedy', 'witty', 'fast-paced dialogue', 'battle of sexes', 'madcap'],
-  COMEDY_STONER: ['stoner comedy', 'marijuana', 'weed', 'pot', 'high', 'drug comedy'],
-  COMEDY_ABSURD: ['absurd', 'surreal comedy', 'random', 'monty python', 'absurdist', 'non sequitur'],
-  COMEDY_CRINGE: ['cringe comedy', 'awkward', 'embarrassing', 'uncomfortable humor', 'office style'],
-  COMEDY_DRAMEDY: ['dramedy', 'tragicomedy', 'bittersweet', 'comedy drama', 'serious comedy'],
-  COMEDY_ACTION: ['action comedy', 'comedy action', 'adventure comedy', 'funny action'],
-  COMEDY_TEEN: ['teen comedy', 'high school comedy', 'coming of age comedy', 'youth comedy'],
-  COMEDY_RAUNCHY: ['raunchy', 'crude', 'adult comedy', 'sex comedy', 'r-rated comedy', 'gross-out'],
-  COMEDY_IMPROV: ['improvised', 'improv comedy', 'mockumentary', 'ad-libbed'],
+  COMEDY_ROMANTIC: [
+    "romantic comedy",
+    "rom-com",
+    "romance",
+    "love story",
+    "dating",
+    "meet cute",
+  ],
+  COMEDY_DARK: [
+    "dark comedy",
+    "black comedy",
+    "morbid humor",
+    "gallows humor",
+    "twisted comedy",
+    "macabre",
+  ],
+  COMEDY_SATIRE: [
+    "satire",
+    "political satire",
+    "social satire",
+    "satirical",
+    "lampoon",
+    "parody of society",
+  ],
+  COMEDY_PARODY: [
+    "parody",
+    "spoof",
+    "mockumentary",
+    "genre parody",
+    "send-up",
+    "pastiche",
+  ],
+  COMEDY_SLAPSTICK: [
+    "slapstick",
+    "physical comedy",
+    "farce",
+    "pratfall",
+    "visual gags",
+    "broad comedy",
+  ],
+  COMEDY_BUDDY: [
+    "buddy comedy",
+    "buddy cop",
+    "duo",
+    "odd couple",
+    "friendship",
+    "partners",
+  ],
+  COMEDY_SCREWBALL: [
+    "screwball comedy",
+    "witty",
+    "fast-paced dialogue",
+    "battle of sexes",
+    "madcap",
+  ],
+  COMEDY_STONER: [
+    "stoner comedy",
+    "marijuana",
+    "weed",
+    "pot",
+    "high",
+    "drug comedy",
+  ],
+  COMEDY_ABSURD: [
+    "absurd",
+    "surreal comedy",
+    "random",
+    "monty python",
+    "absurdist",
+    "non sequitur",
+  ],
+  COMEDY_CRINGE: [
+    "cringe comedy",
+    "awkward",
+    "embarrassing",
+    "uncomfortable humor",
+    "office style",
+  ],
+  COMEDY_DRAMEDY: [
+    "dramedy",
+    "tragicomedy",
+    "bittersweet",
+    "comedy drama",
+    "serious comedy",
+  ],
+  COMEDY_ACTION: [
+    "action comedy",
+    "comedy action",
+    "adventure comedy",
+    "funny action",
+  ],
+  COMEDY_TEEN: [
+    "teen comedy",
+    "high school comedy",
+    "coming of age comedy",
+    "youth comedy",
+  ],
+  COMEDY_RAUNCHY: [
+    "raunchy",
+    "crude",
+    "adult comedy",
+    "sex comedy",
+    "r-rated comedy",
+    "gross-out",
+  ],
+  COMEDY_IMPROV: ["improvised", "improv comedy", "mockumentary", "ad-libbed"],
 
   // ============================================
   // ACTION SUBGENRES (15+)
   // ============================================
-  ACTION_SUPERHERO: ['superhero', 'super hero', 'marvel', 'dc comics', 'comic book', 'batman', 'superman', 'spider-man', 'avengers', 'x-men', 'justice league', 'mcu', 'dceu'],
-  ACTION_SPY: ['spy', 'espionage', 'secret agent', 'james bond', '007', 'cia', 'mi6', 'intelligence', 'undercover'],
-  ACTION_MILITARY: ['military', 'war action', 'soldier', 'navy seal', 'special forces', 'combat', 'battlefield', 'army'],
-  ACTION_MARTIAL_ARTS: ['martial arts', 'kung fu', 'karate', 'taekwondo', 'mixed martial arts', 'mma', 'fighting', 'wuxia'],
-  ACTION_HEIST: ['heist', 'robbery', 'bank robbery', 'con artist', 'theft', 'stealing', 'caper', 'ocean\'s'],
-  ACTION_CAR_CHASE: ['car chase', 'racing', 'fast cars', 'street racing', 'vehicles', 'fast and furious', 'motorcar'],
-  ACTION_DISASTER: ['disaster', 'earthquake', 'tsunami', 'volcano', 'natural disaster', 'catastrophe'],
-  ACTION_BUDDY_COP: ['buddy cop', 'police partners', 'lethal weapon', 'cop duo', 'mismatched partners'],
-  ACTION_REVENGE: ['revenge', 'vengeance', 'payback', 'john wick', 'vigilante', 'retribution'],
-  ACTION_MERCENARY: ['mercenary', 'soldier of fortune', 'guns for hire', 'expendables', 'rambo'],
-  ACTION_SWASHBUCKLER: ['swashbuckler', 'pirate', 'sword fighting', 'musketeer', 'pirate adventure', 'swash adventure', 'pirates of'],
-  ACTION_WESTERN: ['western', 'cowboy', 'frontier', 'wild west', 'gunslinger', 'outlaw'],
-  ACTION_GUNPLAY: ['gunplay', 'shootout', 'gun fu', 'john woo', 'heroic bloodshed', 'balletic action'],
-  ACTION_PARKOUR: ['parkour', 'free running', 'chase', 'athletic', 'stunts'],
+  ACTION_SUPERHERO: [
+    "superhero",
+    "super hero",
+    "marvel",
+    "dc comics",
+    "comic book",
+    "batman",
+    "superman",
+    "spider-man",
+    "avengers",
+    "x-men",
+    "justice league",
+    "mcu",
+    "dceu",
+  ],
+  ACTION_SPY: [
+    "spy",
+    "espionage",
+    "secret agent",
+    "james bond",
+    "007",
+    "cia",
+    "mi6",
+    "intelligence",
+    "undercover",
+  ],
+  ACTION_MILITARY: [
+    "military",
+    "war action",
+    "soldier",
+    "navy seal",
+    "special forces",
+    "combat",
+    "battlefield",
+    "army",
+  ],
+  ACTION_MARTIAL_ARTS: [
+    "martial arts",
+    "kung fu",
+    "karate",
+    "taekwondo",
+    "mixed martial arts",
+    "mma",
+    "fighting",
+    "wuxia",
+  ],
+  ACTION_HEIST: [
+    "heist",
+    "robbery",
+    "bank robbery",
+    "con artist",
+    "theft",
+    "stealing",
+    "caper",
+    "ocean's",
+  ],
+  ACTION_CAR_CHASE: [
+    "car chase",
+    "racing",
+    "fast cars",
+    "street racing",
+    "vehicles",
+    "fast and furious",
+    "motorcar",
+  ],
+  ACTION_DISASTER: [
+    "disaster",
+    "earthquake",
+    "tsunami",
+    "volcano",
+    "natural disaster",
+    "catastrophe",
+  ],
+  ACTION_BUDDY_COP: [
+    "buddy cop",
+    "police partners",
+    "lethal weapon",
+    "cop duo",
+    "mismatched partners",
+  ],
+  ACTION_REVENGE: [
+    "revenge",
+    "vengeance",
+    "payback",
+    "john wick",
+    "vigilante",
+    "retribution",
+  ],
+  ACTION_MERCENARY: [
+    "mercenary",
+    "soldier of fortune",
+    "guns for hire",
+    "expendables",
+    "rambo",
+  ],
+  ACTION_SWASHBUCKLER: [
+    "swashbuckler",
+    "pirate",
+    "sword fighting",
+    "musketeer",
+    "pirate adventure",
+    "swash adventure",
+    "pirates of",
+  ],
+  ACTION_WESTERN: [
+    "western",
+    "cowboy",
+    "frontier",
+    "wild west",
+    "gunslinger",
+    "outlaw",
+  ],
+  ACTION_GUNPLAY: [
+    "gunplay",
+    "shootout",
+    "gun fu",
+    "john woo",
+    "heroic bloodshed",
+    "balletic action",
+  ],
+  ACTION_PARKOUR: ["parkour", "free running", "chase", "athletic", "stunts"],
 
   // ============================================
   // ANIMATION SUBGENRES
   // ============================================
-  ANIME_SCIFI: ['anime', 'japanese animation', 'anime sci-fi'],
-  ANIME_MECHA: ['mecha', 'giant robot', 'gundam', 'evangelion', 'robot anime'],
-  ANIME_SHONEN: ['shonen', 'battle anime', 'action anime', 'dragon ball', 'naruto'],
-  ANIME_SEINEN: ['seinen', 'mature anime', 'adult anime'],
-  ANIME_SLICE_OF_LIFE: ['slice of life', 'everyday life', 'iyashikei', 'relaxing anime'],
-  ANIME_ISEKAI: ['isekai', 'transported to another world', 'fantasy world'],
-  ANIMATION_PIXAR: ['pixar', 'disney animation', 'family animation', 'cg animation'],
-  ANIMATION_STOP_MOTION: ['stop motion', 'claymation', 'puppet animation', 'laika'],
-  ANIMATION_ADULT: ['adult animation', 'mature animation', 'not for kids'],
+  ANIME_SCIFI: ["anime", "japanese animation", "anime sci-fi"],
+  ANIME_MECHA: ["mecha", "giant robot", "gundam", "evangelion", "robot anime"],
+  ANIME_SHONEN: [
+    "shonen",
+    "battle anime",
+    "action anime",
+    "dragon ball",
+    "naruto",
+  ],
+  ANIME_SEINEN: ["seinen", "mature anime", "adult anime"],
+  ANIME_SLICE_OF_LIFE: [
+    "slice of life",
+    "everyday life",
+    "iyashikei",
+    "relaxing anime",
+  ],
+  ANIME_ISEKAI: ["isekai", "transported to another world", "fantasy world"],
+  ANIMATION_PIXAR: [
+    "pixar",
+    "disney animation",
+    "family animation",
+    "cg animation",
+  ],
+  ANIMATION_STOP_MOTION: [
+    "stop motion",
+    "claymation",
+    "puppet animation",
+    "laika",
+  ],
+  ANIMATION_ADULT: ["adult animation", "mature animation", "not for kids"],
 
   // ============================================
   // DOCUMENTARY SUBGENRES
   // ============================================
-  DOC_TRUE_CRIME: ['true crime', 'murder documentary', 'serial killer doc', 'crime documentary', 'investigation'],
-  DOC_NATURE: ['nature documentary', 'wildlife', 'planet earth', 'animal', 'nature'],
-  DOC_MUSIC: ['music documentary', 'concert film', 'band documentary', 'musician'],
-  DOC_SPORTS: ['sports documentary', 'athlete', 'team', 'championship', 'athletic'],
-  DOC_POLITICAL: ['political documentary', 'social documentary', 'activist', 'exposé'],
-  DOC_FOOD: ['food documentary', 'chef', 'cooking', 'cuisine', 'restaurant'],
-  DOC_TRAVEL: ['travel documentary', 'journey', 'expedition', 'exploration'],
-  DOC_HISTORICAL: ['historical documentary', 'history', 'war documentary', 'historical event'],
+  DOC_TRUE_CRIME: [
+    "true crime",
+    "murder documentary",
+    "serial killer doc",
+    "crime documentary",
+    "investigation",
+  ],
+  DOC_NATURE: [
+    "nature documentary",
+    "wildlife",
+    "planet earth",
+    "animal",
+    "nature",
+  ],
+  DOC_MUSIC: [
+    "music documentary",
+    "concert film",
+    "band documentary",
+    "musician",
+  ],
+  DOC_SPORTS: [
+    "sports documentary",
+    "athlete",
+    "team",
+    "championship",
+    "athletic",
+  ],
+  DOC_POLITICAL: [
+    "political documentary",
+    "social documentary",
+    "activist",
+    "exposé",
+  ],
+  DOC_FOOD: ["food documentary", "chef", "cooking", "cuisine", "restaurant"],
+  DOC_TRAVEL: ["travel documentary", "journey", "expedition", "exploration"],
+  DOC_HISTORICAL: [
+    "historical documentary",
+    "history",
+    "war documentary",
+    "historical event",
+  ],
 
   // ============================================
   // ROMANCE SUBGENRES
   // ============================================
-  ROMANCE_PERIOD: ['period romance', 'historical romance', 'regency', 'jane austen', 'costume drama'],
-  ROMANCE_TRAGIC: ['tragic romance', 'doomed love', 'star-crossed lovers', 'sad romance'],
-  ROMANCE_LGBTQ: ['lgbtq romance', 'gay romance', 'lesbian romance', 'queer love', 'same-sex romance'],
-  ROMANCE_INTERRACIAL: ['interracial romance', 'multicultural love', 'cross-cultural'],
-  ROMANCE_FANTASY: ['fantasy romance', 'supernatural romance', 'paranormal romance'],
+  ROMANCE_PERIOD: [
+    "period romance",
+    "historical romance",
+    "regency",
+    "jane austen",
+    "costume drama",
+  ],
+  ROMANCE_TRAGIC: [
+    "tragic romance",
+    "doomed love",
+    "star-crossed lovers",
+    "sad romance",
+  ],
+  ROMANCE_LGBTQ: [
+    "lgbtq romance",
+    "gay romance",
+    "lesbian romance",
+    "queer love",
+    "same-sex romance",
+  ],
+  ROMANCE_INTERRACIAL: [
+    "interracial romance",
+    "multicultural love",
+    "cross-cultural",
+  ],
+  ROMANCE_FANTASY: [
+    "fantasy romance",
+    "supernatural romance",
+    "paranormal romance",
+  ],
 
   // ============================================
   // FANTASY SUBGENRES
   // ============================================
-  FANTASY_EPIC: ['epic fantasy', 'high fantasy', 'lord of the rings', 'tolkien', 'quest', 'chosen one'],
-  FANTASY_DARK: ['dark fantasy', 'grimdark', 'dark magic', 'grim fantasy', 'mature fantasy'],
-  FANTASY_URBAN: ['urban fantasy', 'contemporary fantasy', 'magic in modern world', 'hidden magical world'],
-  FANTASY_FAIRY_TALE: ['fairy tale', 'fairytale', 'storybook', 'once upon a time', 'enchanted'],
-  FANTASY_SWORD_SORCERY: ['sword and sorcery', 'conan', 'barbarian', 'adventure fantasy'],
-  FANTASY_MYTHOLOGICAL: ['mythological', 'greek mythology', 'norse mythology', 'legends', 'gods'],
+  FANTASY_EPIC: [
+    "epic fantasy",
+    "high fantasy",
+    "lord of the rings",
+    "tolkien",
+    "quest",
+    "chosen one",
+  ],
+  FANTASY_DARK: [
+    "dark fantasy",
+    "grimdark",
+    "dark magic",
+    "grim fantasy",
+    "mature fantasy",
+  ],
+  FANTASY_URBAN: [
+    "urban fantasy",
+    "contemporary fantasy",
+    "magic in modern world",
+    "hidden magical world",
+  ],
+  FANTASY_FAIRY_TALE: [
+    "fairy tale",
+    "fairytale",
+    "storybook",
+    "once upon a time",
+    "enchanted",
+  ],
+  FANTASY_SWORD_SORCERY: [
+    "sword and sorcery",
+    "conan",
+    "barbarian",
+    "adventure fantasy",
+  ],
+  FANTASY_MYTHOLOGICAL: [
+    "mythological",
+    "greek mythology",
+    "norse mythology",
+    "legends",
+    "gods",
+  ],
 
   // ============================================
   // P3.2: NEW SUBGENRES - WAR (8)
   // ============================================
-  WAR_WW1: ['world war 1', 'world war i', 'wwi', 'ww1', 'trenches', 'great war', '1917', 'gallipoli'],
-  WAR_WW2: ['world war 2', 'world war ii', 'wwii', 'ww2', 'nazi', 'holocaust', 'd-day', 'normandy', 'pacific theater'],
-  WAR_VIETNAM: ['vietnam war', 'vietnam', 'saigon', 'jungle warfare', 'apocalypse now', 'platoon'],
-  WAR_MODERN: ['modern warfare', 'iraq war', 'afghanistan', 'desert storm', 'war on terror', 'seal team'],
-  WAR_CIVIL: ['civil war', 'american civil war', 'brother against brother', 'revolutionary war'],
-  WAR_COLD: ['cold war', 'iron curtain', 'nuclear threat', 'soviet', 'espionage cold war'],
-  WAR_ANCIENT: ['ancient warfare', 'roman legion', 'gladiator', 'spartan', 'medieval battle', 'siege'],
-  WAR_ANTI: ['anti-war', 'antiwar', 'pacifist', 'war is hell', 'futility of war', 'conscientious objector'],
+  WAR_WW1: [
+    "world war 1",
+    "world war i",
+    "wwi",
+    "ww1",
+    "trenches",
+    "great war",
+    "1917",
+    "gallipoli",
+  ],
+  WAR_WW2: [
+    "world war 2",
+    "world war ii",
+    "wwii",
+    "ww2",
+    "nazi",
+    "holocaust",
+    "d-day",
+    "normandy",
+    "pacific theater",
+  ],
+  WAR_VIETNAM: [
+    "vietnam war",
+    "vietnam",
+    "saigon",
+    "jungle warfare",
+    "apocalypse now",
+    "platoon",
+  ],
+  WAR_MODERN: [
+    "modern warfare",
+    "iraq war",
+    "afghanistan",
+    "desert storm",
+    "war on terror",
+    "seal team",
+  ],
+  WAR_CIVIL: [
+    "civil war",
+    "american civil war",
+    "brother against brother",
+    "revolutionary war",
+  ],
+  WAR_COLD: [
+    "cold war",
+    "iron curtain",
+    "nuclear threat",
+    "soviet",
+    "espionage cold war",
+  ],
+  WAR_ANCIENT: [
+    "ancient warfare",
+    "roman legion",
+    "gladiator",
+    "spartan",
+    "medieval battle",
+    "siege",
+  ],
+  WAR_ANTI: [
+    "anti-war",
+    "antiwar",
+    "pacifist",
+    "war is hell",
+    "futility of war",
+    "conscientious objector",
+  ],
 
   // ============================================
   // P3.2: NEW SUBGENRES - CRIME (10)
   // ============================================
-  CRIME_GANGSTER: ['gangster', 'mob', 'mafia', 'organized crime', 'crime family', 'godfather', 'cosa nostra', 'cartel'],
-  CRIME_HEIST: ['heist', 'robbery', 'bank heist', 'casino heist', 'diamond heist', 'perfect crime'],
-  CRIME_NOIR: ['noir', 'film noir', 'neo-noir', 'hardboiled', 'femme fatale', 'private eye'],
-  CRIME_PRISON: ['prison', 'jail', 'incarceration', 'escape', 'warden', 'death row', 'solitary'],
-  CRIME_DRUG: ['drug dealer', 'drug trafficking', 'narco', 'cartel', 'drug lord', 'breaking bad', 'dealer'],
-  CRIME_SERIAL_KILLER: ['serial killer', 'mass murderer', 'psychopath', 'killer', 'manhunt', 'profiler', 'fbi'],
-  CRIME_DOCUMENTARY: ['true crime', 'crime documentary', 'investigation', 'cold case', 'unsolved'],
-  CRIME_POLICE: ['police procedural', 'detective', 'cop', 'investigation', 'law enforcement', 'badge'],
-  CRIME_COURTROOM: ['courtroom', 'trial', 'jury', 'verdict', 'legal thriller', 'prosecutor', 'defense attorney'],
-  CRIME_VIGILANTE: ['vigilante', 'revenge', 'justice', 'one man army', 'death wish', 'punisher'],
+  CRIME_GANGSTER: [
+    "gangster",
+    "mob",
+    "mafia",
+    "organized crime",
+    "crime family",
+    "godfather",
+    "cosa nostra",
+    "cartel",
+  ],
+  CRIME_HEIST: [
+    "heist",
+    "robbery",
+    "bank heist",
+    "casino heist",
+    "diamond heist",
+    "perfect crime",
+  ],
+  CRIME_NOIR: [
+    "noir",
+    "film noir",
+    "neo-noir",
+    "hardboiled",
+    "femme fatale",
+    "private eye",
+  ],
+  CRIME_PRISON: [
+    "prison",
+    "jail",
+    "incarceration",
+    "escape",
+    "warden",
+    "death row",
+    "solitary",
+  ],
+  CRIME_DRUG: [
+    "drug dealer",
+    "drug trafficking",
+    "narco",
+    "cartel",
+    "drug lord",
+    "breaking bad",
+    "dealer",
+  ],
+  CRIME_SERIAL_KILLER: [
+    "serial killer",
+    "mass murderer",
+    "psychopath",
+    "killer",
+    "manhunt",
+    "profiler",
+    "fbi",
+  ],
+  CRIME_DOCUMENTARY: [
+    "true crime",
+    "crime documentary",
+    "investigation",
+    "cold case",
+    "unsolved",
+  ],
+  CRIME_POLICE: [
+    "police procedural",
+    "detective",
+    "cop",
+    "investigation",
+    "law enforcement",
+    "badge",
+  ],
+  CRIME_COURTROOM: [
+    "courtroom",
+    "trial",
+    "jury",
+    "verdict",
+    "legal thriller",
+    "prosecutor",
+    "defense attorney",
+  ],
+  CRIME_VIGILANTE: [
+    "vigilante",
+    "revenge",
+    "justice",
+    "one man army",
+    "death wish",
+    "punisher",
+  ],
 
   // ============================================
   // P3.2: NEW SUBGENRES - MUSICAL (5)
   // ============================================
-  MUSICAL_CLASSIC: ['classic musical', 'golden age', 'broadway', 'song and dance', 'rogers and hammerstein'],
-  MUSICAL_MODERN: ['modern musical', 'pop musical', 'contemporary musical', 'la la land', 'greatest showman'],
-  MUSICAL_ROCK: ['rock musical', 'rock opera', 'rock and roll', 'rock concert', 'bohemian rhapsody'],
-  MUSICAL_ANIMATED: ['animated musical', 'disney musical', 'singing animals', 'cartoon musical'],
-  MUSICAL_JUKEBOX: ['jukebox musical', 'catalog musical', 'mamma mia', 'song catalog'],
+  MUSICAL_CLASSIC: [
+    "classic musical",
+    "golden age",
+    "broadway",
+    "song and dance",
+    "rogers and hammerstein",
+  ],
+  MUSICAL_MODERN: [
+    "modern musical",
+    "pop musical",
+    "contemporary musical",
+    "la la land",
+    "greatest showman",
+  ],
+  MUSICAL_ROCK: [
+    "rock musical",
+    "rock opera",
+    "rock and roll",
+    "rock concert",
+    "bohemian rhapsody",
+  ],
+  MUSICAL_ANIMATED: [
+    "animated musical",
+    "disney musical",
+    "singing animals",
+    "cartoon musical",
+  ],
+  MUSICAL_JUKEBOX: [
+    "jukebox musical",
+    "catalog musical",
+    "mamma mia",
+    "song catalog",
+  ],
 
   // ============================================
   // P3.2: NEW SUBGENRES - FAMILY/KIDS (6)
   // ============================================
-  FAMILY_ADVENTURE: ['family adventure', 'kids adventure', 'treasure hunt', 'journey', 'quest'],
-  FAMILY_FANTASY: ['family fantasy', 'magical world', 'fairyland', 'wizard', 'enchanted'],
-  FAMILY_ANIMAL: ['animal movie', 'talking animals', 'pet', 'dog movie', 'horse movie', 'wildlife'],
-  FAMILY_HOLIDAY: ['family holiday', 'christmas movie', 'holiday special', 'santa', 'easter bunny'],
-  FAMILY_SPORTS: ['kids sports', 'youth sports', 'little league', 'underdog team', 'mighty ducks'],
-  FAMILY_COMEDY: ['family comedy', 'kids comedy', 'slapstick family', 'home alone', 'silly'],
+  FAMILY_ADVENTURE: [
+    "family adventure",
+    "kids adventure",
+    "treasure hunt",
+    "journey",
+    "quest",
+  ],
+  FAMILY_FANTASY: [
+    "family fantasy",
+    "magical world",
+    "fairyland",
+    "wizard",
+    "enchanted",
+  ],
+  FAMILY_ANIMAL: [
+    "animal movie",
+    "talking animals",
+    "pet",
+    "dog movie",
+    "horse movie",
+    "wildlife",
+  ],
+  FAMILY_HOLIDAY: [
+    "family holiday",
+    "christmas movie",
+    "holiday special",
+    "santa",
+    "easter bunny",
+  ],
+  FAMILY_SPORTS: [
+    "kids sports",
+    "youth sports",
+    "little league",
+    "underdog team",
+    "mighty ducks",
+  ],
+  FAMILY_COMEDY: [
+    "family comedy",
+    "kids comedy",
+    "slapstick family",
+    "home alone",
+    "silly",
+  ],
 
   // ============================================
   // P3.2: NEW SUBGENRES - WESTERN (6)
   // ============================================
-  WESTERN_CLASSIC: ['classic western', 'traditional western', 'john wayne', 'cowboys', 'frontier'],
-  WESTERN_SPAGHETTI: ['spaghetti western', 'sergio leone', 'clint eastwood', 'italian western', 'morricone'],
-  WESTERN_REVISIONIST: ['revisionist western', 'anti-western', 'unforgiven', 'deconstruction', 'gray morality'],
-  WESTERN_NEO: ['neo-western', 'modern western', 'contemporary western', 'no country', 'sicario'],
-  WESTERN_COMEDY: ['western comedy', 'comedic western', 'blazing saddles', 'parody western'],
-  WESTERN_HORROR: ['weird west', 'supernatural western', 'horror western', 'bone tomahawk', 'ghost town'],
+  WESTERN_CLASSIC: [
+    "classic western",
+    "traditional western",
+    "john wayne",
+    "cowboys",
+    "frontier",
+  ],
+  WESTERN_SPAGHETTI: [
+    "spaghetti western",
+    "sergio leone",
+    "clint eastwood",
+    "italian western",
+    "morricone",
+  ],
+  WESTERN_REVISIONIST: [
+    "revisionist western",
+    "anti-western",
+    "unforgiven",
+    "deconstruction",
+    "gray morality",
+  ],
+  WESTERN_NEO: [
+    "neo-western",
+    "modern western",
+    "contemporary western",
+    "no country",
+    "sicario",
+  ],
+  WESTERN_COMEDY: [
+    "western comedy",
+    "comedic western",
+    "blazing saddles",
+    "parody western",
+  ],
+  WESTERN_HORROR: [
+    "weird west",
+    "supernatural western",
+    "horror western",
+    "bone tomahawk",
+    "ghost town",
+  ],
 };
 
 /**
  * Detect detailed subgenre patterns from user's watch history
  */
-export function analyzeSubgenrePatterns(films: Array<{
-  title: string;
-  genres?: string[];
-  keywords?: string[];
-  keywordIds?: number[]; // NEW: ID-based detection
-  rating?: number;
-  liked?: boolean;
-}>): Map<string, SubgenrePattern> {
-
+export function analyzeSubgenrePatterns(
+  films: Array<{
+    title: string;
+    genres?: string[];
+    keywords?: string[];
+    keywordIds?: number[]; // NEW: ID-based detection
+    rating?: number;
+    liked?: boolean;
+  }>,
+): Map<string, SubgenrePattern> {
   const patterns = new Map<string, SubgenrePattern>();
 
   // Initialize patterns for each major genre (P3.2: expanded list)
   const majorGenres = [
-    'Action', 'Science Fiction', 'Horror', 'Comedy', 'Drama', 'Thriller',
-    'War', 'Crime', 'Music', 'Family', 'Western', 'Animation', 'Documentary', 'Romance', 'Fantasy'
+    "Action",
+    "Science Fiction",
+    "Horror",
+    "Comedy",
+    "Drama",
+    "Thriller",
+    "War",
+    "Crime",
+    "Music",
+    "Family",
+    "Western",
+    "Animation",
+    "Documentary",
+    "Romance",
+    "Fantasy",
   ];
 
   for (const genre of majorGenres) {
@@ -308,7 +1530,7 @@ export function analyzeSubgenrePatterns(films: Array<{
       parentGenre: genre,
       subgenres: new Map(),
       avoidedSubgenres: new Set(),
-      preferredSubgenres: new Set()
+      preferredSubgenres: new Set(),
     });
   }
 
@@ -316,7 +1538,10 @@ export function analyzeSubgenrePatterns(films: Array<{
   for (const film of films) {
     const genres = film.genres || [];
     const keywords = film.keywords || [];
-    const allText = [film.title.toLowerCase(), ...keywords.map(k => k.toLowerCase())].join(' ');
+    const allText = [
+      film.title.toLowerCase(),
+      ...keywords.map((k) => k.toLowerCase()),
+    ].join(" ");
 
     const rating = film.rating ?? 0;
     const isLiked = film.liked || rating >= 4;
@@ -328,7 +1553,12 @@ export function analyzeSubgenrePatterns(films: Array<{
       if (!pattern) continue;
 
       // Detect subgenres based on keywords (both text and IDs)
-      const detectedSubgenres = detectSubgenres(genre, allText, keywords, film.keywordIds);
+      const detectedSubgenres = detectSubgenres(
+        genre,
+        allText,
+        keywords,
+        film.keywordIds,
+      );
 
       for (const subgenre of detectedSubgenres) {
         // Initialize subgenre stats
@@ -337,7 +1567,7 @@ export function analyzeSubgenrePatterns(films: Array<{
             watched: 0,
             liked: 0,
             avgRating: 0,
-            weight: 0
+            weight: 0,
           });
         }
 
@@ -355,7 +1585,8 @@ export function analyzeSubgenrePatterns(films: Array<{
 
         // Update average rating
         if (rating > 0) {
-          stats.avgRating = ((stats.avgRating * (stats.watched - 1)) + rating) / stats.watched;
+          stats.avgRating =
+            (stats.avgRating * (stats.watched - 1) + rating) / stats.watched;
         }
       }
     }
@@ -363,7 +1594,10 @@ export function analyzeSubgenrePatterns(films: Array<{
 
   // Determine preferred and avoided subgenres (VERY conservative thresholds)
   for (const [genre, pattern] of patterns.entries()) {
-    const totalWatched = Array.from(pattern.subgenres.values()).reduce((sum, s) => sum + s.watched, 0);
+    const totalWatched = Array.from(pattern.subgenres.values()).reduce(
+      (sum, s) => sum + s.watched,
+      0,
+    );
 
     if (totalWatched === 0) continue;
 
@@ -379,7 +1613,7 @@ export function analyzeSubgenrePatterns(films: Array<{
       // Avoided: ONLY if we have STRONG evidence of active dislike
       // REMOVED: the "rarely watched" condition - that's not evidence of dislike!
       // A user not watching many spy movies doesn't mean they AVOID spy movies
-      // 
+      //
       // New criteria: Must have watched at least 10 films AND actively disliked most (< 20% like ratio)
       // This ensures we only filter subgenres the user has TRIED and consistently disliked
       if (stats.watched >= 10 && likeRatio < 0.2) {
@@ -398,10 +1632,10 @@ export function detectSubgenres(
   genre: string,
   text: string,
   keywords: string[],
-  keywordIds: number[] = []
+  keywordIds: number[] = [],
 ): Set<string> {
   const detected = new Set<string>();
-  const keywordsLower = keywords.map(k => k.toLowerCase());
+  const keywordsLower = keywords.map((k) => k.toLowerCase());
 
   // 1. Check ID-based matches (Most accurate)
   if (keywordIds && keywordIds.length > 0) {
@@ -414,12 +1648,15 @@ export function detectSubgenres(
         // Actually, users might associate "Body Horror" (HORROR_BODY) with Sci-Fi.
         // For simplicity, strict prefix matching for now, OR rely on the mapping to be correct.
 
-        // Strict check: does the subgenre key start with the genre name? 
+        // Strict check: does the subgenre key start with the genre name?
         // e.g. HORROR_FOLK starts with HORROR.
         // But what about 'Science Fiction'? key is SCIFI_.
 
-        const normalizedGenreStr = genre.toUpperCase().replace('SCIENCE FICTION', 'SCIFI').replace(/[^A-Z]/g, '');
-        const subgenrePrefix = subgenreKey.split('_')[0]; // HORROR, SCIFI, THRILLER, ACTION, etc.
+        const normalizedGenreStr = genre
+          .toUpperCase()
+          .replace("SCIENCE FICTION", "SCIFI")
+          .replace(/[^A-Z]/g, "");
+        const subgenrePrefix = subgenreKey.split("_")[0]; // HORROR, SCIFI, THRILLER, ACTION, etc.
 
         // Allow match if prefix matches genre, OR some specific cross-overs
         if (subgenreKey.startsWith(normalizedGenreStr)) {
@@ -431,20 +1668,23 @@ export function detectSubgenres(
 
   // 2. Fallback to text matching
   // Check against subgenre keyword mappings
-  const normalizedGenreStr = genre.toUpperCase().replace('SCIENCE FICTION', 'SCIFI').replace(/[^A-Z]/g, '');
+  const normalizedGenreStr = genre
+    .toUpperCase()
+    .replace("SCIENCE FICTION", "SCIFI")
+    .replace(/[^A-Z]/g, "");
   const relevantMappings = Object.entries(SUBGENRE_KEYWORDS).filter(([key]) =>
-    key.startsWith(normalizedGenreStr)
+    key.startsWith(normalizedGenreStr),
   );
 
   for (const [subgenreKey, subgenreKeywords] of relevantMappings) {
-    const matches = subgenreKeywords.some(kw => {
+    const matches = subgenreKeywords.some((kw) => {
       // Escape keyword for regex to prevent issues with special characters (like '-')
-      const escapedKw = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escapedKw = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       // Use word boundaries (\b) to ensure exact word matches
       // e.g. "spy" won't match "crispy" or "spyglass"
-      const regex = new RegExp(`\\b${escapedKw}\\b`, 'i');
+      const regex = new RegExp(`\\b${escapedKw}\\b`, "i");
 
-      return regex.test(text) || keywordsLower.some(k => regex.test(k));
+      return regex.test(text) || keywordsLower.some((k) => regex.test(k));
     });
 
     if (matches) {
@@ -458,14 +1698,15 @@ export function detectSubgenres(
 /**
  * Analyze cross-genre patterns (e.g., Action+Thriller with spy themes)
  */
-export function analyzeCrossGenrePatterns(films: Array<{
-  title: string;
-  genres?: string[];
-  keywords?: string[];
-  rating?: number;
-  liked?: boolean;
-}>): Map<string, CrossGenrePattern> {
-
+export function analyzeCrossGenrePatterns(
+  films: Array<{
+    title: string;
+    genres?: string[];
+    keywords?: string[];
+    rating?: number;
+    liked?: boolean;
+  }>,
+): Map<string, CrossGenrePattern> {
   const patterns = new Map<string, CrossGenrePattern>();
 
   for (const film of films) {
@@ -479,7 +1720,7 @@ export function analyzeCrossGenrePatterns(films: Array<{
 
     // Create genre combination key
     if (genres.length >= 2) {
-      const combo = genres.slice(0, 3).join('+'); // Max 3 genres
+      const combo = genres.slice(0, 3).join("+"); // Max 3 genres
 
       if (!patterns.has(combo)) {
         patterns.set(combo, {
@@ -489,7 +1730,7 @@ export function analyzeCrossGenrePatterns(films: Array<{
           liked: 0,
           avgRating: 0,
           weight: 0,
-          examples: []
+          examples: [],
         });
       }
 
@@ -498,7 +1739,9 @@ export function analyzeCrossGenrePatterns(films: Array<{
 
       if (isLiked) pattern.liked++;
       if (rating > 0) {
-        pattern.avgRating = ((pattern.avgRating * (pattern.watched - 1)) + rating) / pattern.watched;
+        pattern.avgRating =
+          (pattern.avgRating * (pattern.watched - 1) + rating) /
+          pattern.watched;
       }
 
       // Weight calculation
@@ -509,7 +1752,7 @@ export function analyzeCrossGenrePatterns(films: Array<{
       }
 
       // Add keywords
-      keywords.forEach(kw => pattern.keywords.add(kw.toLowerCase()));
+      keywords.forEach((kw) => pattern.keywords.add(kw.toLowerCase()));
 
       // Add example
       if (pattern.examples.length < 3) {
@@ -536,26 +1779,37 @@ export function shouldFilterBySubgenre(
   candidateKeywordIds: number[], // NEW
   candidateTitle: string,
   subgenrePatterns: Map<string, SubgenrePattern>,
-  allowSubgenres?: string[] // NEW: user-selected subgenres to never filter
+  allowSubgenres?: string[], // NEW: user-selected subgenres to never filter
+  preferSubgenres?: Array<{ key: string; weight: number; count: number }>,
 ): { shouldFilter: boolean; reason?: string } {
-
   // Defensive checks
   if (!Array.isArray(candidateGenres) || !Array.isArray(candidateKeywords)) {
-    console.warn('[SubgenreFilter] Invalid input: genres or keywords not arrays', { candidateGenres, candidateKeywords });
+    console.warn(
+      "[SubgenreFilter] Invalid input: genres or keywords not arrays",
+      { candidateGenres, candidateKeywords },
+    );
     return { shouldFilter: false };
   }
 
   // Convert allowSubgenres to a Set for O(1) lookup
   const allowSet = new Set(allowSubgenres || []);
 
-  const allText = [candidateTitle.toLowerCase(), ...candidateKeywords.map((k: string) => k.toLowerCase())].join(' ');
+  const allText = [
+    candidateTitle.toLowerCase(),
+    ...candidateKeywords.map((k: string) => k.toLowerCase()),
+  ].join(" ");
 
   for (const genre of candidateGenres) {
     const pattern = subgenrePatterns.get(genre);
     if (!pattern) continue;
 
     // Detect subgenres in candidate
-    const candidateSubgenres = detectSubgenres(genre, allText, candidateKeywords, candidateKeywordIds);
+    const candidateSubgenres = detectSubgenres(
+      genre,
+      allText,
+      candidateKeywords,
+      candidateKeywordIds,
+    );
 
     // Check if any detected subgenre is avoided
     for (const subgenre of Array.from(candidateSubgenres)) {
@@ -565,10 +1819,25 @@ export function shouldFilterBySubgenre(
       }
 
       if (pattern.avoidedSubgenres.has(subgenre)) {
-        const subgenreName = subgenre.replace(/_/g, ' ').toLowerCase();
+        const feedbackForSubgenre = preferSubgenres?.find(
+          (s) => s.key === subgenre,
+        );
+        if (
+          feedbackForSubgenre &&
+          feedbackForSubgenre.count >= SUBGENRE_PREFER_OVERRIDE_THRESHOLD
+        ) {
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[SubgenreFilter] Overriding avoidance for ${subgenre} — ${feedbackForSubgenre.count} positive feedback signals`,
+            );
+          }
+          continue;
+        }
+
+        const subgenreName = subgenre.replace(/_/g, " ").toLowerCase();
         return {
           shouldFilter: true,
-          reason: `User avoids ${subgenreName} within ${genre}`
+          reason: `User avoids ${subgenreName} within ${genre}`,
         };
       }
     }
@@ -583,42 +1852,47 @@ export function shouldFilterBySubgenre(
 export function boostForCrossGenreMatch(
   candidateGenres: string[],
   candidateKeywords: string[],
-  crossGenrePatterns: Map<string, CrossGenrePattern>
+  crossGenrePatterns: Map<string, CrossGenrePattern>,
 ): { boost: number; reason?: string } {
-
   // Defensive checks
   if (!Array.isArray(candidateGenres) || !Array.isArray(candidateKeywords)) {
-    console.warn('[CrossGenreBoost] Invalid input: genres or keywords not arrays', { candidateGenres, candidateKeywords });
+    console.warn(
+      "[CrossGenreBoost] Invalid input: genres or keywords not arrays",
+      { candidateGenres, candidateKeywords },
+    );
     return { boost: 0 };
   }
 
   // Check for matching genre combinations
   const sortedGenres = candidateGenres.slice().sort();
-  const candidateKeywordSet = new Set(candidateKeywords.map((k: string) => k.toLowerCase()));
+  const candidateKeywordSet = new Set(
+    candidateKeywords.map((k: string) => k.toLowerCase()),
+  );
 
   let maxBoost = 0;
-  let bestReason = '';
+  let bestReason = "";
 
   for (let i = 2; i <= Math.min(3, sortedGenres.length); i++) {
-    const combo = sortedGenres.slice(0, i).join('+');
+    const combo = sortedGenres.slice(0, i).join("+");
     const pattern = crossGenrePatterns.get(combo);
 
     if (!pattern) continue;
     if (pattern.watched < 3) continue; // Need significant sample
 
     // Check keyword overlap
-    const keywordMatches = Array.from(pattern.keywords).filter(kw =>
-      candidateKeywordSet.has(kw)
+    const keywordMatches = Array.from(pattern.keywords).filter((kw) =>
+      candidateKeywordSet.has(kw),
     );
 
     if (keywordMatches.length > 0) {
       // Calculate boost based on pattern strength and keyword matches
-      const boost = (pattern.weight / pattern.watched) * (1 + (keywordMatches.length * 0.2));
+      const boost =
+        (pattern.weight / pattern.watched) * (1 + keywordMatches.length * 0.2);
 
       if (boost > maxBoost) {
         maxBoost = boost;
-        const exampleFilms = pattern.examples.slice(0, 2).join(', ');
-        bestReason = `Matches your taste in ${combo} with themes: ${keywordMatches.slice(0, 3).join(', ')} (like ${exampleFilms})`;
+        const exampleFilms = pattern.examples.slice(0, 2).join(", ");
+        bestReason = `Matches your taste in ${combo} with themes: ${keywordMatches.slice(0, 3).join(", ")} (like ${exampleFilms})`;
       }
     }
   }
@@ -629,22 +1903,36 @@ export function boostForCrossGenreMatch(
 /**
  * Generate human-readable subgenre preference report
  */
-export function generateSubgenreReport(patterns: Map<string, SubgenrePattern>): string {
+export function generateSubgenreReport(
+  patterns: Map<string, SubgenrePattern>,
+): string {
   const lines: string[] = [];
 
   for (const [genre, pattern] of patterns.entries()) {
-    if (pattern.preferredSubgenres.size === 0 && pattern.avoidedSubgenres.size === 0) continue;
+    if (
+      pattern.preferredSubgenres.size === 0 &&
+      pattern.avoidedSubgenres.size === 0
+    )
+      continue;
 
     lines.push(`\n${genre}:`);
 
     if (pattern.preferredSubgenres.size > 0) {
-      lines.push(`  ✅ Prefers: ${Array.from(pattern.preferredSubgenres).map(s => s.replace(/_/g, ' ').toLowerCase()).join(', ')}`);
+      lines.push(
+        `  ✅ Prefers: ${Array.from(pattern.preferredSubgenres)
+          .map((s) => s.replace(/_/g, " ").toLowerCase())
+          .join(", ")}`,
+      );
     }
 
     if (pattern.avoidedSubgenres.size > 0) {
-      lines.push(`  ❌ Avoids: ${Array.from(pattern.avoidedSubgenres).map(s => s.replace(/_/g, ' ').toLowerCase()).join(', ')}`);
+      lines.push(
+        `  ❌ Avoids: ${Array.from(pattern.avoidedSubgenres)
+          .map((s) => s.replace(/_/g, " ").toLowerCase())
+          .join(", ")}`,
+      );
     }
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
