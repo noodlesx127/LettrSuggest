@@ -408,10 +408,24 @@ export async function POST(req: Request) {
         tmdbDetailsCache: candidateTmdbCache,
       });
 
+      // Apply a minimum score to candidates that arrived ONLY via genre discovery
+      // (no seed-similar or trending backing). Prevents low-relevance genre matches
+      // like "A Dog's Will" from passing through in default (no genre filter) runs.
+      const MIN_DISCOVERY_SCORE = 15.0;
+      const qualityFiltered = scored.filter((item) => {
+        const meta = sourceMetadata.get(item.tmdbId);
+        if (!meta) return true; // No metadata — pass through conservatively
+
+        const isDiscoveryOnly = meta.sources.every(
+          (s) => s === "discover-top-genres",
+        );
+        return isDiscoveryOnly ? item.score >= MIN_DISCOVERY_SCORE : true;
+      });
+
       // Apply genre filter if requested — filter before slicing to limit
-      let genreFiltered = scored;
+      let genreFiltered = qualityFiltered;
       if (body.genre_ids?.length) {
-        const filtered = scored.filter((item) => {
+        const filtered = qualityFiltered.filter((item) => {
           const itemGenres = (item.genres ?? []).map((g: string) =>
             g.toLowerCase(),
           );
@@ -434,7 +448,7 @@ export async function POST(req: Request) {
       // Prevents low-relevance genre-discovery candidates from padding filtered results.
       // Threshold of 15 is calibrated from live data: legitimate matches score 19+,
       // filler films (no taste connection beyond genre tag) score 8–14.
-      if (body.genre_ids?.length && genreFiltered !== scored) {
+      if (body.genre_ids?.length && genreFiltered !== qualityFiltered) {
         const MIN_GENRE_SCORE = 15.0;
         const thresholded = genreFiltered.filter(
           (item) => item.score >= MIN_GENRE_SCORE,
@@ -463,6 +477,7 @@ export async function POST(req: Request) {
         const advancedFilter = applyAdvancedFiltering(
           candidate,
           minimalEnhancedProfile,
+          featureFeedback.preferSubgenres,
         );
 
         return !advancedFilter.shouldFilter;
