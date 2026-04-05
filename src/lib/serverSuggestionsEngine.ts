@@ -7,6 +7,15 @@ import {
 } from "@/lib/enrich";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
+/**
+ * Films whose TMDB neighbourhood is consistently off-profile regardless of
+ * the user's rating. Seeds listed here are excluded from getTopSeedTmdbIds
+ * even when the user rates them highly. Add new entries as discovered.
+ */
+const WEAK_SEED_TMDB_IDS = new Set<number>([
+  9352, // EuroTrip — neighbourhood (Girls Trip, 21 & Over) diverges from taste profile
+]);
+
 type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
 type FeatureFeedback = Awaited<ReturnType<typeof getAvoidedFeatures>>;
 type TasteProfileFilmInput = Parameters<
@@ -257,7 +266,8 @@ function getTopSeedTmdbIds(userContext: UserContext, limit = 8): number[] {
     .sort((left, right) => scoreSeedFilm(right) - scoreSeedFilm(left))
     .map((film) => userContext.mappings.get(film.uri))
     .filter((tmdbId): tmdbId is number => isFiniteNumber(tmdbId))
-    .filter((tmdbId, index, ids) => ids.indexOf(tmdbId) === index);
+    .filter((tmdbId, index, ids) => ids.indexOf(tmdbId) === index)
+    .filter((tmdbId) => !WEAK_SEED_TMDB_IDS.has(tmdbId)); // exclude known weak seeds
 
   // Sample from a larger pool to ensure variety across runs.
   // Take top 30 candidates, shuffle them, then slice to limit.
