@@ -316,7 +316,8 @@ export async function generatePalateCleanser(
     const { data: mappedIds } = await client
       .from("film_tmdb_map")
       .select("tmdb_id")
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .limit(10000);
     const watchedIds = new Set(
       (mappedIds || [])
         .map((row) => row.tmdb_id)

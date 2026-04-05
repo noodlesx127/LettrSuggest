@@ -17,6 +17,7 @@ const WEAK_SEED_TMDB_IDS = new Set<number>([
   153, // Lost in Translation — neighbourhood (Coyote Ugly, Jersey Girl, Reality Bites) off-profile
   571252, // Ad Astra — space sci-fi neighbourhood off-profile
   97365, // Looper — time-travel action neighbourhood off-profile
+  1241436, // Warfare — military action neighbourhood (Lone Survivor, American Sniper) off-profile
 ]);
 
 type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
@@ -548,14 +549,20 @@ export async function loadUserContext(userId: string): Promise<UserContext> {
           "uri, title, year, rating, rewatch, last_date, watch_count, liked, on_watchlist",
         )
         .eq("user_id", userId)
+        .limit(10000)
         .order("last_date", { ascending: false, nullsFirst: false }),
-      db.from("film_tmdb_map").select("uri, tmdb_id").eq("user_id", userId),
+      db
+        .from("film_tmdb_map")
+        .select("uri, tmdb_id")
+        .eq("user_id", userId)
+        .limit(10000),
       db
         .from("user_feature_feedback")
         .select(
           "feature_id, feature_name, feature_type, inferred_preference, positive_count, negative_count",
         )
-        .eq("user_id", userId),
+        .eq("user_id", userId)
+        .limit(10000),
       db
         .from("user_exploration_stats")
         .select("exploration_rate")
@@ -574,8 +581,13 @@ export async function loadUserContext(userId: string): Promise<UserContext> {
         .gte(
           "exposed_at",
           new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-        ),
-      db.from("blocked_suggestions").select("tmdb_id").eq("user_id", userId),
+        )
+        .limit(5000),
+      db
+        .from("blocked_suggestions")
+        .select("tmdb_id")
+        .eq("user_id", userId)
+        .limit(5000),
     ]);
 
     if (filmsResult.error)
