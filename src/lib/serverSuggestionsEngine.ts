@@ -14,6 +14,9 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
  */
 const WEAK_SEED_TMDB_IDS = new Set<number>([
   9352, // EuroTrip — neighbourhood (Girls Trip, 21 & Over) diverges from taste profile
+  153, // Lost in Translation — neighbourhood (Coyote Ugly, Jersey Girl, Reality Bites) off-profile
+  571252, // Ad Astra — space sci-fi neighbourhood off-profile
+  97365, // Looper — time-travel action neighbourhood off-profile
 ]);
 
 type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
@@ -100,6 +103,8 @@ type SourceMetadata = Map<
 
 const TMDB_BATCH_SIZE = 200;
 const TASTE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Minimum positive signal count for explicit feedback to override a pattern-analysis "avoid" classification. */
+const SUBGENRE_POSITIVE_OVERRIDE_MIN = 10;
 
 function createEmptyFeatureFeedback(): FeatureFeedback {
   return {
@@ -431,7 +436,15 @@ export function buildFeatureFeedbackFromRows(
     const count = buildCount(row, direction);
 
     if (row.feature_type === "subgenre") {
-      const target = isPositive
+      // If explicit positive signals are strong (≥ threshold), never place in avoidSubgenres
+      // even if inferred_preference (pattern analysis) says negative.
+      const hasStrongPositive =
+        row.positive_count >= SUBGENRE_POSITIVE_OVERRIDE_MIN;
+      const effectiveIsPositive = hasStrongPositive
+        ? true
+        : (isPositive ?? false);
+
+      const target = effectiveIsPositive
         ? feedback.preferSubgenres
         : feedback.avoidSubgenres;
       target.push({
