@@ -1,5 +1,6 @@
 "use client";
 import Image from "next/image";
+import { refreshTmdbCacheForIdsAction } from "@/app/actions/enrichment";
 import AuthGate from "@/components/AuthGate";
 import MovieCard, { FeatureEvidenceContext } from "@/components/MovieCard";
 import ProgressIndicator from "@/components/ProgressIndicator";
@@ -9,7 +10,6 @@ import { supabase } from "@/lib/supabaseClient";
 import {
   getFilmMappings,
   getBulkTmdbDetails,
-  refreshTmdbCacheForIds,
   suggestByOverlap,
   buildTasteProfile,
   findIncompleteCollections,
@@ -1835,7 +1835,14 @@ export default function SuggestPage() {
           const watchlistIdsForCache = watchlistPicksWithDetails.map(
             (p) => p.id,
           );
-          await refreshTmdbCacheForIds(watchlistIdsForCache);
+          const result =
+            await refreshTmdbCacheForIdsAction(watchlistIdsForCache);
+          if (result.error) {
+            console.error(
+              "[Suggest] Failed to refresh watchlist poster cache",
+              result.error,
+            );
+          }
         } catch (e) {
           console.error(
             "[Suggest] Failed to refresh watchlist poster cache",
@@ -2230,7 +2237,13 @@ export default function SuggestPage() {
               );
             }
           }
-          await refreshTmdbCacheForIds(idsForCache);
+          const result = await refreshTmdbCacheForIdsAction(idsForCache);
+          if (result.error) {
+            console.error(
+              "[Suggest] Failed to refresh TMDB cache for suggested ids",
+              result.error,
+            );
+          }
           await refreshPosters();
         } catch {
           // ignore poster refresh errors; core suggestions still work

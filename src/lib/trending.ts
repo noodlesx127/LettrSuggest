@@ -1,4 +1,5 @@
-import { getCachedTMDBSimilar, setCachedTMDBSimilar } from "./apiCache";
+import { setCachedTMDBSimilarAction } from "@/app/actions/enrichment";
+import { getCachedTMDBSimilar } from "./apiCache";
 
 /**
  * Helper to get the base URL for internal API calls
@@ -628,7 +629,17 @@ export async function fetchSimilarMovieIds(
             .filter((id: number) => id != null);
 
           // Store in cache
-          await setCachedTMDBSimilar(seedId, similarIds, recIds);
+          const { error } = await setCachedTMDBSimilarAction(
+            seedId,
+            similarIds,
+            recIds,
+          );
+          if (error) {
+            console.error("[TMDB] Failed to cache similar movies", {
+              seedId,
+              error,
+            });
+          }
 
           [...similarIds, ...recIds]
             .slice(0, limitPerSeed)
@@ -890,9 +901,8 @@ export async function generateSmartCandidates(profile: {
       }
 
       // Import Server Action (safe for client use)
-      const { getAggregatedRecommendations } = await import(
-        "@/app/actions/recommendations"
-      );
+      const { getAggregatedRecommendations } =
+        await import("@/app/actions/recommendations");
 
       // Combine highly-rated films with watchlist for richer seed pool
       // highlyRatedIds = what user loved (past preferences)
