@@ -209,20 +209,6 @@ export async function fetchMovieById(
   }
 }
 
-export async function upsertTmdbCache(movie: TMDBMovie) {
-  if (!supabase) throw new Error("Supabase not initialized");
-  const { error } = await supabase
-    .from("tmdb_movies")
-    .upsert({ tmdb_id: movie.id, data: movie }, { onConflict: "tmdb_id" });
-  if (error) {
-    console.error("[Supabase] upsertTmdbCache error", {
-      tmdbId: movie.id,
-      error,
-    });
-    throw error;
-  }
-}
-
 export async function upsertFilmMapping(
   userId: string,
   uri: string,
@@ -2809,30 +2795,6 @@ export async function fetchTmdbMovieCached(
     );
     const fresh = await withTimeout(fetchTmdbMovie(id));
     return fresh;
-  }
-}
-
-// Best-effort refresh of TMDB cache rows for a set of ids.
-// Used by UI "refresh posters" actions to backfill missing poster/backdrop
-// metadata without changing any mappings.
-export async function refreshTmdbCacheForIds(ids: number[]): Promise<void> {
-  const distinct = Array.from(new Set(ids.filter(Boolean)));
-  if (!distinct.length) return;
-  // We intentionally do not parallelize too aggressively here; callers can
-  // choose when to invoke this (e.g., behind a button).
-  for (const id of distinct) {
-    try {
-      const fresh = await withTimeout(fetchTmdbMovie(id));
-      if (fresh) {
-        try {
-          await upsertTmdbCache(fresh);
-        } catch {
-          // ignore individual upsert failures
-        }
-      }
-    } catch {
-      // ignore individual fetch failures
-    }
   }
 }
 

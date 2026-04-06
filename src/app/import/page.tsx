@@ -12,7 +12,6 @@ import { supabase } from "@/lib/supabaseClient";
 import {
   searchTmdb,
   upsertFilmMapping,
-  upsertTmdbCache,
   learnFromHistoricalData,
 } from "@/lib/enrich";
 import { seedPreferencesFromHistory } from "@/lib/quizLearning";

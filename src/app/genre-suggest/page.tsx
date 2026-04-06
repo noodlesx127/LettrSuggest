@@ -1,4 +1,5 @@
 "use client";
+import { refreshTmdbCacheForIdsAction } from "@/app/actions/enrichment";
 import AuthGate from "@/components/AuthGate";
 import MovieCard, { FeatureEvidenceContext } from "@/components/MovieCard";
 import ProgressIndicator from "@/components/ProgressIndicator";
@@ -19,7 +20,6 @@ import {
   getAvoidedFeatures,
   getMovieFeaturesForPopup,
   getFeatureEvidenceSummary,
-  refreshTmdbCacheForIds,
   fetchSourceReliability,
   getRecentExposures,
   type FeedbackLearningInsights,
@@ -519,7 +519,10 @@ export default function GenreSuggestPage() {
         .slice(0, 5)
         .map((k) => k.id);
 
-      const shuffledPeople = [...tasteProfile.topDirectors, ...tasteProfile.topActors]
+      const shuffledPeople = [
+        ...tasteProfile.topDirectors,
+        ...tasteProfile.topActors,
+      ]
         .sort(() => Math.random() - 0.5)
         .slice(0, 3)
         .map((p) => p.id);
@@ -541,7 +544,8 @@ export default function GenreSuggestPage() {
           const genreDiscovered = await discoverMoviesByProfile({
             genres: tmdbGenreIds,
             genreMode: "OR", // Match ANY of the selected genres
-            keywords: shuffledKeywords.length > 0 ? shuffledKeywords : undefined,
+            keywords:
+              shuffledKeywords.length > 0 ? shuffledKeywords : undefined,
             people: shuffledPeople.length > 0 ? shuffledPeople : undefined,
             sortBy,
             minVotes: 50,
@@ -559,7 +563,8 @@ export default function GenreSuggestPage() {
           // Limit to first 5 to avoid too many API calls
           const singleGenreDiscovered = await discoverMoviesByProfile({
             genres: [genreId],
-            keywords: shuffledKeywords.length > 0 ? shuffledKeywords : undefined,
+            keywords:
+              shuffledKeywords.length > 0 ? shuffledKeywords : undefined,
             sortBy: "vote_average.desc", // Quality-first for genre discovery
             minVotes: 30,
             limit: 75,
@@ -589,13 +594,30 @@ export default function GenreSuggestPage() {
           if (mid && f.rating && f.rating >= 3.0) {
             const cachedDetails = tmdbDetailsMap.get(mid);
             if (cachedDetails) {
-              const movieText = `${cachedDetails.title || ""} ${cachedDetails.overview || ""}`.toLowerCase();
-              const movieKeywordIds = (cachedDetails.keywords?.keywords || cachedDetails.keywords?.results || []).map((k: any) => k.id);
+              const movieText =
+                `${cachedDetails.title || ""} ${cachedDetails.overview || ""}`.toLowerCase();
+              const movieKeywordIds = (
+                cachedDetails.keywords?.keywords ||
+                cachedDetails.keywords?.results ||
+                []
+              ).map((k: any) => k.id);
               // Check if movie matches any selected subgenre
               for (const subgenreKey of selectedSubgenres) {
-                const parentGenreName = subgenreKey.split("_")[0].charAt(0) + subgenreKey.split("_")[0].slice(1).toLowerCase();
-                const detected = detectSubgenres(parentGenreName, movieText, [], movieKeywordIds);
-                if (detected.has(subgenreKey) || (SUBGENRE_TO_KEYWORD_IDS[subgenreKey] || []).some((id: number) => movieKeywordIds.includes(id))) {
+                const parentGenreName =
+                  subgenreKey.split("_")[0].charAt(0) +
+                  subgenreKey.split("_")[0].slice(1).toLowerCase();
+                const detected = detectSubgenres(
+                  parentGenreName,
+                  movieText,
+                  [],
+                  movieKeywordIds,
+                );
+                if (
+                  detected.has(subgenreKey) ||
+                  (SUBGENRE_TO_KEYWORD_IDS[subgenreKey] || []).some(
+                    (id: number) => movieKeywordIds.includes(id),
+                  )
+                ) {
                   subgenreMatchedWatchedIds.push(mid);
                   break;
                 }
@@ -606,18 +628,24 @@ export default function GenreSuggestPage() {
 
         // Seed similar discovery if we found matched subgenre movies
         if (subgenreMatchedWatchedIds.length > 0) {
-          const subgenreSeeds = subgenreMatchedWatchedIds.sort(() => Math.random() - 0.5).slice(0, 5);
+          const subgenreSeeds = subgenreMatchedWatchedIds
+            .sort(() => Math.random() - 0.5)
+            .slice(0, 5);
           try {
-            const similarToSubgenres = await fetchSimilarMovieIds(subgenreSeeds);
+            const similarToSubgenres =
+              await fetchSimilarMovieIds(subgenreSeeds);
             candidatesRaw.push(...similarToSubgenres);
-            console.log(`[GenreSuggest] Fetched ${similarToSubgenres.length} similar to subgenre seeds`);
+            console.log(
+              `[GenreSuggest] Fetched ${similarToSubgenres.length} similar to subgenre seeds`,
+            );
           } catch (e) {
             console.error("[GenreSuggest] Similar to subgenre seeds failed", e);
           }
         }
 
         // Fetch exactly using subgenre keyword IDs via discoverMoviesByProfile
-        const exactSubgenreKeywordIds = getKeywordIdsForSubgenres(selectedSubgenres);
+        const exactSubgenreKeywordIds =
+          getKeywordIdsForSubgenres(selectedSubgenres);
         if (exactSubgenreKeywordIds.length > 0) {
           try {
             const exactDiscover = await discoverMoviesByProfile({
@@ -629,7 +657,10 @@ export default function GenreSuggestPage() {
               limit: 150,
             });
             candidatesRaw.push(...exactDiscover);
-            console.log(`[GenreSuggest] Exact subgenre keyword discovery:`, exactDiscover.length);
+            console.log(
+              `[GenreSuggest] Exact subgenre keyword discovery:`,
+              exactDiscover.length,
+            );
           } catch (e) {
             console.error("[GenreSuggest] Exact subgenre discovery failed", e);
           }
@@ -891,7 +922,11 @@ export default function GenreSuggestPage() {
                 movie.keywords?.results ||
                 []
               ).map((k: any) => k.name),
-            } as MovieItem & { genre_ids: number[]; keyword_ids: number[]; keyword_names: string[] };
+            } as MovieItem & {
+              genre_ids: number[];
+              keyword_ids: number[];
+              keyword_names: string[];
+            };
           }
           return null;
         } catch (e) {
@@ -902,8 +937,13 @@ export default function GenreSuggestPage() {
 
       const detailResults = await Promise.all(detailPromises);
       const validMovies = detailResults.filter(
-        (m): m is MovieItem & { genre_ids: number[]; keyword_ids: number[]; keyword_names: string[] } =>
-          m !== null,
+        (
+          m,
+        ): m is MovieItem & {
+          genre_ids: number[];
+          keyword_ids: number[];
+          keyword_names: string[];
+        } => m !== null,
       );
 
       // Categorize by selected genres and subgenres
@@ -1051,7 +1091,13 @@ export default function GenreSuggestPage() {
           "[GenreSuggest] Refreshing TMDB cache for posters",
           allSuggestedIds.length,
         );
-        await refreshTmdbCacheForIds(allSuggestedIds);
+        const result = await refreshTmdbCacheForIdsAction(allSuggestedIds);
+        if (result.error) {
+          console.error(
+            "[GenreSuggest] Failed to refresh TMDB cache",
+            result.error,
+          );
+        }
         await refreshPosters();
       } catch (e) {
         console.error("[GenreSuggest] Failed to refresh poster cache", e);

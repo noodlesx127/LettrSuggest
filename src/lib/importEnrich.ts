@@ -1,10 +1,10 @@
 /**
  * Import Enrichment Module
- * 
+ *
  * Comprehensive enrichment of user's imported films using all available APIs.
  * This runs ONCE during import to cache all data upfront, so suggestions
  * don't need to make repeated API calls.
- * 
+ *
  * APIs used:
  * 1. TMDB - Basic movie data, cast, crew, keywords
  * 2. TuiMDB - Enhanced genres, UID mapping
@@ -12,22 +12,24 @@
  * 4. Watchmode - Streaming availability
  */
 
-import { searchMovies } from './movieAPI';
-import { upsertTmdbCache } from './enrich';
-import type { TMDBMovie } from './enrich';
-import { enrichMovieServerSide } from '@/app/actions/enrichment';
+import {
+  enrichMovieServerSide,
+  upsertTmdbCacheAction,
+} from "@/app/actions/enrichment";
+import { searchMovies } from "./movieAPI";
+import type { TMDBMovie } from "./enrich";
 
 export interface EnrichedImportMovie extends TMDBMovie {
-    // All OMDb fields are already in TMDBMovie type
-    // Watchmode streaming data
-    streaming_sources?: Array<{
-        source_id: number;
-        name: string;
-        type: 'sub' | 'buy' | 'rent' | 'free';
-        region: string;
-        web_url: string;
-    }>;
-    watchmode_id?: number;
+  // All OMDb fields are already in TMDBMovie type
+  // Watchmode streaming data
+  streaming_sources?: Array<{
+    source_id: number;
+    name: string;
+    type: "sub" | "buy" | "rent" | "free";
+    region: string;
+    web_url: string;
+  }>;
+  watchmode_id?: number;
 }
 
 /**
@@ -35,95 +37,122 @@ export interface EnrichedImportMovie extends TMDBMovie {
  * This is called during import to cache everything upfront
  */
 export async function enrichMovieForImport(
-    title: string,
-    year?: number,
-    tmdbId?: number
+  title: string,
+  year?: number,
+  tmdbId?: number,
 ): Promise<EnrichedImportMovie | null> {
-    try {
-        console.log('[ImportEnrich] Starting enrichment', { title, year, tmdbId });
+  try {
+    console.log("[ImportEnrich] Starting enrichment", { title, year, tmdbId });
 
-        // Step 1: Get TMDB data (either by ID or search)
-        // We do this on the client because searchMovies is optimized for client use
-        let tmdbMovie: TMDBMovie | null = null;
+    // Step 1: Get TMDB data (either by ID or search)
+    // We do this on the client because searchMovies is optimized for client use
+    let tmdbMovie: TMDBMovie | null = null;
 
-        if (tmdbId) {
-            const searchResults = await searchMovies({ query: title, year, preferTuiMDB: true });
-            tmdbMovie = searchResults.find(m => m.id === tmdbId) || searchResults[0] || null;
-        } else {
-            const searchResults = await searchMovies({ query: title, year, preferTuiMDB: true });
-            tmdbMovie = searchResults[0] || null;
-        }
-
-        if (!tmdbMovie) {
-            console.log('[ImportEnrich] No TMDB match found', { title, year });
-            return null;
-        }
-
-        // Use a non-null variable for the rest of the function to avoid TS errors
-        let movie = tmdbMovie as EnrichedImportMovie;
-
-        console.log('[ImportEnrich] TMDB match found', { tmdbId: movie.id, title: movie.title });
-
-        // Step 2: Server-Side Enrichment (Ratings, Watchmode, TuiMDB)
-        // This securely handles API keys on the server
-        try {
-            const serverData = await enrichMovieServerSide(movie.id, movie.tuimdb_uid);
-            console.log('[ImportEnrich] Server data received:', serverData);
-
-            // Merge full TMDB data if available (includes keywords, credits, etc.)
-            if (serverData.tmdbData) {
-                movie = { ...movie, ...serverData.tmdbData };
-            }
-
-            if (serverData.imdb_id) movie.imdb_id = serverData.imdb_id;
-
-            // Handle TuiMDB data
-            if (serverData.tuimdb_movie) {
-                const tuimdbData = serverData.tuimdb_movie;
-                if (tuimdbData.genres) {
-                    console.log('[ImportEnrich] TuiMDB data fetched', { genreCount: tuimdbData.genres.length });
-                }
-            }
-
-            if (serverData.ratings) {
-                const r = serverData.ratings;
-                // Ratings are already logged and handled by the aggregator
-                // We don't need to store them on the movie object if they aren't in TMDBMovie type
-                // The cache will store the full serverData if needed, or we rely on TMDB ratings.
-
-                console.log('[ImportEnrich] Ratings aggregated:', {
-                    rating: r.rating,
-                    source: r.rating_source,
-                    rt: r.rotten_tomatoes,
-                });
-            }
-
-            if (serverData.watchmode_id) {
-                movie.watchmode_id = serverData.watchmode_id;
-            }
-
-            if (serverData.streaming_sources) {
-                movie.streaming_sources = serverData.streaming_sources;
-                console.log('[ImportEnrich] Watchmode streaming sources added', { count: serverData.streaming_sources.length });
-            }
-
-        } catch (e) {
-            console.error('[ImportEnrich] Server enrichment failed', e);
-        }
-
-        // Step 3: Cache the enriched movie in Supabase
-        try {
-            await upsertTmdbCache(movie);
-            console.log('[ImportEnrich] Cached enriched movie', { tmdbId: movie.id });
-        } catch (e) {
-            console.error('[ImportEnrich] Cache upsert failed', e);
-        }
-
-        return movie;
-    } catch (error) {
-        console.error('[ImportEnrich] Enrichment failed', { title, year, error });
-        return null;
+    if (tmdbId) {
+      const searchResults = await searchMovies({
+        query: title,
+        year,
+        preferTuiMDB: true,
+      });
+      tmdbMovie =
+        searchResults.find((m) => m.id === tmdbId) || searchResults[0] || null;
+    } else {
+      const searchResults = await searchMovies({
+        query: title,
+        year,
+        preferTuiMDB: true,
+      });
+      tmdbMovie = searchResults[0] || null;
     }
+
+    if (!tmdbMovie) {
+      console.log("[ImportEnrich] No TMDB match found", { title, year });
+      return null;
+    }
+
+    // Use a non-null variable for the rest of the function to avoid TS errors
+    let movie = tmdbMovie as EnrichedImportMovie;
+
+    console.log("[ImportEnrich] TMDB match found", {
+      tmdbId: movie.id,
+      title: movie.title,
+    });
+
+    // Step 2: Server-Side Enrichment (Ratings, Watchmode, TuiMDB)
+    // This securely handles API keys on the server
+    try {
+      const serverData = await enrichMovieServerSide(
+        movie.id,
+        movie.tuimdb_uid,
+      );
+      console.log("[ImportEnrich] Server data received:", serverData);
+
+      // Merge full TMDB data if available (includes keywords, credits, etc.)
+      if (serverData.tmdbData) {
+        movie = { ...movie, ...serverData.tmdbData };
+      }
+
+      if (serverData.imdb_id) movie.imdb_id = serverData.imdb_id;
+
+      // Handle TuiMDB data
+      if (serverData.tuimdb_movie) {
+        const tuimdbData = serverData.tuimdb_movie;
+        if (tuimdbData.genres) {
+          console.log("[ImportEnrich] TuiMDB data fetched", {
+            genreCount: tuimdbData.genres.length,
+          });
+        }
+      }
+
+      if (serverData.ratings) {
+        const r = serverData.ratings;
+        // Ratings are already logged and handled by the aggregator
+        // We don't need to store them on the movie object if they aren't in TMDBMovie type
+        // The cache will store the full serverData if needed, or we rely on TMDB ratings.
+
+        console.log("[ImportEnrich] Ratings aggregated:", {
+          rating: r.rating,
+          source: r.rating_source,
+          rt: r.rotten_tomatoes,
+        });
+      }
+
+      if (serverData.watchmode_id) {
+        movie.watchmode_id = serverData.watchmode_id;
+      }
+
+      if (serverData.streaming_sources) {
+        movie.streaming_sources = serverData.streaming_sources;
+        console.log("[ImportEnrich] Watchmode streaming sources added", {
+          count: serverData.streaming_sources.length,
+        });
+      }
+    } catch (e) {
+      console.error("[ImportEnrich] Server enrichment failed", e);
+    }
+
+    // Step 3: Cache the enriched movie in Supabase
+    try {
+      const { error } = await upsertTmdbCacheAction(movie);
+      if (error) {
+        console.error("[ImportEnrich] Cache upsert failed", {
+          tmdbId: movie.id,
+          error,
+        });
+      } else {
+        console.log("[ImportEnrich] Cached enriched movie", {
+          tmdbId: movie.id,
+        });
+      }
+    } catch (e) {
+      console.error("[ImportEnrich] Cache upsert failed", e);
+    }
+
+    return movie;
+  } catch (error) {
+    console.error("[ImportEnrich] Enrichment failed", { title, year, error });
+    return null;
+  }
 }
 
 /**
@@ -131,48 +160,52 @@ export async function enrichMovieForImport(
  * Used during import to enrich all user's films
  */
 export async function batchEnrichMovies(
-    movies: Array<{ title: string; year?: number; tmdbId?: number }>,
-    options?: {
-        concurrency?: number;
-        onProgress?: (current: number, total: number) => void;
-    }
+  movies: Array<{ title: string; year?: number; tmdbId?: number }>,
+  options?: {
+    concurrency?: number;
+    onProgress?: (current: number, total: number) => void;
+  },
 ): Promise<Map<number, EnrichedImportMovie>> {
-    const { concurrency = 2, onProgress } = options || {};
-    const results = new Map<number, EnrichedImportMovie>();
+  const { concurrency = 2, onProgress } = options || {};
+  const results = new Map<number, EnrichedImportMovie>();
 
-    let completed = 0;
-    let next = 0;
+  let completed = 0;
+  let next = 0;
 
-    const worker = async () => {
-        while (true) {
-            const index = next++;
-            if (index >= movies.length) break;
+  const worker = async () => {
+    while (true) {
+      const index = next++;
+      if (index >= movies.length) break;
 
-            const movie = movies[index];
-            const enriched = await enrichMovieForImport(movie.title, movie.year, movie.tmdbId);
+      const movie = movies[index];
+      const enriched = await enrichMovieForImport(
+        movie.title,
+        movie.year,
+        movie.tmdbId,
+      );
 
-            if (enriched) {
-                results.set(enriched.id, enriched);
-            }
+      if (enriched) {
+        results.set(enriched.id, enriched);
+      }
 
-            completed++;
-            if (onProgress) {
-                onProgress(completed, movies.length);
-            }
+      completed++;
+      if (onProgress) {
+        onProgress(completed, movies.length);
+      }
 
-            // Rate limiting: 300ms between requests
-            await new Promise(resolve => setTimeout(resolve, 300));
-        }
-    };
+      // Rate limiting: 300ms between requests
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  };
 
-    // Run workers in parallel
-    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  // Run workers in parallel
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
-    console.log('[ImportEnrich] Batch enrichment complete', {
-        total: movies.length,
-        enriched: results.size,
-        failed: movies.length - results.size,
-    });
+  console.log("[ImportEnrich] Batch enrichment complete", {
+    total: movies.length,
+    enriched: results.size,
+    failed: movies.length - results.size,
+  });
 
-    return results;
+  return results;
 }

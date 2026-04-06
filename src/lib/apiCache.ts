@@ -81,39 +81,6 @@ export async function getCachedTMDBSimilar(
   }
 }
 
-/**
- * Store TMDB similar and recommendations in cache
- */
-export async function setCachedTMDBSimilar(
-  tmdbId: number,
-  similar: number[],
-  recommendations: number[],
-): Promise<void> {
-  if (!supabase) {
-    console.warn("[Cache] Supabase client not initialized");
-    return;
-  }
-
-  try {
-    const { error } = await supabase.from("tmdb_similar_cache").upsert({
-      tmdb_id: tmdbId,
-      similar_ids: similar,
-      recommendations_ids: recommendations,
-      cached_at: new Date().toISOString(),
-    });
-
-    if (error) {
-      console.error("[Cache] Error writing TMDB similar cache:", error);
-    } else {
-      console.log(
-        `[Cache] TMDB similar cache SET for ${tmdbId} (${similar.length} similar, ${recommendations.length} recs)`,
-      );
-    }
-  } catch (e) {
-    console.error("[Cache] Exception writing TMDB similar cache:", e);
-  }
-}
-
 // ============================================================================
 // TuiMDB UID Cache
 // ============================================================================
