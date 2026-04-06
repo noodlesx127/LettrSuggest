@@ -236,66 +236,69 @@ export async function getFilmMappings(userId: string, uris: string[]) {
   if (!supabase) throw new Error("Supabase not initialized");
   if (!uris.length) return new Map<string, number>();
 
-  // Instead of chunking by URIs (which can hit query size limits),
-  // fetch ALL mappings for this user (with pagination), then filter in memory
+  // Capture for TS narrowing: `supabase` may be reassigned elsewhere.
+  const supabaseClient = supabase;
+
+  const map = new Map<string, number>();
+  const uniqueUris = Array.from(new Set(uris.filter(Boolean)));
+  if (!uniqueUris.length) return map;
+
+  // Query only the URIs we care about to avoid paging through all user mappings.
+  // Keep chunks small to avoid PostgREST URL/query-size limits.
+  const chunkSize = 200;
+
   if (process.env.NODE_ENV === "development") {
-    console.log("[Mappings] fetching all mappings for user", {
-      userId,
-      uriCount: uris.length,
+    console.log("[Mappings] fetching mappings for user", {
+      userId: userId.slice(0, 8),
+      uriCount: uniqueUris.length,
+      chunkSize,
     });
   }
-  const map = new Map<string, number>();
 
   try {
-    // Paginate through all mappings (PostgREST defaults to 1000 max per request)
-    const pageSize = 1000;
-    let from = 0;
-    const allMappings: Array<{ uri: string; tmdb_id: number }> = [];
+    type FilmMappingRow = { uri: string; tmdb_id: number };
+    type QueryResult = { data: FilmMappingRow[] | null; error: any };
 
-    while (true) {
-      const queryPromise = supabase
-        .from("film_tmdb_map")
-        .select("uri, tmdb_id")
-        .eq("user_id", userId)
-        .range(from, from + pageSize - 1);
+    const chunks: string[][] = [];
+    for (let i = 0; i < uniqueUris.length; i += chunkSize) {
+      chunks.push(uniqueUris.slice(i, i + chunkSize));
+    }
 
-      const { data, error } = await withTimeout(
-        queryPromise as unknown as Promise<{
-          data: Array<{ uri: string; tmdb_id: number }>;
-          error: any;
-        }>,
-        15000,
-      );
+    const results = await Promise.allSettled(
+      chunks.map((chunk) =>
+        withTimeout(
+          Promise.resolve(
+            supabaseClient
+              .from("film_tmdb_map")
+              .select("uri, tmdb_id")
+              .eq("user_id", userId)
+              .in("uri", chunk),
+          ),
+          15000,
+        ),
+      ),
+    );
 
-      if (error) {
-        console.error("[Mappings] error fetching mappings page", {
-          from,
-          error,
-          code: error.code,
-          message: error.message,
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        const { data, error } = result.value as QueryResult;
+        if (error) {
+          console.error("[Mappings] error fetching mappings chunk", {
+            message: error.message,
+            code: error.code,
+          });
+          continue;
+        }
+
+        for (const row of data ?? []) {
+          if (row?.uri != null && row?.tmdb_id != null) {
+            map.set(row.uri, Number(row.tmdb_id));
+          }
+        }
+      } else {
+        console.error("[Mappings] chunk rejected", {
+          reason: result.reason,
         });
-        break;
-      }
-
-      const rows = data ?? [];
-      allMappings.push(...rows);
-
-      // If we got fewer than pageSize, we've fetched all rows
-      if (rows.length < pageSize) break;
-      from += pageSize;
-    }
-
-    if (process.env.NODE_ENV === "development") {
-      console.log("[Mappings] all mappings loaded", {
-        totalRows: allMappings.length,
-      });
-    }
-
-    // Filter to only the URIs we care about
-    const uriSet = new Set(uris);
-    for (const row of allMappings) {
-      if (row.uri != null && row.tmdb_id != null && uriSet.has(row.uri)) {
-        map.set(row.uri, Number(row.tmdb_id));
       }
     }
   } catch (e: any) {
@@ -310,7 +313,7 @@ export async function getFilmMappings(userId: string, uris: string[]) {
   if (process.env.NODE_ENV === "development") {
     console.log("[Mappings] finished getFilmMappings", {
       totalMappings: map.size,
-      requestedUris: uris.length,
+      requestedUris: uniqueUris.length,
     });
   }
   return map;
@@ -2706,12 +2709,16 @@ function isNicheContent(
 
 // Basic timeout helper for fetches
 async function withTimeout<T>(p: Promise<T>, ms = 8000): Promise<T> {
-  return await Promise.race([
-    p,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error("timeout")), ms),
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timeout")), ms);
+  });
+
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // Fetch with simple cache: prefer Supabase row if present; if missing/partial, fetch from API and upsert
