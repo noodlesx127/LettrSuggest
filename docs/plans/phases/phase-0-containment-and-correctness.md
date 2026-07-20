@@ -57,23 +57,27 @@ rtk git commit -m "test: establish privileged function security baseline"
 
 ## Checkpoint 0A.2: Authorization and Grants Migration
 
-**State:** Ready
+**State:** Blocked
 
 **Files:**
-- Create: `supabase/migrations/20260720090000_secure_privileged_functions.sql`
+- Create: `supabase/migrations/20260720235302_secure_privileged_functions.sql`
 - Modify: `supabase/tests/database/privileged_functions.test.sql`
 - Verify: application callers listed in 0A.1
 
-- [ ] **Step 1: Extend tests for the intended privilege matrix**
+- [x] **Step 1: Extend tests for the intended privilege matrix**
 
 Assert exact signatures and outcomes: `anon` has no execute access; authenticated self-service functions require `auth.uid() = p_user_id`; cross-user calls fail; admin deletion requires a role verified from `user_roles`; rate limiting is service-only unless the API is changed to use authenticated self-operation; service callers continue to work.
+
+Evidence: `supabase/tests/database/privileged_functions.test.sql` now covers the five exact signatures, inherited `PUBLIC` access, `anon`/`authenticated`/`service_role` ACLs, generated self/cross-user/admin fixtures, null identity, positive/negative calls, returned deletion counts, and target/non-target row outcomes. A manual audit confirms 55 assertion-producing pgTAP calls match `select plan(55)`. SQLSTATE/message checks are constrained to the ACL and function authorization contracts; fixtures use generated UUIDs, valid auth/profile/user-role FKs, actual table schemas, and transaction rollback.
 
 - [ ] **Step 2: Run the expanded tests and confirm failure**
 
 Run: `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql`  
 Expected: FAIL on the new self/admin/service authorization matrix.
 
-- [ ] **Step 3: Add one forward-only migration**
+Evidence: Blocked before pgTAP execution because the Supabase CLI requires the Docker-backed `pg_prove` image and Docker Desktop is unavailable. The expanded pre-migration failure was therefore not observed; the earlier linked 0A.1 run remains the available failing evidence.
+
+- [x] **Step 3: Add one forward-only migration**
 
 For every exact signature, the migration must revoke inherited access before granting the minimum role:
 
@@ -85,9 +89,13 @@ revoke all on function public.increment_rate_limit(uuid, timestamptz) from publi
 
 Recreate self-service bodies with fixed `search_path`, explicit `auth.uid()` checks, and no trusted caller identity. Keep admin-targeted and service-only routines separate. Drop obsolete unsafe overloads identified in 0A.1.
 
-- [ ] **Step 4: Adapt callers only where the minimum role contract requires it**
+Evidence: `supabase/migrations/20260720235302_secure_privileged_functions.sql` contains the single forward-only migration, uses `CREATE OR REPLACE FUNCTION` for every exact target, keeps `scope text DEFAULT 'all'`, deletes `public.film_diary_events_raw` in admin import/all while preserving the `film_diary_events` response key, and applies the minimum grants. Supabase MCP applied it directly to production as migration `20260720235302_secure_privileged_functions` on 2026-07-20 after explicit user authorization.
+
+- [x] **Step 4: Adapt callers only where the minimum role contract requires it**
 
 Keep caller-supplied IDs derived from the verified session, never request JSON. If a routine becomes service-only, retain it behind server code using the service client and verify the route authenticates before invoking it.
+
+Evidence: Existing API callers retain their verified server-side/service-role paths; the admin delete action now invokes the admin RPC with a request-scoped anon-key client carrying the verified access token, while `requireAdmin` continues to enforce the admin role. No caller scope was broadened. Runtime API verification remains pending in Step 5.
 
 - [ ] **Step 5: Run database and API tests**
 
@@ -96,9 +104,13 @@ Expected: PASS.
 Run: `rtk npx playwright test tests/api-v1.spec.ts -g "liked|stats|rate limit"`  
 Expected: PASS for authorized callers and rejection for unauthorized callers.
 
+Evidence: Production catalog inspection passed for all exact signatures, fixed search paths, and effective ACLs. A transaction-isolated Supabase MCP probe passed 25/25 authorization checks using generated identities and rolled back all fixture writes. The full local pgTAP runner remains unavailable without Docker. `rtk npx playwright test tests/api-v1.spec.ts -g "liked|stats|rate limit"` still cannot reach the application: 7 credential-dependent tests skip and 2 unauthenticated cases fail because no Playwright `baseURL` is configured (`Invalid URL`).
+
 - [ ] **Step 6: Commit the authorization fix**
 
 Update tracker evidence, mark 0A.2 complete, and make 0A.3 ready.
+
+Evidence: Not completed; this checkpoint remains blocked on the application-caller gate. The deployed migration source and production evidence may be committed without marking 0A.2 complete.
 
 ```powershell
 rtk git add supabase/migrations supabase/tests/database/privileged_functions.test.sql src/app/api/v1 src/app/actions/admin.ts docs/plans/MAIN.md docs/plans/phases/phase-0-containment-and-correctness.md

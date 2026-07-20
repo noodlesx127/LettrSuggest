@@ -1,6 +1,7 @@
 "use server";
 
 import type { User } from "@supabase/auth-js";
+import { createClient } from "@supabase/supabase-js";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -258,6 +259,29 @@ async function requireAdmin(
     adminId: user.id,
     adminEmail: normalizeEmail(user.email),
   };
+}
+
+function createRequestScopedSupabase(accessToken: string) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error(
+      "[AdminAction] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    );
+  }
+
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
 }
 
 async function logAudit(
@@ -785,10 +809,14 @@ export async function deleteUserData(
   const { adminId } = await requireAdmin(accessToken);
   console.log("[AdminAction] deleteUserData", { adminId, userId, scope });
 
-  const { data, error } = await supabaseAdmin.rpc("admin_delete_user_data", {
-    target_user_id: userId,
-    scope,
-  });
+  const requestSupabase = createRequestScopedSupabase(accessToken);
+  const { data, error } = await requestSupabase.rpc(
+    "admin_delete_user_data",
+    {
+      target_user_id: userId,
+      scope,
+    },
+  );
 
   if (error) {
     throw error;
