@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
-**Status:** Ready to execute  
-**Current checkpoint:** 0A.1 - Privileged-function inventory and failing security baseline  
-**Next action:** Execute Phase 0 checkpoint 0A.1 from `docs/plans/phases/phase-0-containment-and-correctness.md`.  
-**Safe stopping point:** After checkpoint 0A.1 is committed and this tracker records its evidence.
+**Status:** In progress  
+**Current checkpoint:** 0A.2 - Authorization and grants migration  
+**Next action:** Start 0A.2 by extending the pgTAP suite for the intended self/admin/service privilege matrix.  
+**Safe stopping point:** After checkpoint 0A.2 is committed and this tracker records its evidence.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -39,8 +39,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 
 | Checkpoint | State | Depends on | Acceptance gate | Commit |
 | --- | --- | --- | --- | --- |
-| 0A.1 Privileged-function inventory and failing security baseline | Ready | None | Effective overload/ACL inventory and negative pgTAP tests fail for each exposed path | Not started |
-| 0A.2 Authorization and grants migration | Not started | 0A.1 | pgTAP proves self/admin/service boundaries and application callers pass | Not started |
+| 0A.1 Privileged-function inventory and failing security baseline | Complete | None | Effective overload/ACL inventory and negative pgTAP tests fail for each exposed path | `test: establish privileged function security baseline` |
+| 0A.2 Authorization and grants migration | Ready | 0A.1 | pgTAP proves self/admin/service boundaries and application callers pass | Not started |
 | 0A.3 Production security validation | Not started | 0A.2 | Effective grants verified; security/performance advisors reviewed; leaked-password protection enabled | Not started |
 | 0B.1 Fast test harness and preference contracts | Not started | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | Not started |
 | 0B.2 Atomic metadata tuples and recency | Not started | 0B.1 | Failed-middle-fetch and date-order fixtures pass | Not started |
@@ -128,12 +128,15 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 
 ## Verification Results
 
-No implementation verification has run. Planning documents were checked separately when created.
+- 2026-07-20 - `rtk npx supabase test db --linked --file supabase/tests/database/privileged_functions.test.sql` - CLI rejected the obsolete `--file` flag; Supabase CLI 2.62.5 accepts test paths positionally.
+- 2026-07-20 - `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql --linked` - runner could not start because Supabase CLI requires the `pg_prove` Docker image and Docker Desktop is unavailable.
+- 2026-07-20 - Executed the same transaction-isolated pgTAP suite through Supabase MCP against linked project `xtcsekftikdsauttlcin` - expected FAIL, 14 of 20 assertions failed: five `anon` ACL assertions, five inherited `PUBLIC EXECUTE` assertions, and cross-user calls to liked suggestions, film stats, rate limiting, and admin deletion. All five exact-signature assertions and the cross-user `delete_user_data` rejection passed.
 
 ## Blockers
 
-None. Phase 0A requires access to the intended Supabase development/test environment before applying migrations.
+None. Docker-backed CLI database tests remain unavailable locally, but the linked database can be queried through Supabase MCP. Phase 0A.2 must use a development branch or local environment before applying its migration.
 
 ## Completed Commits
 
 - `4221f4d` - approved recommendation remediation design (status approval recorded in the planning commit)
+- `test: establish privileged function security baseline` - checkpoint 0A.1 inventory and expected-failing pgTAP contract (this checkpoint)

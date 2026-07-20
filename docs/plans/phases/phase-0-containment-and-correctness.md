@@ -1,14 +1,14 @@
 # Phase 0: Containment and Correctness
 
-**Phase state:** Ready  
-**Current checkpoint:** 0A.1  
+**Phase state:** In progress  
+**Current checkpoint:** 0A.2  
 **Exit condition:** Privileged functions enforce effective authorization, proven signal defects are fixture-tested, and v1 reports honest deterministic behavior.
 
 `docs/plans/MAIN.md` controls checkpoint status. Execute in order.
 
 ## Checkpoint 0A.1: Privileged-Function Inventory and Failing Baseline
 
-**State:** Ready
+**State:** Complete
 
 **Files:**
 - Create: `supabase/tests/database/privileged_functions.test.sql`
@@ -20,15 +20,15 @@
 - Inspect: `src/app/api/v1/_lib/rateLimiter.ts`
 - Inspect: `src/app/actions/admin.ts`
 
-- [ ] **Step 1: Mark 0A.1 in progress**
+- [x] **Step 1: Mark 0A.1 in progress**
 
 Change 0A.1 to `In progress` in this file and `MAIN.md`; keep every other checkpoint not active.
 
-- [ ] **Step 2: Record effective production signatures and ACLs**
+- [x] **Step 2: Record effective production signatures and ACLs**
 
 Query `pg_proc`, `pg_namespace`, and `aclexplode(coalesce(proacl, acldefault('f', proowner)))` for every public security-definer function and all overloads of `add_liked_suggestion`, `get_film_stats`, `increment_rate_limit`, `delete_user_data`, and `admin_delete_user_data`. Record exact identity arguments, owner, security mode, search path, executable roles, intended caller, and application call site in the inventory.
 
-- [ ] **Step 3: Write negative pgTAP authorization tests**
+- [x] **Step 3: Write negative pgTAP authorization tests**
 
 The test must set role/JWT claims and assert:
 
@@ -41,12 +41,12 @@ select function_privs_are('public', 'delete_user_data', array['uuid'], 'anon', a
 
 Add authenticated cross-user calls inside `lives_ok`/`throws_ok` assertions using two generated test users. Assert the current unsafe behavior rather than weakening the test to migration text.
 
-- [ ] **Step 4: Run the baseline and confirm a security failure**
+- [x] **Step 4: Run the baseline and confirm a security failure**
 
-Run: `rtk supabase test db --file supabase/tests/database/privileged_functions.test.sql`  
+Run: `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql`  
 Expected: FAIL because at least one unsafe role can execute a privileged user-targeted function or a cross-user function trusts `p_user_id`.
 
-- [ ] **Step 5: Complete and commit the inventory checkpoint**
+- [x] **Step 5: Complete and commit the inventory checkpoint**
 
 Record the failing assertions and command in `MAIN.md`; mark 0A.1 complete and 0A.2 ready.
 
@@ -57,7 +57,7 @@ rtk git commit -m "test: establish privileged function security baseline"
 
 ## Checkpoint 0A.2: Authorization and Grants Migration
 
-**State:** Not started
+**State:** Ready
 
 **Files:**
 - Create: `supabase/migrations/20260720090000_secure_privileged_functions.sql`
@@ -70,7 +70,7 @@ Assert exact signatures and outcomes: `anon` has no execute access; authenticate
 
 - [ ] **Step 2: Run the expanded tests and confirm failure**
 
-Run: `rtk supabase test db --file supabase/tests/database/privileged_functions.test.sql`  
+Run: `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql`  
 Expected: FAIL on the new self/admin/service authorization matrix.
 
 - [ ] **Step 3: Add one forward-only migration**
@@ -91,7 +91,7 @@ Keep caller-supplied IDs derived from the verified session, never request JSON. 
 
 - [ ] **Step 5: Run database and API tests**
 
-Run: `rtk supabase test db --file supabase/tests/database/privileged_functions.test.sql`  
+Run: `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql`  
 Expected: PASS.  
 Run: `rtk npx playwright test tests/api-v1.spec.ts -g "liked|stats|rate limit"`  
 Expected: PASS for authorized callers and rejection for unauthorized callers.
