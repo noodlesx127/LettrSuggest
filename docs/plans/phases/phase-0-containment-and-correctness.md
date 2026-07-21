@@ -180,7 +180,7 @@ rtk git commit -m "fix: contain privileged helper functions"
 
 ## Checkpoint 0B.1: Fast Test Harness and Preference Contracts
 
-**State:** Ready
+**State:** Complete
 
 **Files:**
 - Modify: `package.json`
@@ -190,12 +190,14 @@ rtk git commit -m "fix: contain privileged helper functions"
 - Create: `tests/unit/recommendationPreference.test.ts`
 - Modify: `src/lib/serverSuggestionsEngine.ts`
 
-- [ ] **Step 1: Install and configure Vitest**
+- [x] **Step 1: Install and configure Vitest**
 
 Run: `rtk npm install --save-dev vitest@^4.1.6`  
 Add the scripts and configuration specified in `docs/plans/testing-strategy.md`.
 
-- [ ] **Step 2: Write failing polarity and identifier tests**
+Evidence: Vitest 4.1.10 resolved from the requested compatible range. `vitest.config.ts` uses the Node environment, planned unit/integration includes, and the `@` source alias. `package.json` exposes `test`, `test:unit`, and `test:integration` run scripts.
+
+- [x] **Step 2: Write failing polarity and identifier tests**
 
 ```typescript
 expect(classifyPreferenceProbability(0.49)).toBe("negative");
@@ -206,21 +208,29 @@ expect(normalizeFeatureKey(" Keywords ", "Time Travel")).toEqual({ type: "keywor
 
 Also test null/non-finite inputs and canonical feature-type aliases.
 
-- [ ] **Step 3: Run the tests and confirm failure**
+Evidence: `tests/unit/recommendationPreference.test.ts` covers the 0.49/0.5/0.51 boundary, null/non-finite/out-of-range values, numeric and categorical legacy strings, canonical type aliases, engine routing, negative confidence monotonicity, and effective subgenre override evidence.
+
+- [x] **Step 3: Run the tests and confirm failure**
 
 Run: `rtk npm run test -- tests/unit/recommendationPreference.test.ts`  
 Expected: FAIL because the pure module does not exist.
 
-- [ ] **Step 4: Implement the minimal pure contract and replace v1 sign logic**
+Evidence: The first focused run failed because `@/lib/recommendationPreference` did not exist. The review-driven regression extension then failed 8 of 26 assertions before its implementation, confirming the string, range, weight-direction, and subgenre evidence defects.
+
+- [x] **Step 4: Implement the minimal pure contract and replace v1 sign logic**
 
 Export `classifyPreferenceProbability(value): "negative" | "neutral" | "positive"` using the `0.5` boundary. Export `normalizeFeatureKey(type, id)` with trimmed lowercase canonical values. Update `buildFeatureFeedbackFromRows` to ignore neutral values and use the shared result.
 
-- [ ] **Step 5: Run the harness gate and commit**
+Evidence: `src/lib/recommendationPreference.ts` provides the shared finite 0..1 probability and canonical identifier contracts. `buildFeatureFeedbackFromRows` now ignores neutral/invalid rows, uses canonical feature types, weights negative probabilities as `1 - p`, preserves numeric/categorical legacy inputs, and computes subgenre weight/count from the effective direction.
+
+- [x] **Step 5: Run the harness gate and commit**
 
 Run: `rtk npm run test -- tests/unit/recommendationPreference.test.ts`  
 Expected: PASS.  
 Run: `rtk npm run typecheck`  
 Expected: PASS.
+
+Evidence: The focused suite passes 26/26; `npm run lint`, `npm run typecheck`, and `git diff --check` pass. Independent spec and code-quality reviews approved the checkpoint after the direction-confidence and subgenre fixes.
 
 ```powershell
 rtk git add package.json package-lock.json vitest.config.ts src/lib/recommendationPreference.ts src/lib/serverSuggestionsEngine.ts tests/unit/recommendationPreference.test.ts docs/plans
@@ -229,7 +239,7 @@ rtk git commit -m "fix: correct recommendation preference polarity"
 
 ## Checkpoint 0B.2: Atomic Metadata Tuples and Recency
 
-**State:** Not started
+**State:** Ready
 
 **Files:**
 - Create: `src/lib/recommendationNormalization.ts`

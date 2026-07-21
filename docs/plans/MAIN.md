@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
 **Status:** Ready  
-**Current checkpoint:** 0B.1 - Fast test harness and preference contracts  
-**Next action:** Start 0B.1 by configuring Vitest and writing the failing preference-polarity and feature-key normalization contracts.
-**Safe stopping point:** Checkpoint 0A.3 is complete and committed; 0B.1 is ready but not yet in progress.
+**Current checkpoint:** 0B.2 - Atomic metadata tuples and recency  
+**Next action:** Write the failed-middle-fetch and order-independent recency tests before introducing the atomic normalized film tuple.
+**Safe stopping point:** Checkpoint 0B.1 is complete and committed; 0B.2 is ready but not yet in progress.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -41,9 +41,9 @@ Secure privileged database operations, correct proven recommendation defects, co
 | --- | --- | --- | --- | --- |
 | 0A.1 Privileged-function inventory and failing security baseline | Complete | None | Effective overload/ACL inventory and negative pgTAP tests fail for each exposed path | `test: establish privileged function security baseline` |
 | 0A.2 Authorization and grants migration | Complete | 0A.1 | pgTAP proves self/admin/service boundaries and application callers pass | `8fa8104`, `test: complete privileged function caller gate` |
-| 0A.3 Production security validation | Complete | 0A.2 | Effective helper grants/triggers verified; security/performance advisors reviewed; leaked-password/HIBP protection enabled or the dated Free-plan exception below is recorded; no remaining advisor finding is waived | `fix: contain privileged helper functions` |
-| 0B.1 Fast test harness and preference contracts | Ready | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | Not started |
-| 0B.2 Atomic metadata tuples and recency | Not started | 0B.1 | Failed-middle-fetch and date-order fixtures pass | Not started |
+| 0A.3 Production security validation | Complete | 0A.2 | Effective helper grants/triggers verified; security/performance advisors reviewed; leaked-password/HIBP protection enabled or the dated Free-plan exception below is recorded; no remaining advisor finding is waived | `2fdf02c` |
+| 0B.1 Fast test harness and preference contracts | Complete | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | `fix: correct recommendation preference polarity` |
+| 0B.2 Atomic metadata tuples and recency | Ready | 0B.1 | Failed-middle-fetch and date-order fixtures pass | Not started |
 | 0B.3 Explicit seed semantics | Not started | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | Not started |
 | 0C.1 Input health and neutral request context | Not started | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | Not started |
 | 0C.2 Strict filters and effective advanced behavior | Not started | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | Not started |
@@ -86,7 +86,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | Audit item | Checkpoint | Required evidence | State |
 | --- | --- | --- | --- |
 | Critical privileged database functions | 0A.1-0A.3 | Effective privilege tests and advisor results | Closed |
-| 1. Reversed negative feature feedback | 0B.1 | Probability-boundary unit tests | Open |
+| 1. Reversed negative feature feedback | 0B.1 | Probability-boundary unit tests | Closed |
 | 2. Explicit seeds do not seed neighborhoods | 0B.3 | Retrieval-anchor fixture | Open |
 | 3. API recency reversed | 0B.2 | Date-ordered fixture | Open |
 | 4. Metadata fetch tuple misalignment | 0B.2 | Failed-middle-fetch fixture | Open |
@@ -154,6 +154,12 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-20 - Production helper catalog and trigger re-query - PASS; all five helpers are owned by `postgres`, are `SECURITY DEFINER`, and use `SET search_path = ''`. `handle_new_user()`, `handle_new_user_role()`, `prune_api_caches(integer)`, and `sync_film_events_last_date()` are executable only by `postgres`; `is_admin(uuid)` is executable only by `authenticated` and `postgres`. The two auth triggers remain enabled AFTER INSERT ROW triggers, and the film-date trigger remains an enabled AFTER INSERT OR UPDATE ROW trigger on `film_diary_events_raw`.
 - 2026-07-20 - Production cleanup and cron verification - PASS; zero generated helper-test auth users, films, or raw diary rows remained. Cron job 1 remains active as `postgres` at `20 3 * * *` with `select public.prune_api_caches(30);`, and the function retains all eight production prune targets.
 - 2026-07-20 - Final Supabase advisor review - PASS for the accepted gate. Security warnings fell from 15 to 6: five intended authenticated `SECURITY DEFINER` RPC warnings whose body authorization is covered by pgTAP, plus disabled HIBP under the dated Free-plan exception. All five prior anonymous helper-exposure warnings are resolved. Performance findings remain INFO-only unused-index candidates and were not removed without traffic evidence.
+- 2026-07-20 - `rtk npm install --save-dev vitest@^4.1.6` - PASS; Vitest 4.1.10 resolved and the Node test harness/scripts were added with the planned unit/integration include paths and `@` alias.
+- 2026-07-20 - Initial `rtk npm run test -- tests/unit/recommendationPreference.test.ts` - expected FAIL because `@/lib/recommendationPreference` did not exist, establishing the 0B.1 red state.
+- 2026-07-20 - Direction-confidence and legacy-input regression extension - expected FAIL, 8 of 26 assertions failed before the fix across numeric/categorical strings, out-of-range inputs, negative-weight monotonicity, and effective subgenre override evidence.
+- 2026-07-20 - `rtk npm run test -- tests/unit/recommendationPreference.test.ts` - PASS, 26/26. Boundary polarity, neutral/invalid inputs, aliases, engine integration, direction-aware negative confidence, and subgenre override evidence pass.
+- 2026-07-20 - `rtk npm run lint` - PASS; no ESLint warnings or errors.
+- 2026-07-20 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully.
 
 ## Blockers
 
@@ -166,4 +172,5 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `8fa8104` - checkpoint 0A.2 privileged-function migration, authorization tests, caller adaptation, and production evidence
 - `139710c` - checkpoint 0A.2 production caller gate and reusable Playwright configuration
 - `6f0828f` - checkpoint 0A.3 initial production validation and Free-plan HIBP blocker evidence
-- `fix: contain privileged helper functions` - checkpoint 0A.3 helper containment, production verification, and advisor closure
+- `2fdf02c` - checkpoint 0A.3 helper containment, production verification, and advisor closure
+- `fix: correct recommendation preference polarity` - checkpoint 0B.1 Vitest harness and corrected preference semantics

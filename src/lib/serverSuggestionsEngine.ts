@@ -5,6 +5,10 @@ import {
   getAvoidedFeatures,
   type TMDBMovie,
 } from "@/lib/enrich";
+import {
+  classifyPreferenceProbability,
+  normalizeFeatureKey,
+} from "@/lib/recommendationPreference";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 /**
@@ -138,29 +142,30 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function isPositivePreference(
-  value: FeatureFeedbackRow["inferred_preference"],
-): boolean | null {
-  if (typeof value === "number" && Number.isFinite(value) && value !== 0) {
-    return value > 0;
-  }
-
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "positive") return true;
-    if (normalized === "negative") return false;
-  }
-
-  return null;
-}
-
 function buildWeight(
   row: FeatureFeedbackRow,
   direction: "positive" | "negative",
 ): number {
   const signal = row.inferred_preference;
-  if (typeof signal === "number" && Number.isFinite(signal) && signal !== 0) {
-    return Math.abs(signal);
+  const signalDirection = classifyPreferenceProbability(signal);
+  const numericSignal =
+    typeof signal === "number"
+      ? signal
+      : typeof signal === "string" && signal.trim() !== ""
+        ? Number(signal)
+        : Number.NaN;
+
+  if (
+    Number.isFinite(numericSignal) &&
+    numericSignal >= 0 &&
+    numericSignal <= 1 &&
+    signalDirection === direction
+  ) {
+    return direction === "positive" ? numericSignal : 1 - numericSignal;
+  }
+
+  if (signalDirection === direction) {
+    return 1;
   }
 
   const delta = Math.abs(row.positive_count - row.negative_count);
@@ -421,22 +426,22 @@ export function buildFeatureFeedbackFromRows(
   const feedback = createEmptyFeatureFeedback();
 
   for (const row of rows) {
-    const preference = isPositivePreference(row.inferred_preference);
-    const fallbackPreference =
-      row.positive_count > row.negative_count
-        ? true
-        : row.negative_count > row.positive_count
-          ? false
-          : null;
-    const isPositive = preference ?? fallbackPreference;
+    const preference = classifyPreferenceProbability(row.inferred_preference);
+    if (preference === "neutral") continue;
 
-    if (isPositive == null) continue;
+    const isPositive = preference === "positive";
+    const normalizedType = normalizeFeatureKey(
+      row.feature_type,
+      row.feature_id,
+    ).type;
+    const featureKey = normalizeFeatureKey(
+      normalizedType,
+      normalizedType === "subgenre"
+        ? row.feature_name
+        : row.feature_id,
+    );
 
-    const direction = isPositive ? "positive" : "negative";
-    const weight = buildWeight(row, direction);
-    const count = buildCount(row, direction);
-
-    if (row.feature_type === "subgenre") {
+    if (featureKey.type === "subgenre") {
       // If explicit positive signals are strong (≥ threshold), never place in avoidSubgenres
       // even if inferred_preference (pattern analysis) says negative.
       const hasStrongPositive =
@@ -444,19 +449,26 @@ export function buildFeatureFeedbackFromRows(
       const effectiveIsPositive = hasStrongPositive
         ? true
         : (isPositive ?? false);
+      const effectiveDirection = effectiveIsPositive ? "positive" : "negative";
+      const weight = buildWeight(row, effectiveDirection);
+      const count = buildCount(row, effectiveDirection);
 
       const target = effectiveIsPositive
         ? feedback.preferSubgenres
         : feedback.avoidSubgenres;
       target.push({
-        key: row.feature_name,
+        key: featureKey.id,
         weight,
         count,
       });
       continue;
     }
 
-    const numericId = row.feature_id;
+    const direction = isPositive ? "positive" : "negative";
+    const weight = buildWeight(row, direction);
+    const count = buildCount(row, direction);
+
+    const numericId = Number(featureKey.id);
     if (!isFiniteNumber(numericId)) continue;
 
     const item = {
@@ -466,7 +478,7 @@ export function buildFeatureFeedbackFromRows(
       count,
     };
 
-    switch (row.feature_type) {
+    switch (featureKey.type) {
       case "actor":
         if (isPositive) feedback.preferActors.push(item);
         else feedback.avoidActors.push(item);
