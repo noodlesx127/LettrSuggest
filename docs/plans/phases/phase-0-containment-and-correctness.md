@@ -119,27 +119,35 @@ rtk git commit -m "fix: enforce privileged function authorization"
 
 ## Checkpoint 0A.3: Production Security Validation
 
-**State:** Ready
+**State:** Blocked
 
 **Files:**
 - Modify: `docs/summary/privileged-function-inventory.md`
 - Modify: `docs/plans/MAIN.md`
 
-- [ ] **Step 1: Apply the migration to the intended development branch**
+- [x] **Step 1: Apply the migration to the intended environment**
 
 Use the Supabase development branch/local workflow. Do not apply an untested migration directly to production.
 
-- [ ] **Step 2: Re-query effective privileges**
+Evidence: A development branch and local Docker runtime were unavailable. After the user explicitly authorized direct production deployment, migration `20260720235302_secure_privileged_functions` was applied and validated transactionally in production.
+
+- [x] **Step 2: Re-query effective privileges**
 
 Repeat the 0A.1 catalog query and compare every overload/role with the intended matrix. Record differences and resolve them before continuing.
 
-- [ ] **Step 3: Run remote negative and positive validation**
+Evidence: The 2026-07-20 production re-query found all five exact targets present, security-definer, fixed to `SET search_path = ''`, denied to `anon`, and matched to the intended authenticated/service-role matrix.
+
+- [x] **Step 3: Run remote negative and positive validation**
 
 Verify anonymous, cross-user, self-service, admin, and service behavior through the same interfaces production uses. No role may rely only on an ACL check when the function body also needs identity authorization.
+
+Evidence: The exact 55-assertion pgTAP suite passed as a rolled-back production transaction, and the 13-test Playwright production slice passed through JWT and API-key application paths. Cleanup queries found no retained generated identities or keys.
 
 - [ ] **Step 4: Review platform controls**
 
 Run Supabase security and performance advisors. Enable leaked-password protection in Auth settings and record the project/date confirmation without storing credentials.
+
+Evidence: Advisors were reviewed on 2026-07-20. Performance findings are INFO-level unused indexes. Security reports 15 lints: intended authenticated target RPC warnings, five non-target functions still executable by `anon`, and disabled leaked-password protection. The Management API rejected `password_hibp_enabled: true` because the feature requires Pro; the user chose to retain the free plan. No billing change occurred, so this step and checkpoint remain blocked.
 
 - [ ] **Step 5: Commit validation evidence**
 

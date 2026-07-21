@@ -1,16 +1,35 @@
 # Privileged Function Inventory
 
-**Catalog snapshot:** 2026-07-20  
+**Baseline catalog snapshot:** 2026-07-20  
+**Production validation:** 2026-07-20  
 **Environment:** linked Supabase project `xtcsekftikdsauttlcin`  
 **Scope:** all `public` `SECURITY DEFINER` functions plus every live overload of the five checkpoint targets
 
-## Findings
+## Production Validation
+
+Migration `20260720235302_secure_privileged_functions` removed `PUBLIC` and `anon` execution from all five target functions. The exact 55-assertion pgTAP suite passed in a rolled-back production transaction, and the production application slice passed 13/13 tests. Current effective boundaries are:
+
+| Effective signature | `anon` | `authenticated` | `service_role` | Body authorization |
+| --- | --- | --- | --- | --- |
+| `add_liked_suggestion(uuid, integer, text, integer, text)` | Denied | Self only | Allowed | Rejects non-service callers unless `auth.uid() = p_user_id` |
+| `get_film_stats(uuid)` | Denied | Self only | Allowed | Rejects non-service callers unless `auth.uid() = p_user_id` |
+| `increment_rate_limit(uuid, timestamp with time zone)` | Denied | Denied | Allowed | Also requires the service-role JWT claim |
+| `delete_user_data(uuid)` | Denied | Self only | Denied | Requires `auth.uid() = target_user_id` |
+| `admin_delete_user_data(uuid, text)` | Denied | Verified admin only | Denied | Requires an admin row for `auth.uid()` in `public.user_roles` |
+
+All five remain `SECURITY DEFINER` with `SET search_path = ''` and schema-qualified bodies.
+
+The security advisor still reports direct `anon` execution on `handle_new_user()`, `handle_new_user_role()`, `is_admin(uuid)`, `prune_api_caches(integer)`, and `sync_film_events_last_date()`. Trigger-only and maintenance routines should not be exposed through PostgREST; `is_admin(uuid)` also permits arbitrary role-status lookup. These findings remain open for follow-up containment.
+
+Leaked-password protection remains disabled. The Management API rejected enabling `password_hibp_enabled` because HaveIBeenPwned protection requires a Pro plan; the user chose to keep the free plan. No billing or Auth configuration change was made.
+
+## Baseline Findings
 
 The live catalog contains one overload of each checkpoint target. All five grant `EXECUTE` to `PUBLIC`, `anon`, `authenticated`, `postgres`, and `service_role`. Because PostgreSQL role privileges are additive, revoking only the explicit `anon` or `authenticated` grant would not remove access while `PUBLIC` retains `EXECUTE`.
 
 Four target bodies trust caller-supplied identifiers without checking the effective user. `delete_user_data(uuid)` is the exception: it rejects a target different from `auth.uid()`. `admin_delete_user_data(uuid, text)` exists in production but has no defining migration in this repository, so the database and migration history have drifted.
 
-## Target Functions
+## Baseline Target Functions
 
 | Effective signature | Owner | Mode / search path | Effective executable roles | Body authorization | Current caller and intended boundary |
 | --- | --- | --- | --- | --- | --- |

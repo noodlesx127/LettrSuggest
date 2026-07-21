@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
-**Status:** Ready  
+**Status:** Blocked  
 **Current checkpoint:** 0A.3 - Production security validation  
-**Next action:** Reconcile the remaining Supabase advisor findings and enable leaked-password protection.
-**Safe stopping point:** Complete and commit 0A.3 only after platform controls and production evidence are recorded.
+**Next action:** Upgrade the Supabase project to Pro or explicitly revise the 0A.3 gate; leaked-password protection is unavailable on the selected free plan.
+**Safe stopping point:** Keep 0A.3 blocked and do not start recommendation correctness work while the required platform control is unavailable.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -41,7 +41,7 @@ Secure privileged database operations, correct proven recommendation defects, co
 | --- | --- | --- | --- | --- |
 | 0A.1 Privileged-function inventory and failing security baseline | Complete | None | Effective overload/ACL inventory and negative pgTAP tests fail for each exposed path | `test: establish privileged function security baseline` |
 | 0A.2 Authorization and grants migration | Complete | 0A.1 | pgTAP proves self/admin/service boundaries and application callers pass | `8fa8104`, `test: complete privileged function caller gate` |
-| 0A.3 Production security validation | Ready | 0A.2 | Effective grants verified; security/performance advisors reviewed; leaked-password protection enabled | Not started |
+| 0A.3 Production security validation | Blocked | 0A.2 | Effective grants verified; security/performance advisors reviewed; leaked-password protection enabled | Not started |
 | 0B.1 Fast test harness and preference contracts | Not started | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | Not started |
 | 0B.2 Atomic metadata tuples and recency | Not started | 0B.1 | Failed-middle-fetch and date-order fixtures pass | Not started |
 | 0B.3 Explicit seed semantics | Not started | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | Not started |
@@ -141,10 +141,13 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-20 - Transaction-isolated production authorization probe through Supabase MCP - PASS, 25/25 checks. Generated identities verified anonymous denial, authenticated self/cross-user/null-identity boundaries, database-backed admin authorization, service liked/stats/rate behavior, service deletion denial, and the rate-limit body claim defense; all fixture writes were rolled back.
 - 2026-07-20 - Temporary confirmed test identity plus `PLAYWRIGHT_BASE_URL=https://lettrsuggest.netlify.app` and `rtk npx playwright test tests/api-v1.spec.ts -g "Key management flow|Liked suggestions CRUD|GET /suggestions/liked|GET /stats"` - PASS, 13/13. The production gate covered unauthenticated rejection, API-key create/use/rate-limit/revoke, liked suggestion list/create/delete, and film stats. The temporary identity was deleted in a `finally` block; a production query confirmed zero matching test users remained.
 - 2026-07-20 - Exact `supabase/tests/database/privileged_functions.test.sql` executed as one transaction through Supabase MCP against production - PASS, 55/55 pgTAP assertions; the script reached `ROLLBACK`. A separate cleanup query confirmed zero retained `@privileged-functions.test` users or `pgtap-*` API keys.
+- 2026-07-20 - Production target-function catalog re-query - PASS; all five exact targets remain `SECURITY DEFINER`, use `SET search_path = ''`, deny `anon`, and match the intended authenticated/service-role matrix.
+- 2026-07-20 - Supabase performance advisor - REVIEWED; findings are INFO-level unused-index candidates only, with no immediate Phase 0 removal because production traffic evidence is insufficient.
+- 2026-07-20 - Supabase security advisor and Management API auth configuration - BLOCKED; 15 lints remain, including five non-target `anon`-executable security-definer functions and disabled leaked-password protection. `PATCH /v1/projects/xtcsekftikdsauttlcin/config/auth` with `password_hibp_enabled: true` was rejected because HaveIBeenPwned protection requires Pro. The user chose to keep the free plan, so no billing or auth configuration change was made.
 
 ## Blockers
 
-Docker and a local Supabase runtime remain unavailable. The exact retained pgTAP suite was therefore executed transactionally through Supabase MCP; production catalog, database authorization, and application-caller gates all pass. No active checkpoint blocker remains.
+Checkpoint 0A.3 requires leaked-password protection. Supabase exposes that control only on Pro plans, and the user chose to keep the free plan on 2026-07-20. The checkpoint and all dependent Phase 0 correctness work remain blocked unless the project is upgraded or the approved gate is explicitly revised. The security advisor also retains five non-target `anon`-executable security-definer findings for follow-up containment.
 
 ## Completed Commits
 
