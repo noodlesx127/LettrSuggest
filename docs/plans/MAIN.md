@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
-**Status:** Blocked  
-**Current checkpoint:** 0A.3 - Production security validation  
-**Next action:** Upgrade the Supabase project to Pro or explicitly revise the 0A.3 gate; leaked-password protection is unavailable on the selected free plan.
-**Safe stopping point:** Keep 0A.3 blocked and do not start recommendation correctness work while the required platform control is unavailable.
+**Status:** Ready  
+**Current checkpoint:** 0B.1 - Fast test harness and preference contracts  
+**Next action:** Start 0B.1 by configuring Vitest and writing the failing preference-polarity and feature-key normalization contracts.
+**Safe stopping point:** Checkpoint 0A.3 is complete and committed; 0B.1 is ready but not yet in progress.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -41,8 +41,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | --- | --- | --- | --- | --- |
 | 0A.1 Privileged-function inventory and failing security baseline | Complete | None | Effective overload/ACL inventory and negative pgTAP tests fail for each exposed path | `test: establish privileged function security baseline` |
 | 0A.2 Authorization and grants migration | Complete | 0A.1 | pgTAP proves self/admin/service boundaries and application callers pass | `8fa8104`, `test: complete privileged function caller gate` |
-| 0A.3 Production security validation | Blocked | 0A.2 | Effective grants verified; security/performance advisors reviewed; leaked-password protection enabled | Not started |
-| 0B.1 Fast test harness and preference contracts | Not started | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | Not started |
+| 0A.3 Production security validation | Complete | 0A.2 | Effective helper grants/triggers verified; security/performance advisors reviewed; leaked-password/HIBP protection enabled or the dated Free-plan exception below is recorded; no remaining advisor finding is waived | `fix: contain privileged helper functions` |
+| 0B.1 Fast test harness and preference contracts | Ready | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | Not started |
 | 0B.2 Atomic metadata tuples and recency | Not started | 0B.1 | Failed-middle-fetch and date-order fixtures pass | Not started |
 | 0B.3 Explicit seed semantics | Not started | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | Not started |
 | 0C.1 Input health and neutral request context | Not started | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | Not started |
@@ -85,7 +85,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 
 | Audit item | Checkpoint | Required evidence | State |
 | --- | --- | --- | --- |
-| Critical privileged database functions | 0A.1-0A.3 | Effective privilege tests and advisor results | Open |
+| Critical privileged database functions | 0A.1-0A.3 | Effective privilege tests and advisor results | Closed |
 | 1. Reversed negative feature feedback | 0B.1 | Probability-boundary unit tests | Open |
 | 2. Explicit seeds do not seed neighborhoods | 0B.3 | Retrieval-anchor fixture | Open |
 | 3. API recency reversed | 0B.2 | Date-ordered fixture | Open |
@@ -125,6 +125,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 2026-07-19 | Treat request seeds as retrieval anchors that cannot be returned. |
 | 2026-07-19 | Keep vector retrieval disabled until capability, versioning, backfill, and cache-score parity gates pass. |
 | 2026-07-19 | Use deterministic fixtures and measured outcomes before changing quality weights. |
+| 2026-07-20 | Keep Supabase Free and accept disabled leaked-password/HIBP protection as a platform limitation; this exception is limited to HIBP only and waives no remaining security or performance advisor finding. |
 
 ## Verification Results
 
@@ -143,14 +144,26 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-20 - Exact `supabase/tests/database/privileged_functions.test.sql` executed as one transaction through Supabase MCP against production - PASS, 55/55 pgTAP assertions; the script reached `ROLLBACK`. A separate cleanup query confirmed zero retained `@privileged-functions.test` users or `pgtap-*` API keys.
 - 2026-07-20 - Production target-function catalog re-query - PASS; all five exact targets remain `SECURITY DEFINER`, use `SET search_path = ''`, deny `anon`, and match the intended authenticated/service-role matrix.
 - 2026-07-20 - Supabase performance advisor - REVIEWED; findings are INFO-level unused-index candidates only, with no immediate Phase 0 removal because production traffic evidence is insufficient.
-- 2026-07-20 - Supabase security advisor and Management API auth configuration - BLOCKED; 15 lints remain, including five non-target `anon`-executable security-definer functions and disabled leaked-password protection. `PATCH /v1/projects/xtcsekftikdsauttlcin/config/auth` with `password_hibp_enabled: true` was rejected because HaveIBeenPwned protection requires Pro. The user chose to keep the free plan, so no billing or auth configuration change was made.
+- 2026-07-20 - Supabase security advisor and Management API auth configuration - REVIEWED; 15 lints remained, including five non-target `anon`-executable security-definer functions and disabled leaked-password protection. `PATCH /v1/projects/xtcsekftikdsauttlcin/config/auth` with `password_hibp_enabled: true` was rejected because HaveIBeenPwned protection requires Pro. The user explicitly approved keeping Free and accepting this HIBP-only limitation; no other advisor finding is waived and no billing or Auth configuration change was made.
+- 2026-07-20 - Pre-migration production baseline: the unchanged then-current `supabase/tests/database/privileged_helpers.test.sql` ran as one transaction, reached `finish()` and `ROLLBACK`, and recorded 31 passed / 33 failed of 64 assertions as expected. No permanent database changes remained.
+- 2026-07-20 - Targeted follow-up transaction: `on_auth_user_created_role` matched `tgrelid = auth.users`, the exact `handle_new_user_role()` `tgfoid`, `tgtype = 5`, and enabled state; inserting two generated `auth.users` rows created both profile rows and both default `user_roles` rows. The transaction rolled back with no permanent changes.
+- 2026-07-20 - Final pre-migration production baseline: the exact 67-assertion `supabase/tests/database/privileged_helpers.test.sql` transaction reached `finish()` and `ROLLBACK`, with 34 passed / 33 expected failures and no retained writes. All three film-trigger behavior assertions passed; the failures were the intended search-path, ACL, arbitrary-ID, and prune-validation contracts.
+- 2026-07-20 - `rtk git diff --check` - PASS after the film-trigger contract and documentation updates; Git emitted only the pre-existing LF/CRLF warning for `supabase/.temp/cli-latest`.
+- 2026-07-20 - Supabase MCP `apply_migration` - PASS; production migration `20260721011822_contain_privileged_helpers` applied successfully. The repository migration is aligned at `supabase/migrations/20260721011822_contain_privileged_helpers.sql`.
+- 2026-07-20 - Exact post-migration `supabase/tests/database/privileged_helpers.test.sql` production transaction - PASS, 67/67 pgTAP assertions with no SQL errors; the script reached `ROLLBACK` and retained no writes.
+- 2026-07-20 - Production helper catalog and trigger re-query - PASS; all five helpers are owned by `postgres`, are `SECURITY DEFINER`, and use `SET search_path = ''`. `handle_new_user()`, `handle_new_user_role()`, `prune_api_caches(integer)`, and `sync_film_events_last_date()` are executable only by `postgres`; `is_admin(uuid)` is executable only by `authenticated` and `postgres`. The two auth triggers remain enabled AFTER INSERT ROW triggers, and the film-date trigger remains an enabled AFTER INSERT OR UPDATE ROW trigger on `film_diary_events_raw`.
+- 2026-07-20 - Production cleanup and cron verification - PASS; zero generated helper-test auth users, films, or raw diary rows remained. Cron job 1 remains active as `postgres` at `20 3 * * *` with `select public.prune_api_caches(30);`, and the function retains all eight production prune targets.
+- 2026-07-20 - Final Supabase advisor review - PASS for the accepted gate. Security warnings fell from 15 to 6: five intended authenticated `SECURITY DEFINER` RPC warnings whose body authorization is covered by pgTAP, plus disabled HIBP under the dated Free-plan exception. All five prior anonymous helper-exposure warnings are resolved. Performance findings remain INFO-only unused-index candidates and were not removed without traffic evidence.
 
 ## Blockers
 
-Checkpoint 0A.3 requires leaked-password protection. Supabase exposes that control only on Pro plans, and the user chose to keep the free plan on 2026-07-20. The checkpoint and all dependent Phase 0 correctness work remain blocked unless the project is upgraded or the approved gate is explicitly revised. The security advisor also retains five non-target `anon`-executable security-definer findings for follow-up containment.
+None. The approved 2026-07-20 gate exception remains limited to disabled leaked-password/HIBP protection on Supabase Free and waives no other security or performance advisor finding.
 
 ## Completed Commits
 
 - `4221f4d` - approved recommendation remediation design (status approval recorded in the planning commit)
 - `test: establish privileged function security baseline` - checkpoint 0A.1 inventory and expected-failing pgTAP contract (this checkpoint)
 - `8fa8104` - checkpoint 0A.2 privileged-function migration, authorization tests, caller adaptation, and production evidence
+- `139710c` - checkpoint 0A.2 production caller gate and reusable Playwright configuration
+- `6f0828f` - checkpoint 0A.3 initial production validation and Free-plan HIBP blocker evidence
+- `fix: contain privileged helper functions` - checkpoint 0A.3 helper containment, production verification, and advisor closure

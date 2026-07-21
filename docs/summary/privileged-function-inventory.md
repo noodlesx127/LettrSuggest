@@ -1,7 +1,7 @@
 # Privileged Function Inventory
 
 **Baseline catalog snapshot:** 2026-07-20  
-**Production validation:** 2026-07-20  
+**Production validation (0A.2 targets):** 2026-07-20  
 **Environment:** linked Supabase project `xtcsekftikdsauttlcin`  
 **Scope:** all `public` `SECURITY DEFINER` functions plus every live overload of the five checkpoint targets
 
@@ -19,9 +19,26 @@ Migration `20260720235302_secure_privileged_functions` removed `PUBLIC` and `ano
 
 All five remain `SECURITY DEFINER` with `SET search_path = ''` and schema-qualified bodies.
 
-The security advisor still reports direct `anon` execution on `handle_new_user()`, `handle_new_user_role()`, `is_admin(uuid)`, `prune_api_caches(integer)`, and `sync_film_events_last_date()`. Trigger-only and maintenance routines should not be exposed through PostgREST; `is_admin(uuid)` also permits arbitrary role-status lookup. These findings remain open for follow-up containment.
+Production migration `20260721011822_contain_privileged_helpers` removed direct client execution from `handle_new_user()`, `handle_new_user_role()`, `prune_api_caches(integer)`, and `sync_film_events_last_date()`. It retained authenticated execution only for `is_admin(uuid)` and added a self-identity body check. All five are owned by `postgres`, remain `SECURITY DEFINER`, and use `SET search_path = ''` with schema-qualified bodies.
 
-Leaked-password protection remains disabled. The Management API rejected enabling `password_hibp_enabled` because HaveIBeenPwned protection requires a Pro plan; the user chose to keep the free plan. No billing or Auth configuration change was made.
+Leaked-password protection remains disabled. On 2026-07-20 the user explicitly approved keeping the Supabase Free plan and accepting disabled HaveIBeenPwned/leaked-password protection as a platform limitation. This exception is limited to HIBP only and waives no remaining security or performance advisor finding. The Management API rejected enabling `password_hibp_enabled` because HaveIBeenPwned protection requires Pro; no billing or Auth configuration change was made.
+
+## Checkpoint 0A.3 Helper Containment (Complete)
+
+The exact final `supabase/tests/database/privileged_helpers.test.sql` pre-migration production baseline reached `finish()` and `ROLLBACK`, recording 34 passed / 33 expected failures of 67 assertions with no retained writes. The 33 failures captured the intended search-path, ACL, arbitrary-ID, and prune-validation defects.
+
+The same unchanged 67-assertion contract passed 67/67 after deployment in one rolled-back production transaction. It covers exact signatures, SECURITY DEFINER and empty search paths, schema-qualified bodies, catalog-based trigger ownership/timing, generated auth-trigger outcomes, exact postgres/grantee ACLs, `is_admin` self/cross-user authorization, raw diary INSERT/UPDATE synchronization, non-target preservation, and safe prune validation/denial probes. It does not perform a valid cache prune.
+
+The applied forward-only migration is `supabase/migrations/20260721011822_contain_privileged_helpers.sql`. It:
+
+- Recreate `handle_new_user()`, `handle_new_user_role()`, `is_admin(uuid)`, `prune_api_caches(integer)`, and `sync_film_events_last_date()` with `SECURITY DEFINER`, `SET search_path = ''`, and schema-qualified objects.
+- Reconcile `on_auth_user_created_role` and `trg_sync_film_events_last_date` without `CASCADE` while retaining trigger firing without client `EXECUTE` grants.
+- Revoke `PUBLIC`, `anon`, `authenticated`, and `service_role` from all five functions; grant `authenticated` only on `is_admin(uuid)`; retain postgres ownership for trigger execution and the existing cron job.
+- Preserve all eight live prune deletions: `public.tmdb_similar_cache.cached_at`, `public.trakt_related_cache.cached_at`, `public.tuimdb_uid_cache.cached_at`, `public.tastedive_cache.cached_at`, `public.watchmode_cache.cached_at`, `public.vector_similarity_cache.cached_at`, `public.tmdb_trending.updated_at`, and `public.user_taste_profile_cache.computed_at`.
+
+Post-migration catalog verification confirmed the exact ACL matrix: owner-only for the three trigger functions and `prune_api_caches(integer)`, and authenticated plus owner for `is_admin(uuid)`. Both auth triggers and the film-date trigger retain their exact enabled relation/function/timing contracts. Cron job 1 remains active as `postgres` at `20 3 * * *` with `select public.prune_api_caches(30);`. Cleanup queries found zero retained helper-test users, films, or raw diary rows.
+
+The final security advisor has six warnings: five intended authenticated SECURITY DEFINER RPC exposures whose body authorization is covered by pgTAP, plus disabled HIBP under the dated Free-plan exception. All five prior anonymous helper exposures are resolved. Performance findings remain INFO-only unused-index candidates; no index was removed without traffic evidence.
 
 ## Baseline Findings
 

@@ -1,7 +1,7 @@
 # Phase 0: Containment and Correctness
 
 **Phase state:** In progress  
-**Current checkpoint:** 0A.3  
+**Current checkpoint:** 0B.1  
 **Exit condition:** Privileged functions enforce effective authorization, proven signal defects are fixture-tested, and v1 reports honest deterministic behavior.
 
 `docs/plans/MAIN.md` controls checkpoint status. Execute in order.
@@ -119,11 +119,31 @@ rtk git commit -m "fix: enforce privileged function authorization"
 
 ## Checkpoint 0A.3: Production Security Validation
 
-**State:** Blocked
+**State:** Complete
 
 **Files:**
+- Create: `supabase/migrations/20260721011822_contain_privileged_helpers.sql`
+- Create: `supabase/tests/database/privileged_helpers.test.sql`
 - Modify: `docs/summary/privileged-function-inventory.md`
 - Modify: `docs/plans/MAIN.md`
+
+### Current helper-containment extension
+
+- [x] **Step A: Write the focused pgTAP contract before the migration**
+
+  `supabase/tests/database/privileged_helpers.test.sql` is transaction-isolated and plans exactly 67 assertions. The final exact pre-migration production run reached `finish()` and `ROLLBACK`, recording 34 passed / 33 expected failures with no permanent changes. The contract covers exact signatures, ownership/grantees, fixed search paths, schema-qualified bodies, trigger catalogs and outcomes, generated identities, `is_admin` self/cross-user authorization, raw diary INSERT/UPDATE synchronization, non-target preservation, and safe prune validation/denial probes.
+
+- [x] **Step B: Add one forward-only helper-containment migration**
+
+  `supabase/migrations/20260721011822_contain_privileged_helpers.sql` hardens all five helper bodies, preserves all eight live prune deletions, reconciles `on_auth_user_created_role` and `trg_sync_film_events_last_date` without `CASCADE`, revokes client/public execution, grants `authenticated` only on `is_admin(uuid)`, and ends with the PostgREST schema reload notification. Supabase applied it as production migration `20260721011822_contain_privileged_helpers`.
+
+- [x] **Step C: Run the migration and post-migration verification**
+
+  Production migration `20260721011822_contain_privileged_helpers` applied successfully. The exact unchanged pgTAP suite passed 67/67 in a rolled-back production transaction. Catalog verification confirmed `postgres` ownership, empty search paths, owner-only execution for trigger/maintenance helpers, authenticated-plus-owner execution for `is_admin(uuid)`, and the exact enabled trigger contracts. Cleanup found zero retained generated identities or film rows. Cron job 1 remains active and unchanged as `postgres`. Final security review contains only five intended body-authorized authenticated RPC warnings plus the approved HIBP limitation; performance findings remain INFO-only.
+
+The earlier steps below are completed validation evidence for the 0A.2 target RPCs; the helper-containment extension above is the final completed 0A.3 work.
+
+### Previously completed 0A.2 target validation
 
 - [x] **Step 1: Apply the migration to the intended environment**
 
@@ -143,24 +163,24 @@ Verify anonymous, cross-user, self-service, admin, and service behavior through 
 
 Evidence: The exact 55-assertion pgTAP suite passed as a rolled-back production transaction, and the 13-test Playwright production slice passed through JWT and API-key application paths. Cleanup queries found no retained generated identities or keys.
 
-- [ ] **Step 4: Review platform controls**
+- [x] **Step 4: Review platform controls**
 
-Run Supabase security and performance advisors. Enable leaked-password protection in Auth settings and record the project/date confirmation without storing credentials.
+Run Supabase security and performance advisors. Enable leaked-password protection in Auth settings when the selected plan supports it, or record the explicit dated HIBP-only Free-plan exception without storing credentials.
 
-Evidence: Advisors were reviewed on 2026-07-20. Performance findings are INFO-level unused indexes. Security reports 15 lints: intended authenticated target RPC warnings, five non-target functions still executable by `anon`, and disabled leaked-password protection. The Management API rejected `password_hibp_enabled: true` because the feature requires Pro; the user chose to retain the free plan. No billing change occurred, so this step and checkpoint remain blocked.
+Evidence: Advisors were reviewed on 2026-07-20. Performance findings are INFO-level unused indexes. Security reported 15 lints, including five non-target functions still executable by `anon` and disabled leaked-password protection. The Management API rejected `password_hibp_enabled: true` because the feature requires Pro. The user explicitly approved keeping Free and accepting disabled leaked-password/HIBP protection as a limitation dated 2026-07-20; the exception is limited to HIBP only and does not waive any remaining advisor finding. No billing or Auth configuration change occurred.
 
-- [ ] **Step 5: Commit validation evidence**
+- [x] **Step 5: Commit validation evidence**
 
-Mark 0A.3 complete and 0B.1 ready.
+0A.3 is complete and 0B.1 is ready. The checkpoint commit includes the aligned migration source, focused pgTAP contract, inventory, and tracker evidence.
 
 ```powershell
-rtk git add docs/summary/privileged-function-inventory.md docs/plans/MAIN.md docs/plans/phases/phase-0-containment-and-correctness.md
-rtk git commit -m "docs: verify privileged function containment"
+rtk git add supabase/migrations/20260721011822_contain_privileged_helpers.sql supabase/tests/database/privileged_helpers.test.sql docs/summary/privileged-function-inventory.md docs/plans/MAIN.md docs/plans/phases/phase-0-containment-and-correctness.md
+rtk git commit -m "fix: contain privileged helper functions"
 ```
 
 ## Checkpoint 0B.1: Fast Test Harness and Preference Contracts
 
-**State:** Not started
+**State:** Ready
 
 **Files:**
 - Modify: `package.json`
