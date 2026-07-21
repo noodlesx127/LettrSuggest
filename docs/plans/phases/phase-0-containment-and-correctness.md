@@ -285,39 +285,46 @@ rtk git commit -m "fix: preserve recommendation metadata identity"
 
 ## Checkpoint 0B.3: Explicit Seed Semantics
 
-**State:** Ready
+**State:** Complete
 
 **Files:**
 - Create: `tests/unit/recommendationSeeds.test.ts`
+- Create: `src/app/api/v1/suggestions/generate/routeHelpers.ts`
 - Modify: `src/lib/serverSuggestionsEngine.ts`
 - Modify: `src/app/api/v1/suggestions/generate/route.ts`
 
-- [ ] **Step 1: Write failing seed tests**
+- [x] **Step 1: Write failing seed tests**
 
 Inject a provider fake that records requested seed IDs. Assert explicit seeds are requested as neighborhoods, excluded from returned candidates, combined deterministically with history seeds, and produce equal output for an equal request seed.
 
-- [ ] **Step 2: Confirm current behavior fails**
+- [x] **Step 2: Confirm current behavior fails**
 
 Run: `rtk npm run test -- tests/unit/recommendationSeeds.test.ts`  
 Expected: FAIL because explicit seeds are inserted as candidates rather than retrieval anchors.
 
-- [ ] **Step 3: Implement retrieval-anchor behavior**
+Evidence: The first focused run recorded 2 failures / 1 pass because the provider seam saw no neighborhood calls. Review-driven extensions also failed before their fixes on the missing route helper seam, canonical ordering, shuffled equal-score history, and unbounded provider concurrency.
+
+- [x] **Step 3: Implement retrieval-anchor behavior**
 
 Pass explicit seeds into neighborhood retrieval, add them to the exclusion set before scoring, remove direct candidate insertion, and derive all selection from the request-scoped seed. Keep the global weak-seed list removal for Phase 1B.1 where all retrieval paths converge.
 
-- [ ] **Step 4: Verify and commit**
+Evidence: Explicit seeds are canonicalized and scheduled first, history anchors have deterministic score/date/TMDB/URI ordering, route inputs derive a canonical request seed, candidates are defensively filtered at both engine and route boundaries, and all provider/fallback requests share a request-scoped concurrency limit of 5.
+
+- [x] **Step 4: Verify and commit**
 
 Run: `rtk npm run test -- tests/unit/recommendationSeeds.test.ts`  
 Expected: PASS.
 
+Evidence: The focused suite passes 10/10; typecheck and `git diff --check` pass. Independent spec and code-quality reviews approved the checkpoint after partial-leak, route-boundary, deterministic-order, and provider-concurrency gaps were corrected.
+
 ```powershell
-rtk git add src/lib/serverSuggestionsEngine.ts src/app/api/v1/suggestions/generate/route.ts tests/unit/recommendationSeeds.test.ts docs/plans
+rtk git add src/lib/serverSuggestionsEngine.ts src/app/api/v1/suggestions/generate/route.ts src/app/api/v1/suggestions/generate/routeHelpers.ts tests/unit/recommendationSeeds.test.ts docs/plans
 rtk git commit -m "fix: use explicit seeds as retrieval anchors"
 ```
 
 ## Checkpoint 0C.1: Input Health and Neutral Request Context
 
-**State:** Not started
+**State:** Ready
 
 **Files:**
 - Create: `tests/integration/recommendationInputHealth.test.ts`

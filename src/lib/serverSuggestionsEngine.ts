@@ -109,6 +109,7 @@ type SourceMetadata = Map<
 
 const TMDB_BATCH_SIZE = 200;
 const TASTE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const CANDIDATE_PROVIDER_CONCURRENCY = 5;
 /** Minimum positive signal count for explicit feedback to override a pattern-analysis "avoid" classification. */
 const SUBGENRE_POSITIVE_OVERRIDE_MIN = 10;
 
@@ -268,14 +269,52 @@ function scoreSeedFilm(film: FilmEventRow): number {
   );
 }
 
-function getTopSeedTmdbIds(userContext: UserContext, limit = 8): number[] {
+function parseFilmDate(value: string | null): number | null {
+  if (!value) return null;
+
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function compareSeedFilms(
+  left: FilmEventRow,
+  right: FilmEventRow,
+  mappings: ReadonlyMap<string, number>,
+): number {
+  const scoreDifference = scoreSeedFilm(right) - scoreSeedFilm(left);
+  if (scoreDifference !== 0) return scoreDifference;
+
+  const leftDate = parseFilmDate(left.last_date);
+  const rightDate = parseFilmDate(right.last_date);
+  if (leftDate !== rightDate) {
+    if (leftDate === null) return 1;
+    if (rightDate === null) return -1;
+    return rightDate - leftDate;
+  }
+
+  const leftTmdbId = mappings.get(left.uri);
+  const rightTmdbId = mappings.get(right.uri);
+  if (leftTmdbId !== rightTmdbId) {
+    if (leftTmdbId === undefined) return 1;
+    if (rightTmdbId === undefined) return -1;
+    return leftTmdbId - rightTmdbId;
+  }
+
+  return left.uri.localeCompare(right.uri);
+}
+
+function getTopSeedTmdbIds(
+  userContext: UserContext,
+  limit: number,
+  random: () => number,
+): number[] {
   const scored = userContext.films
     .filter(
       (film) =>
         userContext.mappings.has(film.uri) &&
         ((film.rating ?? 0) >= 3.5 || film.liked || film.rewatch),
     )
-    .sort((left, right) => scoreSeedFilm(right) - scoreSeedFilm(left))
+    .sort((left, right) => compareSeedFilms(left, right, userContext.mappings))
     .map((film) => userContext.mappings.get(film.uri))
     .filter((tmdbId): tmdbId is number => isFiniteNumber(tmdbId))
     .filter((tmdbId, index, ids) => ids.indexOf(tmdbId) === index)
@@ -287,11 +326,28 @@ function getTopSeedTmdbIds(userContext: UserContext, limit = 8): number[] {
   const pool = scored.slice(0, poolSize);
 
   for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
 
   return pool.slice(0, limit);
+}
+
+function createDeterministicRng(requestSeed: string): () => number {
+  let state = 2166136261;
+
+  for (let index = 0; index < requestSeed.length; index += 1) {
+    state ^= requestSeed.charCodeAt(index);
+    state = Math.imul(state, 16777619);
+  }
+
+  if (state === 0) state = 1;
+
+  return () => {
+    state = Math.imul(state ^ (state >>> 15), 1 | state);
+    state ^= state + Math.imul(state ^ (state >>> 7), 61 | state);
+    return ((state ^ (state >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function getRelevantTasteTmdbIds(userContext: UserContext): number[] {
@@ -784,6 +840,10 @@ export async function generateServerCandidates(
   userContext: UserContext,
   tasteProfile: TasteProfile,
   seedTmdbIds: number[] = [],
+  options: {
+    requestSeed?: string;
+    provider?: typeof fetchTmdb;
+  } = {},
 ): Promise<{ candidateIds: number[]; sourceMetadata: SourceMetadata }> {
   console.log("[ServerEngine] generateServerCandidates", {
     userId,
@@ -793,38 +853,41 @@ export async function generateServerCandidates(
   const sourceMetadata: SourceMetadata = new Map();
   const candidateOrder: number[] = [];
   const candidateSet = new Set<number>();
+  const explicitSeedTmdbIds = Array.from(
+    new Set(
+      seedTmdbIds.filter(
+        (tmdbId) => isFiniteNumber(tmdbId) && tmdbId > 0,
+      ),
+    ),
+  ).sort((left, right) => left - right);
   const seenIds = new Set<number>([
     ...Array.from(userContext.mappings.values()),
     ...Array.from(userContext.blockedIds.values()),
+    ...explicitSeedTmdbIds,
   ]);
+  const random = createDeterministicRng(
+    options.requestSeed ?? `${userId}:${explicitSeedTmdbIds.join(",")}`,
+  );
+  const provider = options.provider ?? fetchTmdb;
+  const providerLimit = pLimit(CANDIDATE_PROVIDER_CONCURRENCY);
+  const limitedProvider = <T>(
+    path: string,
+    params?: Record<string, string | number | undefined>,
+  ): Promise<T> => providerLimit(() => provider<T>(path, params));
 
-  // Seeds are explicitly allowed through the seenIds filter — they serve as discovery anchors.
-  // The downstream ranking engine and/or API consumer should strip them before final display
-  // if the user has already watched the seeded film.
-  for (const tmdbId of seedTmdbIds) {
-    if (userContext.blockedIds.has(tmdbId)) continue;
-    addCandidateSource(
-      sourceMetadata,
-      candidateOrder,
-      candidateSet,
-      tmdbId,
-      "seed",
-      {
-        allowSeen: true,
-      },
-    );
-  }
-
-  const topSeedTmdbIds = getTopSeedTmdbIds(userContext, 12);
+  const topSeedTmdbIds = getTopSeedTmdbIds(userContext, 12, random);
+  const neighborhoodSeedTmdbIds = Array.from(
+    new Set([...explicitSeedTmdbIds, ...topSeedTmdbIds]),
+  );
   const discoverGenreIds = tasteProfile.topGenres
     .slice(0, 3)
     .map((genre) => genre.id);
 
   const requests: Array<Promise<{ source: string; ids: number[] }>> = [];
-  const useDayTrending = Math.random() > 0.5;
+  const useDayTrending = random() > 0.5;
 
   requests.push(
-    fetchTmdb<TmdbListResult>(
+    limitedProvider<TmdbListResult>(
       useDayTrending ? "/trending/movie/day" : "/trending/movie/week",
     )
       .then((result) => ({
@@ -842,7 +905,7 @@ export async function generateServerCandidates(
 
   if (topSeedTmdbIds.length < 4) {
     requests.push(
-      fetchTmdb<TmdbListResult>(
+      limitedProvider<TmdbListResult>(
         useDayTrending ? "/trending/movie/week" : "/trending/movie/day",
       )
         .then((result) => ({
@@ -861,12 +924,12 @@ export async function generateServerCandidates(
 
   if (discoverGenreIds.length > 0) {
     requests.push(
-      fetchTmdb<TmdbListResult>("/discover/movie", {
+      limitedProvider<TmdbListResult>("/discover/movie", {
         with_genres: discoverGenreIds.join("|"),
         include_adult: "false",
         sort_by: "vote_average.desc",
         "vote_count.gte": 200,
-        page: String(Math.floor(Math.random() * 5) + 1),
+        page: String(Math.floor(random() * 5) + 1),
       })
         .then((result) => ({
           source: "discover-top-genres",
@@ -879,16 +942,19 @@ export async function generateServerCandidates(
     );
   }
 
-  for (const tmdbId of topSeedTmdbIds) {
+  for (const tmdbId of neighborhoodSeedTmdbIds) {
     requests.push(
-      fetchTmdb<TmdbListResult>(`/movie/${tmdbId}/recommendations`, { page: 1 })
+      limitedProvider<TmdbListResult>(
+        `/movie/${tmdbId}/recommendations`,
+        { page: 1 },
+      )
         .catch(() => ({ results: [] as Array<{ id: number }> }))
         .then(async (result) => {
           const ids = (result.results ?? []).map((movie) => movie.id);
           // /recommendations returns fewer results for obscure films.
           // Fall back to /similar only when recommendations is empty.
           if (ids.length === 0) {
-            const fallback = await fetchTmdb<TmdbListResult>(
+            const fallback = await limitedProvider<TmdbListResult>(
               `/movie/${tmdbId}/similar`,
               { page: 1 },
             ).catch(() => ({ results: [] as Array<{ id: number }> }));
@@ -934,10 +1000,8 @@ export async function generateServerCandidates(
   const orderedCandidates = [...candidateOrder].sort((left, right) => {
     const leftMeta = sourceMetadata.get(left);
     const rightMeta = sourceMetadata.get(right);
-    const leftSeedBoost = leftMeta?.sources.includes("seed") ? 100 : 0;
-    const rightSeedBoost = rightMeta?.sources.includes("seed") ? 100 : 0;
-    const leftScore = (leftMeta?.sources.length ?? 0) + leftSeedBoost;
-    const rightScore = (rightMeta?.sources.length ?? 0) + rightSeedBoost;
+    const leftScore = leftMeta?.sources.length ?? 0;
+    const rightScore = rightMeta?.sources.length ?? 0;
 
     return rightScore - leftScore;
   });

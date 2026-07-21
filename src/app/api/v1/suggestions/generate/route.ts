@@ -16,6 +16,10 @@ import {
   loadCachedTmdbDetails,
   loadUserContext,
 } from "@/lib/serverSuggestionsEngine";
+import {
+  deriveGenerateRequestSeed,
+  filterGeneratedCandidateIds,
+} from "@/app/api/v1/suggestions/generate/routeHelpers";
 
 import { withApiAuth } from "../../_lib/apiKeyAuth";
 import { isRecord } from "../../_lib/pagination";
@@ -249,6 +253,13 @@ export async function POST(req: Request) {
       const requestId = generateRequestId();
       const body = await parseGenerateSuggestionsBody(req);
       const { debug } = body;
+      const requestSeed = deriveGenerateRequestSeed({
+        userId: auth.userId,
+        seedTmdbIds: body.seed_tmdb_ids,
+        limit: body.limit,
+        excludeTmdbIds: body.exclude_tmdb_ids,
+        genreIds: body.genre_ids,
+      });
 
       console.log("[v1/suggestions/generate] Starting generation", {
         requestId,
@@ -268,15 +279,15 @@ export async function POST(req: Request) {
         userContext,
         tasteProfile,
         body.seed_tmdb_ids,
+        { requestSeed },
       );
 
-      const excludeSet = new Set([
-        ...body.exclude_tmdb_ids,
-        ...Array.from(userContext.blockedIds),
-      ]);
-      const filteredCandidates = candidateIds.filter(
-        (id) => !excludeSet.has(id),
-      );
+      const filteredCandidates = filterGeneratedCandidateIds({
+        candidateIds,
+        seedTmdbIds: body.seed_tmdb_ids,
+        excludeTmdbIds: body.exclude_tmdb_ids,
+        blockedIds: userContext.blockedIds,
+      });
 
       // Batch pre-load TMDB details for candidates + user's mapped films to avoid N+1 fetches
       // Covers: candidate scoring loop, subgenre analysis loop, liked/disliked movie fetches
