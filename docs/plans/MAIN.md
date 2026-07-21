@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
 **Status:** Ready  
-**Current checkpoint:** 0B.2 - Atomic metadata tuples and recency  
-**Next action:** Write the failed-middle-fetch and order-independent recency tests before introducing the atomic normalized film tuple.
-**Safe stopping point:** Checkpoint 0B.1 is complete and committed; 0B.2 is ready but not yet in progress.
+**Current checkpoint:** 0B.3 - Explicit seed semantics  
+**Next action:** Write the explicit-seed retrieval-anchor, exclusion, and deterministic-combination tests before changing candidate retrieval.
+**Safe stopping point:** Checkpoint 0B.2 is complete and committed; 0B.3 is ready but not yet in progress.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -42,9 +42,9 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 0A.1 Privileged-function inventory and failing security baseline | Complete | None | Effective overload/ACL inventory and negative pgTAP tests fail for each exposed path | `test: establish privileged function security baseline` |
 | 0A.2 Authorization and grants migration | Complete | 0A.1 | pgTAP proves self/admin/service boundaries and application callers pass | `8fa8104`, `test: complete privileged function caller gate` |
 | 0A.3 Production security validation | Complete | 0A.2 | Effective helper grants/triggers verified; security/performance advisors reviewed; leaked-password/HIBP protection enabled or the dated Free-plan exception below is recorded; no remaining advisor finding is waived | `2fdf02c` |
-| 0B.1 Fast test harness and preference contracts | Complete | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | `fix: correct recommendation preference polarity` |
-| 0B.2 Atomic metadata tuples and recency | Ready | 0B.1 | Failed-middle-fetch and date-order fixtures pass | Not started |
-| 0B.3 Explicit seed semantics | Not started | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | Not started |
+| 0B.1 Fast test harness and preference contracts | Complete | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | `5117a41` |
+| 0B.2 Atomic metadata tuples and recency | Complete | 0B.1 | Failed-middle-fetch and date-order fixtures pass | `fix: preserve recommendation metadata identity` |
+| 0B.3 Explicit seed semantics | Ready | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | Not started |
 | 0C.1 Input health and neutral request context | Not started | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | Not started |
 | 0C.2 Strict filters and effective advanced behavior | Not started | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | Not started |
 | 1A.1 Canonical contracts and frozen fixtures | Not started | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | Not started |
@@ -88,8 +88,8 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | Critical privileged database functions | 0A.1-0A.3 | Effective privilege tests and advisor results | Closed |
 | 1. Reversed negative feature feedback | 0B.1 | Probability-boundary unit tests | Closed |
 | 2. Explicit seeds do not seed neighborhoods | 0B.3 | Retrieval-anchor fixture | Open |
-| 3. API recency reversed | 0B.2 | Date-ordered fixture | Open |
-| 4. Metadata fetch tuple misalignment | 0B.2 | Failed-middle-fetch fixture | Open |
+| 3. API recency reversed | 0B.2 | Date-ordered fixture | Closed |
+| 4. Metadata fetch tuple misalignment | 0B.2 | Failed-middle-fetch fixture | Closed |
 | 5. False same-provider consensus | 1B.2 | Provider-family evidence fixture | Open |
 | 6. Forced background prior | 0C.1 | Neutral-context API test | Open |
 | 7. Genre filtering fails open | 0C.2 | Strict genre endpoint test | Open |
@@ -135,6 +135,9 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-20 - Extended `supabase/tests/database/privileged_functions.test.sql` to 55 assertions covering exact signatures, PUBLIC/anon/authenticated/service_role ACLs, self/cross-user/admin/service invocation, null identity, generated target/non-target rows, returned deletion counts, and post-call preservation. The pre-migration run of `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql --linked` was blocked before pgTAP execution by the missing Docker Desktop `pg_prove` image; the prior linked 0A.1 run above remains the available failing evidence for the unsafe current behavior.
 - 2026-07-20 - `rtk npm run lint` - PASS; no ESLint warnings or errors.
 - 2026-07-20 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully.
+- 2026-07-21 - Initial `rtk npm run test -- tests/unit/recommendationNormalization.test.ts` - expected FAIL because `@/lib/recommendationNormalization` did not exist, establishing the 0B.2 red state.
+- 2026-07-21 - `rtk npm run test -- tests/unit/recommendationNormalization.test.ts` - PASS, 8/8. The suite covers failed-middle-fetch identity, shuffled and tied date order, failed metadata inside the recent window, distinct-film recency, pinned feedback at and beyond caps, and one-details-result fan-out for duplicate film events.
+- 2026-07-21 - `rtk npm run typecheck` and `rtk git diff --check` - PASS. Independent spec and code-quality reviews approved atomic tuple integration after recent-window, pinned-feedback, unique-fetch, and duplicate-film corrections.
 - 2026-07-20 - `rtk git diff --check` - PASS.
 - 2026-07-20 - `rtk npx playwright test tests/api-v1.spec.ts -g "liked|stats|rate limit"` - BLOCKED/FAIL before endpoint execution: 7 credential-dependent tests skipped and 2 unauthenticated tests failed because no Playwright `baseURL` is configured (`Invalid URL`).
 - 2026-07-20 - Supabase MCP `apply_migration` - PASS; production migration `20260720235302_secure_privileged_functions` applied successfully after explicit user authorization.
@@ -173,4 +176,5 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `139710c` - checkpoint 0A.2 production caller gate and reusable Playwright configuration
 - `6f0828f` - checkpoint 0A.3 initial production validation and Free-plan HIBP blocker evidence
 - `2fdf02c` - checkpoint 0A.3 helper containment, production verification, and advisor closure
-- `fix: correct recommendation preference polarity` - checkpoint 0B.1 Vitest harness and corrected preference semantics
+- `5117a41` - checkpoint 0B.1 Vitest harness and corrected preference semantics
+- `fix: preserve recommendation metadata identity` - checkpoint 0B.2 atomic metadata identity and deterministic recency

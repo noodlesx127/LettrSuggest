@@ -2,6 +2,12 @@ import {
   SUBGENRE_PREFER_OVERRIDE_THRESHOLD,
   TECHNICAL_METADATA_KEYWORDS,
 } from "@/lib/feedbackConstants";
+import {
+  normalizeFilmTuples,
+  selectRecentFeatures,
+  selectRecentFilmsWithPinned,
+  sortByFilmRecency,
+} from "@/lib/recommendationNormalization";
 import { supabase } from "./supabaseClient";
 import { searchMovies } from "./movieAPI";
 import {
@@ -2526,6 +2532,7 @@ export type FilmEventLite = {
   year: number | null;
   rating?: number;
   liked?: boolean;
+  lastDate?: string;
 };
 
 function extractFeatures(movie: TMDBMovie) {
@@ -4987,9 +4994,10 @@ export async function suggestByOverlap(params: {
   const liked = params.films.filter(
     (f) => (f.liked || (f.rating ?? 0) >= 4) && params.mappings.get(f.uri),
   );
-  const likedIdsAll = liked
-    .map((f) => params.mappings.get(f.uri)!)
-    .filter(Boolean) as number[];
+  const likedHistoryFilms = liked.map((film) => ({
+    ...film,
+    tmdbId: params.mappings.get(film.uri)!,
+  }));
 
   // Fetch user feedback to adjust weights and filter candidates
   const feedbackMap = params.feedbackMap ?? (await getFeedback(params.userId));
@@ -5175,15 +5183,35 @@ export async function suggestByOverlap(params: {
       f.rating != null && // Must have an actual rating
       params.mappings.get(f.uri),
   );
-  const dislikedIdsAll = watchedNotLiked
-    .map((f) => params.mappings.get(f.uri)!)
-    .filter(Boolean) as number[];
+  const dislikedHistoryFilms = watchedNotLiked.map((film) => ({
+    ...film,
+    tmdbId: params.mappings.get(film.uri)!,
+  }));
 
-  // Add negative feedback IDs to disliked list to penalize their features
-  dislikedIdsAll.push(...Array.from(negativeFeedbackIds));
+  // Explicit feedback is pinned so history caps cannot discard it.
+  const dislikedFeedbackFilms = Array.from(negativeFeedbackIds).map(
+    (tmdbId) => ({
+      uri: `tmdb:${tmdbId}`,
+      title: `Film #${tmdbId}`,
+      year: null,
+      liked: false,
+      tmdbId,
+    }),
+  );
 
-  // Add positive feedback IDs to liked list to boost their features
-  likedIdsAll.push(...Array.from(positiveFeedbackIds));
+  const likedFeedbackFilms = Array.from(positiveFeedbackIds).map((tmdbId) => {
+      const existing = likedHistoryFilms.find(
+        (film) => film.tmdbId === tmdbId,
+      );
+      return existing
+        ? { ...existing }
+        : {
+            uri: `tmdb:${tmdbId}`,
+            title: `Film #${tmdbId}`,
+            year: null,
+            tmdbId,
+          };
+    });
 
   // Build per-source reliability from user feedback (Laplace-smoothed hit rate)
   const buildSourceReliability = () => {
@@ -5402,25 +5430,30 @@ export async function suggestByOverlap(params: {
 
   const likedCap = 1500;
   const dislikedCap = 600;
-  // If the user has an enormous number of liked films, bias towards
-  // the most recent ones (assuming input films are roughly chronological).
-  const likedIds =
-    likedIdsAll.length > likedCap ? likedIdsAll.slice(-likedCap) : likedIdsAll;
-  const dislikedIds =
-    dislikedIdsAll.length > dislikedCap
-      ? dislikedIdsAll.slice(-dislikedCap)
-      : dislikedIdsAll;
+  const getProfileIdentity = (entry: FilmEventLite & { tmdbId: number }) => ({
+    uri: entry.uri,
+    tmdbId: entry.tmdbId,
+    rating: entry.rating,
+    watchDate: entry.lastDate,
+  });
+  const likedFilms = selectRecentFilmsWithPinned({
+    films: likedHistoryFilms,
+    pinned: likedFeedbackFilms,
+    limit: likedCap,
+    getIdentity: getProfileIdentity,
+  });
+  const dislikedFilms = selectRecentFilmsWithPinned({
+    films: dislikedHistoryFilms,
+    pinned: dislikedFeedbackFilms,
+    limit: dislikedCap,
+    getIdentity: getProfileIdentity,
+  });
+  const likedIds = likedFilms.map(({ tmdbId }) => tmdbId);
+  const dislikedIds = dislikedFilms.map(({ tmdbId }) => tmdbId);
+  const likedFetchIds = Array.from(new Set(likedIds));
+  const dislikedFetchIds = Array.from(new Set(dislikedIds));
 
-  // Create a map of film URI to its rating and liked status for weighted profile building
-  const filmPreferenceMap = new Map<
-    string,
-    { rating?: number; liked?: boolean }
-  >();
-  for (const f of params.films) {
-    filmPreferenceMap.set(f.uri, { rating: f.rating, liked: f.liked });
-  }
-
-  const likedMovies = await mapLimit(likedIds, 10, async (id) => {
+  const likedMovies = await mapLimit(likedFetchIds, 10, async (id) => {
     try {
       if (params.tmdbDetailsCache?.has(id)) {
         return params.tmdbDetailsCache.get(id)!;
@@ -5431,7 +5464,7 @@ export async function suggestByOverlap(params: {
       return null;
     }
   });
-  const dislikedMovies = await mapLimit(dislikedIds, 10, async (id) => {
+  const dislikedMovies = await mapLimit(dislikedFetchIds, 10, async (id) => {
     try {
       if (params.tmdbDetailsCache?.has(id)) {
         return params.tmdbDetailsCache.get(id)!;
@@ -5446,12 +5479,27 @@ export async function suggestByOverlap(params: {
     }
   });
 
-  const likedFeats = likedMovies
-    .filter(Boolean)
-    .map((m) => extractFeatures(m as TMDBMovie));
-  const dislikedFeats = dislikedMovies
-    .filter(Boolean)
-    .map((m) => extractFeatures(m as TMDBMovie));
+  const likedDetailsById = new Map<number, TMDBMovie | null>(
+    likedFetchIds.map((id, index) => [id, likedMovies[index]]),
+  );
+  const dislikedDetailsById = new Map<number, TMDBMovie | null>(
+    dislikedFetchIds.map((id, index) => [id, dislikedMovies[index]]),
+  );
+  const likedTuples = normalizeFilmTuples({
+    films: likedFilms,
+    getIdentity: getProfileIdentity,
+    detailsById: likedDetailsById,
+    extractFeatures,
+  });
+  const dislikedTuples = normalizeFilmTuples({
+    films: dislikedFilms,
+    getIdentity: getProfileIdentity,
+    detailsById: dislikedDetailsById,
+    extractFeatures,
+  });
+  const likedFeats = likedTuples.flatMap((tuple) =>
+    tuple.features ? [tuple.features] : [],
+  );
 
   // COLD START: If user has no liked films, return popular, highly-rated movies
   // Consider watchlist as an alternative signal if available
@@ -5474,20 +5522,6 @@ export async function suggestByOverlap(params: {
     );
   }
 
-  // Map TMDB IDs back to original film data for weighting
-  const likedFilmData = liked.filter((f) => params.mappings.has(f.uri));
-  const likedFilmMap = new Map<number, { rating?: number; liked?: boolean }>();
-  for (const film of likedFilmData) {
-    const tmdbId = params.mappings.get(film.uri);
-    if (tmdbId != null) {
-      likedFilmMap.set(tmdbId, { rating: film.rating, liked: film.liked });
-    }
-  }
-  const likedMovieMap = new Map<number, TMDBMovie>();
-  for (const movie of likedMovies) {
-    if (movie?.id != null) likedMovieMap.set(movie.id, movie);
-  }
-
   // Identify favorite filmmakers (directors/actors) based on highly-rated films
   // Definition: appears in 3+ highly-rated films in the taste profile
   const favoriteDirectorCounts = new Map<
@@ -5503,10 +5537,17 @@ export async function suggestByOverlap(params: {
     liked?: boolean;
   }) => Boolean(film?.liked || (film?.rating ?? 0) >= 4);
 
-  for (const [tmdbId, filmData] of likedFilmMap.entries()) {
+  const favoriteFilmIds = new Set<number>();
+  for (const tuple of likedTuples) {
+    if (favoriteFilmIds.has(tuple.tmdbId)) continue;
+    const filmData = {
+      rating: tuple.rating ?? undefined,
+      liked: tuple.film.liked,
+    };
     if (!isHighlyRatedTasteFilm(filmData)) continue;
-    const movie = likedMovieMap.get(tmdbId);
+    const movie = tuple.details;
     if (!movie) continue;
+    favoriteFilmIds.add(tuple.tmdbId);
 
     const directorIdsForMovie = new Set(
       (movie.credits?.crew || [])
@@ -5654,10 +5695,13 @@ export async function suggestByOverlap(params: {
   let likedFamilyCount = 0;
   let likedChildrensCount = 0;
 
-  for (let i = 0; i < likedFeats.length; i++) {
-    const f = likedFeats[i];
-    const movie = likedMovies[i];
-    const filmData = movie?.id ? likedFilmMap.get(movie.id) : undefined;
+  for (const tuple of likedTuples) {
+    const f = tuple.features;
+    if (!f) continue;
+    const filmData = {
+      rating: tuple.rating ?? undefined,
+      liked: tuple.film.liked,
+    };
     const weight = getPreferenceWeight(filmData?.rating, filmData?.liked);
 
     // Weight all features by the preference strength
@@ -5711,18 +5755,22 @@ export async function suggestByOverlap(params: {
   };
 
   // Build film lookup from liked films (limit to top films by weight for each feature)
-  for (let i = 0; i < likedFeats.length; i++) {
-    const f = likedFeats[i];
-    const movie = likedMovies[i];
-    const filmData = movie?.id ? likedFilmMap.get(movie.id) : undefined;
+  for (const tuple of likedTuples) {
+    const f = tuple.features;
+    const movie = tuple.details;
+    if (!f || !movie) continue;
+    const filmData = {
+      rating: tuple.rating ?? undefined,
+      liked: tuple.film.liked,
+    };
     const weight = getPreferenceWeight(filmData?.rating, filmData?.liked);
 
     // Only track films with meaningful weight (>= 1.0)
     if (weight < 1.0 || !movie) continue;
 
     const filmInfo = {
-      id: likedIds[i],
-      title: movie.title || `Film #${likedIds[i]}`,
+      id: tuple.tmdbId,
+      title: movie.title || `Film #${tuple.tmdbId}`,
     };
 
     // Track genres
@@ -5761,8 +5809,8 @@ export async function suggestByOverlap(params: {
     }
   }
 
-  // Track recent watches (last 20 liked films) for recency boost
-  const recentLiked = likedFeats.slice(-20);
+  // Tuples are explicitly date-sorted, so failed fetches cannot shift identity or recency.
+  const recentLiked = selectRecentFeatures(likedTuples, 20);
   for (const f of recentLiked) {
     f.genres.forEach((g) => pref.recentGenres.add(g));
     f.directors.forEach((d) => pref.recentDirectors.add(d));
@@ -5772,7 +5820,9 @@ export async function suggestByOverlap(params: {
   }
 
   // Build avoidance patterns from disliked films
-  for (const f of dislikedFeats) {
+  for (const tuple of dislikedTuples) {
+    const f = tuple.features;
+    if (!f) continue;
     if (f.genreCombo)
       avoid.genreCombos.set(
         f.genreCombo,
@@ -5821,9 +5871,15 @@ export async function suggestByOverlap(params: {
   // Build advanced subgenre patterns for nuanced filtering
   // E.g., "likes Action but avoids Superhero Action"
   // Fetch TMDB data for all mapped films (with reasonable cap to avoid huge fan-out)
-  const mappedFilmsForAnalysis = params.films
-    .filter((f) => params.mappings.get(f.uri))
-    .slice(-400); // Cap at 400 most recent to avoid excessive fetches
+  const mappedFilmsForAnalysis = sortByFilmRecency(
+    params.films.filter((film) => params.mappings.has(film.uri)),
+    (film) => ({
+      uri: film.uri,
+      tmdbId: params.mappings.get(film.uri)!,
+      rating: film.rating,
+      watchDate: film.lastDate,
+    }),
+  ).slice(0, 400); // Cap at 400 most recent to avoid excessive fetches
 
   const mappedIds = mappedFilmsForAnalysis.map(
     (f) => params.mappings.get(f.uri)!,

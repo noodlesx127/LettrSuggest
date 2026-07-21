@@ -367,6 +367,7 @@ export async function POST(req: Request) {
         year: film.year,
         ...(film.rating != null ? { rating: film.rating } : {}),
         ...(film.liked != null ? { liked: film.liked } : {}),
+        ...(film.last_date != null ? { lastDate: film.last_date } : {}),
       }));
 
       const minimalEnhancedProfile = buildMinimalEnhancedTasteProfile({

@@ -239,44 +239,53 @@ rtk git commit -m "fix: correct recommendation preference polarity"
 
 ## Checkpoint 0B.2: Atomic Metadata Tuples and Recency
 
-**State:** Ready
+**State:** Complete
 
 **Files:**
 - Create: `src/lib/recommendationNormalization.ts`
 - Create: `tests/unit/recommendationNormalization.test.ts`
 - Modify: `src/lib/enrich.ts`
 - Modify: `src/lib/serverSuggestionsEngine.ts`
+- Modify: `src/app/api/v1/suggestions/generate/route.ts`
 
-- [ ] **Step 1: Write failed-middle-fetch and order-independent tests**
+- [x] **Step 1: Write failed-middle-fetch and order-independent tests**
 
 Build three film inputs with distinct rating/date/feature markers and fail metadata for the middle film. Assert the first and third retain their own markers. Shuffle identical dated inputs and assert normalized recent IDs are equal.
 
-- [ ] **Step 2: Confirm the tests fail**
+Evidence: The focused fixture retains all three tuples and their own ratings, dates, details, and features when the middle details result is null. Shuffled and equal-date inputs produce the same date-descending, TMDB-ID-tied order. Additional contracts cover failed and duplicate entries at the recent boundary and explicit feedback under history caps.
+
+- [x] **Step 2: Confirm the tests fail**
 
 Run: `rtk npm run test -- tests/unit/recommendationNormalization.test.ts`  
 Expected: FAIL because compacted feature arrays and positional recency break tuple identity.
 
-- [ ] **Step 3: Introduce and use an atomic normalized film tuple**
+Evidence: The initial focused run failed because `@/lib/recommendationNormalization` did not exist, establishing the red state before production implementation.
+
+- [x] **Step 3: Introduce and use an atomic normalized film tuple**
 
 Define a typed tuple containing URI, TMDB ID, film event, rating, watch date, details health, details, and features. Preserve failed details as `null` in the same tuple. Sort recency by parsed date with TMDB ID as deterministic tie-breaker; do not infer recency from input position.
 
-- [ ] **Step 4: Run focused tests and typecheck**
+Evidence: `recommendationNormalization.ts` owns the atomic tuple and pure selection contracts. `suggestByOverlap` fetches each unique ID once, fans details back to intact tuples, uses tuple identity for weighting and attribution, applies date sorting before caps, and selects recent distinct films before dropping failed features. The v1 adapter now preserves `last_date`, and server taste-profile input is deterministically date ordered.
+
+- [x] **Step 4: Run focused tests and typecheck**
 
 Run: `rtk npm run test -- tests/unit/recommendationNormalization.test.ts`  
 Expected: PASS.  
 Run: `rtk npm run typecheck`  
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+Evidence: The focused suite passes 8/8; typecheck and `git diff --check` pass. Independent spec and code-quality reviews approved the checkpoint after explicit-feedback and duplicate-ID regressions were corrected.
+
+- [x] **Step 5: Commit**
 
 ```powershell
-rtk git add src/lib/recommendationNormalization.ts src/lib/enrich.ts src/lib/serverSuggestionsEngine.ts tests/unit/recommendationNormalization.test.ts docs/plans
+rtk git add src/lib/recommendationNormalization.ts src/lib/enrich.ts src/lib/serverSuggestionsEngine.ts src/app/api/v1/suggestions/generate/route.ts tests/unit/recommendationNormalization.test.ts docs/plans
 rtk git commit -m "fix: preserve recommendation metadata identity"
 ```
 
 ## Checkpoint 0B.3: Explicit Seed Semantics
 
-**State:** Not started
+**State:** Ready
 
 **Files:**
 - Create: `tests/unit/recommendationSeeds.test.ts`

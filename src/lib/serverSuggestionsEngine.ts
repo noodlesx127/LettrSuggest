@@ -9,6 +9,7 @@ import {
   classifyPreferenceProbability,
   normalizeFeatureKey,
 } from "@/lib/recommendationPreference";
+import { sortByFilmRecency } from "@/lib/recommendationNormalization";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 /**
@@ -312,8 +313,14 @@ function getRelevantTasteTmdbIds(userContext: UserContext): number[] {
 
 function buildTasteProfileFilms(
   films: FilmEventRow[],
+  mappings: ReadonlyMap<string, number>,
 ): TasteProfileFilmInput[] {
-  return films.map((film) => ({
+  return sortByFilmRecency(films, (film) => ({
+    uri: film.uri,
+    tmdbId: mappings.get(film.uri) ?? Number.MAX_SAFE_INTEGER,
+    rating: film.rating,
+    watchDate: film.last_date,
+  })).map((film) => ({
     uri: film.uri,
     rating: film.rating ?? undefined,
     liked: film.liked ?? undefined,
@@ -733,7 +740,7 @@ export async function buildTasteProfileServer(
     );
 
     const tasteProfile = await buildTasteProfile({
-      films: buildTasteProfileFilms(userContext.films),
+      films: buildTasteProfileFilms(userContext.films, userContext.mappings),
       mappings: userContext.mappings,
       tmdbDetails: tmdbDetailsMap,
       negativeFeedbackIds: Array.from(userContext.blockedIds),
