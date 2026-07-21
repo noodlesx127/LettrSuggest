@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
-**Status:** Blocked  
-**Current checkpoint:** 0A.2 - Authorization and grants migration  
-**Next action:** Configure the Playwright production base URL and test credentials, then run the required liked/stats/rate-limit API slice.
-**Safe stopping point:** Production is hardened and catalog/transactional authorization probes pass; keep 0A.2 blocked until the required API slice passes.
+**Status:** Ready  
+**Current checkpoint:** 0A.3 - Production security validation  
+**Next action:** Reconcile the remaining Supabase advisor findings and enable leaked-password protection.
+**Safe stopping point:** Complete and commit 0A.3 only after platform controls and production evidence are recorded.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -40,8 +40,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | Checkpoint | State | Depends on | Acceptance gate | Commit |
 | --- | --- | --- | --- | --- |
 | 0A.1 Privileged-function inventory and failing security baseline | Complete | None | Effective overload/ACL inventory and negative pgTAP tests fail for each exposed path | `test: establish privileged function security baseline` |
-| 0A.2 Authorization and grants migration | Blocked | 0A.1 | pgTAP proves self/admin/service boundaries and application callers pass | Not started |
-| 0A.3 Production security validation | Not started | 0A.2 | Effective grants verified; security/performance advisors reviewed; leaked-password protection enabled | Not started |
+| 0A.2 Authorization and grants migration | Complete | 0A.1 | pgTAP proves self/admin/service boundaries and application callers pass | `8fa8104`, `test: complete privileged function caller gate` |
+| 0A.3 Production security validation | Ready | 0A.2 | Effective grants verified; security/performance advisors reviewed; leaked-password protection enabled | Not started |
 | 0B.1 Fast test harness and preference contracts | Not started | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | Not started |
 | 0B.2 Atomic metadata tuples and recency | Not started | 0B.1 | Failed-middle-fetch and date-order fixtures pass | Not started |
 | 0B.3 Explicit seed semantics | Not started | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | Not started |
@@ -139,12 +139,15 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-20 - Supabase MCP `apply_migration` - PASS; production migration `20260720235302_secure_privileged_functions` applied successfully after explicit user authorization.
 - 2026-07-20 - Production catalog inspection - PASS; all five exact functions are `SECURITY DEFINER` with `SET search_path = ''`, no `PUBLIC`/`anon` execution remains, and authenticated/service-role grants exactly match the intended matrix.
 - 2026-07-20 - Transaction-isolated production authorization probe through Supabase MCP - PASS, 25/25 checks. Generated identities verified anonymous denial, authenticated self/cross-user/null-identity boundaries, database-backed admin authorization, service liked/stats/rate behavior, service deletion denial, and the rate-limit body claim defense; all fixture writes were rolled back.
+- 2026-07-20 - Temporary confirmed test identity plus `PLAYWRIGHT_BASE_URL=https://lettrsuggest.netlify.app` and `rtk npx playwright test tests/api-v1.spec.ts -g "Key management flow|Liked suggestions CRUD|GET /suggestions/liked|GET /stats"` - PASS, 13/13. The production gate covered unauthenticated rejection, API-key create/use/rate-limit/revoke, liked suggestion list/create/delete, and film stats. The temporary identity was deleted in a `finally` block; a production query confirmed zero matching test users remained.
+- 2026-07-20 - Exact `supabase/tests/database/privileged_functions.test.sql` executed as one transaction through Supabase MCP against production - PASS, 55/55 pgTAP assertions; the script reached `ROLLBACK`. A separate cleanup query confirmed zero retained `@privileged-functions.test` users or `pgtap-*` API keys.
 
 ## Blockers
 
-Docker and a local Supabase runtime remain unavailable. On 2026-07-20 the user explicitly authorized applying the prepared migration directly to production. Production catalog and transaction-isolated authorization probes pass, but the required Playwright API slice still cannot run because no `baseURL` or test credentials are configured. Checkpoint 0A.2 remains blocked until that application-caller gate passes.
+Docker and a local Supabase runtime remain unavailable. The exact retained pgTAP suite was therefore executed transactionally through Supabase MCP; production catalog, database authorization, and application-caller gates all pass. No active checkpoint blocker remains.
 
 ## Completed Commits
 
 - `4221f4d` - approved recommendation remediation design (status approval recorded in the planning commit)
 - `test: establish privileged function security baseline` - checkpoint 0A.1 inventory and expected-failing pgTAP contract (this checkpoint)
+- `8fa8104` - checkpoint 0A.2 privileged-function migration, authorization tests, caller adaptation, and production evidence
