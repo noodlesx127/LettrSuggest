@@ -1,3 +1,11 @@
+import {
+  RECOMMENDATION_ENGINE_VERSION,
+  USER_CONTEXT_SOURCE_NAMES,
+  type UserContextDiagnostics,
+  type UserContextSourceHealth,
+  type UserContextSourceName,
+} from "@/lib/serverSuggestionsEngine";
+
 type GenerateRequestSeedInput = {
   userId: string;
   seedTmdbIds: readonly number[];
@@ -5,6 +13,90 @@ type GenerateRequestSeedInput = {
   excludeTmdbIds: readonly number[];
   genreIds?: readonly number[];
 };
+
+export type GenerationDiagnostics = {
+  mode: UserContextDiagnostics["mode"];
+  failed_sources: UserContextSourceName[];
+  input_health: Record<
+    UserContextSourceName,
+    { health: UserContextSourceHealth; row_count: number }
+  >;
+  engine_version: typeof RECOMMENDATION_ENGINE_VERSION;
+  request_seed: string;
+  context_mode: string;
+};
+
+const DIAGNOSTIC_ROW_LIMIT = 10_000;
+
+export const RECOMMENDATION_INPUT_UNAVAILABLE_ERROR = {
+  code: "RECOMMENDATION_INPUT_UNAVAILABLE",
+  message: "Recommendation inputs are temporarily unavailable.",
+} as const;
+
+export type GenerationFailureResponse = {
+  status: 503;
+  body: {
+    data: [];
+    meta: GenerationDiagnostics & {
+      warning: "blocked_source_unavailable";
+    } & Partial<GenerationTraceMetadata>;
+    error: typeof RECOMMENDATION_INPUT_UNAVAILABLE_ERROR;
+  };
+};
+
+export type GenerationTraceMetadata = {
+  timestamp: string;
+  requestId: string;
+};
+
+export function buildGenerationDiagnostics(params: {
+  context: UserContextDiagnostics;
+  requestSeed: string;
+  contextMode: string;
+}): GenerationDiagnostics {
+  const inputHealth = Object.fromEntries(
+    USER_CONTEXT_SOURCE_NAMES.map((sourceName) => {
+      const source = params.context.inputHealth[sourceName];
+      const rowCount = Number.isFinite(source.rowCount)
+        ? Math.max(0, Math.min(DIAGNOSTIC_ROW_LIMIT, Math.floor(source.rowCount)))
+        : 0;
+
+      return [
+        sourceName,
+        { health: source.health, row_count: rowCount },
+      ];
+    }),
+  ) as GenerationDiagnostics["input_health"];
+
+  return {
+    mode: params.context.mode,
+    failed_sources: [...params.context.failedSources],
+    input_health: inputHealth,
+    engine_version: RECOMMENDATION_ENGINE_VERSION,
+    request_seed: params.requestSeed,
+    context_mode: params.contextMode,
+  };
+}
+
+export function buildBlockedSourceFailureResponse(
+  diagnostics: GenerationDiagnostics,
+  trace?: GenerationTraceMetadata,
+): GenerationFailureResponse | null {
+  if (diagnostics.input_health.blocked.health !== "failed") return null;
+
+  return {
+    status: 503,
+    body: {
+      data: [],
+      meta: {
+        ...diagnostics,
+        ...(trace ?? {}),
+        warning: "blocked_source_unavailable",
+      },
+      error: RECOMMENDATION_INPUT_UNAVAILABLE_ERROR,
+    },
+  };
+}
 
 function canonicalizeIds(ids: readonly number[] | undefined): number[] {
   return Array.from(new Set(ids ?? [])).sort((left, right) => left - right);

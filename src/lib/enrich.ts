@@ -919,14 +919,18 @@ export async function addFeedback(
 
 type PairwiseConsensus = "high" | "medium" | "low" | undefined;
 
-type SuggestContextMode =
+export type SuggestContextMode =
   | "auto"
   | "weeknight"
   | "short"
   | "immersive"
   | "family"
-  | "background";
-type SuggestContext = { mode: SuggestContextMode; localHour?: number | null };
+  | "background"
+  | "neutral";
+export type SuggestContext = {
+  mode: SuggestContextMode;
+  localHour?: number | null;
+};
 
 export async function recordPairwiseEvent(
   userId: string,
@@ -962,16 +966,18 @@ export async function recordPairwiseEvent(
   }
 }
 
-function deriveContextMode(context?: SuggestContext): {
+export function deriveContextMode(context?: SuggestContext): {
   mode: Exclude<SuggestContextMode, "auto">;
   hour: number | null;
 } {
-  const hour = context?.localHour ?? new Date().getHours();
-  const fallback = { mode: "background" as const, hour };
+  if (!context) return { mode: "neutral", hour: null };
 
-  if (!context) return fallback;
-  if (context.mode && context.mode !== "auto")
-    return { mode: context.mode, hour };
+  if (context.mode !== "auto") {
+    return { mode: context.mode, hour: context.localHour ?? null };
+  }
+
+  const hour = context.localHour ?? new Date().getHours();
+  const fallback = { mode: "neutral" as const, hour };
 
   if (hour >= 22 || hour <= 6) return { mode: "short", hour };
   if (hour >= 17 && hour <= 21) return { mode: "weeknight", hour };

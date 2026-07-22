@@ -407,6 +407,86 @@ test.describe("Authenticated tests", () => {
       expect(meta.pagination).toBeDefined();
     });
 
+    test("generation diagnostics expose additive bounded metadata", async ({
+      request,
+    }) => {
+      test.setTimeout(300_000);
+
+      const { status, body } = await apiPost(
+        request,
+        "/suggestions/generate",
+        { seed_tmdb_ids: [], limit: 1, exclude_tmdb_ids: [] },
+        jwt,
+      );
+
+      expect(status).toBe(200);
+      expectEnvelope(body);
+
+      const meta = body.meta as Record<string, unknown>;
+      expect(meta.engine).toBe("personalized");
+      expect(["degraded", "cold_start", "personalized"]).toContain(
+        meta.mode,
+      );
+      expect(Array.isArray(meta.failed_sources)).toBe(true);
+      expect(meta.engine_version).toBe("v1-phase0");
+      expect(typeof meta.request_seed).toBe("string");
+      expect(meta.context_mode).toBe("neutral");
+
+      const inputHealth = meta.input_health as Record<
+        string,
+        { health: string; row_count: number }
+      >;
+      expect(Object.keys(inputHealth)).toEqual([
+        "films",
+        "mappings",
+        "feedback",
+        "exploration",
+        "adjacent_genres",
+        "exposures",
+        "blocked",
+      ]);
+      for (const source of Object.values(inputHealth)) {
+        expect(["ok", "empty", "failed"]).toContain(source.health);
+        expect(Number.isInteger(source.row_count)).toBe(true);
+        expect(source.row_count).toBeGreaterThanOrEqual(0);
+        expect(source.row_count).toBeLessThanOrEqual(10_000);
+      }
+    });
+
+    test("neutral context keeps the request seed stable for identical requests", async ({
+      request,
+    }) => {
+      test.setTimeout(300_000);
+
+      const payload = {
+        seed_tmdb_ids: [],
+        limit: 1,
+        exclude_tmdb_ids: [],
+      };
+      const first = await apiPost(
+        request,
+        "/suggestions/generate",
+        payload,
+        jwt,
+      );
+      const second = await apiPost(
+        request,
+        "/suggestions/generate",
+        payload,
+        jwt,
+      );
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      const firstMeta = first.body.meta as Record<string, unknown>;
+      const secondMeta = second.body.meta as Record<string, unknown>;
+      expect(firstMeta.engine_version).toBe("v1-phase0");
+      expect(secondMeta.engine_version).toBe("v1-phase0");
+      expect(firstMeta.context_mode).toBe("neutral");
+      expect(secondMeta.context_mode).toBe("neutral");
+      expect(firstMeta.request_seed).toBe(secondMeta.request_seed);
+    });
+
     test("GET /suggestions/blocked returns list", async ({ request }) => {
       const { status, body } = await apiGet(
         request,

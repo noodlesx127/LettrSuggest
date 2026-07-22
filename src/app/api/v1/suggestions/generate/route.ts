@@ -13,10 +13,13 @@ import {
   buildFeatureFeedbackFromRows,
   buildTasteProfileServer,
   generateServerCandidates,
+  getUserContextDiagnostics,
   loadCachedTmdbDetails,
   loadUserContext,
 } from "@/lib/serverSuggestionsEngine";
 import {
+  buildBlockedSourceFailureResponse,
+  buildGenerationDiagnostics,
   deriveGenerateRequestSeed,
   filterGeneratedCandidateIds,
 } from "@/app/api/v1/suggestions/generate/routeHelpers";
@@ -270,6 +273,25 @@ export async function POST(req: Request) {
       });
 
       const userContext = await loadUserContext(auth.userId);
+      const generationDiagnostics = buildGenerationDiagnostics({
+        context: getUserContextDiagnostics(userContext),
+        requestSeed,
+        contextMode: "neutral",
+      });
+      const blockedSourceFailure = buildBlockedSourceFailureResponse(
+        generationDiagnostics,
+        {
+          timestamp: new Date().toISOString(),
+          requestId,
+        },
+      );
+      if (blockedSourceFailure) {
+        return NextResponse.json(
+          blockedSourceFailure.body,
+          { status: blockedSourceFailure.status },
+        );
+      }
+
       const tasteProfile = await buildTasteProfileServer(
         auth.userId,
         userContext,
@@ -320,6 +342,7 @@ export async function POST(req: Request) {
             result_count: 0,
             candidate_count: 0,
             engine: "personalized",
+            ...generationDiagnostics,
             warning,
           },
           error: null,
@@ -412,7 +435,7 @@ export async function POST(req: Request) {
         featureFeedback,
         watchlistEntries,
         context: {
-          mode: "background" as const,
+          mode: "neutral" as const,
           localHour: null,
         },
         recentExposures: userContext.recentExposures,
@@ -541,6 +564,7 @@ export async function POST(req: Request) {
           result_count: data.length,
           candidate_count: filteredCandidates.length,
           engine: "personalized",
+          ...generationDiagnostics,
           ...(debug
             ? {
                 source_candidate_counts: sourceDebugSummary,

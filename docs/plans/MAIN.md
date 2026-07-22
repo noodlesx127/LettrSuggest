@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
 **Status:** Ready  
-**Current checkpoint:** 0C.1 - Input health and neutral request context  
-**Next action:** Write the source-health, degraded-mode, cold-start, personalized-mode, and neutral-context integration contracts.
-**Safe stopping point:** Checkpoint 0B.3 is complete and ready to commit as `fix: use explicit seeds as retrieval anchors`; 0C.1 is ready but not started.
+**Current checkpoint:** 0C.2 - Strict filters and effective advanced behavior  
+**Next action:** Write strict genre, canonical negative matching, effective boost, and threshold eligibility contracts.
+**Safe stopping point:** Checkpoint 0C.1 is complete in `fix: report recommendation input health honestly`; 0C.2 is ready but not started.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -44,9 +44,9 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 0A.3 Production security validation | Complete | 0A.2 | Effective helper grants/triggers verified; security/performance advisors reviewed; leaked-password/HIBP protection enabled or the dated Free-plan exception below is recorded; no remaining advisor finding is waived | `2fdf02c` |
 | 0B.1 Fast test harness and preference contracts | Complete | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | `5117a41` |
 | 0B.2 Atomic metadata tuples and recency | Complete | 0B.1 | Failed-middle-fetch and date-order fixtures pass | `dbf59dd` |
-| 0B.3 Explicit seed semantics | Complete | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | `fix: use explicit seeds as retrieval anchors` |
-| 0C.1 Input health and neutral request context | Ready | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | Not started |
-| 0C.2 Strict filters and effective advanced behavior | Not started | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | Not started |
+| 0B.3 Explicit seed semantics | Complete | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | `07d6885` |
+| 0C.1 Input health and neutral request context | Complete | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | `fix: report recommendation input health honestly` |
+| 0C.2 Strict filters and effective advanced behavior | Ready | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | Not started |
 | 1A.1 Canonical contracts and frozen fixtures | Not started | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | Not started |
 | 1A.2 Engine orchestration seams | Not started | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | Not started |
 | 1B.1 Deterministic weighted retrieval | Not started | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | Not started |
@@ -91,7 +91,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 3. API recency reversed | 0B.2 | Date-ordered fixture | Closed |
 | 4. Metadata fetch tuple misalignment | 0B.2 | Failed-middle-fetch fixture | Closed |
 | 5. False same-provider consensus | 1B.2 | Provider-family evidence fixture | Open |
-| 6. Forced background prior | 0C.1 | Neutral-context API test | Open |
+| 6. Forced background prior | 0C.1 | Neutral-context API test | Closed |
 | 7. Genre filtering fails open | 0C.2 | Strict genre endpoint test | Open |
 | 8. Random pre-score truncation | 1B.1 | Deterministic retention fixture | Open |
 | 9. Diversity caps underfill | 1C.1 | Staged-relaxation count test | Open |
@@ -102,7 +102,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 14. Exploration/MMR direction | 1C.1 | Monotonic diversity test | Open |
 | 15. Weak profile-cache invalidation | 1D.1 | Input-revision matrix | Open |
 | 16. Global weak-seed blacklist | 1B.1 | Removal plus taste-neutral fixture | Open |
-| 17. Input failures become generic results | 0C.1 | Degraded-state endpoint test | Open |
+| 17. Input failures become generic results | 0C.1 | Degraded-state endpoint test | Closed |
 | 18. Advanced boosts discarded | 0C.2 | Rank-impact test | Open |
 | 19. Case-sensitive negative matching | 0C.2 | Mixed-case test | Open |
 | 20. Unseeded randomness | 1B.1 | Repeat-run equality test | Open |
@@ -135,6 +135,12 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-20 - Extended `supabase/tests/database/privileged_functions.test.sql` to 55 assertions covering exact signatures, PUBLIC/anon/authenticated/service_role ACLs, self/cross-user/admin/service invocation, null identity, generated target/non-target rows, returned deletion counts, and post-call preservation. The pre-migration run of `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql --linked` was blocked before pgTAP execution by the missing Docker Desktop `pg_prove` image; the prior linked 0A.1 run above remains the available failing evidence for the unsafe current behavior.
 - 2026-07-20 - `rtk npm run lint` - PASS; no ESLint warnings or errors.
 - 2026-07-20 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully.
+- 2026-07-21 - Initial `rtk npm run test -- tests/integration/recommendationInputHealth.test.ts` - expected FAIL, 17/17 failed before source health, honest modes, neutral context, and diagnostics were implemented.
+- 2026-07-21 - Safety-review regression extension - expected FAIL: the integration suite recorded 12 failures of 30 and the seed suite recorded 1 failure of 11 before blocked-source fail-closed behavior, payload validation, required diagnostics, sanitized errors, and injected generation time were implemented. A later review extension recorded 4 failures of 34 before conservative partial-health handling, nullable exploration support, and traced 503 envelopes were implemented.
+- 2026-07-21 - `rtk npm run test -- tests/integration/recommendationInputHealth.test.ts` - PASS, 34/34. All seven sources distinguish `ok`, `empty`, and `failed`; malformed payloads fail validation; required failures degrade; blocked-source failure returns a bounded traced 503 before generation; healthy empty history is cold start; contributing mapped evidence is personalized; and omitted context is neutral.
+- 2026-07-21 - `rtk npm run test -- tests/unit/recommendationSeeds.test.ts` - PASS, 11/11 after request-time injection was added to deterministic seed selection.
+- 2026-07-21 - Ephemeral confirmed Supabase identity plus `rtk npx playwright test tests/api-v1.spec.ts -g "generation diagnostics|neutral context"` through the retained local Playwright web-server configuration - PASS, 2/2. The HTTP gate verified bounded additive diagnostics, standard envelopes, neutral context, and stable request seeds. The identity was deleted in `finally`; a production query confirmed zero matching `phase0-input-health-%@example.invalid` users remained.
+- 2026-07-21 - `rtk npm run lint`, `rtk npm run typecheck`, and `rtk git diff --check` - PASS. Independent spec and code-quality reviews approved 0C.1 after fail-open, malformed-input, diagnostics-consistency, clock, logging, partial-health, nullable-exploration, and error-envelope findings were corrected.
 - 2026-07-21 - Initial `rtk npm run test -- tests/unit/recommendationSeeds.test.ts` - expected FAIL, 2 failed / 1 passed because the provider seam recorded no neighborhood requests before explicit seeds were wired into retrieval.
 - 2026-07-21 - Seed-contract review extensions - expected FAIL, first because the route helper seam did not exist, then 4 of 10 tests failed on canonical seed order, stable equal-score history order, provider concurrency (`29 > 5`), and omitted/empty genre canonicalization.
 - 2026-07-21 - `rtk npm run test -- tests/unit/recommendationSeeds.test.ts` - PASS, 10/10. Explicit seeds are deterministic neighborhood anchors, are absent from candidates and source metadata, combine explicit-first with stable history anchors, ignore global randomness, preserve the deferred weak-seed blacklist, canonicalize set-like request inputs, and retain all anchors behind a request-scoped provider concurrency limit of 5 including fallbacks.
@@ -182,4 +188,5 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `2fdf02c` - checkpoint 0A.3 helper containment, production verification, and advisor closure
 - `5117a41` - checkpoint 0B.1 Vitest harness and corrected preference semantics
 - `dbf59dd` - checkpoint 0B.2 atomic metadata identity and deterministic recency
-- `fix: use explicit seeds as retrieval anchors` - checkpoint 0B.3 deterministic explicit-seed retrieval and exclusion
+- `07d6885` - checkpoint 0B.3 deterministic explicit-seed retrieval and exclusion
+- `fix: report recommendation input health honestly` - checkpoint 0C.1 source-health, fail-closed generation, neutral context, and additive diagnostics

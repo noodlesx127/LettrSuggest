@@ -54,6 +54,17 @@ const userContext: UserContext = {
   adjacentGenres: [],
   recentExposures: new Map(),
   blockedIds: new Set(),
+  inputHealth: {
+    films: { health: "ok", rowCount: 2 },
+    mappings: { health: "ok", rowCount: 2 },
+    feedback: { health: "empty", rowCount: 0 },
+    exploration: { health: "empty", rowCount: 0 },
+    adjacent_genres: { health: "empty", rowCount: 0 },
+    exposures: { health: "empty", rowCount: 0 },
+    blocked: { health: "empty", rowCount: 0 },
+  },
+  failedSources: [],
+  mode: "personalized",
 };
 
 const tasteProfile = {
@@ -275,6 +286,67 @@ describe("explicit recommendation seeds", () => {
     } finally {
       mathRandom.mockRestore();
     }
+  });
+
+  it("uses the injected clock when ordering history seed recency", async () => {
+    const actualNow = Date.now();
+    const newerDate = new Date(
+      actualNow - 60 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const olderDate = new Date(
+      actualNow - 120 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const context: UserContext = {
+      ...userContext,
+      films: [
+        {
+          ...userContext.films[0],
+          uri: "letterboxd://film/clock-newer",
+          rating: 4,
+          liked: false,
+          last_date: newerDate,
+        },
+        {
+          ...userContext.films[1],
+          uri: "letterboxd://film/clock-older",
+          rating: 4.2,
+          liked: false,
+          last_date: olderDate,
+        },
+      ],
+      mappings: new Map([
+        ["letterboxd://film/clock-newer", 3003],
+        ["letterboxd://film/clock-older", 3004],
+      ]),
+    };
+    const runWithClock = async (clock: number) => {
+      const calls: ProviderCall[] = [];
+      const provider = async <T>(
+        path: string,
+        params?: Record<string, string | number | undefined>,
+      ): Promise<T> => {
+        calls.push({ path, params });
+        return { results: [] } as T;
+      };
+
+      await generateServerCandidates("user-1", context, tasteProfile, [], {
+        requestSeed: "clock-seed",
+        provider,
+        now: () => clock,
+      });
+
+      return calls
+        .filter((call) => call.path.endsWith("/recommendations"))
+        .map((call) => Number(call.path.split("/")[2]))
+        .slice(0, 2);
+    };
+
+    const currentClockAnchors = await runWithClock(actualNow);
+    const futureClockAnchors = await runWithClock(
+      actualNow + 365 * 24 * 60 * 60 * 1000,
+    );
+
+    expect(currentClockAnchors).not.toEqual(futureClockAnchors);
   });
 
   it("keeps the global weak-seed blacklist active for history anchors", async () => {

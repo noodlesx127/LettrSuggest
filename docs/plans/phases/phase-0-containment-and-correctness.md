@@ -1,7 +1,7 @@
 # Phase 0: Containment and Correctness
 
 **Phase state:** In progress  
-**Current checkpoint:** 0B.1  
+**Current checkpoint:** 0C.2  
 **Exit condition:** Privileged functions enforce effective authorization, proven signal defects are fixture-tested, and v1 reports honest deterministic behavior.
 
 `docs/plans/MAIN.md` controls checkpoint status. Execute in order.
@@ -324,36 +324,46 @@ rtk git commit -m "fix: use explicit seeds as retrieval anchors"
 
 ## Checkpoint 0C.1: Input Health and Neutral Request Context
 
-**State:** Ready
+**State:** Complete
 
 **Files:**
 - Create: `tests/integration/recommendationInputHealth.test.ts`
 - Modify: `src/lib/serverSuggestionsEngine.ts`
 - Modify: `src/lib/enrich.ts`
 - Modify: `src/app/api/v1/suggestions/generate/route.ts`
+- Modify: `src/app/api/v1/suggestions/generate/routeHelpers.ts`
 - Modify: `tests/api-v1.spec.ts`
+- Modify: `tests/unit/recommendationSeeds.test.ts`
 
-- [ ] **Step 1: Write health and context tests**
+- [x] **Step 1: Write health and context tests**
 
 Assert each input source returns `ok`, `empty`, or `failed`; a failed required source yields mode `degraded`; valid empty history yields `cold_start`; complete context yields `personalized`; omitted viewing context is neutral and never background.
 
-- [ ] **Step 2: Confirm failure**
+Evidence: The focused integration suite covers all seven source states, required and optional failures, malformed containers and rows, cold-start and personalized evidence, blocked-source fail-closed behavior, bounded diagnostics, and omitted/explicit context modes.
+
+- [x] **Step 2: Confirm failure**
 
 Run: `rtk npm run test -- tests/integration/recommendationInputHealth.test.ts`  
 Expected: FAIL because failures collapse to empty and the route forces background.
 
-- [ ] **Step 3: Implement source health and additive diagnostics**
+Evidence: The initial suite failed 17/17. Review-driven contracts later failed 12 of 30 integration tests plus 1 of 11 seed tests, then 4 of 34 integration tests, before the safety and compatibility corrections were implemented.
+
+- [x] **Step 3: Implement source health and additive diagnostics**
 
 Return per-source health from `loadUserContext`; derive overall mode without relabeling failed data; represent neutral context explicitly; remove forced background. Add response metadata for mode, failed source names, engine version, and deterministic request seed.
 
-- [ ] **Step 4: Verify integration and HTTP behavior**
+Evidence: Required context diagnostics are validated and conservatively normalized; blocked-source failure returns a traced 503 before profile, provider, cache, or scoring work; optional failures remain visible; generation time is injected; and response metadata is additive and bounded on both successful response paths.
+
+- [x] **Step 4: Verify integration and HTTP behavior**
 
 Run: `rtk npm run test -- tests/integration/recommendationInputHealth.test.ts`  
 Expected: PASS.  
 Run: `rtk npx playwright test tests/api-v1.spec.ts -g "generation diagnostics|neutral context"`  
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+Evidence: The focused integration suite passes 34/34 and the seed regression suite passes 11/11. The authenticated HTTP slice passes 2/2 with an ephemeral confirmed Supabase user, proving bounded diagnostics, neutral context, standard envelopes, and stable request seeds; cleanup left zero matching users. Lint, typecheck, and diff hygiene pass, and independent spec and code-quality reviews approve the checkpoint.
+
+- [x] **Step 5: Commit**
 
 ```powershell
 rtk git add src/lib/serverSuggestionsEngine.ts src/lib/enrich.ts src/app/api/v1/suggestions/generate/route.ts tests docs/plans
@@ -362,7 +372,7 @@ rtk git commit -m "fix: report recommendation input health honestly"
 
 ## Checkpoint 0C.2: Strict Filters and Effective Advanced Behavior
 
-**State:** Not started
+**State:** Ready
 
 **Files:**
 - Create: `tests/unit/advancedFiltering.test.ts`
