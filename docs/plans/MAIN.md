@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
-**Status:** Ready  
+**Status:** In progress  
 **Current checkpoint:** 0C.2 - Strict filters and effective advanced behavior  
-**Next action:** Write strict genre, canonical negative matching, effective boost, and threshold eligibility contracts.
-**Safe stopping point:** Checkpoint 0C.1 is complete in `fix: report recommendation input health honestly`; 0C.2 is ready but not started.
+**Next action:** Commit the verified 0C.2 implementation, then record its hash and close Phase 0.
+**Safe stopping point:** The full Phase 0 gate passes; only the 0C.2 implementation commit and tracker closure remain.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -45,8 +45,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 0B.1 Fast test harness and preference contracts | Complete | 0A.3 | Vitest runs in CI shape; polarity and identifier tests pass | `5117a41` |
 | 0B.2 Atomic metadata tuples and recency | Complete | 0B.1 | Failed-middle-fetch and date-order fixtures pass | `dbf59dd` |
 | 0B.3 Explicit seed semantics | Complete | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | `07d6885` |
-| 0C.1 Input health and neutral request context | Complete | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | `fix: report recommendation input health honestly` |
-| 0C.2 Strict filters and effective advanced behavior | Ready | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | Not started |
+| 0C.1 Input health and neutral request context | Complete | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | `e5faf73` |
+| 0C.2 Strict filters and effective advanced behavior | In progress | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | Not started |
 | 1A.1 Canonical contracts and frozen fixtures | Not started | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | Not started |
 | 1A.2 Engine orchestration seams | Not started | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | Not started |
 | 1B.1 Deterministic weighted retrieval | Not started | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | Not started |
@@ -135,6 +135,13 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-20 - Extended `supabase/tests/database/privileged_functions.test.sql` to 55 assertions covering exact signatures, PUBLIC/anon/authenticated/service_role ACLs, self/cross-user/admin/service invocation, null identity, generated target/non-target rows, returned deletion counts, and post-call preservation. The pre-migration run of `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql --linked` was blocked before pgTAP execution by the missing Docker Desktop `pg_prove` image; the prior linked 0A.1 run above remains the available failing evidence for the unsafe current behavior.
 - 2026-07-20 - `rtk npm run lint` - PASS; no ESLint warnings or errors.
 - 2026-07-20 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully.
+- 2026-07-21 - Initial `rtk npm run test -- tests/unit/advancedFiltering.test.ts` - expected FAIL, 7/7 failed before strict eligibility, canonical negative matching, and stable score ordering existed. Review-driven extensions later failed 1/10 on post-MMR deduplication and 2/12 on strict-first relaxation tiers and non-finite score rejection before those defects were corrected.
+- 2026-07-21 - `rtk npm run test -- tests/unit/advancedFiltering.test.ts tests/unit/recommendationSeeds.test.ts tests/integration/recommendationInputHealth.test.ts` - PASS, 61/61. Strict genre and threshold eligibility, canonical negatives, real cross-genre rank impact, deterministic boosted ordering, explicit additive relaxation, finite-score fail-closed behavior with and without genres, request-seed semantics, and input-health regressions pass.
+- 2026-07-21 - Ephemeral confirmed Supabase identity plus `rtk npx playwright test tests/api-v1.spec.ts -g "strict genre"` through the local Playwright web-server configuration - PASS, 1/1. Every returned result matched the requested Action genre and bounded shortage diagnostics were present when applicable. Cleanup ran in `finally`; a production query confirmed zero matching `phase0-strict-filter-%@example.invalid` users.
+- 2026-07-21 - Full Phase 0 application gate: `rtk npm run lint` PASS with no warnings/errors; `rtk npm run typecheck` PASS; `rtk npm run test` PASS, 95/95 across 5 files; `rtk npm run build` PASS. The build retained existing non-fatal dynamic-route and stale browser-data warnings.
+- 2026-07-21 - Full `tests/api-v1.spec.ts` Playwright gate with an ephemeral confirmed Supabase identity - PASS, 46/46 runnable tests; 12 admin/webhook tests skipped because optional admin credentials were not provided. Cleanup ran in `finally`, and a production query confirmed zero matching `phase0-full-gate-%@example.invalid` users.
+- 2026-07-21 - Exact production database phase gate through Supabase MCP - PASS: `privileged_functions.test.sql` 55/55 and `privileged_helpers.test.sql` 67/67, both without SQL errors, both reaching final `ROLLBACK`, and both retaining zero fixture data.
+- 2026-07-21 - Final Supabase advisor rerun - REVIEWED. Security remains at six accepted warnings: five intended authenticated `SECURITY DEFINER` functions whose body authorization is covered by pgTAP, plus disabled HIBP under the dated Free-plan exception. Performance remains INFO-only unused-index candidates; no index was removed without production traffic evidence.
 - 2026-07-21 - Initial `rtk npm run test -- tests/integration/recommendationInputHealth.test.ts` - expected FAIL, 17/17 failed before source health, honest modes, neutral context, and diagnostics were implemented.
 - 2026-07-21 - Safety-review regression extension - expected FAIL: the integration suite recorded 12 failures of 30 and the seed suite recorded 1 failure of 11 before blocked-source fail-closed behavior, payload validation, required diagnostics, sanitized errors, and injected generation time were implemented. A later review extension recorded 4 failures of 34 before conservative partial-health handling, nullable exploration support, and traced 503 envelopes were implemented.
 - 2026-07-21 - `rtk npm run test -- tests/integration/recommendationInputHealth.test.ts` - PASS, 34/34. All seven sources distinguish `ok`, `empty`, and `failed`; malformed payloads fail validation; required failures degrade; blocked-source failure returns a bounded traced 503 before generation; healthy empty history is cold start; contributing mapped evidence is personalized; and omitted context is neutral.
@@ -189,4 +196,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `5117a41` - checkpoint 0B.1 Vitest harness and corrected preference semantics
 - `dbf59dd` - checkpoint 0B.2 atomic metadata identity and deterministic recency
 - `07d6885` - checkpoint 0B.3 deterministic explicit-seed retrieval and exclusion
-- `fix: report recommendation input health honestly` - checkpoint 0C.1 source-health, fail-closed generation, neutral context, and additive diagnostics
+- `e5faf73` - checkpoint 0C.1 source-health, fail-closed generation, neutral context, and additive diagnostics

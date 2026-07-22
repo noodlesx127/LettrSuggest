@@ -8,6 +8,7 @@ import {
 import {
   deriveGenerateRequestSeed,
   filterGeneratedCandidateIds,
+  validateFilterRelaxationRequest,
 } from "@/app/api/v1/suggestions/generate/routeHelpers";
 
 vi.mock("@/app/api/v1/_lib/tmdb", () => ({
@@ -505,6 +506,70 @@ describe("suggestion route seed boundaries", () => {
     ];
 
     expect(new Set(hashes).size).toBe(hashes.length);
+  });
+
+  it("includes explicit filter relaxation in the deterministic request seed", () => {
+    const omitted = deriveGenerateRequestSeed(canonicalInputs);
+    const threshold = deriveGenerateRequestSeed({
+      ...canonicalInputs,
+      filterRelaxation: "threshold",
+    });
+    const genre = deriveGenerateRequestSeed({
+      ...canonicalInputs,
+      filterRelaxation: "genre",
+    });
+
+    expect(new Set([omitted, threshold, genre]).size).toBe(3);
+    expect(
+      deriveGenerateRequestSeed({
+        ...canonicalInputs,
+        filterRelaxation: "threshold",
+      }),
+    ).toBe(threshold);
+    expect(
+      deriveGenerateRequestSeed({
+        ...canonicalInputs,
+        filterRelaxation: "genre",
+      }),
+    ).toBe(genre);
+  });
+
+  it("rejects filter relaxation without an explicit genre request", () => {
+    expect(
+      validateFilterRelaxationRequest({ filterRelaxation: "threshold" }),
+    ).toEqual({
+      valid: false,
+      message: "filter_relaxation requires at least one genre_id",
+    });
+    expect(
+      validateFilterRelaxationRequest({
+        genreIds: [],
+        filterRelaxation: "genre",
+      }),
+    ).toEqual({
+      valid: false,
+      message: "filter_relaxation requires at least one genre_id",
+    });
+    expect(
+      validateFilterRelaxationRequest({
+        genreIds: [28],
+        filterRelaxation: "threshold",
+      }),
+    ).toEqual({ valid: true });
+  });
+
+  it("does not encode inapplicable relaxation in a request seed", () => {
+    const withoutGenre = deriveGenerateRequestSeed({
+      ...canonicalInputs,
+      genreIds: undefined,
+    });
+    const withInapplicableRelaxation = deriveGenerateRequestSeed({
+      ...canonicalInputs,
+      genreIds: undefined,
+      filterRelaxation: "genre",
+    });
+
+    expect(withInapplicableRelaxation).toBe(withoutGenre);
   });
 
   it("defensively excludes explicit seeds at the route output boundary", () => {

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 
 import {
-  applyAdvancedFiltering,
   applyNegativeFiltering,
+  filterCandidatesByGenre,
+  type FilterRelaxation,
 } from "@/lib/advancedFiltering";
 import { suggestByOverlap } from "@/lib/enrich";
 import type { TMDBMovie } from "@/lib/enrich";
@@ -22,6 +23,7 @@ import {
   buildGenerationDiagnostics,
   deriveGenerateRequestSeed,
   filterGeneratedCandidateIds,
+  validateFilterRelaxationRequest,
 } from "@/app/api/v1/suggestions/generate/routeHelpers";
 
 import { withApiAuth } from "../../_lib/apiKeyAuth";
@@ -33,6 +35,7 @@ interface GenerateSuggestionsBody {
   limit: number;
   exclude_tmdb_ids: number[];
   genre_ids?: number[];
+  filter_relaxation?: FilterRelaxation;
   debug?: boolean;
 }
 
@@ -92,6 +95,17 @@ function parseLimit(value: unknown): number {
   return Math.min(value, 50);
 }
 
+function parseFilterRelaxation(value: unknown): FilterRelaxation | undefined {
+  if (value === undefined) return undefined;
+  if (value === "threshold" || value === "genre") return value;
+
+  throw new ApiError(
+    400,
+    "BAD_REQUEST",
+    'filter_relaxation must be either "threshold" or "genre"',
+  );
+}
+
 async function parseGenerateSuggestionsBody(
   req: Request,
 ): Promise<GenerateSuggestionsBody> {
@@ -130,6 +144,7 @@ async function parseGenerateSuggestionsBody(
             maxItems: 5,
           })
         : undefined,
+    filter_relaxation: parseFilterRelaxation(body.filter_relaxation),
     debug,
   };
 }
@@ -256,12 +271,24 @@ export async function POST(req: Request) {
       const requestId = generateRequestId();
       const body = await parseGenerateSuggestionsBody(req);
       const { debug } = body;
+      const filterRelaxationValidation = validateFilterRelaxationRequest({
+        genreIds: body.genre_ids,
+        filterRelaxation: body.filter_relaxation,
+      });
+      if (!filterRelaxationValidation.valid) {
+        throw new ApiError(
+          400,
+          "BAD_REQUEST",
+          filterRelaxationValidation.message,
+        );
+      }
       const requestSeed = deriveGenerateRequestSeed({
         userId: auth.userId,
         seedTmdbIds: body.seed_tmdb_ids,
         limit: body.limit,
         excludeTmdbIds: body.exclude_tmdb_ids,
         genreIds: body.genre_ids,
+        filterRelaxation: body.filter_relaxation,
       });
 
       console.log("[v1/suggestions/generate] Starting generation", {
@@ -343,6 +370,15 @@ export async function POST(req: Request) {
             candidate_count: 0,
             engine: "personalized",
             ...generationDiagnostics,
+            filter_diagnostics: {
+              reasons: body.genre_ids?.length
+                ? ["insufficient_eligible_supply"]
+                : [],
+              applied_stages: [],
+              strict_count: 0,
+              threshold_count: 0,
+              genre_count: 0,
+            },
             warning,
           },
           error: null,
@@ -457,66 +493,33 @@ export async function POST(req: Request) {
         return isDiscoveryOnly ? item.score >= MIN_DISCOVERY_SCORE : true;
       });
 
-      // Apply genre filter if requested — filter before slicing to limit
-      let genreFiltered = qualityFiltered;
-      if (body.genre_ids?.length) {
-        const filtered = qualityFiltered.filter((item) => {
-          const itemGenres = (item.genres ?? []).map((g: string) =>
-            g.toLowerCase(),
-          );
-          return body.genre_ids!.some((gid) => {
-            const canonicalName = TMDB_GENRE_MAP[gid]?.toLowerCase();
-            return canonicalName ? itemGenres.includes(canonicalName) : false;
-          });
-        });
-
-        if (filtered.length > 0) {
-          genreFiltered = filtered;
-        } else {
-          console.warn(
-            "[GenreFilter] Genre filter removed all results, returning unfiltered",
-          );
-        }
-      }
-
-      // Apply minimum score threshold when genre filter is active.
-      // Prevents low-relevance genre-discovery candidates from padding filtered results.
-      // Threshold of 15 is calibrated from live data: legitimate matches score 19+,
-      // filler films (no taste connection beyond genre tag) score 8–14.
-      if (body.genre_ids?.length && genreFiltered !== qualityFiltered) {
-        const MIN_GENRE_SCORE = 15.0;
-        const thresholded = genreFiltered.filter(
-          (item) => item.score >= MIN_GENRE_SCORE,
-        );
-        // Only apply if threshold leaves at least 3 results — prevents empty responses
-        if (thresholded.length >= 3) {
-          genreFiltered = thresholded;
-        } else {
-          console.warn(
-            `[GenreFilter] Score threshold would leave ${thresholded.length} results — skipping threshold`,
-          );
-        }
-      }
-
-      const personalizationFiltered = genreFiltered.filter((item) => {
+      // suggestByOverlap owns scoring-stage boosts and post-score ordering;
+      // apply only the route's canonical negative eligibility filter here.
+      const personalizationCandidates = qualityFiltered.filter((item) => {
         const candidate = buildFilteringCandidate(item, candidateTmdbCache);
-
-        const negativeFilter = applyNegativeFiltering(
-          candidate,
-          minimalEnhancedProfile,
-        );
-        if (negativeFilter.shouldFilter) {
-          return false;
-        }
-
-        const advancedFilter = applyAdvancedFiltering(
-          candidate,
-          minimalEnhancedProfile,
-          featureFeedback.preferSubgenres,
-        );
-
-        return !advancedFilter.shouldFilter;
+        return !applyNegativeFiltering(candidate, minimalEnhancedProfile)
+          .shouldFilter;
       });
+
+      const genreFilterResult = filterCandidatesByGenre(
+        personalizationCandidates,
+        {
+          requestedGenreNames:
+            body.genre_ids?.map(
+              (genreId) => TMDB_GENRE_MAP[genreId] ?? `unknown:${genreId}`,
+            ) ?? [],
+          requestedCount: body.limit,
+          filterRelaxation: body.filter_relaxation,
+        },
+      );
+      const personalizationFiltered = genreFilterResult.candidates;
+      const filterDiagnostics = {
+        reasons: [...genreFilterResult.diagnostics.reasons],
+        applied_stages: [...genreFilterResult.diagnostics.appliedStages],
+        strict_count: genreFilterResult.diagnostics.strictCount,
+        threshold_count: genreFilterResult.diagnostics.thresholdCount,
+        genre_count: genreFilterResult.diagnostics.genreCount,
+      };
 
       // Debug: summarize candidate counts by source
       const sourceDebugSummary = debug
@@ -558,26 +561,27 @@ export async function POST(req: Request) {
       return NextResponse.json({
         data,
         meta: {
-          timestamp: new Date().toISOString(),
-          requestId,
-          seed_count: body.seed_tmdb_ids.length,
-          result_count: data.length,
-          candidate_count: filteredCandidates.length,
-          engine: "personalized",
-          ...generationDiagnostics,
-          ...(debug
-            ? {
-                source_candidate_counts: sourceDebugSummary,
-                seeds_used: body.seed_tmdb_ids,
-                genre_filter_applied: body.genre_ids?.length
-                  ? body.genre_ids
-                  : null,
-                candidates_before_genre_filter: scored.length,
-                candidates_after_genre_filter: genreFiltered.length,
-                candidates_after_personalization_filter:
-                  personalizationFiltered.length,
-              }
-            : {}),
+           timestamp: new Date().toISOString(),
+           requestId,
+           seed_count: body.seed_tmdb_ids.length,
+           result_count: data.length,
+           candidate_count: filteredCandidates.length,
+           engine: "personalized",
+           ...generationDiagnostics,
+           filter_diagnostics: filterDiagnostics,
+           ...(debug
+             ? {
+                 source_candidate_counts: sourceDebugSummary,
+                 seeds_used: body.seed_tmdb_ids,
+                 genre_filter_applied: body.genre_ids?.length
+                   ? body.genre_ids
+                   : null,
+                 candidates_before_genre_filter: scored.length,
+                 candidates_after_genre_filter: personalizationFiltered.length,
+                 candidates_after_personalization_filter:
+                   personalizationFiltered.length,
+               }
+             : {}),
         },
         error: null,
       });

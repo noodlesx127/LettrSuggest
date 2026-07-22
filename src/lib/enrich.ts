@@ -21,7 +21,7 @@ import {
   type CrossGenrePattern,
 } from "./subgenreDetection";
 import { getPreferredSubgenreKeywordIds } from "./subgenreData";
-import { checkNicheCompatibility } from "./advancedFiltering";
+import { checkNicheCompatibility, stableScoreOrder } from "./advancedFiltering";
 import { getTuiMDBMovie, type TuiMDBMovie } from "./tuimdb";
 import {
   mergeEnhancedGenres,
@@ -7808,11 +7808,11 @@ export async function suggestByOverlap(params: {
     reliabilityMultiplier?: number;
     metadataCompleteness?: number;
   }>;
-  results.sort((a, b) => b.score - a.score);
+  const scoreOrderedResults = stableScoreOrder(results);
 
   // Phase 3: Rerank with MMR for better novelty vs relevance
   // Default lambda 0.35 balances precision and variety (was 0.25, which over-diversified)
-  const mmrReranked = applyMMRRerank(results, {
+  const mmrReranked = applyMMRRerank(scoreOrderedResults, {
     lambda: params.mmrLambda ?? 0.35,
     topK: Math.min(
       results.length,

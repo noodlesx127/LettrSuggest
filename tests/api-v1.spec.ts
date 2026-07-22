@@ -453,6 +453,69 @@ test.describe("Authenticated tests", () => {
       }
     });
 
+    test("strict genre never returns a nonmatching result", async ({
+      request,
+    }) => {
+      test.setTimeout(300_000);
+
+      const { status, body } = await apiPost(
+        request,
+        "/suggestions/generate",
+        {
+          seed_tmdb_ids: [],
+          limit: 3,
+          exclude_tmdb_ids: [],
+          genre_ids: [28],
+        },
+        jwt,
+      );
+
+      expect(status).toBe(200);
+      expectEnvelope(body);
+
+      const data = body.data as Array<Record<string, unknown>>;
+      for (const result of data) {
+        const genres = result.genres as unknown[];
+        expect(
+          genres.some(
+            (genre) =>
+              typeof genre === "string" &&
+              genre.trim().toLowerCase() === "action",
+          ),
+        ).toBe(true);
+      }
+
+      const meta = body.meta as Record<string, unknown>;
+      const filterDiagnostics = meta.filter_diagnostics as Record<
+        string,
+        unknown
+      >;
+      expect(filterDiagnostics).toBeDefined();
+      expect(Array.isArray(filterDiagnostics.reasons)).toBe(true);
+      const reasons = filterDiagnostics.reasons as unknown[];
+      expect(reasons.length).toBeLessThanOrEqual(1);
+      expect(Array.isArray(filterDiagnostics.applied_stages)).toBe(true);
+      const appliedStages = filterDiagnostics.applied_stages as unknown[];
+      expect(appliedStages.length).toBeLessThanOrEqual(2);
+      for (const stage of appliedStages) {
+        expect(["threshold", "genre"]).toContain(stage);
+      }
+      if (data.length < 3 && appliedStages.length === 0) {
+        expect(reasons).toContain("insufficient_eligible_supply");
+      }
+      for (const countKey of [
+        "strict_count",
+        "threshold_count",
+        "genre_count",
+      ]) {
+        const count = filterDiagnostics[countKey];
+        expect(typeof count).toBe("number");
+        expect(Number.isInteger(count)).toBe(true);
+        expect(count as number).toBeGreaterThanOrEqual(0);
+        expect(count as number).toBeLessThanOrEqual(10_000);
+      }
+    });
+
     test("neutral context keeps the request seed stable for identical requests", async ({
       request,
     }) => {

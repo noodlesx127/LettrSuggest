@@ -372,28 +372,37 @@ rtk git commit -m "fix: report recommendation input health honestly"
 
 ## Checkpoint 0C.2: Strict Filters and Effective Advanced Behavior
 
-**State:** Ready
+**State:** In progress
 
 **Files:**
 - Create: `tests/unit/advancedFiltering.test.ts`
 - Modify: `src/lib/advancedFiltering.ts`
+- Modify: `src/lib/enrich.ts`
 - Modify: `src/app/api/v1/suggestions/generate/route.ts`
+- Modify: `src/app/api/v1/suggestions/generate/routeHelpers.ts`
+- Modify: `tests/unit/recommendationSeeds.test.ts`
 - Modify: `tests/api-v1.spec.ts`
 
-- [ ] **Step 1: Write failing filter tests**
+- [x] **Step 1: Write failing filter tests**
 
 Assert explicit genres never return a non-matching film by default, mixed-case keywords match canonical negatives, advanced boosts change stable order, and score thresholds do not silently re-admit rejected items. Test explicit staged relaxation only when the request opts into it.
 
-- [ ] **Step 2: Confirm failure**
+Evidence: `tests/unit/advancedFiltering.test.ts` contains 13 focused contracts covering strict genre and threshold eligibility, mixed-case/whitespace negative keywords, real cross-genre rank impact, effective-score and TMDB-ID ordering, post-MMR order/duplicate preservation, explicit strict-first relaxation tiers, shortage diagnostics, and non-finite score rejection with and without a genre request. Route-seed tests cover relaxation canonicalization and invalid inapplicable relaxation.
+
+- [x] **Step 2: Confirm failure**
 
 Run: `rtk npm run test -- tests/unit/advancedFiltering.test.ts`  
 Expected: FAIL on case normalization and discarded boost behavior.
 
-- [ ] **Step 3: Implement strict eligibility and stable boosted order**
+Evidence: The initial focused run failed 7/7 before the filtering helpers and canonical matching existed. Review-driven TDD extensions then failed 1/10 before post-MMR deduplication was removed and 2/12 before strict-first additive relaxation and finite-score exclusion were implemented.
+
+- [x] **Step 3: Implement strict eligibility and stable boosted order**
 
 Normalize both candidate and avoided keyword values. Apply `boost` to the candidate ranking input with TMDB ID tie-breaks. Remove fail-open fallback for strict genre and threshold constraints; return fewer results with diagnostic reason when eligible supply is insufficient.
 
-- [ ] **Step 4: Run the Phase 0 gate**
+Evidence: `advancedFiltering.ts` now canonicalizes negative keywords, treats genre and score as strict finite eligibility constraints, preserves post-MMR order during filtering, and supports only explicit additive threshold/genre relaxation. `enrich.ts` applies stable effective-score/TMDB-ID ordering after real cross-genre boosts and before MMR. The route never restores rejected candidates, rejects relaxation without genres, includes applicable relaxation in the deterministic request seed, and emits bounded insufficiency diagnostics.
+
+- [x] **Step 4: Run the Phase 0 gate**
 
 ```powershell
 rtk npm run lint
@@ -406,9 +415,13 @@ rtk supabase test db
 
 Expected: all commands pass. Rerun Supabase security and performance advisors and record results.
 
+Evidence: Lint and typecheck passed. Full Vitest passed 95/95 across five files. Production build completed successfully with only existing non-fatal dynamic-route and stale browser-data warnings. Full API Playwright passed all 46 runnable tests with 12 optional admin/webhook tests skipped; the focused strict-genre gate also passed 1/1. Ephemeral users were deleted and cleanup queries returned zero. Because the local Supabase CLI runner still requires unavailable Docker, the exact database contracts ran through Supabase MCP against production: 55/55 privileged-function and 67/67 helper assertions passed, both rolled back with no retained data. Security advisors remain at five intentionally authenticated/body-authorized function warnings plus the dated Free-plan HIBP exception; performance findings remain INFO-only unused-index candidates.
+
 - [ ] **Step 5: Complete Phase 0 and commit**
 
 Update all Phase 0 evidence in `MAIN.md`, mark 0C.2 complete, and make 1A.1 ready.
+
+Pending: create the verified checkpoint implementation commit, then record its hash, close audit items 7, 18, and 19, mark Phase 0 complete, and make checkpoint 1A.1 Ready.
 
 ```powershell
 rtk git add src/lib/advancedFiltering.ts src/app/api/v1/suggestions/generate/route.ts tests docs/plans

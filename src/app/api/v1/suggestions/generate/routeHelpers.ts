@@ -5,6 +5,7 @@ import {
   type UserContextSourceHealth,
   type UserContextSourceName,
 } from "@/lib/serverSuggestionsEngine";
+import type { FilterRelaxation } from "@/lib/advancedFiltering";
 
 type GenerateRequestSeedInput = {
   userId: string;
@@ -12,6 +13,7 @@ type GenerateRequestSeedInput = {
   limit: number;
   excludeTmdbIds: readonly number[];
   genreIds?: readonly number[];
+  filterRelaxation?: FilterRelaxation;
 };
 
 export type GenerationDiagnostics = {
@@ -48,6 +50,27 @@ export type GenerationTraceMetadata = {
   timestamp: string;
   requestId: string;
 };
+
+export type FilterRelaxationValidation =
+  | { valid: true }
+  | { valid: false; message: string };
+
+export function validateFilterRelaxationRequest(input: {
+  genreIds?: readonly number[];
+  filterRelaxation?: FilterRelaxation;
+}): FilterRelaxationValidation {
+  if (
+    input.filterRelaxation !== undefined &&
+    (input.genreIds === undefined || input.genreIds.length === 0)
+  ) {
+    return {
+      valid: false,
+      message: "filter_relaxation requires at least one genre_id",
+    };
+  }
+
+  return { valid: true };
+}
 
 export function buildGenerationDiagnostics(params: {
   context: UserContextDiagnostics;
@@ -105,15 +128,15 @@ function canonicalizeIds(ids: readonly number[] | undefined): number[] {
 export function deriveGenerateRequestSeed(
   input: GenerateRequestSeedInput,
 ): string {
+  const genreIds = canonicalizeIds(input.genreIds);
   const canonicalInputs = JSON.stringify({
     userId: input.userId,
     seed_tmdb_ids: canonicalizeIds(input.seedTmdbIds),
     limit: input.limit,
     exclude_tmdb_ids: canonicalizeIds(input.excludeTmdbIds),
-    genre_ids: (() => {
-      const genreIds = canonicalizeIds(input.genreIds);
-      return genreIds.length > 0 ? genreIds : null;
-    })(),
+    genre_ids: genreIds.length > 0 ? genreIds : null,
+    filter_relaxation:
+      genreIds.length > 0 ? (input.filterRelaxation ?? null) : null,
   });
   let hash = 2166136261;
 
