@@ -52,15 +52,58 @@ netlify.state.json
 # Personal Letterboxd exports
 /letterboxd-userdata/
 
-# Editor and local agent configuration
+# Editor configuration
 /.idea/
 /.vscode/
-/.agent/
-/.claude/
-/.codex/
 *.swp
 *.swo
 *~
+
+# AI assistants, agents, and local context
+/.agent/
+/.agents/
+/.ai/
+/.amazonq/
+/.augment/
+/.claude/
+/.cline/
+/.codeium/
+/.codex/
+/.continue/
+/.copilot/
+/.cursor/
+/.junie/
+/.kiro/
+/.mcp/
+/.roo/
+/.tabnine/
+/.windsurf/
+/.aider*
+/.mcp.json
+/mcp.json
+.aiderignore
+.clineignore
+.codeiumignore
+.continueignore
+.cursorignore
+.rooignore
+.windsurfignore
+.clinerules
+.cursorrules
+.roorules
+.windsurfrules
+AGENTS.md
+AGENTS.local.md
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+GEMINI.local.md
+/.github/agents/
+/.github/chatmodes/
+/.github/instructions/
+/.github/prompts/
+/.github/copilot-instructions.md
+/docs/superpowers/
 
 # Temporary and backup files
 /.git_commit_msg.txt
