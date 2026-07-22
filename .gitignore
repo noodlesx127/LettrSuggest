@@ -1,35 +1,77 @@
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+# Dependencies
+/node_modules/
+/.pnp/
+.pnp.*
 
-# Next.js
+# Next.js and TypeScript generated files
 .next/
 out/
-.vercel/
+dist/
+*.tsbuildinfo
+next-env.d.ts
 
-# Local env
-.env*
-!.env.example
-firebase-service-account.json
-service-account.json
-.firebaserc.local
-.firebase/
-netlify.toml.local
-netlify.state.json
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Local Netlify folder
-.netlify
-
-# Playwright
+# Tests and coverage
+/coverage/
 /test-results/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Package-manager and application logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+/Logs/
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+*.env.local
+firebase-service-account.json
+service-account.json
+.firebaserc.local
+/.firebase/
+
+# Local deployment state
+/.netlify/
+/.vercel/
+netlify.toml.local
+netlify.state.json
+
+# Supabase CLI state (migrations and config remain tracked)
+/supabase/.branches/
+/supabase/.temp/
+/supabase/.env.keys
+/supabase/.env.local
+/supabase/.env.*.local
+
+# Personal Letterboxd exports
+/letterboxd-userdata/
+
+# Editor and local agent configuration
+/.idea/
+/.vscode/
+/.agent/
+/.claude/
+/.codex/
+*.swp
+*.swo
+*~
+
+# Temporary and backup files
+/.git_commit_msg.txt
+/.tmp/
+/tmp/
+*.tmp
+*.bak
+*.old.*
+/nul
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
