@@ -1,7 +1,7 @@
 # Phase 0: Containment and Correctness
 
-**Phase state:** In progress  
-**Current checkpoint:** 0C.2  
+**Phase state:** Complete  
+**Current checkpoint:** None; checkpoint 1A.1 is Ready in `docs/plans/MAIN.md`  
 **Exit condition:** Privileged functions enforce effective authorization, proven signal defects are fixture-tested, and v1 reports honest deterministic behavior.
 
 `docs/plans/MAIN.md` controls checkpoint status. Execute in order.
@@ -372,7 +372,7 @@ rtk git commit -m "fix: report recommendation input health honestly"
 
 ## Checkpoint 0C.2: Strict Filters and Effective Advanced Behavior
 
-**State:** In progress
+**State:** Complete
 
 **Files:**
 - Create: `tests/unit/advancedFiltering.test.ts`
@@ -417,11 +417,11 @@ Expected: all commands pass. Rerun Supabase security and performance advisors an
 
 Evidence: Lint and typecheck passed. Full Vitest passed 95/95 across five files. Production build completed successfully with only existing non-fatal dynamic-route and stale browser-data warnings. Full API Playwright passed all 46 runnable tests with 12 optional admin/webhook tests skipped; the focused strict-genre gate also passed 1/1. Ephemeral users were deleted and cleanup queries returned zero. Because the local Supabase CLI runner still requires unavailable Docker, the exact database contracts ran through Supabase MCP against production: 55/55 privileged-function and 67/67 helper assertions passed, both rolled back with no retained data. Security advisors remain at five intentionally authenticated/body-authorized function warnings plus the dated Free-plan HIBP exception; performance findings remain INFO-only unused-index candidates.
 
-- [ ] **Step 5: Complete Phase 0 and commit**
+- [x] **Step 5: Complete Phase 0 and commit**
 
 Update all Phase 0 evidence in `MAIN.md`, mark 0C.2 complete, and make 1A.1 ready.
 
-Pending: create the verified checkpoint implementation commit, then record its hash, close audit items 7, 18, and 19, mark Phase 0 complete, and make checkpoint 1A.1 Ready.
+Evidence: Commit `c300820` contains the verified strict-filter and advanced-ranking implementation. Audit items 7, 18, and 19 are closed in `MAIN.md`; Phase 0 is complete and checkpoint 1A.1 is Ready.
 
 ```powershell
 rtk git add src/lib/advancedFiltering.ts src/app/api/v1/suggestions/generate/route.ts tests docs/plans

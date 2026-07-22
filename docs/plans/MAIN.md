@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
-**Status:** In progress  
-**Current checkpoint:** 0C.2 - Strict filters and effective advanced behavior  
-**Next action:** Commit the verified 0C.2 implementation, then record its hash and close Phase 0.
-**Safe stopping point:** The full Phase 0 gate passes; only the 0C.2 implementation commit and tracker closure remain.
+**Status:** Ready  
+**Current checkpoint:** 1A.1 - Canonical contracts and frozen fixtures  
+**Next action:** Begin checkpoint 1A.1 by writing the canonical request, result, evidence, and diagnostic fixture contracts.
+**Safe stopping point:** Phase 0 is complete in `c300820`; Phase 1 checkpoint 1A.1 is ready but not started.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -46,8 +46,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 0B.2 Atomic metadata tuples and recency | Complete | 0B.1 | Failed-middle-fetch and date-order fixtures pass | `dbf59dd` |
 | 0B.3 Explicit seed semantics | Complete | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | `07d6885` |
 | 0C.1 Input health and neutral request context | Complete | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | `e5faf73` |
-| 0C.2 Strict filters and effective advanced behavior | In progress | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | Not started |
-| 1A.1 Canonical contracts and frozen fixtures | Not started | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | Not started |
+| 0C.2 Strict filters and effective advanced behavior | Complete | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | `c300820` |
+| 1A.1 Canonical contracts and frozen fixtures | Ready | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | Not started |
 | 1A.2 Engine orchestration seams | Not started | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | Not started |
 | 1B.1 Deterministic weighted retrieval | Not started | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | Not started |
 | 1B.2 Evidence semantics and candidate retention | Not started | 1B.1 | Provider-family consensus and same-provider repetition fixtures pass | Not started |
@@ -92,7 +92,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 4. Metadata fetch tuple misalignment | 0B.2 | Failed-middle-fetch fixture | Closed |
 | 5. False same-provider consensus | 1B.2 | Provider-family evidence fixture | Open |
 | 6. Forced background prior | 0C.1 | Neutral-context API test | Closed |
-| 7. Genre filtering fails open | 0C.2 | Strict genre endpoint test | Open |
+| 7. Genre filtering fails open | 0C.2 | Strict genre endpoint test | Closed |
 | 8. Random pre-score truncation | 1B.1 | Deterministic retention fixture | Open |
 | 9. Diversity caps underfill | 1C.1 | Staged-relaxation count test | Open |
 | 10. Calibration cannot change composition | 1C.1 | Larger-window replacement test | Open |
@@ -103,8 +103,8 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 15. Weak profile-cache invalidation | 1D.1 | Input-revision matrix | Open |
 | 16. Global weak-seed blacklist | 1B.1 | Removal plus taste-neutral fixture | Open |
 | 17. Input failures become generic results | 0C.1 | Degraded-state endpoint test | Closed |
-| 18. Advanced boosts discarded | 0C.2 | Rank-impact test | Open |
-| 19. Case-sensitive negative matching | 0C.2 | Mixed-case test | Open |
+| 18. Advanced boosts discarded | 0C.2 | Rank-impact test | Closed |
+| 19. Case-sensitive negative matching | 0C.2 | Mixed-case test | Closed |
 | 20. Unseeded randomness | 1B.1 | Repeat-run equality test | Open |
 | Cross-user local import state | 2A.1 | Auth-transition isolation tests | Open |
 | Larger-row-count state selection | 2A.1 | Cloud-authoritative reconciliation test | Open |
@@ -197,3 +197,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `dbf59dd` - checkpoint 0B.2 atomic metadata identity and deterministic recency
 - `07d6885` - checkpoint 0B.3 deterministic explicit-seed retrieval and exclusion
 - `e5faf73` - checkpoint 0C.1 source-health, fail-closed generation, neutral context, and additive diagnostics
+- `c300820` - checkpoint 0C.2 strict filters, effective advanced ranking, and complete Phase 0 verification
