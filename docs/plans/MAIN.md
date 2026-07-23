@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
 **Status:** In progress  
-**Current checkpoint:** 1A.2 - Engine orchestration seams (Ready)  
-**Next action:** Begin checkpoint 1A.2 by writing the injected context and orchestration seam tests; 1A.1 is complete and no 1A.2 work is included here.
-**Safe stopping point:** Phase 1 remains In progress; 1A.1 is complete with its commit recorded, and 1A.2 is Ready but not started.
+**Current checkpoint:** 1B.1 - Deterministic weighted retrieval (Ready)  
+**Next action:** Begin 1B.1 after the committed 1A.2 orchestration seams; no 1B.1 implementation is included in this checkpoint.  
+**Safe stopping point:** Phase 1 remains In progress; 1A.2 is Complete with its focused evidence and commit recorded, and 1B.1 is Ready but not started.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -48,8 +48,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 0C.1 Input health and neutral request context | Complete | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | `e5faf73` |
 | 0C.2 Strict filters and effective advanced behavior | Complete | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | `c300820` |
 | 1A.1 Canonical contracts and frozen fixtures | Complete | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | `test: define canonical recommendation contracts` |
-| 1A.2 Engine orchestration seams | Ready | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | Not started |
-| 1B.1 Deterministic weighted retrieval | Not started | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | Not started |
+| 1A.2 Engine orchestration seams | Complete | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | `refactor: introduce recommendation engine orchestration` |
+| 1B.1 Deterministic weighted retrieval | Ready | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | Not started |
 | 1B.2 Evidence semantics and candidate retention | Not started | 1B.1 | Provider-family consensus and same-provider repetition fixtures pass | Not started |
 | 1C.1 Constrained reranking and backfill | Not started | 1B.2 | MMR direction, diversity relaxation, niche target, calibration window, and count pass | Not started |
 | 1A.3 v1 canonical adapter | Not started | 1C.1 | v1 fixture and endpoint behavior match canonical output | Not started |
@@ -135,6 +135,11 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-20 - Extended `supabase/tests/database/privileged_functions.test.sql` to 55 assertions covering exact signatures, PUBLIC/anon/authenticated/service_role ACLs, self/cross-user/admin/service invocation, null identity, generated target/non-target rows, returned deletion counts, and post-call preservation. The pre-migration run of `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql --linked` was blocked before pgTAP execution by the missing Docker Desktop `pg_prove` image; the prior linked 0A.1 run above remains the available failing evidence for the unsafe current behavior.
 - 2026-07-20 - `rtk npm run lint` - PASS; no ESLint warnings or errors.
 - 2026-07-20 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully.
+- 2026-07-22 - Initial `rtk npm run test -- tests/integration/recommendationContext.test.ts tests/integration/recommendationEngine.test.ts` - expected RED; both suites failed with 0 tests because `@/lib/recommendationContext` and `@/lib/recommendationEngine` did not exist.
+- 2026-07-22 - `rtk npm run test -- tests/integration/recommendationContext.test.ts tests/integration/recommendationEngine.test.ts` - GREEN/PASS; 2/2 suites and 2/2 tests passed for atomic context tuples, source health/order-independent revision material, injected orchestration, seed exclusion, degraded mode, final IDs, and one bounded trace.
+- 2026-07-22 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully after the orchestration seams were implemented.
+- 2026-07-22 - `rtk proxy npx next lint --file src/lib/recommendationContext.ts --file src/lib/recommendationEngine.ts --file src/lib/enrich.ts --file tests/integration/recommendationContext.test.ts --file tests/integration/recommendationEngine.test.ts` - PASS; no ESLint warnings or errors.
+- 2026-07-22 - `rtk git diff --check` - PASS; Git reported no whitespace errors and only the pre-existing LF/CRLF warning for the unrelated `package-lock.json` change.
 - 2026-07-22 - Initial `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - expected FAIL, 1 suite failed with 0 tests because `@/lib/recommendationTypes` did not exist before checkpoint 1A.1 contracts were implemented.
 - 2026-07-22 - `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - PASS, 2/2 tests in 1 file. The frozen fixture verifies neutral omitted context, weighted seed exclusion, source health, deterministic ordered IDs, bounded attribution, degraded-mode protection, and diagnostics without private-list or secret fields.
 - 2026-07-22 - `rtk npm run typecheck` and `rtk git diff --check` - PASS; TypeScript completed successfully and Git reported no whitespace errors. Git emitted only the pre-existing LF/CRLF warning for the unrelated `package-lock.json` change.
@@ -211,3 +216,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `e5faf73` - checkpoint 0C.1 source-health, fail-closed generation, neutral context, and additive diagnostics
 - `c300820` - checkpoint 0C.2 strict filters, effective advanced ranking, and complete Phase 0 verification
 - `test: define canonical recommendation contracts` - checkpoint 1A.1 canonical request/result contracts, bounded validation, and frozen fixture evidence
+- `refactor: introduce recommendation engine orchestration` - checkpoint 1A.2 atomic context normalization, injected engine orchestration, and overlap scorer seam

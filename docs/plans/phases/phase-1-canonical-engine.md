@@ -23,7 +23,7 @@
 
 ## Checkpoint 1A.2: Engine Orchestration Seams
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Create: `src/lib/recommendationContext.ts`
@@ -32,14 +32,16 @@
 - Create: `tests/integration/recommendationEngine.test.ts`
 - Modify: `src/lib/enrich.ts`
 
-- [ ] Write a context test asserting each films/mappings/metadata/dates/ratings/features record remains atomic, source health is preserved, normalized output is independent of database row order, and input revision material covers every loaded source.
-- [ ] Write an engine test with injected `loadContext`, `retrieveCandidates`, `scoreCandidates`, `rerankCandidates`, `rng`, and `telemetry` fakes. Assert call order, request propagation, seed exclusion, health-derived mode, final IDs, and one bounded trace.
-- [ ] Run both tests; expect failure because no canonical context or orchestration seam exists.
-- [ ] Implement `loadRecommendationContext(repository, userId)` in `recommendationContext.ts` using the Phase 0 health and tuple contracts. Implement `createRecommendationEngine(dependencies)` and `generate(request)` as orchestration only. Wrap existing `suggestByOverlap` behind the scorer dependency without moving unrelated persistence helpers.
-- [ ] Run the focused tests and typecheck; expect pass.
-- [ ] Commit with `rtk git commit -m "refactor: introduce recommendation engine orchestration"`.
+- [x] Write a context test asserting each films/mappings/metadata/dates/ratings/features record remains atomic, source health is preserved, normalized output is independent of database row order, and input revision material covers every loaded source.
+- [x] Write an engine test with injected `loadContext`, `retrieveCandidates`, `scoreCandidates`, `rerankCandidates`, `rng`, and `telemetry` fakes. Assert call order, request propagation, seed exclusion, health-derived mode, final IDs, and one bounded trace.
+- [x] Run both tests; expect failure because no canonical context or orchestration seam exists.
+- [x] Implement `loadRecommendationContext(repository, userId)` in `recommendationContext.ts` using the Phase 0 health and tuple contracts. Implement `createRecommendationEngine(dependencies)` and `generate(request)` as orchestration only. Wrap existing `suggestByOverlap` behind the scorer dependency without moving unrelated persistence helpers.
+- [x] Run the focused tests and typecheck; expect pass.
+- [x] Commit with `rtk git commit -m "refactor: introduce recommendation engine orchestration"`.
 
 ## Checkpoint 1B.1: Deterministic Weighted Retrieval
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `src/lib/recommendationCandidates.ts`

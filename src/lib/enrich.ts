@@ -29,6 +29,11 @@ import {
   boostSeasonalGenres,
 } from "./genreEnhancement";
 import { updateExplorationStats } from "./adaptiveLearning";
+import type { RecommendationContext } from "@/lib/recommendationContext";
+import type {
+  RecommendationCandidate,
+  RecommendationRequest,
+} from "@/lib/recommendationTypes";
 
 /**
  * Helper to get the base URL for internal API calls
@@ -8849,4 +8854,84 @@ export function findPairwiseCandidate<T extends PairwiseCandidate>(
 
   // Fallback: none found
   return null;
+}
+
+/**
+ * Keep the existing overlap scorer behind the canonical engine seam until the
+ * dedicated scoring implementation is extracted in a later checkpoint.
+ */
+export type OverlapScoringContext = RecommendationContext;
+
+export async function scoreRecommendationsWithOverlap(params: {
+  request: RecommendationRequest;
+  context: OverlapScoringContext;
+  candidates: readonly number[];
+}): Promise<RecommendationCandidate[]> {
+  const films: FilmEventLite[] = params.context.films.map((tuple) => {
+    const film = tuple.film;
+    const rating = tuple.rating?.rating ?? film.rating;
+    const lastDate =
+      tuple.date?.watchedAt ??
+      tuple.date?.watched_at ??
+      tuple.date?.lastDate ??
+      tuple.date?.last_date ??
+      film.lastDate ??
+      film.last_date;
+
+    return {
+      uri: tuple.uri,
+      title: typeof film.title === "string" ? film.title : "",
+      year: typeof film.year === "number" ? film.year : null,
+      ...(typeof rating === "number" ? { rating } : {}),
+      ...(typeof film.liked === "boolean" ? { liked: film.liked } : {}),
+      ...(typeof lastDate === "string" ? { lastDate } : {}),
+    };
+  });
+  const mappings = new Map<string, number>();
+  for (const tuple of params.context.films) {
+    if (tuple.tmdbId !== null) mappings.set(tuple.uri, tuple.tmdbId);
+  }
+
+  const scored = await suggestByOverlap({
+    userId: params.request.userId,
+    films,
+    mappings,
+    candidates: [...params.candidates],
+    desiredResults: params.request.count,
+    excludeWatchedIds: new Set(params.context.watchedTmdbIds),
+    context: {
+      mode: params.request.context.mode,
+      localHour: params.request.context.localHour,
+    },
+  });
+
+  return scored.flatMap((item) => {
+    if (!Number.isFinite(item.score) || !Number.isSafeInteger(item.tmdbId)) {
+      return [];
+    }
+
+    const providerFamilies = item.sources?.length
+      ? [...item.sources]
+      : ["overlap"];
+    const retrievalScore = item.score;
+    return [
+      {
+        tmdbId: item.tmdbId,
+        score: item.score,
+        evidence: {
+          seedAnchors: [],
+          providerFamilies,
+          providerOccurrences: providerFamilies.length,
+          retrievalScore,
+        },
+        attribution: {
+          retrieval: retrievalScore,
+          preference: 0,
+          context: 0,
+          diversity: 0,
+          total: item.score,
+        },
+      },
+    ];
+  });
 }
