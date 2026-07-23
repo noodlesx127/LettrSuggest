@@ -34,7 +34,7 @@ const diagnostics: RecommendationDiagnostics = {
     blocked: { health: "ok", rowCount: 1 },
   },
   failedSources: [],
-  requestSeed: "canonical-fixture-seed",
+  requestSeedHash: "0123456789abcdef",
   seedCount: 2,
   candidateCount: 5,
   resultCount: 3,

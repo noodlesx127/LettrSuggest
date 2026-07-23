@@ -130,7 +130,7 @@ export type RecommendationDiagnostics = Readonly<{
   contextMode: RecommendationContextMode;
   inputHealth: RecommendationInputHealth;
   failedSources: readonly RecommendationSourceName[];
-  requestSeed: string;
+  requestSeedHash: string;
   seedCount: number;
   candidateCount: number;
   resultCount: number;
@@ -153,6 +153,7 @@ export type RecommendationResult = Readonly<{
 export const MAX_RECOMMENDATION_COUNT = 100;
 export const MAX_DIAGNOSTIC_COUNT = 10_000;
 export const MAX_DIAGNOSTIC_STRING_LENGTH = 128;
+export const RECOMMENDATION_REQUEST_SEED_HASH_LENGTH = 16;
 
 const RECOMMENDATION_CONTEXT_KEYS = ["mode", "localHour"] as const;
 const SOURCE_HEALTH_KEYS = ["health", "rowCount"] as const;
@@ -162,16 +163,17 @@ const RECOMMENDATION_DIAGNOSTIC_KEYS = [
   "contextMode",
   "inputHealth",
   "failedSources",
-  "requestSeed",
+  "requestSeedHash",
   "seedCount",
   "candidateCount",
   "resultCount",
   "stageCounts",
   "dropReasonCounts",
 ] as const;
-const SAFE_DIAGNOSTIC_STRING = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const SAFE_REQUEST_SEED = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const JWT_LIKE_STRING =
   /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+const LOWERCASE_HEX = /^[0-9a-f]+$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -188,11 +190,19 @@ function hasExactKeys(
   );
 }
 
-function isSafeDiagnosticString(value: unknown): value is string {
+function isBoundedRequestSeed(value: unknown): value is string {
   return (
     typeof value === "string" &&
-    SAFE_DIAGNOSTIC_STRING.test(value) &&
+    SAFE_REQUEST_SEED.test(value) &&
     !JWT_LIKE_STRING.test(value)
+  );
+}
+
+function isRequestSeedHash(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length === RECOMMENDATION_REQUEST_SEED_HASH_LENGTH &&
+    LOWERCASE_HEX.test(value)
   );
 }
 
@@ -352,7 +362,7 @@ export function validateRecommendationRequest(
   if (
     !isPositiveSafeInteger(value.count) ||
     value.count > MAX_RECOMMENDATION_COUNT ||
-    !isSafeDiagnosticString(value.requestSeed)
+    !isBoundedRequestSeed(value.requestSeed)
   ) {
     return false;
   }
@@ -460,7 +470,7 @@ export function validateRecommendationDiagnostics(
     return false;
   }
   if (
-    !isSafeDiagnosticString(value.requestSeed) ||
+    !isRequestSeedHash(value.requestSeedHash) ||
     !isBoundedCount(value.seedCount) ||
     !isBoundedCount(value.candidateCount) ||
     !isBoundedCount(value.resultCount) ||

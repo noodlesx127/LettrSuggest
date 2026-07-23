@@ -100,7 +100,7 @@ describe("canonical recommendation contracts", () => {
     expect(
       validateRecommendationDiagnostics({
         ...diagnostics,
-        requestSeed: "eyJhbGciOiJIUzI1NiJ9.payload.signature",
+        requestSeedHash: "eyJhbGciOiJIUzI1NiJ9.payload.signature",
       }),
     ).toBe(false);
     expect(validateRecommendationDiagnostics(diagnostics)).toBe(true);
@@ -121,5 +121,27 @@ describe("canonical recommendation contracts", () => {
 
     expect(legacyBoundary(seedResult)).toBe(false);
     expect(validateRecommendationResult(seedResult, request)).toBe(false);
+  });
+
+  it("rejects a raw credential-like request seed from diagnostics", () => {
+    expect(
+      validateRecommendationDiagnostics({
+        ...canonicalFixture.result.diagnostics,
+        requestSeed: "sk_live_example_credential",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a result containing an explicit exclusion", () => {
+    const request = normalizeRecommendationRequest(canonicalFixture.request);
+    const excludedResult = {
+      ...canonicalFixture.result,
+      results: [
+        ...canonicalFixture.result.results.slice(0, 2),
+        { ...canonicalFixture.result.results[2], tmdbId: 909 },
+      ],
+    };
+
+    expect(validateRecommendationResult(excludedResult, request)).toBe(false);
   });
 });
