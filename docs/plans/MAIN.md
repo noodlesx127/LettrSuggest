@@ -166,6 +166,12 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-22 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully.
 - 2026-07-22 - `rtk proxy npx next lint --file src/lib/recommendationContext.ts --file tests/integration/recommendationContext.test.ts --file tests/integration/recommendationInputHealth.test.ts` - PASS; no ESLint warnings or errors.
 - 2026-07-22 - `rtk git diff --check` - PASS; no whitespace errors.
+- 2026-07-22 - Direct-canonical RED: `rtk npm run test -- tests/integration/recommendationContext.test.ts` - FAIL, 1 of 9 tests failed; a direct blocked source row with `{ tmdbId: 0 }` was treated as healthy and did not force the required source to degraded.
+- 2026-07-22 - Direct-canonical GREEN: `rtk npm run test -- tests/integration/recommendationContext.test.ts` - PASS, 9/9 tests after dedicated positive-safe-TMDB-ID blocked-row validation was added.
+- 2026-07-22 - Context/engine/canonical/Phase 0 regression gate: `rtk npm run test -- tests/integration/recommendationContext.test.ts tests/integration/recommendationEngine.test.ts tests/integration/recommendationContracts.test.ts tests/integration/recommendationInputHealth.test.ts` - PASS, 61/61 tests across 4 files.
+- 2026-07-22 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully.
+- 2026-07-22 - `rtk proxy npx next lint --file src/lib/recommendationContext.ts --file tests/integration/recommendationContext.test.ts --file tests/integration/recommendationInputHealth.test.ts` - PASS; no ESLint warnings or errors.
+- 2026-07-22 - `rtk git diff --check` - PASS; no whitespace errors.
 - 2026-07-22 - Initial `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - expected FAIL, 1 suite failed with 0 tests because `@/lib/recommendationTypes` did not exist before checkpoint 1A.1 contracts were implemented.
 - 2026-07-22 - `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - PASS, 2/2 tests in 1 file. The frozen fixture verifies neutral omitted context, weighted seed exclusion, source health, deterministic ordered IDs, bounded attribution, degraded-mode protection, and diagnostics without private-list or secret fields.
 - 2026-07-22 - `rtk npm run typecheck` and `rtk git diff --check` - PASS; TypeScript completed successfully and Git reported no whitespace errors. Git emitted only the pre-existing LF/CRLF warning for the unrelated `package-lock.json` change.
@@ -247,3 +253,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `fix: align overlap scoring seam and context fixtures` - checkpoint 1A.2 follow-up spec-review corrections
 - `fix: close recommendation orchestration review findings` - checkpoint 1A.2 quality fixes, fail-closed stage validation, canonical source-health reconciliation, and complete GREEN verification
 - `fix: preserve Phase 0 health in context adapter` - checkpoint 1A.2 compatibility-health and malformed-blocked-row corrections
+- `fix: validate direct blocked context rows` - checkpoint 1A.2 direct-canonical blocked-source validation

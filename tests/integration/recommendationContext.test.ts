@@ -587,6 +587,36 @@ describe("recommendation context", () => {
     expect(context.blockedTmdbIds).toEqual(new Set([909]));
   });
 
+  it("fails closed for malformed blocked rows in a direct source snapshot", async () => {
+    const context = await loadRecommendationContext(
+      repositoryFor({
+        ...sourceSnapshot,
+        sources: {
+          blocked: {
+            data: [{ tmdbId: 0, sourceMarker: "invalid-blocked" }],
+          },
+        },
+        inputHealth: {
+          ...inputHealth,
+          blocked: { health: "ok", rowCount: 1 },
+        },
+      }),
+      "direct-malformed-blocked-user",
+    );
+
+    expect(context.sourceHealth.blocked).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.inputHealth.blocked).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.failedSources).toContain("blocked");
+    expect(context.mode).toBe("degraded");
+    expect(context.blockedTmdbIds).toEqual(new Set());
+  });
+
   it("keeps every Phase 0 adapter source in revision material", async () => {
     const legacyContext = {
       films: [

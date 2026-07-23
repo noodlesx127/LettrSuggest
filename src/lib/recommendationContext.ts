@@ -347,6 +347,11 @@ function normalizeKeyedRecord<T extends RecordValue>(
   };
 }
 
+function normalizeBlockedSourceRow(row: RecordValue): RecordValue | null {
+  const tmdbId = getTmdbId(row);
+  return tmdbId === null ? null : { ...row, tmdbId };
+}
+
 function asMappingRecord(value: RecordValue): RecommendationMappingRecord {
   return value as RecommendationMappingRecord;
 }
@@ -484,6 +489,12 @@ function inspectGenericSource(
     return normalizeHealth(result.health, { health: "failed", rowCount: 0 });
   }
   return normalizeHealth(result.health, healthForRows(result.data.length));
+}
+
+function inspectBlockedSource(
+  result: RecommendationContextSourceResult<RecordValue> | undefined,
+): InspectedRows<RecordValue> {
+  return inspectRows(result, normalizeBlockedSourceRow);
 }
 
 function getSourceResult(
@@ -626,7 +637,13 @@ function buildSourceHealth(
   snapshot: RecommendationContextSourceSnapshot,
   inspected: Readonly<
     Record<
-      "films" | "mappings" | "metadata" | "dates" | "ratings" | "features",
+      | "films"
+      | "mappings"
+      | "metadata"
+      | "dates"
+      | "ratings"
+      | "features"
+      | "blocked",
       InspectedRows<RecordValue>
     >
   >,
@@ -718,7 +735,13 @@ function buildRevisionMaterial(
 function getContextRows(
   inspected: Readonly<
     Record<
-      "films" | "mappings" | "metadata" | "dates" | "ratings" | "features",
+      | "films"
+      | "mappings"
+      | "metadata"
+      | "dates"
+      | "ratings"
+      | "features"
+      | "blocked",
       InspectedRows<RecordValue>
     >
   >,
@@ -829,6 +852,7 @@ export async function loadRecommendationContext(
       dates: inspectRows(snapshot.dates, normalizeKeyedRecord),
       ratings: inspectRows(snapshot.ratings, normalizeKeyedRecord),
       features: inspectRows(snapshot.features, normalizeTmdbRecord),
+      blocked: inspectBlockedSource(getSourceResult(snapshot, "blocked")),
     } as const;
     const sourceHealth = buildSourceHealth(snapshot, inspected);
     const inputHealth = reconcileInputHealth(snapshot, sourceHealth);
@@ -914,15 +938,11 @@ export async function loadRecommendationContext(
       inputHealth,
       hasPersonalizedEvidence,
     });
-    const blockedFromSource = getSourceResult(snapshot, "blocked");
     const blockedTmdbIds = new Set<number>([
       ...(snapshot.blockedTmdbIds ?? []),
-      ...(Array.isArray(blockedFromSource?.data)
-        ? blockedFromSource.data
-            .filter(isRecord)
-            .map(getTmdbId)
-            .filter((tmdbId): tmdbId is number => tmdbId !== null)
-        : []),
+      ...inspected.blocked.rows
+        .map(getTmdbId)
+        .filter((tmdbId): tmdbId is number => tmdbId !== null),
     ].filter(isPositiveSafeInteger).sort((left, right) => left - right));
 
     const sourceRows = getContextRows(inspected, snapshot, feedbackMap);
