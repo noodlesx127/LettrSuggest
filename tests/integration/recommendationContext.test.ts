@@ -5,6 +5,10 @@ import {
   type RecommendationContextRepository,
   type RecommendationContextSourceSnapshot,
 } from "@/lib/recommendationContext";
+import {
+  loadUserContext,
+  type UserContextSourceLoaderResult,
+} from "@/lib/serverSuggestionsEngine";
 
 const inputHealth = {
   films: { health: "ok" as const, rowCount: 3 },
@@ -651,5 +655,107 @@ describe("recommendation context", () => {
     expect(context.inputRevisionMaterial.sources.blocked).toEqual([
       { tmdbId: 909 },
     ]);
+  });
+
+  it("preserves an actual Phase 0 blocked-source failure through compatibility adaptation", async () => {
+    const phase0Context = await loadUserContext("phase0-degraded-user", {
+      now: () => Date.parse("2026-07-21T12:00:00.000Z"),
+      sourceLoader: async (): Promise<UserContextSourceLoaderResult> => ({
+        films: {
+          data: [
+            {
+              uri: "letterboxd://film/phase0",
+              title: "Phase 0",
+              year: 2020,
+              rating: 5,
+              rewatch: false,
+              last_date: "2026-07-01",
+              watch_count: 1,
+              liked: true,
+              on_watchlist: false,
+            },
+          ],
+        },
+        mappings: {
+          data: [{ uri: "letterboxd://film/phase0", tmdb_id: 808 }],
+        },
+        feedback: { data: [] },
+        exploration: { data: { exploration_rate: 0.15 } },
+        adjacent_genres: { data: [] },
+        exposures: { data: [] },
+        blocked: { data: null, error: new Error("blocked unavailable") },
+      }),
+    });
+
+    expect(phase0Context.inputHealth.blocked).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+
+    const context = await loadRecommendationContext(
+      { loadUserContext: async () => phase0Context },
+      "phase0-degraded-user",
+    );
+
+    expect(context.inputHealth.blocked).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.failedSources).toContain("blocked");
+    expect(context.mode).toBe("degraded");
+  });
+
+  it("fails closed for malformed present blocked rows through compatibility adaptation", async () => {
+    const context = await loadRecommendationContext(
+      {
+        loadUserContext: async () => ({
+          films: [
+            {
+              uri: "letterboxd://film/malformed-blocked",
+              title: "Malformed blocked fixture",
+              year: 2020,
+              rating: 5,
+              rewatch: false,
+              last_date: "2026-07-01",
+              watch_count: 1,
+              liked: true,
+              on_watchlist: false,
+            },
+          ],
+          mappings: new Map([
+            ["letterboxd://film/malformed-blocked", 909],
+          ]),
+          mappingsArray: [
+            {
+              uri: "letterboxd://film/malformed-blocked",
+              tmdb_id: 909,
+            },
+          ],
+          feedback: [],
+          explorationRate: 0.15,
+          adjacentGenres: [],
+          recentExposures: new Map(),
+          blockedIds: new Set<number>([0, 909]),
+          inputHealth: {
+            ...inputHealth,
+            blocked: { health: "ok", rowCount: 2 },
+          },
+          failedSources: [],
+          mode: "personalized",
+        }),
+      },
+      "malformed-blocked-user",
+    );
+
+    expect(context.inputHealth.blocked).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.sourceHealth.blocked).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.blockedTmdbIds).toEqual(new Set([909]));
+    expect(context.mode).toBe("degraded");
   });
 });

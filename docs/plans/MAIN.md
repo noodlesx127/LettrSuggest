@@ -160,6 +160,12 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-22 - `rtk proxy npx next lint --file src/lib/recommendationContext.ts --file src/lib/recommendationEngine.ts --file src/lib/enrich.ts --file tests/integration/recommendationContext.test.ts --file tests/integration/recommendationEngine.test.ts` - PASS; no ESLint warnings or errors on touched TypeScript files.
 - 2026-07-22 - `rtk git diff --check` - PASS; no whitespace errors, with only the pre-existing LF/CRLF warning for the unrelated `package-lock.json` change.
 - 2026-07-22 - `rtk npm run build` - PASS; Next.js production build compiled successfully and generated all 51 static pages. Existing non-fatal dynamic-route usage warnings were emitted during page-data collection.
+- 2026-07-22 - Compatibility-review RED: `rtk npm run test -- tests/integration/recommendationContext.test.ts` - FAIL, 2 of 8 tests failed; an actual Phase 0 blocked-source failure was downgraded to `empty` through `loadUserContext` adaptation, and a present malformed blocked row was silently discarded instead of failing closed.
+- 2026-07-22 - Compatibility-review GREEN: `rtk npm run test -- tests/integration/recommendationContext.test.ts` - PASS, 8/8 tests after explicit Phase 0 failed-health precedence and malformed blocked-row validation were added.
+- 2026-07-22 - Context/engine/canonical/Phase 0 gate: `rtk npm run test -- tests/integration/recommendationContext.test.ts tests/integration/recommendationEngine.test.ts tests/integration/recommendationContracts.test.ts tests/integration/recommendationInputHealth.test.ts` - PASS, 60/60 tests across 4 files.
+- 2026-07-22 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully.
+- 2026-07-22 - `rtk proxy npx next lint --file src/lib/recommendationContext.ts --file tests/integration/recommendationContext.test.ts --file tests/integration/recommendationInputHealth.test.ts` - PASS; no ESLint warnings or errors.
+- 2026-07-22 - `rtk git diff --check` - PASS; no whitespace errors.
 - 2026-07-22 - Initial `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - expected FAIL, 1 suite failed with 0 tests because `@/lib/recommendationTypes` did not exist before checkpoint 1A.1 contracts were implemented.
 - 2026-07-22 - `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - PASS, 2/2 tests in 1 file. The frozen fixture verifies neutral omitted context, weighted seed exclusion, source health, deterministic ordered IDs, bounded attribution, degraded-mode protection, and diagnostics without private-list or secret fields.
 - 2026-07-22 - `rtk npm run typecheck` and `rtk git diff --check` - PASS; TypeScript completed successfully and Git reported no whitespace errors. Git emitted only the pre-existing LF/CRLF warning for the unrelated `package-lock.json` change.
@@ -240,3 +246,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `fix: tighten recommendation orchestration seams` - checkpoint 1A.2 independent spec-review corrections
 - `fix: align overlap scoring seam and context fixtures` - checkpoint 1A.2 follow-up spec-review corrections
 - `fix: close recommendation orchestration review findings` - checkpoint 1A.2 quality fixes, fail-closed stage validation, canonical source-health reconciliation, and complete GREEN verification
+- `fix: preserve Phase 0 health in context adapter` - checkpoint 1A.2 compatibility-health and malformed-blocked-row corrections

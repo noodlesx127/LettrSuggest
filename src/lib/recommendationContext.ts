@@ -541,6 +541,9 @@ function normalizeLegacyContext(value: unknown): RecommendationContextSourceSnap
   const blockedRows = blockedIds
     .filter(isPositiveSafeInteger)
     .map((tmdbId) => ({ tmdbId }));
+  const hasMalformedBlockedRows = blockedIds.some(
+    (tmdbId) => !isPositiveSafeInteger(tmdbId),
+  );
   const feedbackMap = normalizeFeedbackMap(value.feedbackMap);
 
   return {
@@ -592,7 +595,12 @@ function normalizeLegacyContext(value: unknown): RecommendationContextSourceSnap
       },
       adjacent_genres: { data: adjacentGenreRows },
       exposures: { data: exposureRows },
-      blocked: { data: blockedRows },
+      blocked: hasMalformedBlockedRows
+        ? {
+            data: blockedRows,
+            health: { health: "failed", rowCount: 0 },
+          }
+        : { data: blockedRows },
     },
     inputHealth: value.inputHealth as RecommendationInputHealth | undefined,
     feedbackMap,
@@ -632,6 +640,9 @@ function buildSourceHealth(
       )
         ? snapshot.inputHealth?.[sourceName as RecommendationSourceName]
         : undefined);
+    if (explicit?.health === "failed") {
+      return [sourceName, { health: "failed" as const, rowCount: 0 }];
+    }
     const inspectedSource = inspected[sourceName as keyof typeof inspected];
     if (inspectedSource) return [sourceName, inspectedSource.health];
 
