@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
-**Status:** Ready  
-**Current checkpoint:** 1A.1 - Canonical contracts and frozen fixtures  
-**Next action:** Begin checkpoint 1A.1 by writing the canonical request, result, evidence, and diagnostic fixture contracts.
-**Safe stopping point:** Phase 0 is complete in `c300820`; Phase 1 checkpoint 1A.1 is ready but not started.
+**Status:** In progress  
+**Current checkpoint:** 1A.2 - Engine orchestration seams (Ready)  
+**Next action:** Begin checkpoint 1A.2 by writing the injected context and orchestration seam tests; 1A.1 is complete and no 1A.2 work is included here.
+**Safe stopping point:** Phase 1 remains In progress; 1A.1 is complete with its commit recorded, and 1A.2 is Ready but not started.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -47,8 +47,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 0B.3 Explicit seed semantics | Complete | 0B.2 | Seeds influence retrieval, never appear as results, and runs are deterministic | `07d6885` |
 | 0C.1 Input health and neutral request context | Complete | 0B.3 | `ok/empty/failed` state, honest mode, neutral default, and additive diagnostics pass | `e5faf73` |
 | 0C.2 Strict filters and effective advanced behavior | Complete | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | `c300820` |
-| 1A.1 Canonical contracts and frozen fixtures | Ready | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | Not started |
-| 1A.2 Engine orchestration seams | Not started | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | Not started |
+| 1A.1 Canonical contracts and frozen fixtures | Complete | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | `test: define canonical recommendation contracts` |
+| 1A.2 Engine orchestration seams | Ready | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | Not started |
 | 1B.1 Deterministic weighted retrieval | Not started | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | Not started |
 | 1B.2 Evidence semantics and candidate retention | Not started | 1B.1 | Provider-family consensus and same-provider repetition fixtures pass | Not started |
 | 1C.1 Constrained reranking and backfill | Not started | 1B.2 | MMR direction, diversity relaxation, niche target, calibration window, and count pass | Not started |
@@ -135,6 +135,9 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-20 - Extended `supabase/tests/database/privileged_functions.test.sql` to 55 assertions covering exact signatures, PUBLIC/anon/authenticated/service_role ACLs, self/cross-user/admin/service invocation, null identity, generated target/non-target rows, returned deletion counts, and post-call preservation. The pre-migration run of `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql --linked` was blocked before pgTAP execution by the missing Docker Desktop `pg_prove` image; the prior linked 0A.1 run above remains the available failing evidence for the unsafe current behavior.
 - 2026-07-20 - `rtk npm run lint` - PASS; no ESLint warnings or errors.
 - 2026-07-20 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully.
+- 2026-07-22 - Initial `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - expected FAIL, 1 suite failed with 0 tests because `@/lib/recommendationTypes` did not exist before checkpoint 1A.1 contracts were implemented.
+- 2026-07-22 - `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - PASS, 2/2 tests in 1 file. The frozen fixture verifies neutral omitted context, weighted seed exclusion, source health, deterministic ordered IDs, bounded attribution, degraded-mode protection, and diagnostics without private-list or secret fields.
+- 2026-07-22 - `rtk npm run typecheck` and `rtk git diff --check` - PASS; TypeScript completed successfully and Git reported no whitespace errors. Git emitted only the pre-existing LF/CRLF warning for the unrelated `package-lock.json` change.
 - 2026-07-21 - Initial `rtk npm run test -- tests/unit/advancedFiltering.test.ts` - expected FAIL, 7/7 failed before strict eligibility, canonical negative matching, and stable score ordering existed. Review-driven extensions later failed 1/10 on post-MMR deduplication and 2/12 on strict-first relaxation tiers and non-finite score rejection before those defects were corrected.
 - 2026-07-21 - `rtk npm run test -- tests/unit/advancedFiltering.test.ts tests/unit/recommendationSeeds.test.ts tests/integration/recommendationInputHealth.test.ts` - PASS, 61/61. Strict genre and threshold eligibility, canonical negatives, real cross-genre rank impact, deterministic boosted ordering, explicit additive relaxation, finite-score fail-closed behavior with and without genres, request-seed semantics, and input-health regressions pass.
 - 2026-07-21 - Ephemeral confirmed Supabase identity plus `rtk npx playwright test tests/api-v1.spec.ts -g "strict genre"` through the local Playwright web-server configuration - PASS, 1/1. Every returned result matched the requested Action genre and bounded shortage diagnostics were present when applicable. Cleanup ran in `finally`; a production query confirmed zero matching `phase0-strict-filter-%@example.invalid` users.
@@ -198,3 +201,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `07d6885` - checkpoint 0B.3 deterministic explicit-seed retrieval and exclusion
 - `e5faf73` - checkpoint 0C.1 source-health, fail-closed generation, neutral context, and additive diagnostics
 - `c300820` - checkpoint 0C.2 strict filters, effective advanced ranking, and complete Phase 0 verification
+- `test: define canonical recommendation contracts` - checkpoint 1A.1 canonical request/result contracts, bounded validation, and frozen fixture evidence

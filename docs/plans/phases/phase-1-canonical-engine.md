@@ -1,6 +1,6 @@
 # Phase 1: Canonical Recommendation Engine
 
-**Phase state:** Not started  
+**Phase state:** In progress  
 **Entry condition:** Phase 0 complete  
 **Exit condition:** One deterministic server engine serves v1 and web, cache inputs are revisioned, and optional sources are capability-gated.
 
@@ -8,18 +8,22 @@
 
 ## Checkpoint 1A.1: Canonical Contracts and Frozen Fixtures
 
+**Checkpoint state:** Complete
+
 **Files:**
 - Create: `src/lib/recommendationTypes.ts`
 - Create: `tests/fixtures/recommendations/canonicalFixture.ts`
 - Create: `tests/integration/recommendationContracts.test.ts`
 
-- [ ] Define `RecommendationRequest`, weighted seeds, neutral context, source health, candidate evidence, score attribution, drop reason, engine mode/version, diagnostics, and `RecommendationResult` in one server-safe module.
-- [ ] Write a compile/runtime contract test that constructs the canonical fixture and asserts seed exclusion, health fields, ordered expected IDs, attribution, and no private-list fields in diagnostics.
-- [ ] Run `rtk npm run test -- tests/integration/recommendationContracts.test.ts`; expect failure before the contracts exist.
-- [ ] Implement only the types, validation helpers, and frozen fixture needed by the test; run the test and `rtk npm run typecheck`; expect pass.
-- [ ] Update trackers and commit with `rtk git commit -m "test: define canonical recommendation contracts"`.
+- [x] Define `RecommendationRequest`, weighted seeds, neutral context, source health, candidate evidence, score attribution, drop reason, engine mode/version, diagnostics, and `RecommendationResult` in one server-safe module.
+- [x] Write a compile/runtime contract test that constructs the canonical fixture and asserts seed exclusion, health fields, ordered expected IDs, attribution, and no private-list fields in diagnostics.
+- [x] Run `rtk npm run test -- tests/integration/recommendationContracts.test.ts`; expect failure before the contracts exist.
+- [x] Implement only the types, validation helpers, and frozen fixture needed by the test; run the test and `rtk npm run typecheck`; expect pass.
+- [x] Update trackers and commit with `rtk git commit -m "test: define canonical recommendation contracts"`.
 
 ## Checkpoint 1A.2: Engine Orchestration Seams
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `src/lib/recommendationContext.ts`
