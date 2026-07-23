@@ -1,35 +1,27 @@
-import {
-  scoreRecommendationsWithOverlap,
-  type OverlapScoringContext,
-} from "@/lib/enrich";
+import type { RecommendationContext } from "@/lib/recommendationContext";
 import {
   deriveRecommendationMode,
+  MAX_DIAGNOSTIC_COUNT,
   normalizeRecommendationRequest,
   RECOMMENDATION_ENGINE_VERSION,
   RECOMMENDATION_SOURCE_NAMES,
-  MAX_DIAGNOSTIC_COUNT,
+  validateRecommendationDiagnostics,
   type RecommendationCandidate,
   type RecommendationDiagnostics,
   type RecommendationInputHealth,
   type RecommendationRequest,
   type RecommendationRequestInput,
   type RecommendationResult,
-  type RecommendationSourceName,
 } from "@/lib/recommendationTypes";
-import type { RecommendationContext } from "@/lib/recommendationContext";
 
 export type RecommendationEngineContext = RecommendationContext;
 export type RecommendationRng = () => number;
 export type RecommendationRngFactory = (
   requestSeed: string,
-) => RecommendationRng | number;
+) => RecommendationRng;
 
 export type RecommendationCandidateInput = Readonly<{
   tmdbId: number;
-  retrievalScore?: number;
-  seedAnchors?: readonly number[];
-  providerFamilies?: readonly string[];
-  providerOccurrences?: number;
 }>;
 
 export type RecommendationRetrieveParams = Readonly<{
@@ -71,88 +63,40 @@ export type RecommendationEngineDependencies = Readonly<{
   retrieveCandidates: (
     params: RecommendationRetrieveParams,
   ) =>
-    | readonly (number | RecommendationCandidateInput)[]
-    | Promise<readonly (number | RecommendationCandidateInput)[]>;
-  scoreCandidates?: (
+    | readonly RecommendationCandidateInput[]
+    | Promise<readonly RecommendationCandidateInput[]>;
+  scoreCandidates: (
     params: RecommendationScoreParams,
-  ) => readonly RecommendationCandidate[] | Promise<readonly RecommendationCandidate[]>;
-  rerankCandidates?: (
+  ) =>
+    | readonly RecommendationCandidate[]
+    | Promise<readonly RecommendationCandidate[]>;
+  rerankCandidates: (
     params: RecommendationRerankParams,
-  ) => readonly RecommendationCandidate[] | Promise<readonly RecommendationCandidate[]>;
-  rng?: RecommendationRngFactory;
-  telemetry?: RecommendationTelemetry;
+  ) =>
+    | readonly RecommendationCandidate[]
+    | Promise<readonly RecommendationCandidate[]>;
+  rng: RecommendationRngFactory;
+  telemetry: RecommendationTelemetry;
 }>;
 
-const EMPTY_PROVIDER_FAMILY = "canonical";
+type CandidateWithId = Readonly<{ tmdbId: number }>;
 
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function getCandidateId(value: unknown): number | null {
-  if (isPositiveSafeInteger(value)) return value;
-  if (typeof value !== "object" || value === null) return null;
-
-  const record = value as Record<string, unknown>;
-  const id = record.tmdbId ?? record.tmdb_id ?? record.id;
-  return isPositiveSafeInteger(id) ? id : null;
-}
-
-function toCandidateInput(value: number | RecommendationCandidateInput): RecommendationCandidateInput | null {
-  const tmdbId = getCandidateId(value);
-  return tmdbId === null
-    ? null
-    : typeof value === "number"
-      ? { tmdbId }
-      : { ...value, tmdbId };
-}
-
-function toCandidateInputs(
-  values: readonly (number | RecommendationCandidateInput)[],
-): RecommendationCandidateInput[] {
-  const seen = new Set<number>();
-  const candidates: RecommendationCandidateInput[] = [];
-  for (const value of values) {
-    const candidate = toCandidateInput(value);
-    if (!candidate || seen.has(candidate.tmdbId)) continue;
-    seen.add(candidate.tmdbId);
-    candidates.push(candidate);
-  }
-  return candidates;
-}
-
-function getExcludedIds(
-  request: RecommendationRequest,
-  context: RecommendationEngineContext,
-): Set<number> {
-  return new Set([
-    ...request.seeds.map((seed) => seed.tmdbId),
-    ...request.excludeTmdbIds,
-    ...Array.from(context.watchedTmdbIds ?? []),
-    ...Array.from(context.blockedTmdbIds ?? []),
-  ]);
-}
-
-function filterByReason(
-  candidates: readonly RecommendationCandidateInput[],
+function filterByReason<T extends CandidateWithId>(
+  candidates: readonly T[],
   request: RecommendationRequest,
   context: RecommendationEngineContext,
 ): {
-  candidates: RecommendationCandidateInput[];
+  candidates: T[];
   seedDrops: number;
   exclusionDrops: number;
 } {
   const seedIds = new Set(request.seeds.map((seed) => seed.tmdbId));
   const requestExclusions = new Set(request.excludeTmdbIds);
   const contextExclusions = new Set([
-    ...Array.from(context.watchedTmdbIds ?? []),
-    ...Array.from(context.blockedTmdbIds ?? []),
+    ...Array.from(context.watchedTmdbIds),
+    ...Array.from(context.blockedTmdbIds),
   ]);
-  const retained: RecommendationCandidateInput[] = [];
+  const retained: T[] = [];
   let seedDrops = 0;
   let exclusionDrops = 0;
 
@@ -172,92 +116,6 @@ function filterByReason(
   return { candidates: retained, seedDrops, exclusionDrops };
 }
 
-function candidateFromUnknown(
-  value: unknown,
-): RecommendationCandidate | null {
-  const tmdbId = getCandidateId(value);
-  if (tmdbId === null) return null;
-
-  const record =
-    typeof value === "object" && value !== null
-      ? (value as Partial<RecommendationCandidate>)
-      : undefined;
-  const score = isFiniteNumber(record?.score) ? record.score : 0;
-  const evidence = record?.evidence;
-  const attribution = record?.attribution;
-  const providerFamilies = evidence?.providerFamilies?.length
-    ? [...evidence.providerFamilies]
-    : [EMPTY_PROVIDER_FAMILY];
-  const retrievalScore = isFiniteNumber(evidence?.retrievalScore)
-    ? evidence.retrievalScore
-    : score;
-
-  return {
-    tmdbId,
-    score,
-    evidence: {
-      seedAnchors: evidence?.seedAnchors ? [...evidence.seedAnchors] : [],
-      providerFamilies,
-      providerOccurrences:
-        typeof evidence?.providerOccurrences === "number" &&
-        Number.isSafeInteger(evidence.providerOccurrences) &&
-        evidence.providerOccurrences >= 0
-          ? evidence.providerOccurrences
-          : 1,
-      retrievalScore,
-    },
-    attribution: {
-      retrieval: isFiniteNumber(attribution?.retrieval)
-        ? attribution.retrieval
-        : retrievalScore,
-      preference: isFiniteNumber(attribution?.preference)
-        ? attribution.preference
-        : 0,
-      context: isFiniteNumber(attribution?.context) ? attribution.context : 0,
-      diversity: isFiniteNumber(attribution?.diversity)
-        ? attribution.diversity
-        : 0,
-      total: isFiniteNumber(attribution?.total) ? attribution.total : score,
-    },
-  };
-}
-
-function normalizeCandidates(values: readonly unknown[]): RecommendationCandidate[] {
-  const seen = new Set<number>();
-  const candidates: RecommendationCandidate[] = [];
-  values.forEach((value) => {
-    const candidate = candidateFromUnknown(value);
-    if (!candidate || seen.has(candidate.tmdbId)) return;
-    seen.add(candidate.tmdbId);
-    candidates.push(candidate);
-  });
-  return candidates;
-}
-
-function deterministicRng(requestSeed: string): RecommendationRng {
-  let state = 2166136261;
-  for (const character of requestSeed) {
-    state ^= character.charCodeAt(0);
-    state = Math.imul(state, 16777619);
-  }
-  if (state === 0) state = 1;
-
-  return () => {
-    state = Math.imul(state ^ (state >>> 15), 1 | state);
-    state ^= state + Math.imul(state ^ (state >>> 7), 61 | state);
-    return ((state ^ (state >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function resolveRng(
-  factory: RecommendationRngFactory | undefined,
-  requestSeed: string,
-): RecommendationRng {
-  if (!factory) return deterministicRng(requestSeed);
-  const value = factory(requestSeed);
-  return typeof value === "function" ? value : () => value;
-}
-
 function hashRequestSeed(requestSeed: string): string {
   let hash = 2166136261;
   for (const character of requestSeed) {
@@ -267,17 +125,11 @@ function hashRequestSeed(requestSeed: string): string {
   return (hash >>> 0).toString(16).padStart(16, "0");
 }
 
-function getInputHealth(
-  context: RecommendationEngineContext,
-): RecommendationInputHealth {
-  return context.inputHealth;
-}
-
-function getMode(
+function deriveEngineMode(
   context: RecommendationEngineContext,
 ): RecommendationDiagnostics["mode"] {
   return deriveRecommendationMode({
-    inputHealth: getInputHealth(context),
+    inputHealth: context.inputHealth,
     hasPersonalizedEvidence: context.hasPersonalizedEvidence,
   });
 }
@@ -293,44 +145,44 @@ function buildDiagnostics(params: {
   seedDrops: number;
   exclusionDrops: number;
 }): RecommendationDiagnostics {
-  const { request, context, mode } = params;
-  const inputHealth = getInputHealth(context);
+  const inputHealth: RecommendationInputHealth = params.context.inputHealth;
   const failedSources = RECOMMENDATION_SOURCE_NAMES.filter(
     (sourceName) => inputHealth[sourceName].health === "failed",
   );
+  const boundedCount = (count: number) =>
+    Math.min(Math.max(0, count), MAX_DIAGNOSTIC_COUNT);
 
   return {
-    mode,
+    mode: params.mode,
     engineVersion: RECOMMENDATION_ENGINE_VERSION,
-    contextMode: request.context.mode,
+    contextMode: params.request.context.mode,
     inputHealth,
     failedSources,
-    requestSeedHash: hashRequestSeed(request.requestSeed),
-    seedCount: request.seeds.length,
-    candidateCount: Math.min(params.candidateCount, MAX_DIAGNOSTIC_COUNT),
-    resultCount: params.resultCount,
+    requestSeedHash: hashRequestSeed(params.request.requestSeed),
+    seedCount: boundedCount(params.request.seeds.length),
+    candidateCount: boundedCount(params.candidateCount),
+    resultCount: boundedCount(params.resultCount),
     stageCounts: {
-      retrieval: Math.min(params.candidateCount, MAX_DIAGNOSTIC_COUNT),
-      scoring: Math.min(params.scoringCount, MAX_DIAGNOSTIC_COUNT),
-      reranking: Math.min(params.rerankingCount, MAX_DIAGNOSTIC_COUNT),
-      final: Math.min(params.resultCount, MAX_DIAGNOSTIC_COUNT),
+      retrieval: boundedCount(params.candidateCount),
+      scoring: boundedCount(params.scoringCount),
+      reranking: boundedCount(params.rerankingCount),
+      final: boundedCount(params.resultCount),
     },
     dropReasonCounts: {
       ...(params.seedDrops > 0
-        ? { seed: Math.min(params.seedDrops, MAX_DIAGNOSTIC_COUNT) }
+        ? { seed: boundedCount(params.seedDrops) }
         : {}),
       ...(params.exclusionDrops > 0
-        ? { excluded: Math.min(params.exclusionDrops, MAX_DIAGNOSTIC_COUNT) }
+        ? { excluded: boundedCount(params.exclusionDrops) }
         : {}),
     },
   };
 }
 
 async function emitTelemetry(
-  telemetry: RecommendationTelemetry | undefined,
+  telemetry: RecommendationTelemetry,
   trace: RecommendationDiagnostics,
 ): Promise<void> {
-  if (!telemetry) return;
   try {
     if (typeof telemetry === "function") {
       await telemetry(trace);
@@ -346,91 +198,67 @@ async function emitTelemetry(
   }
 }
 
-function asOverlapContext(
-  context: RecommendationEngineContext,
-): OverlapScoringContext {
-  return context;
-}
-
 export function createRecommendationEngine(
   dependencies: RecommendationEngineDependencies,
 ): Readonly<{
-  generate: (request: RecommendationRequestInput) => Promise<RecommendationResult>;
+  generate: (
+    request: RecommendationRequestInput,
+  ) => Promise<RecommendationResult>;
 }> {
   return {
-    async generate(input: RecommendationRequestInput): Promise<RecommendationResult> {
+    async generate(
+      input: RecommendationRequestInput,
+    ): Promise<RecommendationResult> {
       const request = normalizeRecommendationRequest(input);
       const context = await dependencies.loadContext(request.userId);
-      const mode = getMode(context);
-      const rng = resolveRng(dependencies.rng, request.requestSeed);
-      const retrievedRaw = await dependencies.retrieveCandidates({
+      const mode = deriveEngineMode(context);
+      const rng = dependencies.rng(request.requestSeed);
+      const retrieved = await dependencies.retrieveCandidates({
         request,
         context,
         mode,
         rng,
       });
-      const retrieved = toCandidateInputs(retrievedRaw);
-      const filteredRetrieval = filterByReason(retrieved, request, context);
-
-      const scoreCandidates = dependencies.scoreCandidates ?? (async (params) =>
-        scoreRecommendationsWithOverlap({
-          request: params.request,
-          context: asOverlapContext(params.context),
-          candidates: params.candidates.map((candidate) => candidate.tmdbId),
-        }));
-      const scoredRaw = await scoreCandidates({
+      const eligibleRetrieved = filterByReason(retrieved, request, context);
+      const scored = await dependencies.scoreCandidates({
         request,
         context,
         mode,
-        candidates: filteredRetrieval.candidates,
+        candidates: eligibleRetrieved.candidates,
       });
-      const scored = normalizeCandidates(scoredRaw);
-      const filteredScored = filterByReason(
-        scored.map((candidate) => ({
-          tmdbId: candidate.tmdbId,
-          retrievalScore: candidate.score,
-        })),
-        request,
-        context,
-      );
-      const scoredById = new Map(scored.map((candidate) => [candidate.tmdbId, candidate]));
-      const eligibleScored = filteredScored.candidates
-        .map((candidate) => scoredById.get(candidate.tmdbId))
-        .filter((candidate): candidate is RecommendationCandidate => Boolean(candidate));
-
-      const rerankCandidates = dependencies.rerankCandidates ?? (async (params) =>
-        params.candidates);
-      const rerankedRaw = await rerankCandidates({
+      const eligibleScored = filterByReason(scored, request, context);
+      const reranked = await dependencies.rerankCandidates({
         request,
         context,
         mode,
-        candidates: eligibleScored,
+        candidates: eligibleScored.candidates,
       });
-      const reranked = normalizeCandidates(rerankedRaw);
-      const finalExcludedIds = getExcludedIds(request, context);
-      const finalCandidates = reranked
-        .filter((candidate) => !finalExcludedIds.has(candidate.tmdbId))
-        .slice(0, request.count);
-
+      const eligibleReranked = filterByReason(reranked, request, context);
+      const results = eligibleReranked.candidates.slice(0, request.count);
       const diagnostics = buildDiagnostics({
         request,
         context,
         mode,
-        candidateCount: filteredRetrieval.candidates.length,
-        scoringCount: eligibleScored.length,
+        candidateCount: eligibleRetrieved.candidates.length,
+        scoringCount: eligibleScored.candidates.length,
         rerankingCount: reranked.length,
-        resultCount: finalCandidates.length,
+        resultCount: results.length,
         seedDrops:
-          filteredRetrieval.seedDrops + filteredScored.seedDrops,
+          eligibleRetrieved.seedDrops +
+          eligibleScored.seedDrops +
+          eligibleReranked.seedDrops,
         exclusionDrops:
-          filteredRetrieval.exclusionDrops + filteredScored.exclusionDrops,
+          eligibleRetrieved.exclusionDrops +
+          eligibleScored.exclusionDrops +
+          eligibleReranked.exclusionDrops,
       });
+
+      if (!validateRecommendationDiagnostics(diagnostics)) {
+        throw new Error("Invalid recommendation diagnostics");
+      }
       await emitTelemetry(dependencies.telemetry, diagnostics);
 
-      return {
-        results: finalCandidates,
-        diagnostics,
-      };
+      return { results, diagnostics };
     },
   };
 }

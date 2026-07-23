@@ -2,10 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createRecommendationEngine,
+  type RecommendationCandidateInput,
   type RecommendationEngineContext,
   type RecommendationEngineDependencies,
+  type RecommendationRerankParams,
+  type RecommendationRetrieveParams,
+  type RecommendationScoreParams,
 } from "@/lib/recommendationEngine";
-import type { RecommendationCandidate } from "@/lib/recommendationTypes";
+import {
+  MAX_DIAGNOSTIC_COUNT,
+  validateRecommendationDiagnostics,
+  type RecommendationCandidate,
+  type RecommendationDiagnostics,
+} from "@/lib/recommendationTypes";
 
 const inputHealth = {
   films: { health: "ok" as const, rowCount: 1 },
@@ -75,36 +84,54 @@ describe("recommendation engine", () => {
       expect(userId).toBe(request.userId);
       return context;
     });
+    const injectedRng = () => 0.25;
     const rng = vi.fn((requestSeed: string) => {
       calls.push("rng");
       expect(requestSeed).toBe(request.requestSeed);
-      return () => 0.25;
+      return injectedRng;
     });
-    const retrieveCandidates = vi.fn(async (params) => {
+    const retrieveCandidates = vi.fn(async (
+      params: RecommendationRetrieveParams,
+    ) => {
       calls.push("retrieveCandidates");
       expect(params.request).toEqual(request);
       expect(params.context).toBe(context);
-      return [101, 303, 909, 505];
+      expect(params.mode).toBe("degraded");
+      expect(params.rng).toBe(injectedRng);
+      return [
+        { tmdbId: 101 },
+        { tmdbId: 303 },
+        { tmdbId: 909 },
+        { tmdbId: 505 },
+      ] satisfies RecommendationCandidateInput[];
     });
-    const scoreCandidates = vi.fn(async (params) => {
+    const scoreCandidates = vi.fn(async (params: RecommendationScoreParams) => {
       calls.push("scoreCandidates");
       expect(params.request).toEqual(request);
       expect(params.context).toBe(context);
+      expect(params.mode).toBe("degraded");
       expect(params.candidates.map((candidate: { tmdbId: number }) => candidate.tmdbId)).toEqual([
         303,
         505,
       ]);
-      return [candidate(303, 1.2), candidate(505, 1.1)];
+      return rankedCandidates;
     });
-    const rerankCandidates = vi.fn(async (params) => {
+    const rankedCandidates = [candidate(303, 1.2), candidate(505, 1.1)];
+    const rerankCandidates = vi.fn(async (params: RecommendationRerankParams) => {
       calls.push("rerankCandidates");
       expect(params.request).toEqual(request);
       expect(params.context).toBe(context);
-      return [params.candidates[1], params.candidates[0]];
+      expect(params.mode).toBe("degraded");
+      return [rankedCandidates[1], rankedCandidates[0]];
     });
-    const telemetry = vi.fn(async (trace) => {
+    const telemetry = vi.fn(async (
+      trace: RecommendationDiagnostics,
+    ) => {
       calls.push("telemetry");
-      expect(trace.candidateIds).toBeUndefined();
+      expect(Object.hasOwn(trace, "candidateIds")).toBe(false);
+      expect(validateRecommendationDiagnostics(trace)).toBe(true);
+      expect(trace.seedCount).toBeLessThanOrEqual(MAX_DIAGNOSTIC_COUNT);
+      expect(trace.inputHealth).toEqual(inputHealth);
     });
 
     const dependencies: RecommendationEngineDependencies = {
@@ -128,6 +155,7 @@ describe("recommendation engine", () => {
       "telemetry",
     ]);
     expect(result.results.map((item) => item.tmdbId)).toEqual([505, 303]);
+    expect(result.results[0]).toBe(rankedCandidates[1]);
     expect(result.results.map((item) => item.tmdbId)).not.toContain(101);
     expect(result.diagnostics.mode).toBe("degraded");
     expect(result.diagnostics.failedSources).toEqual(["mappings"]);
@@ -140,5 +168,31 @@ describe("recommendation engine", () => {
     });
     expect(telemetry).toHaveBeenCalledTimes(1);
     expect(telemetry.mock.calls[0]?.[0]).toEqual(result.diagnostics);
+  });
+
+  it("bounds the seed count in a complete validated trace", async () => {
+    const manySeeds = Array.from(
+      { length: MAX_DIAGNOSTIC_COUNT + 3 },
+      (_, index) => ({ tmdbId: index + 1, weight: 1 }),
+    );
+    let trace: RecommendationDiagnostics | undefined;
+    const result = await createRecommendationEngine({
+      loadContext: async () => context,
+      retrieveCandidates: async () => [],
+      scoreCandidates: async () => [],
+      rerankCandidates: async ({ candidates }) => candidates,
+      rng: () => () => 0.5,
+      telemetry: (value) => {
+        trace = value;
+      },
+    }).generate({
+      ...request,
+      count: 1,
+      seeds: manySeeds,
+    });
+
+    expect(result.diagnostics.seedCount).toBe(MAX_DIAGNOSTIC_COUNT);
+    expect(trace).toBeDefined();
+    expect(validateRecommendationDiagnostics(trace)).toBe(true);
   });
 });

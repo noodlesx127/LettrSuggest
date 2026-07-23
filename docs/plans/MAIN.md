@@ -140,6 +140,11 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 - 2026-07-22 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully after the orchestration seams were implemented.
 - 2026-07-22 - `rtk proxy npx next lint --file src/lib/recommendationContext.ts --file src/lib/recommendationEngine.ts --file src/lib/enrich.ts --file tests/integration/recommendationContext.test.ts --file tests/integration/recommendationEngine.test.ts` - PASS; no ESLint warnings or errors.
 - 2026-07-22 - `rtk git diff --check` - PASS; Git reported no whitespace errors and only the pre-existing LF/CRLF warning for the unrelated `package-lock.json` change.
+- 2026-07-22 - Independent spec-review RED: `rtk npm run test -- tests/integration/recommendationContext.test.ts tests/integration/recommendationEngine.test.ts` - FAIL, 4/4 tests failed for Phase 0 revision-source loss, parallel tuple fields, candidate normalization, and unbounded seed diagnostics.
+- 2026-07-22 - Spec-review GREEN: `rtk npm run test -- tests/integration/recommendationContext.test.ts tests/integration/recommendationEngine.test.ts tests/integration/recommendationContracts.test.ts` - PASS, 15/15 tests across 3 files. Required stage injection, lossless normalized tuples, all Phase 0 revision rows, bounded validated telemetry, seed exclusion, RNG propagation, and health-derived mode propagation pass.
+- 2026-07-22 - `rtk npm run typecheck` - PASS; `tsc --noEmit` completed successfully after spec-review fixes.
+- 2026-07-22 - `rtk proxy npx next lint --file src/lib/recommendationContext.ts --file src/lib/recommendationEngine.ts --file src/lib/enrich.ts --file tests/integration/recommendationContext.test.ts --file tests/integration/recommendationEngine.test.ts` - PASS; no ESLint warnings or errors after spec-review fixes.
+- 2026-07-22 - `rtk git diff --check` - PASS; no whitespace errors.
 - 2026-07-22 - Initial `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - expected FAIL, 1 suite failed with 0 tests because `@/lib/recommendationTypes` did not exist before checkpoint 1A.1 contracts were implemented.
 - 2026-07-22 - `rtk npm run test -- tests/integration/recommendationContracts.test.ts` - PASS, 2/2 tests in 1 file. The frozen fixture verifies neutral omitted context, weighted seed exclusion, source health, deterministic ordered IDs, bounded attribution, degraded-mode protection, and diagnostics without private-list or secret fields.
 - 2026-07-22 - `rtk npm run typecheck` and `rtk git diff --check` - PASS; TypeScript completed successfully and Git reported no whitespace errors. Git emitted only the pre-existing LF/CRLF warning for the unrelated `package-lock.json` change.
@@ -217,3 +222,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `c300820` - checkpoint 0C.2 strict filters, effective advanced ranking, and complete Phase 0 verification
 - `test: define canonical recommendation contracts` - checkpoint 1A.1 canonical request/result contracts, bounded validation, and frozen fixture evidence
 - `refactor: introduce recommendation engine orchestration` - checkpoint 1A.2 atomic context normalization, injected engine orchestration, and overlap scorer seam
+- `fix: tighten recommendation orchestration seams` - checkpoint 1A.2 independent spec-review corrections

@@ -8869,14 +8869,8 @@ export async function scoreRecommendationsWithOverlap(params: {
 }): Promise<RecommendationCandidate[]> {
   const films: FilmEventLite[] = params.context.films.map((tuple) => {
     const film = tuple.film;
-    const rating = tuple.rating?.rating ?? film.rating;
-    const lastDate =
-      tuple.date?.watchedAt ??
-      tuple.date?.watched_at ??
-      tuple.date?.lastDate ??
-      tuple.date?.last_date ??
-      film.lastDate ??
-      film.last_date;
+    const rating = tuple.rating ?? film.rating;
+    const lastDate = tuple.watchDate ?? film.lastDate ?? film.last_date;
 
     return {
       uri: tuple.uri,

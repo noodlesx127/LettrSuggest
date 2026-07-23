@@ -6,7 +6,10 @@ import {
   type RecommendationSourceName,
   type SourceHealth,
 } from "@/lib/recommendationTypes";
-import { sortByFilmRecency } from "@/lib/recommendationNormalization";
+import {
+  normalizeFilmTuples,
+  type NormalizedFilmTuple,
+} from "@/lib/recommendationNormalization";
 
 export const RECOMMENDATION_CONTEXT_SOURCE_NAMES = [
   "films",
@@ -110,15 +113,16 @@ export type RecommendationContextRepository = Readonly<{
   loadUserContext?: (userId: string) => Promise<unknown>;
 }>;
 
-export type RecommendationFilmTuple = Readonly<{
-  uri: string;
-  tmdbId: number | null;
-  film: RecommendationFilmRecord;
+export type RecommendationFilmTuple = NormalizedFilmTuple<
+  RecommendationFilmRecord,
+  RecommendationMetadataRecord,
+  RecommendationFeatureRecord | null
+> &
+  Readonly<{
   mapping: RecommendationMappingRecord | null;
-  metadata: RecommendationMetadataRecord | null;
   date: RecommendationDateRecord | null;
-  rating: RecommendationRatingRecord | null;
-  features: RecommendationFeatureRecord | null;
+  ratingRecord: RecommendationRatingRecord | null;
+  metadata: RecommendationMetadataRecord | null;
 }>;
 
 export type RecommendationInputRevisionMaterial = Readonly<{
@@ -369,26 +373,10 @@ function buildTmdbIndex<T extends RecordValue>(
   );
 }
 
-function getWatchDate(
-  tuple: Pick<RecommendationFilmTuple, "film" | "date">,
-): string | null {
-  const date = tuple.date;
-  const candidate =
-    date?.watchedAt ??
-    date?.watched_at ??
-    date?.lastDate ??
-    date?.last_date ??
-    tuple.film.lastDate ??
-    tuple.film.last_date ??
-    null;
-  return typeof candidate === "string" ? candidate : null;
-}
-
 function getRating(
-  tuple: Pick<RecommendationFilmTuple, "film" | "rating">,
+  tuple: Pick<RecommendationFilmTuple, "rating">,
 ): number | null {
-  const rating = tuple.rating?.rating ?? tuple.film.rating ?? null;
-  return typeof rating === "number" && Number.isFinite(rating) ? rating : null;
+  return tuple.rating;
 }
 
 function buildDefaultInputHealth(
@@ -456,6 +444,31 @@ function normalizeLegacyContext(value: unknown): RecommendationContextSourceSnap
     value.blockedIds instanceof Set
       ? Array.from(value.blockedIds)
       : [];
+  const feedbackRows = Array.isArray(value.feedback)
+    ? value.feedback.filter(isRecord)
+    : [];
+  const adjacentGenreRows = Array.isArray(value.adjacentGenres)
+    ? value.adjacentGenres.filter(isRecord)
+    : [];
+  const explorationRate =
+    typeof value.explorationRate === "number" &&
+    Number.isFinite(value.explorationRate)
+      ? value.explorationRate
+      : null;
+  const exposureRows =
+    value.recentExposures instanceof Map
+      ? Array.from(value.recentExposures.entries())
+          .filter(
+            ([tmdbId, daysSince]) =>
+              isPositiveSafeInteger(tmdbId) &&
+              typeof daysSince === "number" &&
+              Number.isFinite(daysSince),
+          )
+          .map(([tmdbId, daysSince]) => ({ tmdbId, daysSince }))
+      : [];
+  const blockedRows = blockedIds
+    .filter(isPositiveSafeInteger)
+    .map((tmdbId) => ({ tmdbId }));
 
   return {
     films: { data: films as RecommendationFilmRecord[] },
@@ -489,6 +502,25 @@ function normalizeLegacyContext(value: unknown): RecommendationContextSourceSnap
       }),
     },
     features: { data: [] },
+    sources: {
+      feedback: { data: feedbackRows },
+      exploration: {
+        data:
+          explorationRate === null
+            ? []
+            : [
+                {
+                  ...(typeof value.explorationMarker === "string"
+                    ? { sourceMarker: value.explorationMarker }
+                    : {}),
+                  explorationRate,
+                },
+              ],
+      },
+      adjacent_genres: { data: adjacentGenreRows },
+      exposures: { data: exposureRows },
+      blocked: { data: blockedRows },
+    },
     inputHealth: value.inputHealth as RecommendationInputHealth | undefined,
     blockedTmdbIds: blockedIds.filter(isPositiveSafeInteger),
     hasPersonalizedEvidence:
@@ -605,7 +637,6 @@ function isPersonalized(
   }
 
   return tuples.some((tuple) => {
-    if (tuple.tmdbId === null) return false;
     const rating = getRating(tuple);
     return (
       tuple.film.liked === true ||
@@ -695,39 +726,63 @@ export async function loadRecommendationContext(
     const datesByUri = buildUriIndex(dateRows);
     const ratingsByUri = buildUriIndex(ratingRows);
 
-    const tuples = films.map((film): RecommendationFilmTuple => {
-      const mapping = mappingsByUri.get(film.uri);
-      const mappingRecord = mapping ? asMappingRecord(mapping) : null;
-      const tmdbId = mappingRecord?.tmdbId ?? null;
-      const metadata = tmdbId === null ? undefined : metadataByTmdbId.get(tmdbId);
-      const date =
-        tmdbId === null
-          ? datesByUri.get(film.uri)
-          : (datesByTmdbId.get(tmdbId) ?? datesByUri.get(film.uri));
-      const rating =
-        tmdbId === null
-          ? ratingsByUri.get(film.uri)
-          : (ratingsByTmdbId.get(tmdbId) ?? ratingsByUri.get(film.uri));
-      const features =
-        tmdbId === null ? undefined : featuresByTmdbId.get(tmdbId);
-      return {
-        uri: film.uri,
+    const mappedFilms = films.filter((film) => mappingsByUri.has(film.uri));
+    const metadataById = new Map<number, RecommendationMetadataRecord | null>(
+      Array.from(metadataByTmdbId.entries()).map(([tmdbId, row]) => [
         tmdbId,
-        film,
-        mapping: mappingRecord,
-        metadata: metadata ? asMetadataRecord(metadata) : null,
-        date: date ? asDateRecord(date) : null,
-        rating: rating ? asRatingRecord(rating) : null,
-        features: features ? asFeatureRecord(features) : null,
-      };
+        asMetadataRecord(row),
+      ]),
+    );
+    const normalizedTuples = normalizeFilmTuples<
+      RecommendationFilmRecord,
+      RecommendationMetadataRecord,
+      RecommendationFeatureRecord | null
+    >({
+      films: mappedFilms,
+      getIdentity: (film) => {
+        const mapping = asMappingRecord(mappingsByUri.get(film.uri)!);
+        const date =
+          datesByTmdbId.get(mapping.tmdbId) ?? datesByUri.get(film.uri);
+        const rating =
+          ratingsByTmdbId.get(mapping.tmdbId) ?? ratingsByUri.get(film.uri);
+        const watchDate =
+          date?.watchedAt ??
+          date?.watched_at ??
+          date?.lastDate ??
+          date?.last_date ??
+          film.lastDate ??
+          film.last_date ??
+          null;
+        const ratingRecord = rating ? asRatingRecord(rating) : null;
+        return {
+          uri: film.uri,
+          tmdbId: mapping.tmdbId,
+          rating: ratingRecord?.rating ?? film.rating ?? null,
+          watchDate: typeof watchDate === "string" ? watchDate : null,
+        };
+      },
+      detailsById: metadataById,
+      extractFeatures: (details) => {
+        const feature = featuresByTmdbId.get(details.tmdbId);
+        return feature ? asFeatureRecord(feature) : null;
+      },
     });
-
-    const orderedTuples = sortByFilmRecency(tuples, (tuple) => ({
-      uri: tuple.uri,
-      tmdbId: tuple.tmdbId ?? Number.MAX_SAFE_INTEGER,
-      rating: getRating(tuple),
-      watchDate: getWatchDate(tuple),
-    }));
+    const orderedTuples: RecommendationFilmTuple[] = normalizedTuples.map(
+      (tuple) => {
+        const mapping = asMappingRecord(mappingsByUri.get(tuple.uri)!);
+        const date =
+          datesByTmdbId.get(tuple.tmdbId) ?? datesByUri.get(tuple.uri);
+        const rating =
+          ratingsByTmdbId.get(tuple.tmdbId) ?? ratingsByUri.get(tuple.uri);
+        return {
+          ...tuple,
+          mapping,
+          metadata: tuple.details,
+          date: date ? asDateRecord(date) : null,
+          ratingRecord: rating ? asRatingRecord(rating) : null,
+        };
+      },
+    );
     const hasPersonalizedEvidence = isPersonalized(orderedTuples, snapshot);
     const failedSources = RECOMMENDATION_SOURCE_NAMES.filter(
       (sourceName) => inputHealth[sourceName].health === "failed",
@@ -794,9 +849,7 @@ export async function loadRecommendationContext(
       mode,
       hasPersonalizedEvidence,
       watchedTmdbIds: new Set(
-        orderedTuples
-          .map((tuple) => tuple.tmdbId)
-          .filter((tmdbId): tmdbId is number => tmdbId !== null),
+        orderedTuples.map((tuple) => tuple.tmdbId),
       ),
       blockedTmdbIds,
       inputRevisionMaterial: revisionMaterial,
