@@ -154,11 +154,46 @@ export const MAX_RECOMMENDATION_COUNT = 100;
 export const MAX_DIAGNOSTIC_COUNT = 10_000;
 export const MAX_DIAGNOSTIC_STRING_LENGTH = 128;
 
-const PRIVATE_DIAGNOSTIC_KEY =
-  /film|watch|rating|private|secret|token|password|jwt|api[_-]?key|raw/i;
+const RECOMMENDATION_CONTEXT_KEYS = ["mode", "localHour"] as const;
+const SOURCE_HEALTH_KEYS = ["health", "rowCount"] as const;
+const RECOMMENDATION_DIAGNOSTIC_KEYS = [
+  "mode",
+  "engineVersion",
+  "contextMode",
+  "inputHealth",
+  "failedSources",
+  "requestSeed",
+  "seedCount",
+  "candidateCount",
+  "resultCount",
+  "stageCounts",
+  "dropReasonCounts",
+] as const;
+const SAFE_DIAGNOSTIC_STRING = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const JWT_LIKE_STRING =
+  /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  allowedKeys: readonly string[],
+): boolean {
+  const actualKeys = Object.keys(value);
+  return (
+    actualKeys.length === allowedKeys.length &&
+    allowedKeys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+function isSafeDiagnosticString(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    SAFE_DIAGNOSTIC_STRING.test(value) &&
+    !JWT_LIKE_STRING.test(value)
+  );
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
@@ -175,7 +210,9 @@ function isBoundedCount(value: unknown): value is number {
 }
 
 function isContext(value: unknown): value is RecommendationContext {
-  if (!isRecord(value)) return false;
+  if (!isRecord(value) || !hasExactKeys(value, RECOMMENDATION_CONTEXT_KEYS)) {
+    return false;
+  }
 
   const validMode =
     value.mode === "neutral" ||
@@ -214,6 +251,7 @@ function isWeightedSeed(value: unknown): value is WeightedSeed {
 function isSourceHealth(value: unknown): value is SourceHealth {
   return (
     isRecord(value) &&
+    hasExactKeys(value, SOURCE_HEALTH_KEYS) &&
     (value.health === "ok" ||
       value.health === "empty" ||
       value.health === "failed") &&
@@ -222,7 +260,9 @@ function isSourceHealth(value: unknown): value is SourceHealth {
 }
 
 function isInputHealth(value: unknown): value is RecommendationInputHealth {
-  if (!isRecord(value)) return false;
+  if (!isRecord(value) || !hasExactKeys(value, RECOMMENDATION_SOURCE_NAMES)) {
+    return false;
+  }
 
   return RECOMMENDATION_SOURCE_NAMES.every((sourceName) =>
     isSourceHealth(value[sourceName]),
@@ -231,32 +271,6 @@ function isInputHealth(value: unknown): value is RecommendationInputHealth {
 
 function isFiniteScore(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
-}
-
-function hasPrivateDiagnosticFields(
-  value: unknown,
-  seen = new Set<object>(),
-  allowSourceHealthKeys = false,
-): boolean {
-  if (value === null || typeof value !== "object") return false;
-  if (seen.has(value)) return false;
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    return value.some((item) =>
-      hasPrivateDiagnosticFields(item, seen, allowSourceHealthKeys),
-    );
-  }
-
-  return Object.entries(value).some(
-    ([key, child]) =>
-      (!(
-        allowSourceHealthKeys &&
-        RECOMMENDATION_SOURCE_NAMES.includes(key as RecommendationSourceName)
-      ) &&
-        PRIVATE_DIAGNOSTIC_KEY.test(key)) ||
-      hasPrivateDiagnosticFields(child, seen, key === "inputHealth"),
-  );
 }
 
 function hasFailedRequiredSource(inputHealth: RecommendationInputHealth): boolean {
@@ -268,7 +282,9 @@ function hasFailedRequiredSource(inputHealth: RecommendationInputHealth): boolea
 function isValidStageCounts(value: unknown): value is Readonly<
   Record<RecommendationStage, number>
 > {
-  if (!isRecord(value)) return false;
+  if (!isRecord(value) || !hasExactKeys(value, RECOMMENDATION_STAGES)) {
+    return false;
+  }
 
   return RECOMMENDATION_STAGES.every((stage) => isBoundedCount(value[stage]));
 }
@@ -336,9 +352,7 @@ export function validateRecommendationRequest(
   if (
     !isPositiveSafeInteger(value.count) ||
     value.count > MAX_RECOMMENDATION_COUNT ||
-    typeof value.requestSeed !== "string" ||
-    value.requestSeed.length === 0 ||
-    value.requestSeed.length > MAX_DIAGNOSTIC_STRING_LENGTH
+    !isSafeDiagnosticString(value.requestSeed)
   ) {
     return false;
   }
@@ -422,7 +436,9 @@ export function deriveRecommendationMode(input: {
 export function validateRecommendationDiagnostics(
   value: unknown,
 ): value is RecommendationDiagnostics {
-  if (!isRecord(value) || hasPrivateDiagnosticFields(value)) return false;
+  if (!isRecord(value) || !hasExactKeys(value, RECOMMENDATION_DIAGNOSTIC_KEYS)) {
+    return false;
+  }
   if (
     value.mode !== "personalized" &&
     value.mode !== "cold_start" &&
@@ -444,9 +460,7 @@ export function validateRecommendationDiagnostics(
     return false;
   }
   if (
-    typeof value.requestSeed !== "string" ||
-    value.requestSeed.length === 0 ||
-    value.requestSeed.length > MAX_DIAGNOSTIC_STRING_LENGTH ||
+    !isSafeDiagnosticString(value.requestSeed) ||
     !isBoundedCount(value.seedCount) ||
     !isBoundedCount(value.candidateCount) ||
     !isBoundedCount(value.resultCount) ||
@@ -461,8 +475,9 @@ export function validateRecommendationDiagnostics(
 
 export function validateRecommendationResult(
   value: unknown,
-  request?: RecommendationRequest,
+  request: RecommendationRequest,
 ): value is RecommendationResult {
+  if (!validateRecommendationRequest(request)) return false;
   if (!isRecord(value) || !Array.isArray(value.results)) return false;
   if (
     value.results.length > MAX_RECOMMENDATION_COUNT ||
@@ -476,14 +491,12 @@ export function validateRecommendationResult(
   if (new Set(ids).size !== ids.length) return false;
   if (value.diagnostics.resultCount !== value.results.length) return false;
 
-  if (request !== undefined) {
-    const excludedIds = new Set([
-      ...request.seeds.map((seed) => seed.tmdbId),
-      ...request.excludeTmdbIds,
-    ]);
-    if (ids.some((id) => excludedIds.has(id))) return false;
-    if (value.results.length > request.count) return false;
-  }
+  const excludedIds = new Set([
+    ...request.seeds.map((seed) => seed.tmdbId),
+    ...request.excludeTmdbIds,
+  ]);
+  if (ids.some((id) => excludedIds.has(id))) return false;
+  if (value.results.length > request.count) return false;
 
   return true;
 }

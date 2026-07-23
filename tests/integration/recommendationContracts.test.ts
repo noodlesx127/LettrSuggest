@@ -5,6 +5,7 @@ import {
   deriveRecommendationMode,
   normalizeRecommendationRequest,
   validateRecommendationRequest,
+  validateRecommendationDiagnostics,
   validateRecommendationResult,
 } from "@/lib/recommendationTypes";
 import { canonicalFixture } from "../fixtures/recommendations/canonicalFixture";
@@ -77,5 +78,48 @@ describe("canonical recommendation contracts", () => {
         normalizeRecommendationRequest(canonicalFixture.request),
       ),
     ).toBe(false);
+  });
+
+  it("rejects unknown nested payloads and obvious credential-like values", () => {
+    const diagnostics = canonicalFixture.result.diagnostics;
+
+    expect(
+      validateRecommendationDiagnostics({
+        ...diagnostics,
+        trace: {
+          payload: { values: new Array(10_001).fill(101) },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      validateRecommendationDiagnostics({
+        ...diagnostics,
+        metadata: { credential: "sk_live_example_credential" },
+      }),
+    ).toBe(false);
+    expect(
+      validateRecommendationDiagnostics({
+        ...diagnostics,
+        requestSeed: "eyJhbGciOiJIUzI1NiJ9.payload.signature",
+      }),
+    ).toBe(false);
+    expect(validateRecommendationDiagnostics(diagnostics)).toBe(true);
+  });
+
+  it("rejects a seed-containing result without a request-aware bypass", () => {
+    const request = normalizeRecommendationRequest(canonicalFixture.request);
+    const seedResult = {
+      ...canonicalFixture.result,
+      results: [
+        ...canonicalFixture.result.results.slice(0, 2),
+        { ...canonicalFixture.result.results[2], tmdbId: 101 },
+      ],
+    };
+    const legacyBoundary = validateRecommendationResult as unknown as (
+      value: unknown,
+    ) => boolean;
+
+    expect(legacyBoundary(seedResult)).toBe(false);
+    expect(validateRecommendationResult(seedResult, request)).toBe(false);
   });
 });
