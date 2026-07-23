@@ -80,7 +80,7 @@ describe("canonical recommendation contracts", () => {
     ).toBe(false);
   });
 
-  it("rejects unknown nested payloads and obvious credential-like values", () => {
+  it("rejects unknown diagnostic shapes and invalid hash fields", () => {
     const diagnostics = canonicalFixture.result.diagnostics;
 
     expect(
@@ -123,7 +123,7 @@ describe("canonical recommendation contracts", () => {
     expect(validateRecommendationResult(seedResult, request)).toBe(false);
   });
 
-  it("rejects a raw credential-like request seed from diagnostics", () => {
+  it("rejects the legacy raw requestSeed diagnostic field", () => {
     expect(
       validateRecommendationDiagnostics({
         ...canonicalFixture.result.diagnostics,
@@ -143,5 +143,140 @@ describe("canonical recommendation contracts", () => {
     };
 
     expect(validateRecommendationResult(excludedResult, request)).toBe(false);
+  });
+
+  it("rejects sparse request, result, and evidence arrays", () => {
+    const request = normalizeRecommendationRequest(canonicalFixture.request);
+    const sparseSeeds = new Array(2);
+    sparseSeeds[0] = request.seeds[0];
+    const sparseRequest = { ...request, seeds: sparseSeeds };
+
+    expect(validateRecommendationRequest(sparseRequest)).toBe(false);
+    expect(() => normalizeRecommendationRequest(sparseRequest as never)).toThrow(
+      "Invalid recommendation request",
+    );
+
+    const sparseResults = new Array(3);
+    sparseResults[0] = canonicalFixture.result.results[0];
+    sparseResults[1] = canonicalFixture.result.results[1];
+    expect(
+      validateRecommendationResult(
+        { ...canonicalFixture.result, results: sparseResults },
+        request,
+      ),
+    ).toBe(false);
+
+    const sparseSeedAnchors = new Array(2);
+    sparseSeedAnchors[0] = 101;
+    const sparseProviderFamilies = new Array(2);
+    sparseProviderFamilies[0] = "tmdb";
+    const candidate = canonicalFixture.result.results[0];
+    expect(
+      validateRecommendationResult(
+        {
+          ...canonicalFixture.result,
+          results: [
+            {
+              ...candidate,
+              evidence: {
+                ...candidate.evidence,
+                seedAnchors: sparseSeedAnchors,
+                providerFamilies: sparseProviderFamilies,
+              },
+            },
+            ...canonicalFixture.result.results.slice(1),
+          ],
+        },
+        request,
+      ),
+    ).toBe(false);
+  });
+
+  it("requires failedSources to exactly match failed source health", () => {
+    const failedMappings = {
+      ...canonicalFixture.result.diagnostics.inputHealth,
+      mappings: { health: "failed" as const, rowCount: 0 },
+    };
+
+    expect(
+      validateRecommendationDiagnostics({
+        ...canonicalFixture.result.diagnostics,
+        inputHealth: failedMappings,
+        failedSources: [],
+      }),
+    ).toBe(false);
+    expect(
+      validateRecommendationDiagnostics({
+        ...canonicalFixture.result.diagnostics,
+        failedSources: ["feedback"],
+      }),
+    ).toBe(false);
+  });
+
+  it("requires degraded mode for required failures without choosing evidence mode", () => {
+    const failedMappings = {
+      ...canonicalFixture.result.diagnostics.inputHealth,
+      mappings: { health: "failed" as const, rowCount: 0 },
+    };
+
+    expect(
+      validateRecommendationDiagnostics({
+        ...canonicalFixture.result.diagnostics,
+        inputHealth: failedMappings,
+        failedSources: ["mappings"],
+        mode: "cold_start",
+      }),
+    ).toBe(false);
+    expect(
+      validateRecommendationDiagnostics({
+        ...canonicalFixture.result.diagnostics,
+        inputHealth: failedMappings,
+        failedSources: ["mappings"],
+        mode: "personalized",
+      }),
+    ).toBe(false);
+    expect(
+      validateRecommendationDiagnostics({
+        ...canonicalFixture.result.diagnostics,
+        inputHealth: failedMappings,
+        failedSources: ["mappings"],
+        mode: "degraded",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects degraded mode without a required source failure", () => {
+    expect(
+      validateRecommendationDiagnostics({
+        ...canonicalFixture.result.diagnostics,
+        mode: "degraded",
+      }),
+    ).toBe(false);
+
+    const optionalFailure = {
+      ...canonicalFixture.result.diagnostics.inputHealth,
+      feedback: { health: "failed" as const, rowCount: 0 },
+    };
+    expect(
+      validateRecommendationDiagnostics({
+        ...canonicalFixture.result.diagnostics,
+        inputHealth: optionalFailure,
+        failedSources: ["feedback"],
+        mode: "personalized",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects whitespace-only user IDs", () => {
+    const request = normalizeRecommendationRequest(canonicalFixture.request);
+    const whitespaceRequest = { ...request, userId: " \t\n" };
+
+    expect(validateRecommendationRequest(whitespaceRequest)).toBe(false);
+    expect(() =>
+      normalizeRecommendationRequest({
+        ...canonicalFixture.request,
+        userId: " \t\n",
+      }),
+    ).toThrow("Invalid recommendation request");
   });
 });

@@ -179,6 +179,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isDenseArray<T>(
+  value: unknown,
+  predicate: (item: unknown) => item is T,
+): value is T[] {
+  if (!Array.isArray(value)) return false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index) || !predicate(value[index])) return false;
+  }
+
+  return true;
+}
+
 function hasExactKeys(
   value: Record<string, unknown>,
   allowedKeys: readonly string[],
@@ -208,6 +221,28 @@ function isRequestSeedHash(value: unknown): value is string {
 
 function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isRecommendationSourceName(
+  value: unknown,
+): value is RecommendationSourceName {
+  return RECOMMENDATION_SOURCE_NAMES.includes(value as RecommendationSourceName);
+}
+
+function isGenreName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length <= MAX_DIAGNOSTIC_STRING_LENGTH
+  );
+}
+
+function isProviderFamily(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_DIAGNOSTIC_STRING_LENGTH
+  );
 }
 
 function isBoundedCount(value: unknown): value is number {
@@ -289,6 +324,35 @@ function hasFailedRequiredSource(inputHealth: RecommendationInputHealth): boolea
   );
 }
 
+function getFailedSourceNames(
+  inputHealth: RecommendationInputHealth,
+): RecommendationSourceName[] {
+  return RECOMMENDATION_SOURCE_NAMES.filter(
+    (sourceName) => inputHealth[sourceName].health === "failed",
+  );
+}
+
+function hasSameSourceNames(
+  actual: readonly RecommendationSourceName[],
+  expected: readonly RecommendationSourceName[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((sourceName, index) => sourceName === expected[index])
+  );
+}
+
+function isDiagnosticsModeConsistent(
+  mode: RecommendationEngineMode,
+  inputHealth: RecommendationInputHealth,
+): boolean {
+  if (hasFailedRequiredSource(inputHealth)) return mode === "degraded";
+
+  // deriveRecommendationMode distinguishes personalized from cold_start using
+  // evidence that is intentionally not present in bounded diagnostics.
+  return mode === "personalized" || mode === "cold_start";
+}
+
 function isValidStageCounts(value: unknown): value is Readonly<
   Record<RecommendationStage, number>
 > {
@@ -312,19 +376,17 @@ function isValidDropReasonCounts(
 }
 
 function isValidCandidateEvidence(value: unknown): value is CandidateEvidence {
-  if (!isRecord(value) || !Array.isArray(value.seedAnchors)) return false;
-  if (!Array.isArray(value.providerFamilies)) return false;
+  if (
+    !isRecord(value) ||
+    !isDenseArray(value.seedAnchors, isPositiveSafeInteger) ||
+    !isDenseArray(value.providerFamilies, isProviderFamily)
+  ) {
+    return false;
+  }
 
   return (
     value.seedAnchors.length <= MAX_RECOMMENDATION_COUNT &&
-    value.seedAnchors.every(isPositiveSafeInteger) &&
     value.providerFamilies.length <= MAX_RECOMMENDATION_COUNT &&
-    value.providerFamilies.every(
-      (family) =>
-        typeof family === "string" &&
-        family.length > 0 &&
-        family.length <= MAX_DIAGNOSTIC_STRING_LENGTH,
-    ) &&
     isBoundedCount(value.providerOccurrences) &&
     isFiniteScore(value.retrievalScore)
   );
@@ -356,7 +418,7 @@ export function validateRecommendationRequest(
   value: unknown,
 ): value is RecommendationRequest {
   if (!isRecord(value)) return false;
-  if (typeof value.userId !== "string" || value.userId.length === 0) {
+  if (typeof value.userId !== "string" || value.userId.trim().length === 0) {
     return false;
   }
   if (
@@ -366,19 +428,12 @@ export function validateRecommendationRequest(
   ) {
     return false;
   }
-  if (!Array.isArray(value.seeds) || !value.seeds.every(isWeightedSeed)) {
+  if (!isDenseArray(value.seeds, isWeightedSeed)) {
     return false;
   }
   if (
-    !Array.isArray(value.excludeTmdbIds) ||
-    !value.excludeTmdbIds.every(isPositiveSafeInteger) ||
-    !Array.isArray(value.genres) ||
-    !value.genres.every(
-      (genre) =>
-        typeof genre === "string" &&
-        genre.trim().length > 0 &&
-        genre.length <= MAX_DIAGNOSTIC_STRING_LENGTH,
-    )
+    !isDenseArray(value.excludeTmdbIds, isPositiveSafeInteger) ||
+    !isDenseArray(value.genres, isGenreName)
   ) {
     return false;
   }
@@ -458,15 +513,17 @@ export function validateRecommendationDiagnostics(
   }
   if (value.engineVersion !== RECOMMENDATION_ENGINE_VERSION) return false;
   if (!isContext({ mode: value.contextMode, localHour: null })) return false;
+  const inputHealth = value.inputHealth;
+  const failedSources = value.failedSources;
   if (
-    !isInputHealth(value.inputHealth) ||
-    !Array.isArray(value.failedSources) ||
-    value.failedSources.length > RECOMMENDATION_SOURCE_NAMES.length ||
-    !value.failedSources.every((source) =>
-      RECOMMENDATION_SOURCE_NAMES.includes(source),
-    ) ||
-    new Set(value.failedSources).size !== value.failedSources.length
+    !isInputHealth(inputHealth) ||
+    !isDenseArray(failedSources, isRecommendationSourceName) ||
+    failedSources.length > RECOMMENDATION_SOURCE_NAMES.length ||
+    new Set(failedSources).size !== failedSources.length
   ) {
+    return false;
+  }
+  if (!hasSameSourceNames(failedSources, getFailedSourceNames(inputHealth))) {
     return false;
   }
   if (
@@ -480,7 +537,7 @@ export function validateRecommendationDiagnostics(
     return false;
   }
 
-  return value.mode !== "personalized" || !hasFailedRequiredSource(value.inputHealth);
+  return isDiagnosticsModeConsistent(value.mode, inputHealth);
 }
 
 export function validateRecommendationResult(
@@ -488,25 +545,26 @@ export function validateRecommendationResult(
   request: RecommendationRequest,
 ): value is RecommendationResult {
   if (!validateRecommendationRequest(request)) return false;
-  if (!isRecord(value) || !Array.isArray(value.results)) return false;
+  if (!isRecord(value)) return false;
+  const results = value.results;
   if (
-    value.results.length > MAX_RECOMMENDATION_COUNT ||
-    !value.results.every(isValidCandidate) ||
+    !isDenseArray(results, isValidCandidate) ||
+    results.length > MAX_RECOMMENDATION_COUNT ||
     !validateRecommendationDiagnostics(value.diagnostics)
   ) {
     return false;
   }
 
-  const ids = value.results.map((candidate) => candidate.tmdbId);
+  const ids = results.map((candidate) => candidate.tmdbId);
   if (new Set(ids).size !== ids.length) return false;
-  if (value.diagnostics.resultCount !== value.results.length) return false;
+  if (value.diagnostics.resultCount !== results.length) return false;
 
   const excludedIds = new Set([
     ...request.seeds.map((seed) => seed.tmdbId),
     ...request.excludeTmdbIds,
   ]);
   if (ids.some((id) => excludedIds.has(id))) return false;
-  if (value.results.length > request.count) return false;
+  if (results.length > request.count) return false;
 
   return true;
 }
