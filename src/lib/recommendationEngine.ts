@@ -5,6 +5,7 @@ import {
   normalizeRecommendationRequest,
   RECOMMENDATION_ENGINE_VERSION,
   RECOMMENDATION_SOURCE_NAMES,
+  validateRecommendationResult,
   validateRecommendationDiagnostics,
   type RecommendationCandidate,
   type RecommendationDiagnostics,
@@ -80,6 +81,31 @@ export type RecommendationEngineDependencies = Readonly<{
 }>;
 
 type CandidateWithId = Readonly<{ tmdbId: number }>;
+
+function assertCandidateIds(
+  candidates: readonly unknown[],
+  stage: string,
+): asserts candidates is readonly CandidateWithId[] {
+  if (
+    !Array.isArray(candidates) ||
+    candidates.some(
+      (candidate) =>
+        typeof candidate !== "object" ||
+        candidate === null ||
+        !Number.isSafeInteger((candidate as { tmdbId?: unknown }).tmdbId) ||
+        ((candidate as { tmdbId: number }).tmdbId ?? 0) <= 0,
+    )
+  ) {
+    throw new Error(`Invalid ${stage} candidates`);
+  }
+
+  const ids = (candidates as readonly CandidateWithId[]).map(
+    (candidate) => candidate.tmdbId,
+  );
+  if (new Set(ids).size !== ids.length) {
+    throw new Error(`Invalid ${stage} candidates`);
+  }
+}
 
 function filterByReason<T extends CandidateWithId>(
   candidates: readonly T[],
@@ -219,6 +245,7 @@ export function createRecommendationEngine(
         mode,
         rng,
       });
+      assertCandidateIds(retrieved, "retrieval");
       const eligibleRetrieved = filterByReason(retrieved, request, context);
       const scored = await dependencies.scoreCandidates({
         request,
@@ -226,6 +253,7 @@ export function createRecommendationEngine(
         mode,
         candidates: eligibleRetrieved.candidates,
       });
+      assertCandidateIds(scored, "scoring");
       const eligibleScored = filterByReason(scored, request, context);
       const reranked = await dependencies.rerankCandidates({
         request,
@@ -233,6 +261,7 @@ export function createRecommendationEngine(
         mode,
         candidates: eligibleScored.candidates,
       });
+      assertCandidateIds(reranked, "reranking");
       const eligibleReranked = filterByReason(reranked, request, context);
       const results = eligibleReranked.candidates.slice(0, request.count);
       const diagnostics = buildDiagnostics({
@@ -253,12 +282,16 @@ export function createRecommendationEngine(
           eligibleReranked.exclusionDrops,
       });
 
+      const result = { results, diagnostics };
       if (!validateRecommendationDiagnostics(diagnostics)) {
         throw new Error("Invalid recommendation diagnostics");
       }
+      if (!validateRecommendationResult(result, request)) {
+        throw new Error("Invalid recommendation result");
+      }
       await emitTelemetry(dependencies.telemetry, diagnostics);
 
-      return { results, diagnostics };
+      return result;
     },
   };
 }

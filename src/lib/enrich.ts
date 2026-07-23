@@ -44,6 +44,23 @@ function getBaseUrl(): string {
   return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 }
 
+function hashForLog(value: string): string {
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(16, "0");
+}
+
+function safeErrorCode(error: unknown): string {
+  if (typeof error !== "object" || error === null) return "UNKNOWN_ERROR";
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(code)
+    ? code
+    : "SUPABASE_ERROR";
+}
+
 // Normalize a numeric signal into a user-facing strength label
 function reasonStrengthLabel(strength: number): string {
   if (strength >= 3.5) return "High";
@@ -2426,7 +2443,10 @@ export async function getFeedback(
     .eq("user_id", userId);
 
   if (error) {
-    console.error("[Supabase] getFeedback error", { userId, error });
+    console.error("[Supabase] getFeedback error", {
+      userIdHash: hashForLog(userId),
+      code: safeErrorCode(error),
+    });
     return new Map();
   }
 
@@ -8864,6 +8884,15 @@ export type OverlapScoringContext = RecommendationScoreParams["context"];
 export async function scoreRecommendationsWithOverlap(
   params: RecommendationScoreParams,
 ): Promise<RecommendationCandidate[]> {
+  if (
+    params.candidates.some(
+      (candidate) =>
+        !Number.isSafeInteger(candidate.tmdbId) || candidate.tmdbId <= 0,
+    )
+  ) {
+    throw new Error("Invalid recommendation candidate ID");
+  }
+
   const films: FilmEventLite[] = params.context.films.map((tuple) => {
     const film = tuple.film;
     const rating = tuple.rating ?? film.rating;
@@ -8888,6 +8917,7 @@ export async function scoreRecommendationsWithOverlap(
     films,
     mappings,
     candidates: params.candidates.map((candidate) => candidate.tmdbId),
+    feedbackMap: new Map(params.context.feedbackMap),
     desiredResults: params.request.count,
     excludeWatchedIds: new Set(params.context.watchedTmdbIds),
     context: {
@@ -8896,17 +8926,24 @@ export async function scoreRecommendationsWithOverlap(
     },
   });
 
-  return scored.flatMap((item) => {
-    if (!Number.isFinite(item.score) || !Number.isSafeInteger(item.tmdbId)) {
-      return [];
-    }
+  if (
+    scored.some(
+      (item) =>
+        !Number.isFinite(item.score) ||
+        !Number.isSafeInteger(item.tmdbId) ||
+        item.tmdbId <= 0,
+    )
+  ) {
+    throw new Error("Invalid overlap scorer result");
+  }
+
+  return scored.map((item) => {
 
     const providerFamilies = item.sources?.length
       ? [...item.sources]
       : ["overlap"];
     const retrievalScore = item.score;
-    return [
-      {
+    return {
         tmdbId: item.tmdbId,
         score: item.score,
         evidence: {
@@ -8922,7 +8959,6 @@ export async function scoreRecommendationsWithOverlap(
           diversity: 0,
           total: item.score,
         },
-      },
-    ];
+      };
   });
 }

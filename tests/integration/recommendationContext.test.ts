@@ -77,6 +77,7 @@ const sourceSnapshot: RecommendationContextSourceSnapshot = {
         title: "Alpha metadata",
         metadataVersion: "m1",
         sourceMarker: "metadata-alpha",
+        nestedOrder: ["zulu", "alpha"],
       },
     ],
   },
@@ -112,6 +113,11 @@ const sourceSnapshot: RecommendationContextSourceSnapshot = {
         sourceMarker: "features-alpha",
       },
     ],
+  },
+  sources: {
+    blocked: {
+      data: [{ tmdbId: 909, sourceMarker: "blocked-alpha" }],
+    },
   },
   inputHealth,
 };
@@ -172,12 +178,14 @@ describe("recommendation context", () => {
         title: "Alpha metadata",
         metadataVersion: "m1",
         sourceMarker: "metadata-alpha",
+        nestedOrder: ["zulu", "alpha"],
       },
       metadata: {
         tmdbId: 101,
         title: "Alpha metadata",
         metadataVersion: "m1",
         sourceMarker: "metadata-alpha",
+        nestedOrder: ["zulu", "alpha"],
       },
       date: {
         tmdbId: 101,
@@ -363,6 +371,7 @@ describe("recommendation context", () => {
         title: "Alpha metadata",
         metadataVersion: "m1",
         sourceMarker: "metadata-alpha",
+        nestedOrder: ["zulu", "alpha"],
       },
       {
         tmdbId: 202,
@@ -449,6 +458,131 @@ describe("recommendation context", () => {
     });
   });
 
+  it("preserves nested array order while sorting source rows", async () => {
+    const context = await loadRecommendationContext(
+      repositoryFor(sourceSnapshot),
+      "nested-order-user",
+    );
+    const reorderedNested = await loadRecommendationContext(
+      repositoryFor({
+        ...sourceSnapshot,
+        metadata: {
+          data: sourceSnapshot.metadata.data!.map((row) =>
+            row.tmdbId === 101
+              ? { ...row, nestedOrder: ["alpha", "zulu"] }
+              : row,
+          ),
+        },
+      }),
+      "nested-order-user",
+    );
+
+    const alphaMetadata = context.inputRevisionMaterial.sources.metadata.find(
+      (row) => row.tmdbId === 101,
+    );
+    expect(alphaMetadata).toEqual({
+      tmdbId: 101,
+      title: "Alpha metadata",
+      metadataVersion: "m1",
+      sourceMarker: "metadata-alpha",
+      nestedOrder: ["zulu", "alpha"],
+    });
+    expect(reorderedNested.inputRevisionMaterial).not.toEqual(
+      context.inputRevisionMaterial,
+    );
+  });
+
+  it("lets source errors, malformed rows, and missing required blocked input override health", async () => {
+    const context = await loadRecommendationContext(
+      repositoryFor({
+        ...sourceSnapshot,
+        films: {
+          data: null,
+          error: new Error("films database failure"),
+        },
+        mappings: {
+          data: [
+            {
+              uri: "letterboxd://film/invalid",
+              tmdbId: 0,
+            } as never,
+          ],
+        },
+        sources: {},
+        inputHealth: {
+          ...inputHealth,
+          films: { health: "ok", rowCount: 3 },
+          mappings: { health: "ok", rowCount: 3 },
+          blocked: { health: "ok", rowCount: 1 },
+        },
+      }),
+      "health-conflict-user",
+    );
+
+    expect(context.sourceHealth.films).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.sourceHealth.mappings).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.sourceHealth.blocked).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.inputHealth.films).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.inputHealth.mappings).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.inputHealth.blocked).toEqual({
+      health: "failed",
+      rowCount: 0,
+    });
+    expect(context.mode).toBe("degraded");
+  });
+
+  it("infers populated optional source health when explicit health is absent", async () => {
+    const context = await loadRecommendationContext(
+      repositoryFor({
+        ...sourceSnapshot,
+        inputHealth: undefined,
+        sources: {
+          feedback: { data: [{ sourceMarker: "optional-feedback" }] },
+          exploration: { data: [{ sourceMarker: "optional-exploration" }] },
+          adjacent_genres: { data: [{ sourceMarker: "optional-adjacent" }] },
+          exposures: {
+            data: [{ tmdbId: 707, sourceMarker: "optional-exposure" }],
+          },
+          blocked: { data: [{ tmdbId: 909, sourceMarker: "optional-blocked" }] },
+        },
+      }),
+      "optional-source-user",
+    );
+
+    for (const sourceName of [
+      "feedback",
+      "exploration",
+      "adjacent_genres",
+      "exposures",
+      "blocked",
+    ] as const) {
+      expect(context.inputHealth[sourceName]).toEqual({
+        health: "ok",
+        rowCount: 1,
+      });
+      expect(context.sourceHealth[sourceName]).toEqual({
+        health: "ok",
+        rowCount: 1,
+      });
+    }
+    expect(context.blockedTmdbIds).toEqual(new Set([909]));
+  });
+
   it("keeps every Phase 0 adapter source in revision material", async () => {
     const legacyContext = {
       films: [
@@ -473,6 +607,7 @@ describe("recommendation context", () => {
       ],
       mappings: new Map([["letterboxd://film/legacy", 808]]),
       feedback: [{ sourceMarker: "feedback-legacy", feature_id: 1 }],
+      feedbackMap: new Map([[707, "negative" as const]]),
       explorationRate: 0.42,
       explorationMarker: "exploration-legacy",
       adjacentGenres: [{ sourceMarker: "adjacent-legacy", from: "Drama" }],
@@ -499,8 +634,10 @@ describe("recommendation context", () => {
     expect(context.inputHealth).toEqual(legacyContext.inputHealth);
     expect(context.sourceHealth).toMatchObject(legacyContext.inputHealth);
     expect(context.blockedTmdbIds).toEqual(new Set([909]));
+    expect(context.feedbackMap).toEqual(new Map([[707, "negative"]]));
     expect(context.inputRevisionMaterial.sources.feedback).toEqual([
       { sourceMarker: "feedback-legacy", feature_id: 1 },
+      { tmdbId: 707, feedbackType: "negative" },
     ]);
     expect(context.inputRevisionMaterial.sources.exploration).toEqual([
       { sourceMarker: "exploration-legacy", explorationRate: 0.42 },

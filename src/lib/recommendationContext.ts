@@ -30,6 +30,8 @@ export type RecommendationContextSourceName =
 
 type RecordValue = Readonly<Record<string, unknown>>;
 
+export type RecommendationFeedbackType = "negative" | "positive";
+
 export type RecommendationFilmRecord = RecordValue & {
   uri: string;
   title?: string;
@@ -99,6 +101,7 @@ export type RecommendationContextSourceSnapshot = Readonly<{
       RecommendationContextSourceResult<RecordValue>
     >
   >;
+  feedbackMap?: ReadonlyMap<number, RecommendationFeedbackType>;
   blockedTmdbIds?: readonly number[];
   hasPersonalizedEvidence?: boolean;
 }>;
@@ -151,6 +154,7 @@ export type RecommendationContext = Readonly<{
     Record<RecommendationContextSourceName, SourceHealth>
   >;
   inputHealth: RecommendationInputHealth;
+  feedbackMap: ReadonlyMap<number, RecommendationFeedbackType>;
   failedSources: readonly RecommendationSourceName[];
   mode: RecommendationEngineMode;
   hasPersonalizedEvidence: boolean;
@@ -171,6 +175,11 @@ const REQUIRED_SOURCE_NAMES = new Set<RecommendationSourceName>([
   "mappings",
   "blocked",
 ]);
+const REQUIRED_CONTEXT_SOURCE_NAMES = new Set<RecommendationContextSourceName>([
+  "films",
+  "mappings",
+  "blocked",
+]);
 
 function isRecord(value: unknown): value is RecordValue {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -178,6 +187,15 @@ function isRecord(value: unknown): value is RecordValue {
 
 function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function hashForLog(value: string): string {
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(16, "0");
 }
 
 function boundedRowCount(value: number): number {
@@ -216,11 +234,7 @@ function getUri(value: RecordValue): string | null {
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value
-      .map((item) => canonicalize(item))
-      .sort((left, right) =>
-        JSON.stringify(left).localeCompare(JSON.stringify(right)),
-      );
+    return value.map((item) => canonicalize(item));
   }
 
   if (value instanceof Map) {
@@ -246,6 +260,16 @@ function canonicalize(value: unknown): unknown {
   }
 
   return value;
+}
+
+function canonicalizeSourceRows(
+  rows: readonly RecordValue[],
+): readonly RecordValue[] {
+  return rows
+    .map((row) => canonicalize(row) as RecordValue)
+    .sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right)),
+    );
 }
 
 function stableRecordKey(value: RecordValue): string {
@@ -398,33 +422,81 @@ function buildDefaultInputHealth(
   ) as RecommendationInputHealth;
 }
 
-function copyInputHealth(inputHealth: RecommendationInputHealth): RecommendationInputHealth {
-  return Object.fromEntries(
-    RECOMMENDATION_SOURCE_NAMES.map((sourceName) => [
-      sourceName,
-      {
-        health: inputHealth[sourceName].health,
-        rowCount: boundedRowCount(inputHealth[sourceName].rowCount),
-      },
-    ]),
-  ) as RecommendationInputHealth;
+function isFeedbackType(value: unknown): value is RecommendationFeedbackType {
+  return value === "negative" || value === "positive";
 }
 
-function emptySourceResult(): RecommendationContextSourceResult<RecordValue> {
-  return { data: [] };
+function normalizeFeedbackMap(value: unknown): Map<number, RecommendationFeedbackType> {
+  const feedbackMap = new Map<number, RecommendationFeedbackType>();
+  const add = (tmdbId: unknown, feedbackType: unknown) => {
+    if (isPositiveSafeInteger(tmdbId) && isFeedbackType(feedbackType)) {
+      feedbackMap.set(tmdbId, feedbackType);
+    }
+  };
+
+  if (value instanceof Map) {
+    for (const [tmdbId, feedbackType] of value.entries()) {
+      add(tmdbId, feedbackType);
+    }
+  } else if (Array.isArray(value)) {
+    for (const row of value) {
+      if (!isRecord(row)) continue;
+      add(
+        getTmdbId(row),
+        row.feedbackType ?? row.feedback_type,
+      );
+    }
+  }
+
+  return new Map(
+    Array.from(feedbackMap.entries()).sort(([left], [right]) => left - right),
+  );
+}
+
+function feedbackMapRows(
+  feedbackMap: ReadonlyMap<number, RecommendationFeedbackType>,
+): RecordValue[] {
+  return Array.from(feedbackMap.entries()).map(([tmdbId, feedbackType]) => ({
+    tmdbId,
+    feedbackType,
+  }));
+}
+
+function hasSourceResult(
+  snapshot: RecommendationContextSourceSnapshot,
+  sourceName: RecommendationContextSourceName,
+): boolean {
+  const snapshotRecord = snapshot as Record<string, unknown>;
+  return (
+    Object.hasOwn(snapshotRecord, sourceName) ||
+    Object.hasOwn(snapshot.sources ?? {}, sourceName)
+  );
+}
+
+function inspectGenericSource(
+  result: RecommendationContextSourceResult<RecordValue> | undefined,
+): SourceHealth | null {
+  if (!result) return null;
+  if (result.error != null || !Array.isArray(result.data)) {
+    return { health: "failed", rowCount: 0 };
+  }
+  if (result.health?.health === "failed") {
+    return normalizeHealth(result.health, { health: "failed", rowCount: 0 });
+  }
+  return normalizeHealth(result.health, healthForRows(result.data.length));
 }
 
 function getSourceResult(
   snapshot: RecommendationContextSourceSnapshot,
   sourceName: RecommendationContextSourceName,
 ): RecommendationContextSourceResult<RecordValue> | undefined {
-  if (sourceName in snapshot) {
-    const snapshotRecord = snapshot as Record<string, unknown>;
+  const snapshotRecord = snapshot as Record<string, unknown>;
+  if (Object.hasOwn(snapshotRecord, sourceName)) {
     return snapshotRecord[sourceName] as
       | RecommendationContextSourceResult<RecordValue>
       | undefined;
   }
-  return snapshot.sources?.[sourceName] ?? emptySourceResult();
+  return snapshot.sources?.[sourceName];
 }
 
 function normalizeLegacyContext(value: unknown): RecommendationContextSourceSnapshot {
@@ -469,6 +541,7 @@ function normalizeLegacyContext(value: unknown): RecommendationContextSourceSnap
   const blockedRows = blockedIds
     .filter(isPositiveSafeInteger)
     .map((tmdbId) => ({ tmdbId }));
+  const feedbackMap = normalizeFeedbackMap(value.feedbackMap);
 
   return {
     films: { data: films as RecommendationFilmRecord[] },
@@ -522,6 +595,7 @@ function normalizeLegacyContext(value: unknown): RecommendationContextSourceSnap
       blocked: { data: blockedRows },
     },
     inputHealth: value.inputHealth as RecommendationInputHealth | undefined,
+    feedbackMap,
     blockedTmdbIds: blockedIds.filter(isPositiveSafeInteger),
     hasPersonalizedEvidence:
       value.mode === "personalized" ? true : undefined,
@@ -549,28 +623,61 @@ function buildSourceHealth(
     >
   >,
 ): Readonly<Record<RecommendationContextSourceName, SourceHealth>> {
+  const feedbackMap = normalizeFeedbackMap(snapshot.feedbackMap);
   const entries = RECOMMENDATION_CONTEXT_SOURCE_NAMES.map((sourceName) => {
-    const explicit = snapshot.sourceHealth?.[sourceName];
-    const phase0Health = RECOMMENDATION_SOURCE_NAMES.includes(
-      sourceName as RecommendationSourceName,
-    )
-      ? snapshot.inputHealth?.[sourceName as RecommendationSourceName]
-      : undefined;
-    if (phase0Health) {
-      return [sourceName, normalizeHealth(phase0Health, phase0Health)];
-    }
+    const explicit =
+      snapshot.sourceHealth?.[sourceName] ??
+      (RECOMMENDATION_SOURCE_NAMES.includes(
+        sourceName as RecommendationSourceName,
+      )
+        ? snapshot.inputHealth?.[sourceName as RecommendationSourceName]
+        : undefined);
     const inspectedSource = inspected[sourceName as keyof typeof inspected];
-    if (explicit) return [sourceName, normalizeHealth(explicit, explicit)];
     if (inspectedSource) return [sourceName, inspectedSource.health];
 
     const source = getSourceResult(snapshot, sourceName);
-    if (source?.health) return [sourceName, normalizeHealth(source.health, source.health)];
+    const sourceHealth = inspectGenericSource(source);
+    if (sourceHealth) return [sourceName, sourceHealth];
+    if (sourceName === "feedback" && feedbackMap.size > 0) {
+      return [sourceName, healthForRows(feedbackMap.size)];
+    }
+    if (
+      REQUIRED_CONTEXT_SOURCE_NAMES.has(sourceName) &&
+      !hasSourceResult(snapshot, sourceName)
+    ) {
+      return [sourceName, { health: "failed" as const, rowCount: 0 }];
+    }
+    if (explicit) return [sourceName, normalizeHealth(explicit, explicit)];
     return [sourceName, { health: "empty" as const, rowCount: 0 }];
   });
 
   return Object.fromEntries(entries) as Readonly<
     Record<RecommendationContextSourceName, SourceHealth>
   >;
+}
+
+function reconcileInputHealth(
+  snapshot: RecommendationContextSourceSnapshot,
+  sourceHealth: Readonly<
+    Record<RecommendationContextSourceName, SourceHealth>
+  >,
+): RecommendationInputHealth {
+  const feedbackMap = normalizeFeedbackMap(snapshot.feedbackMap);
+  return Object.fromEntries(
+    RECOMMENDATION_SOURCE_NAMES.map((sourceName) => {
+      const explicit = snapshot.inputHealth?.[sourceName];
+      const represented =
+        hasSourceResult(snapshot, sourceName) ||
+        (sourceName === "feedback" && feedbackMap.size > 0);
+
+      if (represented) return [sourceName, sourceHealth[sourceName]];
+      if (REQUIRED_SOURCE_NAMES.has(sourceName)) {
+        return [sourceName, { health: "failed" as const, rowCount: 0 }];
+      }
+      if (explicit) return [sourceName, normalizeHealth(explicit, explicit)];
+      return [sourceName, { health: "empty" as const, rowCount: 0 }];
+    }),
+  ) as RecommendationInputHealth;
 }
 
 function buildRevisionMaterial(
@@ -583,7 +690,7 @@ function buildRevisionMaterial(
   const sources = Object.fromEntries(
     RECOMMENDATION_CONTEXT_SOURCE_NAMES.map((sourceName) => [
       sourceName,
-      canonicalize(sourceRows[sourceName] ?? []) as readonly RecordValue[],
+      canonicalizeSourceRows(sourceRows[sourceName] ?? []),
     ]),
   ) as Readonly<
     Record<RecommendationContextSourceName, readonly RecordValue[]>
@@ -605,6 +712,7 @@ function getContextRows(
     >
   >,
   snapshot: RecommendationContextSourceSnapshot,
+  feedbackMap: ReadonlyMap<number, RecommendationFeedbackType>,
 ): Readonly<Record<RecommendationContextSourceName, readonly RecordValue[]>> {
   const rows: Partial<
     Record<RecommendationContextSourceName, readonly RecordValue[]>
@@ -618,9 +726,13 @@ function getContextRows(
     }
 
     const source = getSourceResult(snapshot, sourceName);
-    rows[sourceName] = Array.isArray(source?.data)
+    const sourceRows = Array.isArray(source?.data)
       ? source.data.filter(isRecord)
       : [];
+    rows[sourceName] =
+      sourceName === "feedback"
+        ? [...sourceRows, ...feedbackMapRows(feedbackMap)]
+        : sourceRows;
   }
 
   return rows as Readonly<
@@ -677,6 +789,7 @@ function emptyContext(
     dates: new Map(),
     ratings: new Map(),
     features: new Map(),
+    feedbackMap: new Map(),
     sourceHealth,
     inputHealth,
     failedSources,
@@ -707,9 +820,8 @@ export async function loadRecommendationContext(
       features: inspectRows(snapshot.features, normalizeTmdbRecord),
     } as const;
     const sourceHealth = buildSourceHealth(snapshot, inspected);
-    const inputHealth = snapshot.inputHealth
-      ? copyInputHealth(snapshot.inputHealth)
-      : buildDefaultInputHealth(sourceHealth);
+    const inputHealth = reconcileInputHealth(snapshot, sourceHealth);
+    const feedbackMap = normalizeFeedbackMap(snapshot.feedbackMap);
 
     const films = inspected.films.rows as readonly RecommendationFilmRecord[];
     const mappingsRows = inspected.mappings.rows;
@@ -802,7 +914,7 @@ export async function loadRecommendationContext(
         : []),
     ].filter(isPositiveSafeInteger).sort((left, right) => left - right));
 
-    const sourceRows = getContextRows(inspected, snapshot);
+    const sourceRows = getContextRows(inspected, snapshot, feedbackMap);
     const revisionMaterial = buildRevisionMaterial(
       sourceRows,
       sourceHealth,
@@ -843,6 +955,7 @@ export async function loadRecommendationContext(
           asFeatureRecord(row),
         ]),
       ),
+      feedbackMap,
       sourceHealth,
       inputHealth,
       failedSources,
@@ -857,7 +970,7 @@ export async function loadRecommendationContext(
     };
   } catch (error) {
     console.error("[RecommendationContext] load failed", {
-      userId: userId.slice(0, 8),
+      userIdHash: hashForLog(userId),
       code: error instanceof Error ? error.name : "UNKNOWN_ERROR",
     });
 
