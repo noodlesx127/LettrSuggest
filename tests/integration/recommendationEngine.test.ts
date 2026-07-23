@@ -9,12 +9,16 @@ import {
   type RecommendationRetrieveParams,
   type RecommendationScoreParams,
 } from "@/lib/recommendationEngine";
+import { scoreRecommendationsWithOverlap } from "@/lib/enrich";
 import {
   MAX_DIAGNOSTIC_COUNT,
   validateRecommendationDiagnostics,
   type RecommendationCandidate,
   type RecommendationDiagnostics,
 } from "@/lib/recommendationTypes";
+
+const overlapScorer: RecommendationEngineDependencies["scoreCandidates"] =
+  scoreRecommendationsWithOverlap;
 
 const inputHealth = {
   films: { health: "ok" as const, rowCount: 1 },
@@ -77,6 +81,10 @@ function candidate(tmdbId: number, score: number): RecommendationCandidate {
 }
 
 describe("recommendation engine", () => {
+  it("accepts the overlap scorer directly as the scoring dependency", () => {
+    expect(overlapScorer).toBe(scoreRecommendationsWithOverlap);
+  });
+
   it("orchestrates injected stages, excludes seeds, and emits one bounded trace", async () => {
     const calls: string[] = [];
     const loadContext = vi.fn(async (userId: string) => {

@@ -29,10 +29,9 @@ import {
   boostSeasonalGenres,
 } from "./genreEnhancement";
 import { updateExplorationStats } from "./adaptiveLearning";
-import type { RecommendationContext } from "@/lib/recommendationContext";
+import type { RecommendationScoreParams } from "@/lib/recommendationEngine";
 import type {
   RecommendationCandidate,
-  RecommendationRequest,
 } from "@/lib/recommendationTypes";
 
 /**
@@ -8860,13 +8859,11 @@ export function findPairwiseCandidate<T extends PairwiseCandidate>(
  * Keep the existing overlap scorer behind the canonical engine seam until the
  * dedicated scoring implementation is extracted in a later checkpoint.
  */
-export type OverlapScoringContext = RecommendationContext;
+export type OverlapScoringContext = RecommendationScoreParams["context"];
 
-export async function scoreRecommendationsWithOverlap(params: {
-  request: RecommendationRequest;
-  context: OverlapScoringContext;
-  candidates: readonly number[];
-}): Promise<RecommendationCandidate[]> {
+export async function scoreRecommendationsWithOverlap(
+  params: RecommendationScoreParams,
+): Promise<RecommendationCandidate[]> {
   const films: FilmEventLite[] = params.context.films.map((tuple) => {
     const film = tuple.film;
     const rating = tuple.rating ?? film.rating;
@@ -8890,7 +8887,7 @@ export async function scoreRecommendationsWithOverlap(params: {
     userId: params.request.userId,
     films,
     mappings,
-    candidates: [...params.candidates],
+    candidates: params.candidates.map((candidate) => candidate.tmdbId),
     desiredResults: params.request.count,
     excludeWatchedIds: new Set(params.context.watchedTmdbIds),
     context: {

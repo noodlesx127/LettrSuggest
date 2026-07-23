@@ -67,6 +67,12 @@ const sourceSnapshot: RecommendationContextSourceSnapshot = {
         sourceMarker: "metadata-gamma",
       },
       {
+        tmdbId: 202,
+        title: "Beta metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-beta",
+      },
+      {
         tmdbId: 101,
         title: "Alpha metadata",
         metadataVersion: "m1",
@@ -96,6 +102,11 @@ const sourceSnapshot: RecommendationContextSourceSnapshot = {
         sourceMarker: "features-gamma",
       },
       {
+        tmdbId: 202,
+        features: { marker: "features-202" },
+        sourceMarker: "features-beta",
+      },
+      {
         tmdbId: 101,
         features: { marker: "features-101" },
         sourceMarker: "features-alpha",
@@ -120,13 +131,11 @@ function shuffledSnapshot(): RecommendationContextSourceSnapshot {
 function repositoryFor(
   snapshot: RecommendationContextSourceSnapshot,
 ): RecommendationContextRepository {
-  return {
-    load: async () => snapshot,
-  };
+  return { load: async () => snapshot };
 }
 
 describe("recommendation context", () => {
-  it("keeps atomic tuples, preserves health, and is order independent", async () => {
+  it("keeps complete atomic tuples, health, mappings, and exact revision rows order-independent", async () => {
     const context = await loadRecommendationContext(
       repositoryFor(sourceSnapshot),
       "context-user",
@@ -135,108 +144,309 @@ describe("recommendation context", () => {
       repositoryFor(shuffledSnapshot()),
       "context-user",
     );
+    const tuplesById = new Map(
+      context.films.map((tuple) => [tuple.tmdbId, tuple]),
+    );
 
     expect(context.inputHealth).toEqual(inputHealth);
     expect(context.sourceHealth.feedback).toEqual({
       health: "failed",
       rowCount: 0,
     });
-
-    const tuplesById = new Map(
-      context.films.map((tuple) => [tuple.tmdbId, tuple]),
-    );
-    expect(tuplesById.get(101)).toMatchObject({
+    expect(tuplesById.get(101)).toEqual({
       uri: "letterboxd://film/alpha",
       tmdbId: 101,
+      film: {
+        uri: "letterboxd://film/alpha",
+        title: "Alpha",
+        year: 2020,
+        sourceMarker: "films-alpha",
+      },
+      mapping: {
+        uri: "letterboxd://film/alpha",
+        tmdbId: 101,
+        sourceMarker: "mappings-alpha",
+      },
+      details: {
+        tmdbId: 101,
+        title: "Alpha metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-alpha",
+      },
+      metadata: {
+        tmdbId: 101,
+        title: "Alpha metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-alpha",
+      },
+      date: {
+        tmdbId: 101,
+        watchedAt: "2026-02-01",
+        sourceMarker: "dates-alpha",
+      },
+      ratingRecord: {
+        tmdbId: 101,
+        rating: 5,
+        sourceMarker: "ratings-alpha",
+      },
+      features: {
+        tmdbId: 101,
+        features: { marker: "features-101" },
+        sourceMarker: "features-alpha",
+      },
       rating: 5,
       watchDate: "2026-02-01",
       detailsHealth: "ok",
-      metadata: { tmdbId: 101, title: "Alpha metadata" },
-      details: { tmdbId: 101, title: "Alpha metadata" },
-      date: { tmdbId: 101, watchedAt: "2026-02-01" },
-      ratingRecord: { tmdbId: 101, rating: 5 },
-      features: { tmdbId: 101, sourceMarker: "features-alpha" },
     });
-    expect(tuplesById.get(202)).toMatchObject({
+    expect(tuplesById.get(202)).toEqual({
       uri: "letterboxd://film/beta",
       tmdbId: 202,
+      film: {
+        uri: "letterboxd://film/beta",
+        title: "Beta",
+        year: 2021,
+        sourceMarker: "films-beta",
+      },
+      mapping: {
+        uri: "letterboxd://film/beta",
+        tmdbId: 202,
+        sourceMarker: "mappings-beta",
+      },
+      details: {
+        tmdbId: 202,
+        title: "Beta metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-beta",
+      },
+      metadata: {
+        tmdbId: 202,
+        title: "Beta metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-beta",
+      },
+      date: {
+        tmdbId: 202,
+        watchedAt: "2026-01-01",
+        sourceMarker: "dates-beta",
+      },
+      ratingRecord: {
+        tmdbId: 202,
+        rating: 2,
+        sourceMarker: "ratings-beta",
+      },
+      features: {
+        tmdbId: 202,
+        features: { marker: "features-202" },
+        sourceMarker: "features-beta",
+      },
       rating: 2,
       watchDate: "2026-01-01",
-      detailsHealth: "failed",
-      metadata: null,
-      details: null,
-      date: { tmdbId: 202, watchedAt: "2026-01-01" },
-      ratingRecord: { tmdbId: 202, rating: 2 },
-      features: null,
+      detailsHealth: "ok",
     });
-    expect(tuplesById.get(303)).toMatchObject({
+    expect(tuplesById.get(303)).toEqual({
       uri: "letterboxd://film/gamma",
       tmdbId: 303,
+      film: {
+        uri: "letterboxd://film/gamma",
+        title: "Gamma",
+        year: 2019,
+        sourceMarker: "films-gamma",
+      },
+      mapping: {
+        uri: "letterboxd://film/gamma",
+        tmdbId: 303,
+        sourceMarker: "mappings-gamma",
+      },
+      details: {
+        tmdbId: 303,
+        title: "Gamma metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-gamma",
+      },
+      metadata: {
+        tmdbId: 303,
+        title: "Gamma metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-gamma",
+      },
+      date: {
+        tmdbId: 303,
+        watchedAt: "2026-03-01",
+        sourceMarker: "dates-gamma",
+      },
+      ratingRecord: {
+        tmdbId: 303,
+        rating: 4,
+        sourceMarker: "ratings-gamma",
+      },
+      features: {
+        tmdbId: 303,
+        features: { marker: "features-303" },
+        sourceMarker: "features-gamma",
+      },
       rating: 4,
       watchDate: "2026-03-01",
       detailsHealth: "ok",
-      metadata: { tmdbId: 303, title: "Gamma metadata" },
-      details: { tmdbId: 303, title: "Gamma metadata" },
-      date: { tmdbId: 303, watchedAt: "2026-03-01" },
-      ratingRecord: { tmdbId: 303, rating: 4 },
-      features: { tmdbId: 303, sourceMarker: "features-gamma" },
     });
 
     expect(Array.from(context.mappings.entries())).toEqual([
-      ["letterboxd://film/alpha", expect.objectContaining({ tmdbId: 101 })],
-      ["letterboxd://film/beta", expect.objectContaining({ tmdbId: 202 })],
-      ["letterboxd://film/gamma", expect.objectContaining({ tmdbId: 303 })],
+      [
+        "letterboxd://film/alpha",
+        {
+          uri: "letterboxd://film/alpha",
+          tmdbId: 101,
+          sourceMarker: "mappings-alpha",
+        },
+      ],
+      [
+        "letterboxd://film/beta",
+        {
+          uri: "letterboxd://film/beta",
+          tmdbId: 202,
+          sourceMarker: "mappings-beta",
+        },
+      ],
+      [
+        "letterboxd://film/gamma",
+        {
+          uri: "letterboxd://film/gamma",
+          tmdbId: 303,
+          sourceMarker: "mappings-gamma",
+        },
+      ],
     ]);
     expect(context.films.map((tuple) => tuple.tmdbId)).toEqual([303, 101, 202]);
     expect(shuffledContext.films).toEqual(context.films);
     expect(shuffledContext.inputRevisionMaterial).toEqual(
       context.inputRevisionMaterial,
     );
-
-    const loadedSources = [
+    expect(context.inputRevisionMaterial.sources.films).toEqual([
+      {
+        uri: "letterboxd://film/alpha",
+        title: "Alpha",
+        year: 2020,
+        sourceMarker: "films-alpha",
+      },
+      {
+        uri: "letterboxd://film/beta",
+        title: "Beta",
+        year: 2021,
+        sourceMarker: "films-beta",
+      },
+      {
+        uri: "letterboxd://film/gamma",
+        title: "Gamma",
+        year: 2019,
+        sourceMarker: "films-gamma",
+      },
+    ]);
+    expect(context.inputRevisionMaterial.sources.mappings).toEqual([
+      {
+        uri: "letterboxd://film/alpha",
+        tmdbId: 101,
+        sourceMarker: "mappings-alpha",
+      },
+      {
+        uri: "letterboxd://film/beta",
+        tmdbId: 202,
+        sourceMarker: "mappings-beta",
+      },
+      {
+        uri: "letterboxd://film/gamma",
+        tmdbId: 303,
+        sourceMarker: "mappings-gamma",
+      },
+    ]);
+    expect(context.inputRevisionMaterial.sources.metadata).toEqual([
+      {
+        tmdbId: 101,
+        title: "Alpha metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-alpha",
+      },
+      {
+        tmdbId: 202,
+        title: "Beta metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-beta",
+      },
+      {
+        tmdbId: 303,
+        title: "Gamma metadata",
+        metadataVersion: "m1",
+        sourceMarker: "metadata-gamma",
+      },
+    ]);
+    expect(context.inputRevisionMaterial.sources.dates).toEqual([
+      { tmdbId: 101, watchedAt: "2026-02-01", sourceMarker: "dates-alpha" },
+      { tmdbId: 202, watchedAt: "2026-01-01", sourceMarker: "dates-beta" },
+      { tmdbId: 303, watchedAt: "2026-03-01", sourceMarker: "dates-gamma" },
+    ]);
+    expect(context.inputRevisionMaterial.sources.ratings).toEqual([
+      { tmdbId: 202, rating: 2, sourceMarker: "ratings-beta" },
+      { tmdbId: 303, rating: 4, sourceMarker: "ratings-gamma" },
+      { tmdbId: 101, rating: 5, sourceMarker: "ratings-alpha" },
+    ]);
+    expect(context.inputRevisionMaterial.sources.features).toEqual([
+      {
+        tmdbId: 101,
+        features: { marker: "features-101" },
+        sourceMarker: "features-alpha",
+      },
+      {
+        tmdbId: 202,
+        features: { marker: "features-202" },
+        sourceMarker: "features-beta",
+      },
+      {
+        tmdbId: 303,
+        features: { marker: "features-303" },
+        sourceMarker: "features-gamma",
+      },
+    ]);
+    for (const sourceName of [
       "films",
       "mappings",
       "metadata",
       "dates",
       "ratings",
       "features",
-    ] as const;
-    for (const sourceName of loadedSources) {
-      expect(context.inputRevisionMaterial.sources[sourceName]).toBeDefined();
+    ] as const) {
       expect(context.inputRevisionMaterial[sourceName]).toEqual(
         context.inputRevisionMaterial.sources[sourceName],
       );
     }
-    expect(context.inputRevisionMaterial.sources.films).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourceMarker: "films-alpha" }),
-      ]),
+  });
+
+  it("keeps a missing metadata tuple failed without shifting later records", async () => {
+    const missingMiddleMetadata = {
+      ...sourceSnapshot,
+      metadata: {
+        data: sourceSnapshot.metadata.data!.filter((row) => row.tmdbId !== 202),
+      },
+      features: {
+        data: sourceSnapshot.features.data!.filter((row) => row.tmdbId !== 202),
+      },
+    };
+    const context = await loadRecommendationContext(
+      repositoryFor(missingMiddleMetadata),
+      "atomic-user",
     );
-    expect(context.inputRevisionMaterial.sources.mappings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourceMarker: "mappings-alpha" }),
-      ]),
+    const tuplesById = new Map(
+      context.films.map((tuple) => [tuple.tmdbId, tuple]),
     );
-    expect(context.inputRevisionMaterial.sources.metadata).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourceMarker: "metadata-alpha" }),
-      ]),
-    );
-    expect(context.inputRevisionMaterial.sources.dates).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourceMarker: "dates-alpha" }),
-      ]),
-    );
-    expect(context.inputRevisionMaterial.sources.ratings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourceMarker: "ratings-alpha" }),
-      ]),
-    );
-    expect(context.inputRevisionMaterial.sources.features).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ sourceMarker: "features-alpha" }),
-      ]),
-    );
+
+    expect(tuplesById.get(202)).toMatchObject({
+      detailsHealth: "failed",
+      details: null,
+      metadata: null,
+      features: null,
+    });
+    expect(tuplesById.get(303)).toMatchObject({
+      detailsHealth: "ok",
+      details: { sourceMarker: "metadata-gamma" },
+      features: { sourceMarker: "features-gamma" },
+    });
   });
 
   it("keeps every Phase 0 adapter source in revision material", async () => {
