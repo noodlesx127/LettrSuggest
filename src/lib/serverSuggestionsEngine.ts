@@ -11,19 +11,12 @@ import {
 } from "@/lib/recommendationPreference";
 import { sortByFilmRecency } from "@/lib/recommendationNormalization";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-
-/**
- * Films whose TMDB neighbourhood is consistently off-profile regardless of
- * the user's rating. Seeds listed here are excluded from getTopSeedTmdbIds
- * even when the user rates them highly. Add new entries as discovered.
- */
-const WEAK_SEED_TMDB_IDS = new Set<number>([
-  9352, // EuroTrip — neighbourhood (Girls Trip, 21 & Over) diverges from taste profile
-  153, // Lost in Translation — neighbourhood (Coyote Ugly, Jersey Girl, Reality Bites) off-profile
-  571252, // Ad Astra — space sci-fi neighbourhood off-profile
-  97365, // Looper — time-travel action neighbourhood off-profile
-  1241436, // Warfare — military action neighbourhood (Lone Survivor, American Sniper) off-profile
-]);
+import {
+  applySourceIntentQuotas,
+  createDeterministicRng,
+  stableSortCandidates,
+  type WeightedRecommendationSeed,
+} from "@/lib/recommendationCandidates";
 
 type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
 type FeatureFeedback = Awaited<ReturnType<typeof getAvoidedFeatures>>;
@@ -162,10 +155,31 @@ type TmdbListResult = {
   }>;
 };
 
+type SourceMetadataEntry = {
+  sources: string[];
+  consensusLevel: "high" | "medium" | "low";
+  intents?: string[];
+};
+
 type SourceMetadata = Map<
   number,
-  { sources: string[]; consensusLevel: "high" | "medium" | "low" }
+  SourceMetadataEntry
 >;
+
+type ServerSeedInput =
+  | number
+  | Readonly<{
+      tmdbId: number;
+      weight?: number;
+      source?: WeightedRecommendationSeed["source"];
+      intent?: string;
+    }>;
+
+type CandidateSourceResult = Readonly<{
+  source: string;
+  ids: number[];
+  intent?: string;
+}>;
 
 const TMDB_BATCH_SIZE = 200;
 const TASTE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -283,7 +297,11 @@ function addCandidateSource(
   candidateSet: Set<number>,
   tmdbId: number,
   source: string,
-  options?: { allowSeen?: boolean; seenIds?: Set<number> },
+  options?: {
+    allowSeen?: boolean;
+    seenIds?: Set<number>;
+    intent?: string;
+  },
 ): void {
   if (!isFiniteNumber(tmdbId) || tmdbId <= 0) return;
 
@@ -303,10 +321,13 @@ function addCandidateSource(
   const sourceCount = sources.size;
   const consensusLevel: "high" | "medium" | "low" =
     sourceCount >= 3 ? "high" : sourceCount >= 2 ? "medium" : "low";
+  const intents = new Set(existing?.intents ?? []);
+  if (options?.intent) intents.add(options.intent);
 
   sourceMetadata.set(tmdbId, {
-    sources: Array.from(sources),
+    sources: Array.from(sources).sort(),
     consensusLevel,
+    ...(intents.size > 0 ? { intents: Array.from(intents).sort() } : {}),
   });
 }
 
@@ -370,10 +391,9 @@ function compareSeedFilms(
 function getTopSeedTmdbIds(
   userContext: UserContext,
   limit: number,
-  random: () => number,
   now: number,
-): number[] {
-  const scored = userContext.films
+): WeightedRecommendationSeed[] {
+  const scoredFilms = [...userContext.films]
     .filter(
       (film) =>
         userContext.mappings.has(film.uri) &&
@@ -381,40 +401,27 @@ function getTopSeedTmdbIds(
     )
     .sort((left, right) =>
       compareSeedFilms(left, right, userContext.mappings, now),
-    )
-    .map((film) => userContext.mappings.get(film.uri))
-    .filter((tmdbId): tmdbId is number => isFiniteNumber(tmdbId))
-    .filter((tmdbId, index, ids) => ids.indexOf(tmdbId) === index)
-    .filter((tmdbId) => !WEAK_SEED_TMDB_IDS.has(tmdbId)); // exclude known weak seeds
+    );
 
-  // Sample from a larger pool to ensure variety across runs.
-  // Take top 30 candidates, shuffle them, then slice to limit.
-  const poolSize = Math.max(limit, Math.min(scored.length, 30));
-  const pool = scored.slice(0, poolSize);
-
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
+  const scored: WeightedRecommendationSeed[] = [];
+  for (const film of scoredFilms) {
+    const tmdbId = userContext.mappings.get(film.uri);
+    if (tmdbId === undefined) continue;
+    scored.push({
+      tmdbId,
+      weight: Math.max(0.01, scoreSeedFilm(film, now)),
+      source: "history",
+    });
   }
 
-  return pool.slice(0, limit);
-}
-
-function createDeterministicRng(requestSeed: string): () => number {
-  let state = 2166136261;
-
-  for (let index = 0; index < requestSeed.length; index += 1) {
-    state ^= requestSeed.charCodeAt(index);
-    state = Math.imul(state, 16777619);
-  }
-
-  if (state === 0) state = 1;
-
-  return () => {
-    state = Math.imul(state ^ (state >>> 15), 1 | state);
-    state ^= state + Math.imul(state ^ (state >>> 7), 61 | state);
-    return ((state ^ (state >>> 14)) >>> 0) / 4294967296;
-  };
+  const seen = new Set<number>();
+  return scored
+    .filter((seed) => {
+      if (seen.has(seed.tmdbId)) return false;
+      seen.add(seed.tmdbId);
+      return true;
+    })
+    .slice(0, limit);
 }
 
 function getRelevantTasteTmdbIds(userContext: UserContext): number[] {
@@ -1340,7 +1347,7 @@ export async function generateServerCandidates(
   userId: string,
   userContext: UserContext,
   tasteProfile: TasteProfile,
-  seedTmdbIds: number[] = [],
+  seedTmdbIds: readonly ServerSeedInput[] = [],
   options: {
     requestSeed?: string;
     provider?: typeof fetchTmdb;
@@ -1356,13 +1363,33 @@ export async function generateServerCandidates(
   const sourceMetadata: SourceMetadata = new Map();
   const candidateOrder: number[] = [];
   const candidateSet = new Set<number>();
-  const explicitSeedTmdbIds = Array.from(
-    new Set(
-      seedTmdbIds.filter(
-        (tmdbId) => isFiniteNumber(tmdbId) && tmdbId > 0,
-      ),
-    ),
-  ).sort((left, right) => left - right);
+  const explicitSeedsById = new Map<number, WeightedRecommendationSeed>();
+  for (const seed of seedTmdbIds) {
+    const tmdbId = typeof seed === "number" ? seed : seed.tmdbId;
+    if (!isFiniteNumber(tmdbId) || tmdbId <= 0) continue;
+
+    const weightedSeed: WeightedRecommendationSeed =
+      typeof seed === "number"
+        ? { tmdbId, weight: 2, source: "explicit" }
+        : {
+            tmdbId,
+            weight:
+              typeof seed.weight === "number" && seed.weight > 0
+                ? seed.weight
+                : 2,
+            source: seed.source ?? "explicit",
+            ...(seed.intent ? { intent: seed.intent } : {}),
+          };
+    const existing = explicitSeedsById.get(tmdbId);
+    if (existing === undefined || weightedSeed.weight > existing.weight) {
+      explicitSeedsById.set(tmdbId, weightedSeed);
+    }
+  }
+
+  const explicitSeeds = [...explicitSeedsById.values()].sort(
+    (left, right) => left.tmdbId - right.tmdbId,
+  );
+  const explicitSeedTmdbIds = explicitSeeds.map((seed) => seed.tmdbId);
   const seenIds = new Set<number>([
     ...Array.from(userContext.mappings.values()),
     ...Array.from(userContext.blockedIds.values()),
@@ -1381,17 +1408,20 @@ export async function generateServerCandidates(
   const topSeedTmdbIds = getTopSeedTmdbIds(
     userContext,
     12,
-    random,
     currentTime,
   );
-  const neighborhoodSeedTmdbIds = Array.from(
-    new Set([...explicitSeedTmdbIds, ...topSeedTmdbIds]),
-  );
+  const neighborhoodSeedsById = new Map<number, WeightedRecommendationSeed>();
+  for (const seed of [...explicitSeeds, ...topSeedTmdbIds]) {
+    if (!neighborhoodSeedsById.has(seed.tmdbId)) {
+      neighborhoodSeedsById.set(seed.tmdbId, seed);
+    }
+  }
+  const neighborhoodSeeds = [...neighborhoodSeedsById.values()];
   const discoverGenreIds = tasteProfile.topGenres
     .slice(0, 3)
     .map((genre) => genre.id);
 
-  const requests: Array<Promise<{ source: string; ids: number[] }>> = [];
+  const requests: Array<Promise<CandidateSourceResult>> = [];
   const useDayTrending = random() > 0.5;
 
   requests.push(
@@ -1401,13 +1431,15 @@ export async function generateServerCandidates(
       .then((result) => ({
         source: useDayTrending ? "trending-day" : "trending-week",
         ids: (result.results ?? []).map((movie) => movie.id),
+        intent: "exploration",
       }))
       .catch((error) => {
         console.error("[ServerEngine] trending error:", error);
-        return {
-          source: useDayTrending ? "trending-day" : "trending-week",
-          ids: [],
-        };
+          return {
+            source: useDayTrending ? "trending-day" : "trending-week",
+            ids: [],
+            intent: "exploration",
+          };
       }),
   );
 
@@ -1419,13 +1451,15 @@ export async function generateServerCandidates(
         .then((result) => ({
           source: useDayTrending ? "trending-week" : "trending-day",
           ids: (result.results ?? []).map((movie) => movie.id),
+          intent: "exploration",
         }))
         .catch((error) => {
           console.error("[ServerEngine] trending alternate error:", error);
-          return {
-            source: useDayTrending ? "trending-week" : "trending-day",
-            ids: [],
-          };
+            return {
+              source: useDayTrending ? "trending-week" : "trending-day",
+              ids: [],
+              intent: "exploration",
+            };
         }),
     );
   }
@@ -1442,6 +1476,7 @@ export async function generateServerCandidates(
         .then((result) => ({
           source: "discover-top-genres",
           ids: (result.results ?? []).map((movie) => movie.id),
+          intent: "exploration",
         }))
         .catch((error) => {
           console.error("[ServerEngine] discover error:", error);
@@ -1450,7 +1485,9 @@ export async function generateServerCandidates(
     );
   }
 
-  for (const tmdbId of neighborhoodSeedTmdbIds) {
+  for (const seed of neighborhoodSeeds) {
+    const { tmdbId } = seed;
+    const intent = seed.intent ?? seed.source ?? "history";
     requests.push(
       limitedProvider<TmdbListResult>(
         `/movie/${tmdbId}/recommendations`,
@@ -1469,17 +1506,18 @@ export async function generateServerCandidates(
             return {
               source: `similar:${tmdbId}`,
               ids: (fallback.results ?? []).map((movie) => movie.id),
+              intent,
             };
           }
           // Keep label as `similar:` for backward compatibility — downstream consumers depend on this label.
-          return { source: `similar:${tmdbId}`, ids };
+          return { source: `similar:${tmdbId}`, ids, intent };
         })
         .catch((error) => {
           console.error("[ServerEngine] recommendations fetch error:", {
             tmdbId,
             error,
           });
-          return { source: `similar:${tmdbId}`, ids: [] };
+          return { source: `similar:${tmdbId}`, ids: [], intent };
         }),
     );
   }
@@ -1500,19 +1538,21 @@ export async function generateServerCandidates(
         candidateSet,
         tmdbId,
         result.value.source,
-        { seenIds },
+        { seenIds, intent: result.value.intent },
       );
     }
   }
 
-  const orderedCandidates = [...candidateOrder].sort((left, right) => {
-    const leftMeta = sourceMetadata.get(left);
-    const rightMeta = sourceMetadata.get(right);
-    const leftScore = leftMeta?.sources.length ?? 0;
-    const rightScore = rightMeta?.sources.length ?? 0;
-
-    return rightScore - leftScore;
-  });
+  const orderedCandidates = stableSortCandidates(
+    candidateOrder.map((tmdbId) => {
+      const metadata = sourceMetadata.get(tmdbId);
+      return {
+        tmdbId,
+        score: metadata?.sources.length ?? 0,
+        sources: metadata?.sources ?? [],
+      };
+    }),
+  ).map((candidate) => candidate.tmdbId);
 
   const SOURCE_CAPS: Record<string, number> = {
     "trending-day": 10,
@@ -1520,32 +1560,32 @@ export async function generateServerCandidates(
     "discover-top-genres": 15,
   };
 
-  const sourceCounts = new Map<string, number>();
-  const cappedCandidateOrder: number[] = [];
-
+  const intentQuotas: Record<string, number> = {};
   for (const tmdbId of orderedCandidates) {
-    const meta = sourceMetadata.get(tmdbId);
-    if (!meta) {
-      cappedCandidateOrder.push(tmdbId);
-      continue;
-    }
-
-    const canAdd = meta.sources.some((source) => {
-      const cap = SOURCE_CAPS[source];
-      if (cap === undefined) return true;
-      const count = sourceCounts.get(source) ?? 0;
-      return count < cap;
-    });
-
-    if (canAdd) {
-      cappedCandidateOrder.push(tmdbId);
-      for (const source of meta.sources) {
-        if (SOURCE_CAPS[source] !== undefined) {
-          sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
-        }
+    const intents = sourceMetadata.get(tmdbId)?.intents ?? [];
+    for (const intent of intents) {
+      if (intent === "explicit" || intent === "history" || intent === "watchlist") {
+        intentQuotas[intent] = (intentQuotas[intent] ?? 0) + 1;
       }
     }
   }
+
+  const cappedCandidateOrder = applySourceIntentQuotas(
+    orderedCandidates.map((tmdbId) => {
+      const metadata = sourceMetadata.get(tmdbId);
+      return {
+        tmdbId,
+        score: metadata?.sources.length ?? 0,
+        sources: metadata?.sources ?? [],
+        intents: metadata?.intents ?? [],
+      };
+    }),
+    {
+      limit: orderedCandidates.length,
+      sourceQuotas: SOURCE_CAPS,
+      intentQuotas,
+    },
+  ).map((candidate) => candidate.tmdbId);
 
   console.log("[ServerEngine] source caps applied", {
     before: orderedCandidates.length,

@@ -7,8 +7,15 @@ import { aggregateRecommendations, type AggregatedRecommendation } from '@/lib/r
  * This runs on the server to securely access API keys for TasteDive, Watchmode, etc.
  */
 export async function getAggregatedRecommendations(params: {
-    seedMovies: Array<{ tmdbId: number; title: string; imdbId?: string }>;
+    seedMovies: Array<{
+        tmdbId: number;
+        title: string;
+        imdbId?: string;
+        weight?: number;
+        source?: "explicit" | "history" | "watchlist" | "feedback";
+    }>;
     limit?: number;
+    requestSeed?: string;
 }): Promise<AggregatedRecommendation[]> {
     try {
         console.log('[RecommendationsAction] Fetching aggregated recommendations', { seedCount: params.seedMovies.length });

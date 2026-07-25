@@ -14,6 +14,13 @@
 
 import pLimit from "p-limit";
 
+import {
+  createDeterministicRng,
+  deriveCandidateRequestSeed,
+  selectWeightedSeeds,
+  type RecommendationRng,
+  type WeightedRecommendationSeed,
+} from "@/lib/recommendationCandidates";
 import { generateMovieEmbeddingById } from "./embeddings";
 import { searchMovies } from "./movieAPI";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -71,13 +78,34 @@ export type AggregateRecommendationsResult = {
   sourceDebug: SourceDebug;
 };
 
+type AggregatorSeedMovie = WeightedRecommendationSeed & {
+  title: string;
+  imdbId?: string;
+};
+
 export async function aggregateRecommendations(params: {
-  seedMovies: Array<{ tmdbId: number; title: string; imdbId?: string }>;
+  seedMovies: Array<{
+    tmdbId: number;
+    title: string;
+    imdbId?: string;
+    weight?: number;
+    source?: WeightedRecommendationSeed["source"];
+  }>;
   limit?: number;
   sourceReliability?: Map<string, number>;
   deadlineMs?: number;
+  requestSeed?: string;
 }): Promise<AggregateRecommendationsResult> {
-  const { seedMovies, limit = 50, sourceReliability, deadlineMs } = params;
+  const { limit = 50, sourceReliability, deadlineMs } = params;
+  const seedMovies: AggregatorSeedMovie[] = params.seedMovies.map((seed) => ({
+    ...seed,
+    weight:
+      typeof seed.weight === "number" && Number.isFinite(seed.weight) && seed.weight > 0
+        ? seed.weight
+        : 1,
+  }));
+  const requestSeed =
+    params.requestSeed ?? deriveCandidateRequestSeed(seedMovies);
   const startTime = Date.now();
 
   const withDeadline = <T>(p: Promise<T>, label: string): Promise<T> => {
@@ -109,15 +137,33 @@ export async function aggregateRecommendations(params: {
   const sourceFetchStart = Date.now();
   const [tmdbRecs, tastediveRecs, watchmodeRecs, vectorRecs] =
     await Promise.allSettled([
-      withDeadline(fetchTMDBRecommendations(seedMovies), "TMDB"),
-      withDeadline(fetchTasteDiveRecommendations(seedMovies), "TasteDive"),
+      withDeadline(
+        fetchTMDBRecommendations(
+          seedMovies,
+          createDeterministicRng(`${requestSeed}:tmdb`),
+        ),
+        "TMDB",
+      ),
+      withDeadline(
+        fetchTasteDiveRecommendations(
+          seedMovies,
+          createDeterministicRng(`${requestSeed}:tastedive`),
+        ),
+        "TasteDive",
+      ),
       withDeadline(
         fetchWatchmodeSimilar(seedMovies).then((results) =>
           results.length > 0 ? results : fetchWatchmodeTrending(),
         ),
         "Watchmode",
       ),
-      withDeadline(fetchVectorSimilarityRecommendations(seedMovies), "Vector"),
+      withDeadline(
+        fetchVectorSimilarityRecommendations(
+          seedMovies,
+          createDeterministicRng(`${requestSeed}:vector`),
+        ),
+        "Vector",
+      ),
     ]);
   const sourceFetchElapsed = Date.now() - sourceFetchStart;
 
@@ -526,7 +572,8 @@ function getConsensusLevel(sourceCount: number): "high" | "medium" | "low" {
  * Uses TMDB's /recommendations endpoint (collaborative filtering)
  */
 async function fetchTMDBRecommendations(
-  seedMovies: Array<{ tmdbId: number; title: string }>,
+  seedMovies: readonly AggregatorSeedMovie[],
+  rng: RecommendationRng,
 ): Promise<SourceRecommendation[]> {
   const recommendations: SourceRecommendation[] = [];
 
@@ -535,10 +582,7 @@ async function fetchTMDBRecommendations(
     Math.max(5, Math.floor(seedMovies.length * 0.15)),
     25,
   );
-  // Randomly sample seeds for higher recommendation variety
-  const seeds = [...seedMovies]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, dynamicLimit);
+  const seeds = selectWeightedSeeds(seedMovies, dynamicLimit, rng);
 
   console.log("[Aggregator] Fetching TMDB recommendations", {
     seedCount: seeds.length,
@@ -670,7 +714,8 @@ function titleSimilarity(a: string, b: string): number {
  * Uses TasteDive's similar content API
  */
 async function fetchTasteDiveRecommendations(
-  seedMovies: Array<{ tmdbId: number; title: string }>,
+  seedMovies: readonly AggregatorSeedMovie[],
+  rng: RecommendationRng,
 ): Promise<SourceRecommendation[]> {
   const recommendations: SourceRecommendation[] = [];
 
@@ -680,10 +725,7 @@ async function fetchTasteDiveRecommendations(
       Math.max(5, Math.floor(seedMovies.length * 0.15)),
       25,
     );
-    // Randomly sample seeds for higher recommendation variety
-    const seeds = [...seedMovies]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, dynamicLimit);
+    const seeds = selectWeightedSeeds(seedMovies, dynamicLimit, rng);
 
     console.log("[Aggregator] Fetching TasteDive recommendations in chunks", {
       totalSeeds: seeds.length,
@@ -939,7 +981,8 @@ async function fetchWatchmodeTrending(): Promise<SourceRecommendation[]> {
  * Uses server-side vector embeddings to find semantic neighbors
  */
 async function fetchVectorSimilarityRecommendations(
-  seedMovies: Array<{ tmdbId: number; title: string }>,
+  seedMovies: readonly AggregatorSeedMovie[],
+  rng: RecommendationRng,
 ): Promise<SourceRecommendation[]> {
   const recommendations: SourceRecommendation[] = [];
 
@@ -948,9 +991,7 @@ async function fetchVectorSimilarityRecommendations(
       Math.max(5, Math.floor(seedMovies.length * 0.15)),
       25,
     );
-    const seeds = [...seedMovies]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, dynamicLimit);
+    const seeds = selectWeightedSeeds(seedMovies, dynamicLimit, rng);
     const seedIds = seeds.map((s) => s.tmdbId).filter(Boolean);
     if (seedIds.length === 0) return recommendations;
 

@@ -1,9 +1,11 @@
 # Recommendation Remediation Program
 
 **Status:** In progress  
-**Current checkpoint:** 1B.1 - Deterministic weighted retrieval (Ready)  
-**Next action:** Begin 1B.1 after the committed 1A.2 orchestration seams; no 1B.1 implementation is included in this checkpoint.  
-**Safe stopping point:** Phase 1 remains In progress; 1A.2 is Complete with its focused evidence and commit recorded, and 1B.1 is Ready but not started.
+**Current checkpoint:** 1B.2 - Evidence semantics and candidate retention (Ready)
+
+**Next action:** Begin 1B.2 with failing provider-family consensus and repetition-retention fixtures.
+
+**Safe stopping point:** Phase 1 remains In progress; 1B.1 is Complete and 1B.2 is Ready but not started.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -49,8 +51,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 0C.2 Strict filters and effective advanced behavior | Complete | 0C.1 | Genre/negative/threshold contracts and advanced boosts pass | `c300820` |
 | 1A.1 Canonical contracts and frozen fixtures | Complete | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | `test: define canonical recommendation contracts` |
 | 1A.2 Engine orchestration seams | Complete | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | `refactor: introduce recommendation engine orchestration` |
-| 1B.1 Deterministic weighted retrieval | Ready | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | Not started |
-| 1B.2 Evidence semantics and candidate retention | Not started | 1B.1 | Provider-family consensus and same-provider repetition fixtures pass | Not started |
+| 1B.1 Deterministic weighted retrieval | Complete | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | `refactor: make recommendation retrieval deterministic` |
+| 1B.2 Evidence semantics and candidate retention | Ready | 1B.1 | Provider-family consensus and same-provider repetition fixtures pass | Not started |
 | 1C.1 Constrained reranking and backfill | Not started | 1B.2 | MMR direction, diversity relaxation, niche target, calibration window, and count pass | Not started |
 | 1A.3 v1 canonical adapter | Not started | 1C.1 | v1 fixture and endpoint behavior match canonical output | Not started |
 | 1A.4 Web canonical adapter and legacy removal | Not started | 1A.3 | Web/v1 parity passes and no competing production orchestration remains | Not started |
@@ -93,19 +95,19 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 5. False same-provider consensus | 1B.2 | Provider-family evidence fixture | Open |
 | 6. Forced background prior | 0C.1 | Neutral-context API test | Closed |
 | 7. Genre filtering fails open | 0C.2 | Strict genre endpoint test | Closed |
-| 8. Random pre-score truncation | 1B.1 | Deterministic retention fixture | Open |
+| 8. Random pre-score truncation | 1B.1 | Deterministic retention fixture | Closed |
 | 9. Diversity caps underfill | 1C.1 | Staged-relaxation count test | Open |
 | 10. Calibration cannot change composition | 1C.1 | Larger-window replacement test | Open |
 | 11. Incorrect niche quota/order | 1C.1 | Score-aware target test | Open |
 | 12. Inactive/lossy vector source | 1D.2, 3.3 | Capability and cached-score parity evidence | Open |
-| 13. Seed weighting discarded | 1B.1 | Weighted-boundary test | Open |
+| 13. Seed weighting discarded | 1B.1 | Weighted-boundary test | Closed |
 | 14. Exploration/MMR direction | 1C.1 | Monotonic diversity test | Open |
 | 15. Weak profile-cache invalidation | 1D.1 | Input-revision matrix | Open |
-| 16. Global weak-seed blacklist | 1B.1 | Removal plus taste-neutral fixture | Open |
+| 16. Global weak-seed blacklist | 1B.1 | Removal plus taste-neutral fixture | Closed |
 | 17. Input failures become generic results | 0C.1 | Degraded-state endpoint test | Closed |
 | 18. Advanced boosts discarded | 0C.2 | Rank-impact test | Closed |
 | 19. Case-sensitive negative matching | 0C.2 | Mixed-case test | Closed |
-| 20. Unseeded randomness | 1B.1 | Repeat-run equality test | Open |
+| 20. Unseeded randomness | 1B.1 | Repeat-run equality test | Closed |
 | Cross-user local import state | 2A.1 | Auth-transition isolation tests | Open |
 | Larger-row-count state selection | 2A.1 | Cloud-authoritative reconciliation test | Open |
 | Blank year becomes zero | 2A.2 | Null-year normalization test | Open |
@@ -129,6 +131,10 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 
 ## Verification Results
 
+- 2026-07-25 - Checkpoint 1B.1 continuation RED: the focused retrieval test initially failed its provider-page contract, and the full Vitest suite exposed the superseded Phase 0 expectation that the global weak-seed blacklist remain active.
+- 2026-07-25 - `rtk npm run test -- tests/unit/recommendationCandidates.test.ts tests/unit/recommendationSeeds.test.ts` - PASS, 21/21 tests. Weighted seed objects and request seeds cross the aggregator boundary; weighted deterministic sampling, repeatable pages/order, ascending TMDB-ID ties, source caps, intent reservations, multi-source retention, user-scoped exclusions, and weak-seed neutrality pass.
+- 2026-07-25 - Full checkpoint gate: `rtk npm run test` PASS, 129/129 across 9 files; `rtk npm run lint` PASS; `rtk npm run typecheck` PASS; and `rtk npm run build` PASS. The build retained the existing non-fatal dynamic-route and stale browser-data warnings.
+- 2026-07-25 - CodeRabbit review unavailable: the CLI was absent, and the prescribed installer could not run because `bash` is not installed in the Windows environment.
 - 2026-07-20 - `rtk npx supabase test db --linked --file supabase/tests/database/privileged_functions.test.sql` - CLI rejected the obsolete `--file` flag; Supabase CLI 2.62.5 accepts test paths positionally.
 - 2026-07-20 - `rtk npx supabase test db supabase/tests/database/privileged_functions.test.sql --linked` - runner could not start because Supabase CLI requires the `pg_prove` Docker image and Docker Desktop is unavailable.
 - 2026-07-20 - Executed the same transaction-isolated pgTAP suite through Supabase MCP against linked project `xtcsekftikdsauttlcin` - expected FAIL, 14 of 20 assertions failed: five `anon` ACL assertions, five inherited `PUBLIC EXECUTE` assertions, and cross-user calls to liked suggestions, film stats, rate limiting, and admin deletion. All five exact-signature assertions and the cross-user `delete_user_data` rejection passed.
@@ -254,3 +260,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `fix: close recommendation orchestration review findings` - checkpoint 1A.2 quality fixes, fail-closed stage validation, canonical source-health reconciliation, and complete GREEN verification
 - `fix: preserve Phase 0 health in context adapter` - checkpoint 1A.2 compatibility-health and malformed-blocked-row corrections
 - `fix: validate direct blocked context rows` - checkpoint 1A.2 direct-canonical blocked-source validation
+- `refactor: make recommendation retrieval deterministic` - checkpoint 1B.1 request-scoped RNG, weighted provider boundaries, stable retention, source/intent quotas, and taste-neutral seed handling

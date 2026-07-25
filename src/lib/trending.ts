@@ -1,5 +1,10 @@
 import { setCachedTMDBSimilarAction } from "@/app/actions/enrichment";
 import { getCachedTMDBSimilar } from "./apiCache";
+import {
+  createDeterministicRng,
+  shuffleDeterministic,
+  type RecommendationRng,
+} from "@/lib/recommendationCandidates";
 
 /**
  * Helper to get the base URL for internal API calls
@@ -157,10 +162,7 @@ export function scoreSignatureFilm(
 
   // 3. Genre alignment (up to 1.5 points)
   const topGenreIds = new Set(
-    [...profile.topGenres]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 5)
-      .map((g) => g.id),
+    profile.topGenres.slice(0, 5).map((g) => g.id),
   );
   const filmGenres = film.genreIds || [];
   const matchingGenres = filmGenres.filter((gid) => topGenreIds.has(gid));
@@ -262,7 +264,9 @@ function getSignatureSeedIds(
 
   // Add variety picks from remaining films (shuffle for randomness)
   const remainingFilms = signatureScored.slice(signatureCount);
-  const shuffledRemaining = remainingFilms.sort(() => Math.random() - 0.5);
+  const shuffledRemaining = remainingFilms.sort(
+    (left, right) => left.tmdbId - right.tmdbId,
+  );
   const varietyIds = shuffledRemaining
     .slice(0, varietyCount)
     .map((f) => f.tmdbId);
@@ -408,7 +412,7 @@ export function getWeightedSeedIds(
 
       return { ...f, score };
     })
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score || a.tmdbId - b.tmdbId);
 
   if (!ensureDiversity || scored.length <= limit) {
     return scored.slice(0, limit).map((f) => f.tmdbId);
@@ -423,8 +427,7 @@ export function getWeightedSeedIds(
   // We take a larger pool (e.g. up to 300) so we aren't picking the exact same 100 every time
   const samplePool = scored.slice(0, Math.max(limit * 3, 100));
 
-  // Shuffle the sample pool to introduce deliberate randomness and prevent repeat suggestions
-  const shuffledPool = samplePool.sort(() => Math.random() - 0.5);
+  const shuffledPool = samplePool;
 
   for (const film of shuffledPool) {
     if (selectedIds.length >= limit) break;
@@ -663,7 +666,7 @@ export async function fetchSimilarMovieIds(
  * Discover movies using TMDB's discover API with specific filters
  * This generates highly personalized candidates based on user's taste profile
  */
-export async function discoverMoviesByProfile(options: {
+export type DiscoverMoviesByProfileOptions = {
   genres?: number[];
   genreMode?: "AND" | "OR";
   keywords?: number[];
@@ -679,7 +682,13 @@ export async function discoverMoviesByProfile(options: {
   minVotes?: number;
   limit?: number;
   randomizePage?: boolean; // Add random page offset for variety
-}): Promise<number[]> {
+  requestSeed?: string;
+  rng?: RecommendationRng;
+};
+
+export async function discoverMoviesByProfile(
+  options: DiscoverMoviesByProfileOptions,
+): Promise<number[]> {
   const allIds = new Set<number>();
 
   // Validate IDs are reasonable
@@ -741,15 +750,22 @@ export async function discoverMoviesByProfile(options: {
     if (options.minVotes)
       u.searchParams.set("vote_count.gte", String(options.minVotes));
 
-    // Randomize starting page for variety (pages 1-10 for much wider coverage)
+    // Randomize starting page only from a request-scoped stream. Older callers
+    // without a request seed retain stable page one behavior.
     if (options.randomizePage !== false) {
-      const randomPage = Math.floor(Math.random() * 10) + 1;
+      const requestRng =
+        options.rng ??
+        (options.requestSeed
+          ? createDeterministicRng(options.requestSeed)
+          : undefined);
+      const randomPage = requestRng
+        ? Math.floor(requestRng() * 10) + 1
+        : 1;
       u.searchParams.set("page", String(randomPage));
     }
 
     const limit = options.limit ?? 20;
     u.searchParams.set("limit", String(limit));
-    u.searchParams.set("_t", String(Date.now())); // Cache buster
 
     if (process.env.NODE_ENV === "development") {
       console.log("[TMDB] discover start", filterSummary);
@@ -809,7 +825,10 @@ export async function generateSmartCandidates(profile: {
   // NEW: Preferred subgenre keyword IDs from learned patterns
   // These are TMDB keyword IDs corresponding to subgenres the user loves
   preferredSubgenreKeywordIds?: number[];
-}): Promise<{
+}, options: {
+  requestSeed?: string;
+  rng?: RecommendationRng;
+} = {}): Promise<{
   trending: number[];
   similar: number[];
   discovered: number[];
@@ -818,6 +837,17 @@ export async function generateSmartCandidates(profile: {
     { sources: string[]; consensusLevel: "high" | "medium" | "low" }
   >;
 }> {
+  const requestSeed =
+    options.requestSeed ??
+    JSON.stringify({
+      highlyRatedIds: [...profile.highlyRatedIds].sort((a, b) => a - b),
+      watchlistIds: [...(profile.watchlistIds ?? [])].sort((a, b) => a - b),
+      savedSuggestionIds: [...(profile.savedSuggestionIds ?? [])].sort(
+        (a, b) => a - b,
+      ),
+    });
+  const random = options.rng ?? createDeterministicRng(requestSeed);
+
   if (process.env.NODE_ENV === "development") {
     console.log("[SmartCandidates] Generating with enhanced profile", {
       highlyRatedCount: profile.highlyRatedIds.length,
@@ -867,7 +897,7 @@ export async function generateSmartCandidates(profile: {
         results.trending = fallbackDiscover;
       } else {
         // Absolute last resort (User has completely empty profile)
-        const period = Math.random() > 0.5 ? "day" : "week";
+        const period = random() > 0.5 ? "day" : "week";
         results.trending = await fetchTrendingIds(period, 100);
       }
     } catch (e) {
@@ -907,17 +937,24 @@ export async function generateSmartCandidates(profile: {
       // Combine highly-rated films with watchlist for richer seed pool
       // highlyRatedIds = what user loved (past preferences)
       // watchlistIds = what user wants to watch (future intent/discovery signals)
-      const seedWeights = new Map<number, { weight: number; order: number }>();
+      const seedWeights = new Map<
+        number,
+        { weight: number; order: number; source: "history" | "watchlist" | "feedback" }
+      >();
       let seedOrder = 0;
 
-      const addSeedIds = (ids: number[], weight: number) => {
+      const addSeedIds = (
+        ids: number[],
+        weight: number,
+        source: "history" | "watchlist" | "feedback",
+      ) => {
         for (const id of ids) {
           if (!seedWeights.has(id)) {
-            seedWeights.set(id, { weight, order: seedOrder++ });
+            seedWeights.set(id, { weight, order: seedOrder++, source });
           } else {
             const existing = seedWeights.get(id);
             if (existing && weight > existing.weight) {
-              seedWeights.set(id, { weight, order: existing.order });
+              seedWeights.set(id, { ...existing, weight, source });
             }
           }
         }
@@ -943,20 +980,23 @@ export async function generateSmartCandidates(profile: {
           )
         : 20;
 
-      // Shuffle lists before slicing to guarantee APIs get diverse, non-repeating seeds
-      const shuffledHighlyRated = [...(profile.highlyRatedIds || [])].sort(
-        () => Math.random() - 0.5,
+      const shuffledHighlyRated = shuffleDeterministic(
+        profile.highlyRatedIds || [],
+        random,
       );
-      const shuffledWatchlist = [...(profile.watchlistIds || [])].sort(
-        () => Math.random() - 0.5,
+      const shuffledWatchlist = shuffleDeterministic(
+        profile.watchlistIds || [],
+        random,
       );
-      const shuffledSaved = [...(savedSuggestionIds || [])].sort(
-        () => Math.random() - 0.5,
-      );
+      const shuffledSaved = shuffleDeterministic(savedSuggestionIds, random);
 
-      addSeedIds(shuffledHighlyRated.slice(0, maxHighlyRated), 1.0); // Past preferences
-      addSeedIds(shuffledWatchlist.slice(0, maxWatchlist), 1.0); // Intent signals
-      addSeedIds(shuffledSaved.slice(0, maxSaved), 1.5); // High-intent saved suggestions
+      addSeedIds(
+        shuffledHighlyRated.slice(0, maxHighlyRated),
+        1.0,
+        "history",
+      );
+      addSeedIds(shuffledWatchlist.slice(0, maxWatchlist), 1.0, "watchlist");
+      addSeedIds(shuffledSaved.slice(0, maxSaved), 1.5, "feedback");
 
       // NEW: Extract highly rated films that match the user's preferred subgenres
       if (
@@ -981,13 +1021,15 @@ export async function generateSmartCandidates(profile: {
           }
         }
         if (subgenreSeeds.length > 0) {
-          const shuffledSubgenreSeeds = subgenreSeeds.sort(
-            () => Math.random() - 0.5,
+          const shuffledSubgenreSeeds = shuffleDeterministic(
+            subgenreSeeds,
+            random,
           );
           // High weight (1.8) to heavily bias aggregator results towards subgenre taste
           addSeedIds(
             shuffledSubgenreSeeds.slice(0, Math.min(10, subgenreSeeds.length)),
             1.8,
+            "feedback",
           );
           if (process.env.NODE_ENV === "development") {
             console.log(
@@ -1005,17 +1047,19 @@ export async function generateSmartCandidates(profile: {
       );
       const uniqueSeedIds = Array.from(seedWeights.entries())
         .map(([tmdbId, meta]) => ({ tmdbId, ...meta }))
-        .sort((a, b) => b.weight - a.weight || a.order - b.order)
+        .sort((a, b) => b.weight - a.weight || a.tmdbId - b.tmdbId)
         .slice(0, dynamicSeedLimit)
         .map((entry) => entry.tmdbId);
 
       const seedMovies = uniqueSeedIds.map((tmdbId) => {
         const details = profile.tmdbDetailsMap?.get(tmdbId);
-        return {
-          tmdbId,
-          title: details?.title ?? "",
-          imdbId: details?.imdb_id,
-        };
+          return {
+            tmdbId,
+            title: details?.title ?? "",
+            imdbId: details?.imdb_id,
+            weight: seedWeights.get(tmdbId)?.weight ?? 1,
+            source: seedWeights.get(tmdbId)?.source ?? "history",
+          };
       });
 
       const seedMoviesWithTitles = seedMovies.filter((s) => s.title); // TasteDive needs title
@@ -1041,6 +1085,7 @@ export async function generateSmartCandidates(profile: {
       const aggregated = await getAggregatedRecommendations({
         seedMovies,
         limit: dynamicAggrLimit,
+        requestSeed,
       });
 
       // Add high-scoring recommendations and track source metadata
@@ -1075,9 +1120,7 @@ export async function generateSmartCandidates(profile: {
     }
     try {
       if (profile.highlyRatedIds.length > 0) {
-        const shuffled = [...profile.highlyRatedIds].sort(
-          () => Math.random() - 0.5,
-        );
+        const shuffled = shuffleDeterministic(profile.highlyRatedIds, random);
         results.similar = await fetchSimilarMovieIds(shuffled.slice(0, 20), 30);
       }
     } catch (fallbackError) {
@@ -1089,19 +1132,15 @@ export async function generateSmartCandidates(profile: {
   try {
     if (profile.topGenres.length > 0) {
       // Shuffle genre/keyword selection more aggressively
-      const shuffledGenres = [...profile.topGenres].sort(
-        () => Math.random() - 0.5,
-      );
-      const shuffledKeywords = [...profile.topKeywords].sort(
-        () => Math.random() - 0.5,
-      );
+      const shuffledGenres = shuffleDeterministic(profile.topGenres, random);
+      const shuffledKeywords = shuffleDeterministic(profile.topKeywords, random);
 
       // Use minimum 2 genres/keywords for better specificity (never just 1)
-      const genreCount = Math.floor(Math.random() * 2) + 2; // 2-3 genres
-      const keywordCount = Math.floor(Math.random() * 3) + 2; // 2-4 keywords
+      const genreCount = Math.floor(random() * 2) + 2; // 2-3 genres
+      const keywordCount = Math.floor(random() * 3) + 2; // 2-4 keywords
 
       // Weighted sort selection: 85% quality, 15% recency
-      const sortRand = Math.random();
+      const sortRand = random();
       const randomSort =
         sortRand < 0.85 ? "vote_average.desc" : "primary_release_date.desc";
 
@@ -1116,7 +1155,7 @@ export async function generateSmartCandidates(profile: {
       ];
       const temporalFilter =
         temporalStrategies[
-          Math.floor(Math.random() * temporalStrategies.length)
+          Math.floor(random() * temporalStrategies.length)
         ];
 
       // Scale discover API pool dynamically based on library size
@@ -1156,11 +1195,11 @@ export async function generateSmartCandidates(profile: {
       if (genreDiscovered.length < 30) {
         const altTemporalFilter =
           temporalStrategies[
-            Math.floor(Math.random() * temporalStrategies.length)
+            Math.floor(random() * temporalStrategies.length)
           ];
 
         // Weighted sort selection: 85% quality, 15% recency
-        const fallbackSortRand = Math.random();
+        const fallbackSortRand = random();
         const fallbackSort =
           fallbackSortRand < 0.85
             ? "vote_average.desc"
@@ -1168,7 +1207,7 @@ export async function generateSmartCandidates(profile: {
 
         const genreOnlyDiscovered = await discoverMoviesByProfile({
           genres: shuffledGenres
-            .slice(0, Math.floor(Math.random() * 2) + 2) // 2-3 genres (minimum 2)
+            .slice(0, Math.floor(random() * 2) + 2) // 2-3 genres (minimum 2)
             .map((g) => g.id),
           genreMode: "OR",
           sortBy: fallbackSort,
@@ -1188,11 +1227,11 @@ export async function generateSmartCandidates(profile: {
       if (results.discovered.length < 100) {
         const altTemporalFilter =
           temporalStrategies[
-            Math.floor(Math.random() * temporalStrategies.length)
+            Math.floor(random() * temporalStrategies.length)
           ];
         const popularDiscovered = await discoverMoviesByProfile({
           genres: shuffledGenres
-            .slice(0, Math.floor(Math.random() * 3) + 1)
+            .slice(0, Math.floor(random() * 3) + 1)
             .map((g) => g.id),
           genreMode: "OR",
           sortBy: "popularity.desc",
@@ -1217,8 +1256,9 @@ export async function generateSmartCandidates(profile: {
   try {
     if (profile.topDirectors.length > 0) {
       // Shuffle director selection for variety
-      const shuffledDirectors = [...profile.topDirectors].sort(
-        () => Math.random() - 0.5,
+      const shuffledDirectors = shuffleDeterministic(
+        profile.topDirectors,
+        random,
       );
 
       // Try with top directors (expanded from 3 to 8), no year filter
@@ -1265,9 +1305,7 @@ export async function generateSmartCandidates(profile: {
   try {
     if (profile.topKeywords.length > 2 && results.discovered.length < 200) {
       // Take random keywords for variety
-      const shuffledKeywords = [...profile.topKeywords].sort(
-        () => Math.random() - 0.5,
-      );
+      const shuffledKeywords = shuffleDeterministic(profile.topKeywords, random);
       const dynamicNicheLimit = Math.min(
         200,
         Math.max(100, Math.floor(profile.highlyRatedIds.length * 0.3)),
@@ -1303,17 +1341,19 @@ export async function generateSmartCandidates(profile: {
         console.log(
           "[SmartCandidates] Running preferred subgenre keyword discovery",
           {
-            keywordIds: [...profile.preferredSubgenreKeywordIds]
-              .sort(() => Math.random() - 0.5)
-              .slice(0, 5),
+            keywordIds: shuffleDeterministic(
+              profile.preferredSubgenreKeywordIds,
+              random,
+            ).slice(0, 5),
           },
         );
       }
 
       const subgenreDiscovered = await discoverMoviesByProfile({
-        keywords: [...profile.preferredSubgenreKeywordIds]
-          .sort(() => Math.random() - 0.5)
-          .slice(0, 5),
+        keywords: shuffleDeterministic(
+          profile.preferredSubgenreKeywordIds,
+          random,
+        ).slice(0, 5),
         sortBy: "vote_average.desc",
         minVotes: 50,
         limit: 75,
@@ -1333,9 +1373,10 @@ export async function generateSmartCandidates(profile: {
         profile.preferredSubgenreKeywordIds.length >= 3
       ) {
         const subgenrePopular = await discoverMoviesByProfile({
-          keywords: [...profile.preferredSubgenreKeywordIds]
-            .sort(() => Math.random() - 0.5)
-            .slice(0, 3),
+          keywords: shuffleDeterministic(
+            profile.preferredSubgenreKeywordIds,
+            random,
+          ).slice(0, 3),
           sortBy: "popularity.desc",
           minVotes: 30,
           limit: 50,
@@ -1374,8 +1415,7 @@ export async function generateSmartCandidates(profile: {
       // Fetch more candidates from top genres for subgenre text filtering
       for (const sortBy of ["vote_average.desc"] as const) {
         const enhancedDiscovered = await discoverMoviesByProfile({
-          genres: [...profile.topGenres]
-            .sort(() => Math.random() - 0.5)
+          genres: shuffleDeterministic(profile.topGenres, random)
             .slice(0, 3)
             .map((g) => g.id),
           genreMode: "OR",
@@ -1399,9 +1439,7 @@ export async function generateSmartCandidates(profile: {
   // 6. Add pure genre-based discovery with varied temporal ranges
   try {
     if (profile.topGenres.length > 0 && results.discovered.length < 200) {
-      const shuffledGenres = [...profile.topGenres].sort(
-        () => Math.random() - 0.5,
-      );
+      const shuffledGenres = shuffleDeterministic(profile.topGenres, random);
       const sortMethods = [
         "vote_average.desc",
         "popularity.desc",
@@ -1417,14 +1455,14 @@ export async function generateSmartCandidates(profile: {
         { yearMin: 1980, yearMax: 1999 },
       ];
       const temporal =
-        temporalOptions[Math.floor(Math.random() * temporalOptions.length)];
+        temporalOptions[Math.floor(random() * temporalOptions.length)];
 
       const pureGenreDiscovered = await discoverMoviesByProfile({
         genres: shuffledGenres
-          .slice(0, Math.floor(Math.random() * 3) + 1)
+          .slice(0, Math.floor(random() * 3) + 1)
           .map((g) => g.id),
         genreMode: "OR",
-        sortBy: sortMethods[Math.floor(Math.random() * sortMethods.length)],
+        sortBy: sortMethods[Math.floor(random() * sortMethods.length)],
         minVotes: 100,
         limit: 100,
         ...temporal,
@@ -1560,9 +1598,7 @@ export async function generateSmartCandidates(profile: {
       profile.topActors.length > 0 &&
       results.discovered.length < 400
     ) {
-      const shuffledActors = [...profile.topActors].sort(
-        () => Math.random() - 0.5,
-      );
+      const shuffledActors = shuffleDeterministic(profile.topActors, random);
 
       // Discover movies featuring user's favorite actors
       const actorDiscovered = await discoverMoviesByProfile({
@@ -1604,8 +1640,7 @@ export async function generateSmartCandidates(profile: {
   // Detect and discover by genre pairs that the user frequently enjoys together
   try {
     if (profile.topGenres.length >= 2 && results.discovered.length < 450) {
-      const topGenreIds = [...profile.topGenres]
-        .sort(() => Math.random() - 0.5)
+      const topGenreIds = shuffleDeterministic(profile.topGenres, random)
         .slice(0, 4)
         .map((g) => g.id);
 
@@ -1618,9 +1653,7 @@ export async function generateSmartCandidates(profile: {
       }
 
       // Shuffle and pick 2-3 pairs to discover
-      const shuffledPairs = genrePairs
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 3);
+      const shuffledPairs = shuffleDeterministic(genrePairs, random).slice(0, 3);
 
       for (const [genre1, genre2] of shuffledPairs) {
         const comboDiscovered = await discoverMoviesByProfile({
@@ -1656,8 +1689,9 @@ export async function generateSmartCandidates(profile: {
       );
 
       if (significantStudios.length > 0) {
-        const shuffledStudios = [...significantStudios].sort(
-          () => Math.random() - 0.5,
+        const shuffledStudios = shuffleDeterministic(
+          significantStudios,
+          random,
         );
 
         // TMDB company-based discovery (use top 2 studios)
@@ -1687,8 +1721,7 @@ export async function generateSmartCandidates(profile: {
   try {
     // Use user's actual preferred decades from taste profile, with sensible defaults
     const userDecades =
-      [...(profile.topDecades || [])]
-        .sort(() => Math.random() - 0.5)
+      shuffleDeterministic(profile.topDecades || [], random)
         .slice(0, 3)
         .map((d) => d.decade) || [];
     const preferredDecades =
@@ -1705,14 +1738,13 @@ export async function generateSmartCandidates(profile: {
       }));
 
       // Pick 1-2 strategies randomly for variety
-      const pickedStrategies = decadeStrategies
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 2);
+      const pickedStrategies = shuffleDeterministic(
+        decadeStrategies,
+        random,
+      ).slice(0, 2);
 
       for (const strategy of pickedStrategies) {
-        const shuffledGenres = [...profile.topGenres].sort(
-          () => Math.random() - 0.5,
-        );
+        const shuffledGenres = shuffleDeterministic(profile.topGenres, random);
 
         const decadeDiscovered = await discoverMoviesByProfile({
           genres: shuffledGenres.slice(0, 2).map((g) => g.id),
@@ -1861,9 +1893,21 @@ export async function generateExploratoryPicks(
     count: number; // How many exploratory picks to generate
     minVoteAverage?: number; // Minimum quality threshold
     minVoteCount?: number; // Minimum vote count for reliability
+    requestSeed?: string;
+    rng?: RecommendationRng;
   },
 ): Promise<number[]> {
   const exploratoryIds: number[] = [];
+  const random =
+    options.rng ??
+    createDeterministicRng(
+      options.requestSeed ??
+        JSON.stringify({
+          topGenres: profile.topGenres.map((genre) => genre.id).sort((a, b) => a - b),
+          avoidGenres: profile.avoidGenres.map((genre) => genre.id).sort((a, b) => a - b),
+          count: options.count,
+        }),
+    );
 
   // Strategy 1: Adjacent genres (70% of exploratory picks)
   const adjacentCount = Math.floor(options.count * 0.7);
@@ -1871,6 +1915,7 @@ export async function generateExploratoryPicks(
     profile,
     adjacentCount,
     options,
+    random,
   );
   exploratoryIds.push(...adjacentIds);
 
@@ -1880,6 +1925,7 @@ export async function generateExploratoryPicks(
     profile,
     acclaimedCount,
     options,
+    random,
   );
   exploratoryIds.push(...acclaimedIds);
 
@@ -1905,6 +1951,7 @@ async function getAdjacentGenrePicks(
   },
   count: number,
   options: { minVoteAverage?: number; minVoteCount?: number },
+  random: RecommendationRng,
 ): Promise<number[]> {
   if (count === 0) return [];
 
@@ -1935,7 +1982,7 @@ async function getAdjacentGenrePicks(
   // Query TMDB discover API for adjacent genre films
   const adjacentGenreArray = Array.from(adjacentGenres);
   const randomGenre =
-    adjacentGenreArray[Math.floor(Math.random() * adjacentGenreArray.length)];
+    adjacentGenreArray[Math.floor(random() * adjacentGenreArray.length)];
 
   if (process.env.NODE_ENV === "development") {
     console.log("[Exploration] Exploring adjacent genre", {
@@ -1954,7 +2001,7 @@ async function getAdjacentGenrePicks(
   });
 
   // Shuffle and return requested count
-  return ids.sort(() => Math.random() - 0.5).slice(0, count);
+  return shuffleDeterministic(ids, random).slice(0, count);
 }
 
 /**
@@ -1967,6 +2014,7 @@ async function getCriticallyAcclaimedPicks(
   },
   count: number,
   options: { minVoteAverage?: number; minVoteCount?: number },
+  random: RecommendationRng,
 ): Promise<number[]> {
   if (count === 0) return [];
 
@@ -1993,7 +2041,7 @@ async function getCriticallyAcclaimedPicks(
 
   // Pick a random exploration genre
   const randomGenre =
-    explorationGenres[Math.floor(Math.random() * explorationGenres.length)];
+    explorationGenres[Math.floor(random() * explorationGenres.length)];
 
   if (process.env.NODE_ENV === "development") {
     console.log("[Exploration] Exploring acclaimed films in new genre", {
@@ -2011,5 +2059,5 @@ async function getCriticallyAcclaimedPicks(
     limit: count * 2,
   });
 
-  return ids.sort(() => Math.random() - 0.5).slice(0, count);
+  return shuffleDeterministic(ids, random).slice(0, count);
 }

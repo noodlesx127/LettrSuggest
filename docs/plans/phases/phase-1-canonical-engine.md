@@ -41,7 +41,7 @@
 
 ## Checkpoint 1B.1: Deterministic Weighted Retrieval
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Create: `src/lib/recommendationCandidates.ts`
@@ -50,14 +50,16 @@
 - Modify: `src/lib/trending.ts`
 - Modify: `src/lib/serverSuggestionsEngine.ts`
 
-- [ ] Write tests asserting weighted seeds remain weighted at provider calls, identical request seeds select identical providers/pages/order, stable ties use TMDB ID, per-source quotas retain high-intent supply, and the global `WEAK_SEED_TMDB_IDS` list has no effect.
-- [ ] Run the tests; expect failure from ID-only boundaries and ambient randomness.
-- [ ] Implement a request-scoped deterministic RNG, weighted seed selection, stable dedupe/tie-breaking, and source/intent quotas in `recommendationCandidates.ts`. Adapt existing provider functions rather than duplicating clients.
-- [ ] Remove random pre-score shuffle/truncation and the taste-specific global weak-seed blacklist. Keep explicit block/exclusion inputs user-scoped.
-- [ ] Run focused tests, lint touched files, and typecheck; expect pass.
-- [ ] Commit with `rtk git commit -m "refactor: make recommendation retrieval deterministic"`.
+- [x] Write tests asserting weighted seeds remain weighted at provider calls, identical request seeds select identical providers/pages/order, stable ties use TMDB ID, per-source quotas retain high-intent supply, and the global `WEAK_SEED_TMDB_IDS` list has no effect.
+- [x] Run the tests; expect failure from ID-only boundaries and ambient randomness.
+- [x] Implement a request-scoped deterministic RNG, weighted seed selection, stable dedupe/tie-breaking, and source/intent quotas in `recommendationCandidates.ts`. Adapt existing provider functions rather than duplicating clients.
+- [x] Remove random pre-score shuffle/truncation and the taste-specific global weak-seed blacklist. Keep explicit block/exclusion inputs user-scoped.
+- [x] Run focused tests, lint touched files, and typecheck; expect pass.
+- [x] Commit with `rtk git commit -m "refactor: make recommendation retrieval deterministic"`.
 
 ## Checkpoint 1B.2: Evidence Semantics and Candidate Retention
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Modify: `src/lib/recommendationCandidates.ts`

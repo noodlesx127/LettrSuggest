@@ -350,7 +350,7 @@ describe("explicit recommendation seeds", () => {
     expect(currentClockAnchors).not.toEqual(futureClockAnchors);
   });
 
-  it("keeps the global weak-seed blacklist active for history anchors", async () => {
+  it("does not apply a global weak-seed blacklist to history anchors", async () => {
     const weakSeedContext: UserContext = {
       ...userContext,
       films: [
@@ -378,7 +378,7 @@ describe("explicit recommendation seeds", () => {
       calls
         .filter((call) => call.path.includes("/recommendations"))
         .map((call) => Number(call.path.split("/")[2])),
-    ).not.toContain(9352);
+    ).toContain(9352);
   });
 
   it("limits all provider calls without dropping explicit or history anchors", async () => {

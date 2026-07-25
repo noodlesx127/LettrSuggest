@@ -1,0 +1,329 @@
+import type { WeightedSeed } from "@/lib/recommendationTypes";
+
+export type RecommendationRng = () => number;
+
+export type WeightedRecommendationSeed = WeightedSeed & {
+  title?: string;
+  imdbId?: string;
+  intent?: string;
+};
+
+export type QuotaCandidate = Readonly<{
+  tmdbId: number;
+  source?: string;
+  sources?: readonly string[];
+  intent?: string;
+  intents?: readonly string[];
+  score?: number;
+  retrievalScore?: number;
+}>;
+
+export type CandidateQuotaOptions = Readonly<{
+  limit: number;
+  sourceQuotas?: Readonly<Record<string, number>>;
+  intentQuotas?: Readonly<Record<string, number>>;
+}>;
+
+const REQUEST_SEED_HASH_OFFSET = 2166136261;
+const REQUEST_SEED_HASH_PRIME = 16777619;
+
+function hashRequestSeed(value: string): string {
+  let hash = REQUEST_SEED_HASH_OFFSET;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, REQUEST_SEED_HASH_PRIME);
+  }
+
+  return (hash >>> 0).toString(16);
+}
+
+/**
+ * Create the only random stream used by recommendation retrieval.
+ *
+ * The state is local to a request, so concurrent requests cannot influence
+ * one another through ambient process randomness.
+ */
+export function createDeterministicRng(requestSeed: string): RecommendationRng {
+  let state = REQUEST_SEED_HASH_OFFSET;
+
+  for (let index = 0; index < requestSeed.length; index += 1) {
+    state ^= requestSeed.charCodeAt(index);
+    state = Math.imul(state, REQUEST_SEED_HASH_PRIME);
+  }
+
+  if (state === 0) state = 1;
+
+  return () => {
+    state = Math.imul(state ^ (state >>> 15), 1 | state);
+    state ^= state + Math.imul(state ^ (state >>> 7), 61 | state);
+    return ((state ^ (state >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export const createRequestScopedRng = createDeterministicRng;
+
+export function shuffleDeterministic<T>(
+  items: readonly T[],
+  rng: RecommendationRng,
+): T[] {
+  const shuffled = [...items];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const random = normalizedRandom(rng());
+    const swapIndex = Math.floor(random * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [
+      shuffled[swapIndex],
+      shuffled[index],
+    ];
+  }
+  return shuffled;
+}
+
+/**
+ * Derive a stable fallback request key when an older caller has not supplied
+ * one yet. Seed IDs and weights, rather than input array order, define it.
+ */
+export function deriveCandidateRequestSeed(
+  seeds: readonly Pick<WeightedRecommendationSeed, "tmdbId" | "weight">[],
+): string {
+  const canonicalSeeds = [...seeds]
+    .filter(
+      (seed) =>
+        Number.isSafeInteger(seed.tmdbId) &&
+        seed.tmdbId > 0 &&
+        Number.isFinite(seed.weight) &&
+        seed.weight > 0,
+    )
+    .map((seed) => ({ tmdbId: seed.tmdbId, weight: seed.weight }))
+    .sort(
+      (left, right) =>
+        left.tmdbId - right.tmdbId || left.weight - right.weight,
+    );
+
+  return hashRequestSeed(JSON.stringify(canonicalSeeds));
+}
+
+function normalizedRandom(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return Number.MIN_VALUE;
+  if (value >= 1) return 1 - Number.EPSILON;
+  return value;
+}
+
+function seedSourcePriority(source: WeightedRecommendationSeed["source"]): number {
+  switch (source) {
+    case "explicit":
+      return 4;
+    case "feedback":
+      return 3;
+    case "watchlist":
+      return 2;
+    case "history":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Select a deterministic weighted seed subset without losing the seed
+ * objects. The weighted priority is a seeded weighted sample; equal priorities
+ * always finish with ascending TMDB ID.
+ */
+export function selectWeightedSeeds<T extends WeightedRecommendationSeed>(
+  seeds: readonly T[],
+  limit: number,
+  rng: RecommendationRng,
+): T[] {
+  if (limit <= 0) return [];
+
+  const unique = new Map<number, T>();
+  for (const seed of seeds) {
+    if (
+      !Number.isSafeInteger(seed.tmdbId) ||
+      seed.tmdbId <= 0 ||
+      !Number.isFinite(seed.weight) ||
+      seed.weight <= 0
+    ) {
+      continue;
+    }
+
+    const existing = unique.get(seed.tmdbId);
+    if (
+      existing === undefined ||
+      seed.weight > existing.weight ||
+      (seed.weight === existing.weight &&
+        seedSourcePriority(seed.source) > seedSourcePriority(existing.source))
+    ) {
+      unique.set(seed.tmdbId, seed);
+    }
+  }
+
+  const ranked = [...unique.values()]
+    .sort((left, right) => left.tmdbId - right.tmdbId)
+    .map((seed) => {
+      const random = normalizedRandom(rng());
+      return {
+        seed,
+        priority: Math.pow(random, 1 / seed.weight),
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.priority - left.priority ||
+        right.seed.weight - left.seed.weight ||
+        left.seed.tmdbId - right.seed.tmdbId,
+    );
+
+  return ranked.slice(0, limit).map(({ seed }) => seed);
+}
+
+function candidateScore(candidate: QuotaCandidate): number {
+  const score = candidate.score ?? candidate.retrievalScore ?? 0;
+  return Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY;
+}
+
+function candidateSources(candidate: QuotaCandidate): readonly string[] {
+  if (candidate.sources && candidate.sources.length > 0) {
+    return candidate.sources;
+  }
+  return candidate.source ? [candidate.source] : [];
+}
+
+function candidateIntents(candidate: QuotaCandidate): readonly string[] {
+  if (candidate.intents && candidate.intents.length > 0) {
+    return candidate.intents;
+  }
+  return candidate.intent ? [candidate.intent] : [];
+}
+
+function compareQuotaCandidates(
+  left: QuotaCandidate,
+  right: QuotaCandidate,
+): number {
+  return (
+    candidateScore(right) - candidateScore(left) ||
+    candidateSources(right).length - candidateSources(left).length ||
+    left.tmdbId - right.tmdbId
+  );
+}
+
+/**
+ * Deduplicate candidates without making incoming provider order meaningful.
+ * Higher retrieval scores win; equal scores use the lower TMDB ID.
+ */
+export function stableDedupeCandidates<T extends QuotaCandidate>(
+  candidates: readonly T[],
+): T[] {
+  const unique = new Map<number, T>();
+
+  for (const candidate of candidates) {
+    if (!Number.isSafeInteger(candidate.tmdbId) || candidate.tmdbId <= 0) {
+      continue;
+    }
+
+    const existing = unique.get(candidate.tmdbId);
+    if (existing === undefined || compareQuotaCandidates(candidate, existing) < 0) {
+      unique.set(candidate.tmdbId, candidate);
+    }
+  }
+
+  return [...unique.values()].sort(compareQuotaCandidates);
+}
+
+export function stableSortCandidates<T extends QuotaCandidate>(
+  candidates: readonly T[],
+): T[] {
+  return [...candidates].sort(compareQuotaCandidates);
+}
+
+function canAddCandidate<T extends QuotaCandidate>(
+  candidate: T,
+  selected: readonly T[],
+  sourceQuotas: Readonly<Record<string, number>>,
+): boolean {
+  const counts = new Map<string, number>();
+  for (const selectedCandidate of selected) {
+    for (const source of candidateSources(selectedCandidate)) {
+      counts.set(source, (counts.get(source) ?? 0) + 1);
+    }
+  }
+
+  const sources = candidateSources(candidate);
+  if (sources.length === 0) return true;
+
+  return sources.some((source) => {
+    const quota = sourceQuotas[source];
+    return quota === undefined || (counts.get(source) ?? 0) < quota;
+  });
+}
+
+function addSelectedCandidate<T extends QuotaCandidate>(
+  candidate: T,
+  selected: T[],
+  selectedIntents: Map<string, number>,
+): void {
+  selected.push(candidate);
+  for (const intent of candidateIntents(candidate)) {
+    selectedIntents.set(intent, (selectedIntents.get(intent) ?? 0) + 1);
+  }
+}
+
+/**
+ * Apply intent reservations and source caps before the global result window.
+ * Reservations are selected first, then the final output is restored to the
+ * deterministic retrieval order.
+ */
+export function applySourceIntentQuotas<T extends QuotaCandidate>(
+  candidates: readonly T[],
+  options: CandidateQuotaOptions,
+): T[] {
+  const limit = Math.max(0, Math.floor(options.limit));
+  if (limit === 0) return [];
+
+  const sourceQuotas = options.sourceQuotas ?? {};
+  const intentQuotas = options.intentQuotas ?? {};
+  const ranked = stableDedupeCandidates(candidates);
+  const selected: T[] = [];
+  const selectedIds = new Set<number>();
+  const selectedIntents = new Map<string, number>();
+
+  for (const intent of Object.keys(intentQuotas)) {
+    const quota = Math.max(0, Math.floor(intentQuotas[intent] ?? 0));
+    for (const candidate of ranked) {
+      if (selected.length >= limit || selectedIntents.get(intent) === quota) {
+        break;
+      }
+      if (
+        selectedIds.has(candidate.tmdbId) ||
+        !candidateIntents(candidate).includes(intent) ||
+        !canAddCandidate(candidate, selected, sourceQuotas)
+      ) {
+        continue;
+      }
+
+      addSelectedCandidate(candidate, selected, selectedIntents);
+      selectedIds.add(candidate.tmdbId);
+    }
+  }
+
+  for (const candidate of ranked) {
+    if (selected.length >= limit) break;
+    if (
+      selectedIds.has(candidate.tmdbId) ||
+      !canAddCandidate(candidate, selected, sourceQuotas)
+    ) {
+      continue;
+    }
+
+    addSelectedCandidate(candidate, selected, selectedIntents);
+    selectedIds.add(candidate.tmdbId);
+  }
+
+  const selectedSet = new Set(selected.map((candidate) => candidate.tmdbId));
+  return ranked
+    .filter((candidate) => selectedSet.has(candidate.tmdbId))
+    .slice(0, limit) as T[];
+}
+
+export const retainCandidatesByQuota = applySourceIntentQuotas;
+export const retainCandidatesWithQuotas = applySourceIntentQuotas;
