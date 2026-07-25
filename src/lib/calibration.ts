@@ -6,6 +6,8 @@ export type GenreDistribution = Record<string, number>;
 export type CalibrationConfig = {
   strength?: number; // 0-1, default 0.7
   minCandidatesPerGenre?: number; // default 1
+  targetCount?: number;
+  windowSize?: number;
 };
 
 type CalibratableMovie = {
@@ -249,7 +251,7 @@ const calibrateByDistribution = <T extends CalibratableMovie>(
   targetCount: number,
   minCandidatesPerGenre: number,
 ) => {
-  const pool = candidates.slice(0, targetCount);
+  const pool = [...candidates];
   const buckets = new Map<string, T[]>();
   pool.forEach((item) => {
     const genre = pickPrimaryGenre(item.genres, distribution);
@@ -338,32 +340,75 @@ const calibrateByDistribution = <T extends CalibratableMovie>(
 };
 
 const blendCalibrationOrder = <T extends CalibratableMovie>(
-  originalTop: T[],
+  calibrationWindow: T[],
   calibratedTop: T[],
+  targetCount: number,
   strength: number,
 ) => {
   if (strength >= 1) return calibratedTop;
-  if (strength <= 0) return originalTop;
+  if (strength <= 0) return calibrationWindow.slice(0, targetCount);
 
   const originalRank = new Map<number, number>();
   const calibratedRank = new Map<number, number>();
 
-  originalTop.forEach((item, index) => originalRank.set(item.id, index));
+  calibrationWindow.forEach((item, index) => originalRank.set(item.id, index));
   calibratedTop.forEach((item, index) => calibratedRank.set(item.id, index));
 
-  const blended = [...originalTop].sort((a, b) => {
+  const blended = [...calibrationWindow].sort((a, b) => {
     const origA = originalRank.get(a.id) ?? 0;
     const origB = originalRank.get(b.id) ?? 0;
-    const calibA = calibratedRank.get(a.id) ?? originalTop.length + origA;
-    const calibB = calibratedRank.get(b.id) ?? originalTop.length + origB;
+    const calibA = calibratedRank.get(a.id) ?? targetCount + origA;
+    const calibB = calibratedRank.get(b.id) ?? targetCount + origB;
     const scoreA = origA * (1 - strength) + calibA * strength;
     const scoreB = origB * (1 - strength) + calibB * strength;
-    if (scoreA === scoreB) return origA - origB;
+    if (scoreA === scoreB) return origA - origB || a.id - b.id;
     return scoreA - scoreB;
   });
 
-  return blended;
+  return blended.slice(0, targetCount);
 };
+
+export function calibrateRecommendationWindow<T extends CalibratableMovie>(
+  candidates: readonly T[],
+  distribution: GenreDistribution,
+  config: CalibrationConfig = {},
+): T[] {
+  if (candidates.length === 0) return [];
+
+  const targetCount = Math.min(
+    candidates.length,
+    Math.max(0, Math.floor(config.targetCount ?? DEFAULT_TARGET_COUNT)),
+  );
+  if (targetCount === 0) return [...candidates];
+
+  const windowSize = Math.min(
+    candidates.length,
+    Math.max(
+      targetCount,
+      Math.floor(
+        config.windowSize ?? Math.max(targetCount * 3, targetCount + 12),
+      ),
+    ),
+  );
+  const calibrationWindow = candidates.slice(0, windowSize);
+  const calibratedTop = calibrateByDistribution(
+    calibrationWindow,
+    distribution,
+    targetCount,
+    config.minCandidatesPerGenre ?? DEFAULT_MIN_PER_GENRE,
+  );
+  const blendedTop = blendCalibrationOrder(
+    calibrationWindow,
+    calibratedTop,
+    targetCount,
+    clamp(config.strength ?? DEFAULT_CALIBRATION_STRENGTH, 0, 1),
+  );
+  const selectedIds = new Set(blendedTop.map((item) => item.id));
+  return [
+    ...blendedTop,
+    ...candidates.filter((item) => !selectedIds.has(item.id)),
+  ];
+}
 
 export async function calibrateRecommendations<T extends CalibratableMovie>(
   userId: string,
@@ -385,26 +430,22 @@ export async function calibrateRecommendations<T extends CalibratableMovie>(
       );
     }
 
-    const strength = clamp(
-      config.strength ?? DEFAULT_CALIBRATION_STRENGTH,
-      0,
-      1,
+    const targetCount = Math.min(
+      config.targetCount ?? DEFAULT_TARGET_COUNT,
+      candidates.length,
     );
-    const minCandidatesPerGenre =
-      config.minCandidatesPerGenre ?? DEFAULT_MIN_PER_GENRE;
-    const targetCount = Math.min(DEFAULT_TARGET_COUNT, candidates.length);
 
     const originalTop = candidates.slice(0, targetCount);
     const beforeCounts = countGenres(originalTop, distribution);
-
-    const calibratedTop = calibrateByDistribution(
-      originalTop,
+    const calibrated = calibrateRecommendationWindow(
+      candidates,
       distribution,
-      targetCount,
-      minCandidatesPerGenre,
+      { ...config, targetCount },
     );
-
-    const afterCounts = countGenres(calibratedTop, distribution);
+    const afterCounts = countGenres(
+      calibrated.slice(0, targetCount),
+      distribution,
+    );
 
     if (process.env.NODE_ENV === "development") {
       console.log("[Calibration] Before/After genre counts", {
@@ -413,13 +454,7 @@ export async function calibrateRecommendations<T extends CalibratableMovie>(
       });
     }
 
-    const blendedTop = blendCalibrationOrder(
-      originalTop,
-      calibratedTop,
-      strength,
-    );
-
-    return [...blendedTop, ...candidates.slice(targetCount)];
+    return calibrated;
   } catch (error) {
     console.error("[Calibration] Failed to calibrate", error);
     return candidates;

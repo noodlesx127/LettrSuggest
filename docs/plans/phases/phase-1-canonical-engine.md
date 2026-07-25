@@ -74,7 +74,7 @@
 
 ## Checkpoint 1C.1: Constrained Reranking and Backfill
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Create: `src/lib/recommendationReranking.ts`
@@ -82,14 +82,16 @@
 - Modify: `src/lib/enrich.ts`
 - Modify: `src/lib/calibration.ts`
 
-- [ ] Write tests for `lambda * relevance - (1 - lambda) * similarity`, monotonic exploration-to-diversity behavior, named diversity relaxation stages, exact requested-count backfill when eligible supply exists, score-aware niche targets, and calibration replacement from a larger window.
-- [ ] Run tests; expect failure on exploration mapping, hard caps, niche interleave, and calibration composition.
-- [ ] Extract pure reranking stages with stable TMDB ID ties. Apply strict eligibility first, then relevance/MMR, niche/calibration constraints, staged diversity relaxation, and final backfill.
-- [ ] Keep each drop/relaxation reason available for telemetry. Do not alter base relevance weights in this checkpoint.
-- [ ] Run reranking and canonical fixture tests; expect pass.
-- [ ] Commit with `rtk git commit -m "fix: constrain recommendation reranking with backfill"`.
+- [x] Write tests for `lambda * relevance - (1 - lambda) * similarity`, monotonic exploration-to-diversity behavior, named diversity relaxation stages, exact requested-count backfill when eligible supply exists, score-aware niche targets, and calibration replacement from a larger window.
+- [x] Run tests; expect failure on exploration mapping, hard caps, niche interleave, and calibration composition.
+- [x] Extract pure reranking stages with stable TMDB ID ties. Apply strict eligibility first, then relevance/MMR, niche/calibration constraints, staged diversity relaxation, and final backfill.
+- [x] Keep each drop/relaxation reason available for telemetry. Do not alter base relevance weights in this checkpoint.
+- [x] Run reranking and canonical fixture tests; expect pass.
+- [x] Commit with `rtk git commit -m "fix: constrain recommendation reranking with backfill"`.
 
 ## Checkpoint 1A.3: v1 Canonical Adapter
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `src/lib/recommendationAdapters.ts`

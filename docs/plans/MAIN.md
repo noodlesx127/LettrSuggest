@@ -1,11 +1,11 @@
 # Recommendation Remediation Program
 
 **Status:** In progress  
-**Current checkpoint:** 1C.1 - Constrained reranking and backfill (Ready)
+**Current checkpoint:** 1A.3 - v1 canonical adapter (Ready)
 
-**Next action:** Begin 1C.1 with failing MMR direction, diversity relaxation, niche-target, calibration-window, and requested-count fixtures.
+**Next action:** Begin 1A.3 with failing v1 request/output adapter and canonical route fixtures.
 
-**Safe stopping point:** Phase 1 remains In progress; 1B.2 is Complete and 1C.1 is Ready but not started.
+**Safe stopping point:** Phase 1 remains In progress; 1C.1 is Complete and 1A.3 is Ready but not started.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -53,8 +53,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 1A.2 Engine orchestration seams | Complete | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | `refactor: introduce recommendation engine orchestration` |
 | 1B.1 Deterministic weighted retrieval | Complete | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | `refactor: make recommendation retrieval deterministic` |
 | 1B.2 Evidence semantics and candidate retention | Complete | 1B.1 | Provider-family consensus and same-provider repetition fixtures pass | `fix: distinguish consensus from provider repetition` |
-| 1C.1 Constrained reranking and backfill | Ready | 1B.2 | MMR direction, diversity relaxation, niche target, calibration window, and count pass | Not started |
-| 1A.3 v1 canonical adapter | Not started | 1C.1 | v1 fixture and endpoint behavior match canonical output | Not started |
+| 1C.1 Constrained reranking and backfill | Complete | 1B.2 | MMR direction, diversity relaxation, niche target, calibration window, and count pass | `fix: constrain recommendation reranking with backfill` |
+| 1A.3 v1 canonical adapter | Ready | 1C.1 | v1 fixture and endpoint behavior match canonical output | Not started |
 | 1A.4 Web canonical adapter and legacy removal | Not started | 1A.3 | Web/v1 parity passes and no competing production orchestration remains | Not started |
 | 1D.1 Cache revision and invalidation | Not started | 1A.4 | Every profile input affects revision; stale cache fixture misses | Not started |
 | 1D.2 Source lifecycle and vector capability gate | Not started | 1D.1 | Vector remains disabled unless model/backfill/score-parity checks pass | Not started |
@@ -131,6 +131,8 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 
 ## Verification Results
 
+- 2026-07-25 - Checkpoint 1C.1 RED: `rtk npm run test -- tests/unit/recommendationReranking.test.ts` - expected FAIL before execution (0 tests) because `@/lib/recommendationReranking` did not exist.
+- 2026-07-25 - Checkpoint 1C.1 focused GREEN: `rtk npm run test -- tests/unit/recommendationReranking.test.ts tests/integration/recommendationEngine.test.ts tests/integration/recommendationContracts.test.ts` - PASS, 24/24 across 3 files. The exact MMR equation and exploration direction, stable TMDB-ID ties, eligibility, named diversity relaxation/backfill, exact count, score-aware niche target, larger calibration window, and canonical engine/contracts pass. Full `rtk npm run test` PASS, 139/139 across 11 files; `rtk npm run typecheck` PASS; focused `next lint` PASS with no warnings or errors; and `rtk git diff --check` PASS.
 - 2026-07-25 - Checkpoint 1B.2 RED: `rtk npm run test -- tests/unit/recommendationEvidence.test.ts` - expected FAIL, 3/3 tests failed because provider-family merging and consensus helpers did not exist.
 - 2026-07-25 - Checkpoint 1B.2 focused GREEN: `rtk npm run test -- tests/unit/recommendationEvidence.test.ts tests/unit/recommendationCandidates.test.ts tests/integration/recommendationContracts.test.ts` - PASS, 22/22 across 3 files. Distinct-family consensus, same-family repetition tracking and saturation, Watchmode family normalization, lossless deterministic source confidence/reason attribution, quota-before-window retention, existing retrieval behavior, and the canonical result contract pass.
 - 2026-07-25 - Checkpoint 1B.2 full gate: `rtk npm run test` PASS, 133/133 across 10 files; `rtk npm run lint` PASS; `rtk npm run typecheck` PASS; `rtk npm run build` PASS; and `rtk git diff --check` PASS. The build retained the existing non-fatal dynamic-route and stale browser-data warnings.

@@ -30,9 +30,8 @@ import {
 } from "./genreEnhancement";
 import { updateExplorationStats } from "./adaptiveLearning";
 import type { RecommendationScoreParams } from "@/lib/recommendationEngine";
-import type {
-  RecommendationCandidate,
-} from "@/lib/recommendationTypes";
+import { rerankRecommendations } from "@/lib/recommendationReranking";
+import type { RecommendationCandidate } from "@/lib/recommendationTypes";
 
 /**
  * Helper to get the base URL for internal API calls
@@ -7833,55 +7832,34 @@ export async function suggestByOverlap(params: {
     metadataCompleteness?: number;
   }>;
   const scoreOrderedResults = stableScoreOrder(results);
-
-  // Phase 3: Rerank with MMR for better novelty vs relevance
-  // Default lambda 0.35 balances precision and variety (was 0.25, which over-diversified)
-  const mmrReranked = applyMMRRerank(scoreOrderedResults, {
-    lambda: params.mmrLambda ?? 0.35,
-    topK: Math.min(
-      results.length,
-      Math.max(desired * (params.mmrTopKFactor ?? 3), desired + 12),
-    ),
+  // Legacy callers supplied an exploration-shaped value under the mmrLambda
+  // name (more exploration produced a larger value). Convert it to the actual
+  // MMR relevance weight so exploration and diversity move together.
+  const legacyExplorationWeight = Math.max(
+    0,
+    Math.min(1, params.mmrLambda ?? 0.35),
+  );
+  const reranked = rerankRecommendations(scoreOrderedResults, {
+    count: desired,
+    lambda: 1 - legacyExplorationWeight,
+    nicheRatio: 0.35,
   });
 
-  // Phase 3b: Apply diversity filtering (tightened to reduce common-genre saturation)
-  const diversified = applyDiversityFilter(mmrReranked, {
-    maxSameDirector: 3,
-    maxSameGenre: 5,
-    maxSameDecade: 8,
-    maxSameStudio: 4,
-    maxSameActor: 4,
-  });
-
-  // Enforce niche content ratio: at least 35% of results should be non-mainstream
-  // (films with fewer than 1000 TMDB votes), interleaved throughout results
-  const mainstream = diversified.filter((r) => (r.voteCount ?? 0) >= 1000);
-  const niche = diversified.filter((r) => (r.voteCount ?? 0) < 1000);
-  const targetNicheRatio = 0.35;
-  const targetNicheCount = Math.floor(diversified.length * targetNicheRatio);
-
-  let nicheEnforced = diversified;
-  if (niche.length >= targetNicheCount) {
-    // Interleave niche and mainstream: every 3rd film is a niche pick
-    const rebalanced: typeof diversified = [];
-    let ni = 0,
-      mi = 0;
-    while (rebalanced.length < diversified.length) {
-      if (
-        ni < niche.length &&
-        (rebalanced.length % 3 === 2 || mi >= mainstream.length)
-      ) {
-        rebalanced.push(niche[ni++]);
-      } else if (mi < mainstream.length) {
-        rebalanced.push(mainstream[mi++]);
-      } else {
-        rebalanced.push(niche[ni++]);
-      }
-    }
-    nicheEnforced = rebalanced;
+  if (process.env.NODE_ENV === "development") {
+    console.log("[RecommendationReranking] Applied constrained reranking", {
+      requested: desired,
+      returned: reranked.candidates.length,
+      nicheTarget: reranked.diagnostics.nicheTarget,
+      nicheSelected: reranked.diagnostics.nicheSelected,
+      stages: reranked.diagnostics.stages.map((stage) => ({
+        name: stage.name,
+        added: stage.added,
+        dropReasons: stage.dropReasons,
+      })),
+    });
   }
 
-  return nicheEnforced.slice(0, desired);
+  return [...reranked.candidates];
 }
 
 export async function deleteFilmMapping(userId: string, uri: string) {
