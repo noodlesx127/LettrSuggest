@@ -1,11 +1,11 @@
 # Recommendation Remediation Program
 
 **Status:** In progress  
-**Current checkpoint:** 1B.2 - Evidence semantics and candidate retention (Ready)
+**Current checkpoint:** 1C.1 - Constrained reranking and backfill (Ready)
 
-**Next action:** Begin 1B.2 with failing provider-family consensus and repetition-retention fixtures.
+**Next action:** Begin 1C.1 with failing MMR direction, diversity relaxation, niche-target, calibration-window, and requested-count fixtures.
 
-**Safe stopping point:** Phase 1 remains In progress; 1B.1 is Complete and 1B.2 is Ready but not started.
+**Safe stopping point:** Phase 1 remains In progress; 1B.2 is Complete and 1C.1 is Ready but not started.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -52,8 +52,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 1A.1 Canonical contracts and frozen fixtures | Complete | Phase 0 | Request/result/evidence/diagnostic types compile; fixture expectations pass | `test: define canonical recommendation contracts` |
 | 1A.2 Engine orchestration seams | Complete | 1A.1 | Injected context, retrieval, scoring, reranking, RNG, and telemetry run in one engine test | `refactor: introduce recommendation engine orchestration` |
 | 1B.1 Deterministic weighted retrieval | Complete | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | `refactor: make recommendation retrieval deterministic` |
-| 1B.2 Evidence semantics and candidate retention | Ready | 1B.1 | Provider-family consensus and same-provider repetition fixtures pass | Not started |
-| 1C.1 Constrained reranking and backfill | Not started | 1B.2 | MMR direction, diversity relaxation, niche target, calibration window, and count pass | Not started |
+| 1B.2 Evidence semantics and candidate retention | Complete | 1B.1 | Provider-family consensus and same-provider repetition fixtures pass | `fix: distinguish consensus from provider repetition` |
+| 1C.1 Constrained reranking and backfill | Ready | 1B.2 | MMR direction, diversity relaxation, niche target, calibration window, and count pass | Not started |
 | 1A.3 v1 canonical adapter | Not started | 1C.1 | v1 fixture and endpoint behavior match canonical output | Not started |
 | 1A.4 Web canonical adapter and legacy removal | Not started | 1A.3 | Web/v1 parity passes and no competing production orchestration remains | Not started |
 | 1D.1 Cache revision and invalidation | Not started | 1A.4 | Every profile input affects revision; stale cache fixture misses | Not started |
@@ -92,7 +92,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 2. Explicit seeds do not seed neighborhoods | 0B.3 | Retrieval-anchor fixture | Closed |
 | 3. API recency reversed | 0B.2 | Date-ordered fixture | Closed |
 | 4. Metadata fetch tuple misalignment | 0B.2 | Failed-middle-fetch fixture | Closed |
-| 5. False same-provider consensus | 1B.2 | Provider-family evidence fixture | Open |
+| 5. False same-provider consensus | 1B.2 | Provider-family evidence fixture | Closed |
 | 6. Forced background prior | 0C.1 | Neutral-context API test | Closed |
 | 7. Genre filtering fails open | 0C.2 | Strict genre endpoint test | Closed |
 | 8. Random pre-score truncation | 1B.1 | Deterministic retention fixture | Closed |
@@ -131,6 +131,10 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 
 ## Verification Results
 
+- 2026-07-25 - Checkpoint 1B.2 RED: `rtk npm run test -- tests/unit/recommendationEvidence.test.ts` - expected FAIL, 3/3 tests failed because provider-family merging and consensus helpers did not exist.
+- 2026-07-25 - Checkpoint 1B.2 focused GREEN: `rtk npm run test -- tests/unit/recommendationEvidence.test.ts tests/unit/recommendationCandidates.test.ts tests/integration/recommendationContracts.test.ts` - PASS, 22/22 across 3 files. Distinct-family consensus, same-family repetition tracking and saturation, Watchmode family normalization, lossless deterministic source confidence/reason attribution, quota-before-window retention, existing retrieval behavior, and the canonical result contract pass.
+- 2026-07-25 - Checkpoint 1B.2 full gate: `rtk npm run test` PASS, 133/133 across 10 files; `rtk npm run lint` PASS; `rtk npm run typecheck` PASS; `rtk npm run build` PASS; and `rtk git diff --check` PASS. The build retained the existing non-fatal dynamic-route and stale browser-data warnings.
+- 2026-07-25 - Independent review tightened 1B.2 by aligning with canonical `providerOccurrences`, proving capped repetition remains below two-family consensus, collapsing Watchmode variants, and forwarding distinct families into downstream source metadata. CodeRabbit was unavailable because its CLI and the installer-required `sh`/`bash` runtime are absent in the Windows environment.
 - 2026-07-25 - Checkpoint 1B.1 continuation RED: the focused retrieval test initially failed its provider-page contract, and the full Vitest suite exposed the superseded Phase 0 expectation that the global weak-seed blacklist remain active.
 - 2026-07-25 - `rtk npm run test -- tests/unit/recommendationCandidates.test.ts tests/unit/recommendationSeeds.test.ts` - PASS, 21/21 tests. Weighted seed objects and request seeds cross the aggregator boundary; weighted deterministic sampling, repeatable pages/order, ascending TMDB-ID ties, source caps, intent reservations, multi-source retention, user-scoped exclusions, and weak-seed neutrality pass.
 - 2026-07-25 - Full checkpoint gate: `rtk npm run test` PASS, 129/129 across 9 files; `rtk npm run lint` PASS; `rtk npm run typecheck` PASS; and `rtk npm run build` PASS. The build retained the existing non-fatal dynamic-route and stale browser-data warnings.
@@ -261,3 +265,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `fix: preserve Phase 0 health in context adapter` - checkpoint 1A.2 compatibility-health and malformed-blocked-row corrections
 - `fix: validate direct blocked context rows` - checkpoint 1A.2 direct-canonical blocked-source validation
 - `refactor: make recommendation retrieval deterministic` - checkpoint 1B.1 request-scoped RNG, weighted provider boundaries, stable retention, source/intent quotas, and taste-neutral seed handling
+- `fix: distinguish consensus from provider repetition` - checkpoint 1B.2 provider-family evidence, capped repetition strength, lossless attribution, and quota-aware retention

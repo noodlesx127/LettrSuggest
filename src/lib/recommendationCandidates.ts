@@ -24,6 +24,32 @@ export type CandidateQuotaOptions = Readonly<{
   intentQuotas?: Readonly<Record<string, number>>;
 }>;
 
+export type CandidateEvidenceInput<TSource extends string = string> = Readonly<{
+  tmdbId: number;
+  title?: string;
+  source: TSource;
+  confidence: number;
+  reason?: string;
+}>;
+
+export type MergedCandidateEvidence<TSource extends string = string> = {
+  tmdbId: number;
+  title: string;
+  sources: Array<{
+    source: TSource;
+    confidence: number;
+    reason?: string;
+  }>;
+  providerFamilies: string[];
+  familyCount: number;
+  providerOccurrences: number;
+  repetitionsByFamily: Record<string, number>;
+};
+
+const MAX_CONSENSUS_BONUS = 0.25;
+const MAX_REPETITION_BONUS = 0.05;
+const MAX_BONUS_REPETITIONS = 3;
+
 const REQUEST_SEED_HASH_OFFSET = 2166136261;
 const REQUEST_SEED_HASH_PRIME = 16777619;
 
@@ -107,6 +133,109 @@ function normalizedRandom(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return Number.MIN_VALUE;
   if (value >= 1) return 1 - Number.EPSILON;
   return value;
+}
+
+export function getProviderConsensusLevel(
+  familyCount: number,
+): "high" | "medium" | "low" {
+  if (familyCount >= 4) return "high";
+  if (familyCount >= 2) return "medium";
+  return "low";
+}
+
+export function getProviderEvidenceBonus(
+  familyCount: number,
+  providerOccurrences: number,
+  activeFamilyCount = 4,
+): number {
+  const normalizedFamilyCount = Math.max(0, Math.floor(familyCount));
+  const normalizedOccurrences = Math.max(
+    normalizedFamilyCount,
+    Math.floor(providerOccurrences),
+  );
+  const repetitionCount = normalizedOccurrences - normalizedFamilyCount;
+  const consensusBonus =
+    Math.min(normalizedFamilyCount / Math.max(1, activeFamilyCount), 1) *
+    MAX_CONSENSUS_BONUS;
+  const repetitionBonus =
+    (Math.min(repetitionCount, MAX_BONUS_REPETITIONS) /
+      MAX_BONUS_REPETITIONS) *
+    MAX_REPETITION_BONUS;
+
+  return consensusBonus + repetitionBonus;
+}
+
+/**
+ * Merge raw provider evidence without treating repeated results from one
+ * provider family as independent agreement. Raw rows remain available for
+ * attribution, while family and repetition signals are stored separately.
+ */
+export function mergeCandidateEvidence<TSource extends string>(
+  candidates: readonly CandidateEvidenceInput<TSource>[],
+  getProviderFamily: (source: TSource) => string,
+): MergedCandidateEvidence<TSource>[] {
+  const grouped = new Map<
+    number,
+    {
+      titles: Set<string>;
+      sources: MergedCandidateEvidence<TSource>["sources"];
+      repetitionsByFamily: Map<string, number>;
+    }
+  >();
+
+  for (const candidate of candidates) {
+    if (!Number.isSafeInteger(candidate.tmdbId) || candidate.tmdbId <= 0) {
+      continue;
+    }
+
+    const providerFamily = getProviderFamily(candidate.source).trim();
+    if (!providerFamily) continue;
+
+    const existing = grouped.get(candidate.tmdbId) ?? {
+      titles: new Set<string>(),
+      sources: [],
+      repetitionsByFamily: new Map<string, number>(),
+    };
+    if (candidate.title?.trim()) existing.titles.add(candidate.title.trim());
+    existing.sources.push({
+      source: candidate.source,
+      confidence: candidate.confidence,
+      ...(candidate.reason === undefined ? {} : { reason: candidate.reason }),
+    });
+    existing.repetitionsByFamily.set(
+      providerFamily,
+      (existing.repetitionsByFamily.get(providerFamily) ?? 0) + 1,
+    );
+    grouped.set(candidate.tmdbId, existing);
+  }
+
+  return [...grouped.entries()]
+    .map(([tmdbId, evidence]) => {
+      const providerFamilies = [...evidence.repetitionsByFamily.keys()].sort();
+      const repetitionsByFamily = Object.fromEntries(
+        providerFamilies.map((family) => [
+          family,
+          evidence.repetitionsByFamily.get(family) ?? 0,
+        ]),
+      );
+      const sources = [...evidence.sources].sort(
+        (left, right) =>
+          right.confidence - left.confidence ||
+          left.source.localeCompare(right.source) ||
+          (left.reason ?? "").localeCompare(right.reason ?? ""),
+      );
+
+      return {
+        tmdbId,
+        title: [...evidence.titles].sort()[0] ?? "",
+        sources,
+        providerFamilies,
+        familyCount: providerFamilies.length,
+        providerOccurrences: sources.length,
+        repetitionsByFamily,
+      };
+    })
+    .sort((left, right) => left.tmdbId - right.tmdbId);
 }
 
 function seedSourcePriority(source: WeightedRecommendationSeed["source"]): number {

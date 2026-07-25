@@ -1096,7 +1096,7 @@ export async function generateSmartCandidates(profile: {
 
           // Store source metadata for multi-source badge display
           results.sourceMetadata.set(rec.tmdbId, {
-            sources: rec.sources.map((s) => s.source),
+            sources: rec.providerFamilies,
             consensusLevel: rec.consensusLevel,
           });
         }

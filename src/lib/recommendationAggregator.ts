@@ -15,8 +15,12 @@
 import pLimit from "p-limit";
 
 import {
+  applySourceIntentQuotas,
   createDeterministicRng,
   deriveCandidateRequestSeed,
+  getProviderEvidenceBonus,
+  getProviderConsensusLevel,
+  mergeCandidateEvidence,
   selectWeightedSeeds,
   type RecommendationRng,
   type WeightedRecommendationSeed,
@@ -61,7 +65,11 @@ export type AggregatedRecommendation = {
     confidence: number;
     reason?: string;
   }>;
-  consensusLevel: "high" | "medium" | "low"; // How many sources agree
+  providerFamilies: string[];
+  familyCount: number;
+  providerOccurrences: number;
+  repetitionsByFamily: Record<string, number>;
+  consensusLevel: "high" | "medium" | "low";
 };
 
 /**
@@ -93,10 +101,11 @@ export async function aggregateRecommendations(params: {
   }>;
   limit?: number;
   sourceReliability?: Map<string, number>;
+  sourceQuotas?: Readonly<Record<string, number>>;
   deadlineMs?: number;
   requestSeed?: string;
 }): Promise<AggregateRecommendationsResult> {
-  const { limit = 50, sourceReliability, deadlineMs } = params;
+  const { limit = 50, sourceReliability, sourceQuotas, deadlineMs } = params;
   const seedMovies: AggregatorSeedMovie[] = params.seedMovies.map((seed) => ({
     ...seed,
     weight:
@@ -260,14 +269,26 @@ export async function aggregateRecommendations(params: {
   );
 
   // Calculate consensus scores and sort
-  const scored = aggregated
+  const ranked = aggregated
     .map((rec) => ({
       ...rec,
       score: calculateAggregateScore(rec, sourceReliability),
-      consensusLevel: getConsensusLevel(rec.sources.length),
+      consensusLevel: getProviderConsensusLevel(rec.familyCount),
     }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .sort((a, b) => b.score - a.score || a.tmdbId - b.tmdbId);
+  const retainedIds = applySourceIntentQuotas(
+    ranked.map((candidate) => ({
+      tmdbId: candidate.tmdbId,
+      sources: candidate.providerFamilies,
+      score: candidate.score,
+    })),
+    { limit, sourceQuotas },
+  ).map((candidate) => candidate.tmdbId);
+  const rankedById = new Map(ranked.map((candidate) => [candidate.tmdbId, candidate]));
+  const scored = retainedIds.flatMap((tmdbId) => {
+    const candidate = rankedById.get(tmdbId);
+    return candidate ? [candidate] : [];
+  });
 
   // Log comprehensive source distribution and quality metrics
   logSourceDistribution(scored);
@@ -445,45 +466,19 @@ function logTopRecommendations(recommendations: AggregatedRecommendation[]) {
 function mergeRecommendations(
   recs: SourceRecommendation[],
 ): AggregatedRecommendation[] {
-  const grouped = new Map<number, AggregatedRecommendation>();
-
-  for (const rec of recs) {
-    const existing = grouped.get(rec.tmdbId);
-
-    if (existing) {
-      if (!existing.title && rec.title) {
-        existing.title = rec.title;
-      }
-      // Add this source to existing recommendation
-      existing.sources.push({
-        source: rec.source,
-        confidence: rec.confidence,
-        reason: rec.reason,
-      });
-    } else {
-      // Create new aggregated recommendation
-      grouped.set(rec.tmdbId, {
-        tmdbId: rec.tmdbId,
-        title: rec.title,
-        score: 0, // Will be calculated later
-        sources: [
-          {
-            source: rec.source,
-            confidence: rec.confidence,
-            reason: rec.reason,
-          },
-        ],
-        consensusLevel: "low", // Will be calculated later
-      });
-    }
-  }
-
-  return Array.from(grouped.values());
+  return mergeCandidateEvidence(recs, getProviderFamily).map((candidate) => ({
+    ...candidate,
+    score: 0,
+    consensusLevel: getProviderConsensusLevel(candidate.familyCount),
+  }));
 }
 
-// Number of actually implemented recommendation sources
-// Update this constant if TuiMDB or other sources are added/removed
-const ACTIVE_SOURCE_COUNT = 4; // tmdb, tastedive, watchmode, vector-similarity
+function getProviderFamily(source: RecommendationSource): string {
+  if (source === "watchmode" || source === "watchmode-similar") {
+    return "watchmode";
+  }
+  return source;
+}
 
 /**
  * Calculate weighted score based on:
@@ -527,14 +522,27 @@ function calculateAggregateScore(
   let totalWeight = 0;
   const adjustedWeights: Record<string, number> = {};
 
-  for (const source of rec.sources) {
-    const adjustedWeight = getAdjustedWeight(
-      source.source,
-      baseWeights[source.source],
-    );
-    adjustedWeights[source.source] = adjustedWeight;
-    totalScore += source.confidence * adjustedWeight;
-    totalWeight += adjustedWeight;
+  for (const providerFamily of rec.providerFamilies) {
+    const strongest = rec.sources
+      .filter((source) => getProviderFamily(source.source) === providerFamily)
+      .map((source) => {
+        const adjustedWeight = getAdjustedWeight(
+          source.source,
+          baseWeights[source.source],
+        );
+        return { source, adjustedWeight };
+      })
+      .sort(
+        (left, right) =>
+          right.source.confidence * right.adjustedWeight -
+            left.source.confidence * left.adjustedWeight ||
+          left.source.source.localeCompare(right.source.source),
+      )[0];
+
+    if (!strongest) continue;
+    adjustedWeights[providerFamily] = strongest.adjustedWeight;
+    totalScore += strongest.source.confidence * strongest.adjustedWeight;
+    totalWeight += strongest.adjustedWeight;
   }
 
   // Log adjusted weights for first recommendation (debugging)
@@ -544,8 +552,10 @@ function calculateAggregateScore(
 
   // Bonus for consensus (multiple sources agreeing)
   // Divide by ACTIVE_SOURCE_COUNT so movies appearing in all active sources get full bonus
-  const consensusBonus =
-    Math.min(rec.sources.length / ACTIVE_SOURCE_COUNT, 1.0) * 0.25;
+  const evidenceBonus = getProviderEvidenceBonus(
+    rec.familyCount,
+    rec.providerOccurrences,
+  );
 
   // Quality source bonus (TasteDive is better for personalized niche finds)
   // Gives a small edge to recommendations that include high-quality niche sources
@@ -555,16 +565,8 @@ function calculateAggregateScore(
 
   // No uniqueness bonus — single-source finds should not outrank multi-source consensus.
   // The quality of a recommendation is validated by source agreement, not scarcity.
-  return totalScore / totalWeight + consensusBonus + qualitySourceBonus;
-}
-
-/**
- * Determine consensus level based on number of sources
- */
-function getConsensusLevel(sourceCount: number): "high" | "medium" | "low" {
-  if (sourceCount >= 4) return "high"; // 4-5 sources agree
-  if (sourceCount >= 2) return "medium"; // 2-3 sources agree
-  return "low"; // 1 source
+  const baseScore = totalWeight > 0 ? totalScore / totalWeight : 0;
+  return baseScore + evidenceBonus + qualitySourceBonus;
 }
 
 /**

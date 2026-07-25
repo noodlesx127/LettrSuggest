@@ -59,20 +59,22 @@
 
 ## Checkpoint 1B.2: Evidence Semantics and Candidate Retention
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Modify: `src/lib/recommendationCandidates.ts`
 - Modify: `src/lib/recommendationAggregator.ts`
 - Create: `tests/unit/recommendationEvidence.test.ts`
 
-- [ ] Write fixtures where one provider repeats an ID and two independent provider families return another ID. Assert only distinct families increase consensus, repetition is tracked separately, source confidence survives merging, and quotas are applied before global truncation.
-- [ ] Run tests; expect failure because repeated same-provider evidence currently raises consensus.
-- [ ] Implement normalized provider-family evidence and deterministic merge semantics. Preserve raw sources for attribution but cap family contribution.
-- [ ] Run tests and the canonical engine fixture; expect pass without unrelated order churn.
-- [ ] Commit with `rtk git commit -m "fix: distinguish consensus from provider repetition"`.
+- [x] Write fixtures where one provider repeats an ID and two independent provider families return another ID. Assert only distinct families increase consensus, repetition is tracked separately, source confidence survives merging, and quotas are applied before global truncation.
+- [x] Run tests; expect failure because repeated same-provider evidence currently raises consensus.
+- [x] Implement normalized provider-family evidence and deterministic merge semantics. Preserve raw sources for attribution but cap family contribution.
+- [x] Run tests and the canonical engine fixture; expect pass without unrelated order churn.
+- [x] Commit with `rtk git commit -m "fix: distinguish consensus from provider repetition"`.
 
 ## Checkpoint 1C.1: Constrained Reranking and Backfill
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `src/lib/recommendationReranking.ts`
