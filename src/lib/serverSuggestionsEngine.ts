@@ -17,6 +17,14 @@ import {
   stableSortCandidates,
   type WeightedRecommendationSeed,
 } from "@/lib/recommendationCandidates";
+import {
+  createRecommendationEngine,
+  type RecommendationEngineDependencies,
+} from "@/lib/recommendationEngine";
+import type {
+  RecommendationRequestInput,
+  RecommendationResult,
+} from "@/lib/recommendationTypes";
 
 type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
 type FeatureFeedback = Awaited<ReturnType<typeof getAvoidedFeatures>>;
@@ -116,6 +124,14 @@ export type UserContextSourceLoader = (
   userId: string,
   exposureCutoff: string,
 ) => Promise<UserContextSourceLoaderResult>;
+
+export async function runCanonicalServerRecommendations(
+  request: RecommendationRequestInput,
+  dependencies: RecommendationEngineDependencies,
+): Promise<RecommendationResult> {
+  const engine = createRecommendationEngine(dependencies);
+  return engine.generate(request);
+}
 
 type CachedTasteProfileRow = {
   profile: TasteProfile;

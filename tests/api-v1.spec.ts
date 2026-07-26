@@ -428,7 +428,7 @@ test.describe("Authenticated tests", () => {
         meta.mode,
       );
       expect(Array.isArray(meta.failed_sources)).toBe(true);
-      expect(meta.engine_version).toBe("v1-phase0");
+      expect(meta.engine_version).toBe("v1-canonical-1");
       expect(typeof meta.request_seed).toBe("string");
       expect(meta.context_mode).toBe("neutral");
 
@@ -543,8 +543,8 @@ test.describe("Authenticated tests", () => {
       expect(second.status).toBe(200);
       const firstMeta = first.body.meta as Record<string, unknown>;
       const secondMeta = second.body.meta as Record<string, unknown>;
-      expect(firstMeta.engine_version).toBe("v1-phase0");
-      expect(secondMeta.engine_version).toBe("v1-phase0");
+      expect(firstMeta.engine_version).toBe("v1-canonical-1");
+      expect(secondMeta.engine_version).toBe("v1-canonical-1");
       expect(firstMeta.context_mode).toBe("neutral");
       expect(secondMeta.context_mode).toBe("neutral");
       expect(firstMeta.request_seed).toBe(secondMeta.request_seed);

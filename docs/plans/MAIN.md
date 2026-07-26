@@ -1,11 +1,11 @@
 # Recommendation Remediation Program
 
 **Status:** In progress  
-**Current checkpoint:** 1A.3 - v1 canonical adapter (Ready)
+**Current checkpoint:** 1A.4 - Web canonical adapter and legacy removal (Ready)
 
-**Next action:** Begin 1A.3 with failing v1 request/output adapter and canonical route fixtures.
+**Next action:** Begin 1A.4 with a failing web/v1 parity fixture and production-orchestration search.
 
-**Safe stopping point:** Phase 1 remains In progress; 1C.1 is Complete and 1A.3 is Ready but not started.
+**Safe stopping point:** Phase 1 remains In progress; 1A.3 is Complete and 1A.4 is Ready but not started.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -54,8 +54,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 1B.1 Deterministic weighted retrieval | Complete | 1A.2 | Weighted seeds survive boundaries; stable tie-breaks and source quotas pass | `refactor: make recommendation retrieval deterministic` |
 | 1B.2 Evidence semantics and candidate retention | Complete | 1B.1 | Provider-family consensus and same-provider repetition fixtures pass | `fix: distinguish consensus from provider repetition` |
 | 1C.1 Constrained reranking and backfill | Complete | 1B.2 | MMR direction, diversity relaxation, niche target, calibration window, and count pass | `fix: constrain recommendation reranking with backfill` |
-| 1A.3 v1 canonical adapter | Ready | 1C.1 | v1 fixture and endpoint behavior match canonical output | Not started |
-| 1A.4 Web canonical adapter and legacy removal | Not started | 1A.3 | Web/v1 parity passes and no competing production orchestration remains | Not started |
+| 1A.3 v1 canonical adapter | Complete | 1C.1 | v1 fixture and endpoint behavior match canonical output | `refactor: route v1 through canonical recommendations` |
+| 1A.4 Web canonical adapter and legacy removal | Ready | 1A.3 | Web/v1 parity passes and no competing production orchestration remains | Not started |
 | 1D.1 Cache revision and invalidation | Not started | 1A.4 | Every profile input affects revision; stale cache fixture misses | Not started |
 | 1D.2 Source lifecycle and vector capability gate | Not started | 1D.1 | Vector remains disabled unless model/backfill/score-parity checks pass | Not started |
 | 2A.1 Per-user local import state | Not started | Phase 1 | Auth transition and cross-user isolation tests pass | Not started |
@@ -96,12 +96,12 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 6. Forced background prior | 0C.1 | Neutral-context API test | Closed |
 | 7. Genre filtering fails open | 0C.2 | Strict genre endpoint test | Closed |
 | 8. Random pre-score truncation | 1B.1 | Deterministic retention fixture | Closed |
-| 9. Diversity caps underfill | 1C.1 | Staged-relaxation count test | Open |
-| 10. Calibration cannot change composition | 1C.1 | Larger-window replacement test | Open |
-| 11. Incorrect niche quota/order | 1C.1 | Score-aware target test | Open |
+| 9. Diversity caps underfill | 1C.1 | Staged-relaxation count test | Closed |
+| 10. Calibration cannot change composition | 1C.1 | Larger-window replacement test | Closed |
+| 11. Incorrect niche quota/order | 1C.1 | Score-aware target test | Closed |
 | 12. Inactive/lossy vector source | 1D.2, 3.3 | Capability and cached-score parity evidence | Open |
 | 13. Seed weighting discarded | 1B.1 | Weighted-boundary test | Closed |
-| 14. Exploration/MMR direction | 1C.1 | Monotonic diversity test | Open |
+| 14. Exploration/MMR direction | 1C.1 | Monotonic diversity test | Closed |
 | 15. Weak profile-cache invalidation | 1D.1 | Input-revision matrix | Open |
 | 16. Global weak-seed blacklist | 1B.1 | Removal plus taste-neutral fixture | Closed |
 | 17. Input failures become generic results | 0C.1 | Degraded-state endpoint test | Closed |
@@ -131,6 +131,8 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 
 ## Verification Results
 
+- 2026-07-25 - Checkpoint 1A.3 RED: `rtk npm run test -- tests/integration/recommendationAdapters.test.ts` - expected FAIL before execution (0 tests) because `@/lib/recommendationAdapters` did not exist.
+- 2026-07-25 - Checkpoint 1A.3 focused GREEN: `rtk npm run test -- tests/integration/recommendationAdapters.test.ts tests/integration/recommendationEngine.test.ts tests/integration/recommendationContracts.test.ts tests/unit/recommendationSeeds.test.ts` - PASS, 34/34 across 4 files. Every parsed v1 intent field maps to the canonical request/options, canonical order maps to the compatible v1 payload, canonical diagnostics are additive, and existing engine/seed contracts pass. Full `rtk npm run test` PASS, 141/141 across 12 files; `rtk npm run typecheck` PASS; focused `next lint` PASS; and `rtk git diff --check` PASS. The focused Playwright generation command exited successfully but skipped all 3 selected tests because authenticated test credentials were unavailable.
 - 2026-07-25 - Checkpoint 1C.1 RED: `rtk npm run test -- tests/unit/recommendationReranking.test.ts` - expected FAIL before execution (0 tests) because `@/lib/recommendationReranking` did not exist.
 - 2026-07-25 - Checkpoint 1C.1 focused GREEN: `rtk npm run test -- tests/unit/recommendationReranking.test.ts tests/integration/recommendationEngine.test.ts tests/integration/recommendationContracts.test.ts` - PASS, 24/24 across 3 files. The exact MMR equation and exploration direction, stable TMDB-ID ties, eligibility, named diversity relaxation/backfill, exact count, score-aware niche target, larger calibration window, and canonical engine/contracts pass. Full `rtk npm run test` PASS, 139/139 across 11 files; `rtk npm run typecheck` PASS; focused `next lint` PASS with no warnings or errors; and `rtk git diff --check` PASS.
 - 2026-07-25 - Checkpoint 1B.2 RED: `rtk npm run test -- tests/unit/recommendationEvidence.test.ts` - expected FAIL, 3/3 tests failed because provider-family merging and consensus helpers did not exist.

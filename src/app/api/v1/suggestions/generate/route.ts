@@ -10,6 +10,13 @@ import type { TMDBMovie } from "@/lib/enrich";
 import type { EnhancedTasteProfile } from "@/lib/enhancedProfile";
 import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import {
+  adaptCanonicalResultToV1,
+  adaptV1RecommendationIntent,
+  type V1RecommendationDetails,
+} from "@/lib/recommendationAdapters";
+import { createDeterministicRng } from "@/lib/recommendationCandidates";
+import { loadRecommendationContext } from "@/lib/recommendationContext";
+import {
   buildAdjacentGenreMap,
   buildFeatureFeedbackFromRows,
   buildTasteProfileServer,
@@ -17,6 +24,7 @@ import {
   getUserContextDiagnostics,
   loadCachedTmdbDetails,
   loadUserContext,
+  runCanonicalServerRecommendations,
 } from "@/lib/serverSuggestionsEngine";
 import {
   buildBlockedSourceFailureResponse,
@@ -36,7 +44,7 @@ interface GenerateSuggestionsBody {
   exclude_tmdb_ids: number[];
   genre_ids?: number[];
   filter_relaxation?: FilterRelaxation;
-  debug?: boolean;
+  debug: boolean;
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -319,6 +327,25 @@ export async function POST(req: Request) {
         );
       }
 
+      const adaptedIntent = adaptV1RecommendationIntent({
+        userId: auth.userId,
+        seedTmdbIds: body.seed_tmdb_ids,
+        limit: body.limit,
+        excludeTmdbIds: body.exclude_tmdb_ids,
+        genreIds: body.genre_ids,
+        genreNames:
+          body.genre_ids?.map(
+            (genreId) => TMDB_GENRE_MAP[genreId] ?? `unknown:${genreId}`,
+          ) ?? [],
+        filterRelaxation: body.filter_relaxation,
+        debug,
+        requestSeed,
+      });
+      const canonicalContext = await loadRecommendationContext(
+        { loadUserContext: async () => userContext },
+        auth.userId,
+      );
+
       const tasteProfile = await buildTasteProfileServer(
         auth.userId,
         userContext,
@@ -348,40 +375,17 @@ export async function POST(req: Request) {
       ];
       const candidateTmdbCache = await loadCachedTmdbDetails(allIdsToCache);
 
-      if (filteredCandidates.length === 0) {
-        const warning =
-          candidateIds.length === 0
+      const warning =
+        filteredCandidates.length === 0
+          ? candidateIds.length === 0
             ? "no_candidates_generated"
-            : "all_candidates_excluded";
-
+            : "all_candidates_excluded"
+          : undefined;
+      if (warning) {
         console.warn("[v1/suggestions/generate] No candidates available", {
           requestId,
           candidateIds: candidateIds.length,
           warning,
-        });
-
-        return NextResponse.json({
-          data: [],
-          meta: {
-            timestamp: new Date().toISOString(),
-            requestId,
-            seed_count: body.seed_tmdb_ids.length,
-            result_count: 0,
-            candidate_count: 0,
-            engine: "personalized",
-            ...generationDiagnostics,
-            filter_diagnostics: {
-              reasons: body.genre_ids?.length
-                ? ["insufficient_eligible_supply"]
-                : [],
-              applied_stages: [],
-              strict_count: 0,
-              threshold_count: 0,
-              genre_count: 0,
-            },
-            warning,
-          },
-          error: null,
         });
       }
 
@@ -534,22 +538,69 @@ export async function POST(req: Request) {
           })()
         : undefined;
 
-      const data = personalizationFiltered.slice(0, body.limit).map((item) => ({
-        tmdb_id: item.tmdbId,
-        title: item.title ?? "",
-        score: Math.round(item.score * 1000) / 1000,
-        consensus_level: item.consensusLevel ?? "low",
-        sources: (
-          sourceMetadata.get(item.tmdbId)?.sources ??
-          item.sources ??
-          []
-        ).map((source: string) => ({ source, confidence: 1.0 })),
-        reasons: item.reasons ?? [],
-        genres: item.genres ?? [],
-        year: item.release_date?.slice(0, 4) ?? null,
-        poster_path: item.poster_path ?? null,
-        vote_category: item.voteCategory ?? null,
-      }));
+      const richCandidates = new Map(
+        personalizationFiltered.map((item) => [item.tmdbId, item]),
+      );
+      const canonicalResult = await runCanonicalServerRecommendations(
+        adaptedIntent.request,
+        {
+          loadContext: async () => canonicalContext,
+          retrieveCandidates: async () =>
+            personalizationFiltered.map((item) => ({ tmdbId: item.tmdbId })),
+          scoreCandidates: async ({ candidates }) =>
+            candidates.map(({ tmdbId }) => {
+              const item = richCandidates.get(tmdbId);
+              if (!item) {
+                throw new Error("Missing scored v1 recommendation candidate");
+              }
+              const providerFamilies =
+                sourceMetadata.get(tmdbId)?.sources ??
+                item.sources ??
+                ["overlap"];
+              return {
+                tmdbId,
+                score: item.score,
+                evidence: {
+                  seedAnchors: [...body.seed_tmdb_ids],
+                  providerFamilies: [...providerFamilies],
+                  providerOccurrences: providerFamilies.length,
+                  retrievalScore: item.score,
+                },
+                attribution: {
+                  retrieval: item.score,
+                  preference: 0,
+                  context: 0,
+                  diversity: 0,
+                  total: item.score,
+                },
+              };
+            }),
+          rerankCandidates: async ({ candidates }) => candidates,
+          rng: createDeterministicRng,
+          telemetry: () => undefined,
+        },
+      );
+      const responseDetails = new Map<number, V1RecommendationDetails>(
+        personalizationFiltered.map((item) => [
+          item.tmdbId,
+          {
+            title: item.title,
+            consensusLevel: item.consensusLevel,
+            sources:
+              sourceMetadata.get(item.tmdbId)?.sources ?? item.sources ?? [],
+            reasons: item.reasons,
+            genres: item.genres,
+            releaseDate: item.release_date,
+            posterPath: item.poster_path,
+            voteCategory: item.voteCategory,
+          },
+        ]),
+      );
+      const adaptedResult = adaptCanonicalResultToV1(
+        canonicalResult,
+        responseDetails,
+      );
+      const data = adaptedResult.data;
 
       console.log("[v1/suggestions/generate] Generation completed", {
         requestId,
@@ -568,7 +619,9 @@ export async function POST(req: Request) {
            candidate_count: filteredCandidates.length,
            engine: "personalized",
            ...generationDiagnostics,
+           ...adaptedResult.meta,
            filter_diagnostics: filterDiagnostics,
+           ...(warning ? { warning } : {}),
            ...(debug
              ? {
                  source_candidate_counts: sourceDebugSummary,
