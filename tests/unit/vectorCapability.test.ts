@@ -316,6 +316,10 @@ describe("vector capability gate", () => {
     );
     expect(migration).toMatch(/to service_role/i);
     expect(migration).toMatch(/set search_path = ''/i);
+    expect(migration).toMatch(/query_embedding extensions\.vector\(1536\)/i);
+    expect(migration).toMatch(/operator\(extensions\.<=>\)/i);
+    expect(migration).not.toMatch(/public\.vector\(1536\)/i);
+    expect(migration).not.toMatch(/operator\(public\.<=>\)/i);
   });
 
   it("uses a unique final TMDB-ID tie-breaker for offset pagination", () => {

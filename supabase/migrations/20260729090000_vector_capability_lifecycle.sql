@@ -301,7 +301,7 @@ COMMENT ON COLUMN public.vector_similarity_cache.neighbor_count IS
 
 -- Keep vector retrieval restricted to embeddings with explicit current metadata.
 CREATE OR REPLACE FUNCTION public.match_movie_embeddings(
-  query_embedding public.vector(1536),
+  query_embedding extensions.vector(1536),
   match_count integer
 )
 RETURNS TABLE (tmdb_id integer, similarity float)
@@ -312,11 +312,11 @@ SET search_path = ''
 AS $$
   SELECT
     public.movie_embeddings.tmdb_id,
-    1 - (public.movie_embeddings.embedding OPERATOR(public.<=>) query_embedding) AS similarity
+    1 - (public.movie_embeddings.embedding OPERATOR(extensions.<=>) query_embedding) AS similarity
   FROM public.movie_embeddings
   WHERE public.movie_embeddings.model_version = 'text-embedding-ada-002'
     AND public.movie_embeddings.embedding_dimensions = 1536
-  ORDER BY public.movie_embeddings.embedding OPERATOR(public.<=>) query_embedding
+  ORDER BY public.movie_embeddings.embedding OPERATOR(extensions.<=>) query_embedding
   LIMIT match_count;
 $$;
 
