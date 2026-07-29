@@ -1,6 +1,6 @@
 # Phase 1: Canonical Recommendation Engine
 
-**Phase state:** In progress  
+**Phase state:** Complete  
 **Entry condition:** Phase 0 complete  
 **Exit condition:** One deterministic server engine serves v1 and web, cache inputs are revisioned, and optional sources are capability-gated.
 
@@ -144,7 +144,7 @@
 
 ## Checkpoint 1D.2: Source Lifecycle and Vector Capability Gate
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Modify: `src/lib/recommendationCandidates.ts`
@@ -153,9 +153,9 @@
 - Modify: `scripts/generate-embeddings.ts`
 - Create: `tests/unit/vectorCapability.test.ts`
 
-- [ ] Write tests asserting vector is disabled without explicit model version, compatible dimensions, completed backfill marker, similarity score persistence, and cached/uncached rank parity.
-- [ ] Run tests; expect failure because cache entries lose similarity scores and no complete capability contract exists.
-- [ ] Implement a capability result with named failed checks. Version embeddings/cache records as needed and preserve similarity scores; do not enable production vector retrieval in this checkpoint.
-- [ ] Run tests and record production backfill coverage as evidence, not as an activation claim.
-- [ ] Run the full Phase 1 gate from `MAIN.md`, relevant Playwright tests, and Supabase advisors; expect pass.
-- [ ] Mark Phase 1 complete, make 2A.1 ready, and commit with `rtk git commit -m "fix: gate vector recommendations by capability"`.
+- [x] Write tests asserting vector is disabled without explicit model version, compatible dimensions, completed backfill marker, similarity score persistence, and cached/uncached rank parity.
+- [x] Run tests; the initial RED failed 9/9 because the capability contract did not exist, with later review-driven RED cycles covering lifecycle and cache edge cases.
+- [x] Implement a capability result with named failed checks. Version embeddings/cache records as needed and preserve similarity scores; do not enable production vector retrieval in this checkpoint.
+- [x] Run tests and record production backfill coverage as evidence, not as an activation claim. Production has 0 compatible embeddings out of the 5,000-row target and 0 vector-cache rows.
+- [x] Run the full Phase 1 gate from `MAIN.md`, relevant Playwright tests, and Supabase advisors; automated gates passed, Playwright skipped one authenticated test, and linked advisors matched the accepted baseline. Local database tests were unavailable because no Supabase instance was listening on port 54322.
+- [x] Mark Phase 1 complete, make 2A.1 ready, and commit with `rtk git commit -m "fix: gate vector recommendations by capability"`.

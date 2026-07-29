@@ -1,10 +1,12 @@
 # Phase 2: Integrity, Observability, and Evaluation
 
-**Phase state:** Not started  
+**Phase state:** Ready  
 **Entry condition:** Phase 1 complete  
 **Exit condition:** Import inputs are user-safe and atomic, request/exposure diagnostics explain output, and offline/online evaluation gates are operational.
 
 ## Checkpoint 2A.1: Per-User Local Import State
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `src/lib/importStorage.ts`

@@ -2,6 +2,63 @@ import type { WeightedSeed } from "@/lib/recommendationTypes";
 
 export type RecommendationRng = () => number;
 
+export const VECTOR_EMBEDDING_MODEL_VERSION = "text-embedding-ada-002";
+export const VECTOR_EMBEDDING_DIMENSIONS = 1536;
+export const VECTOR_SIMILARITY_CACHE_VERSION = "vector-similarity-v1";
+
+export type VectorSimilarityResult = Readonly<{
+  tmdbId: number;
+  similarity: number;
+}>;
+
+export type VectorBackfillMarker = Readonly<{
+  status: "pending" | "running" | "partial" | "failed" | "complete";
+  modelVersion: string | null;
+  dimensions: number | null;
+  expectedCount: number;
+  completedCount: number;
+  failureCount: number;
+}>;
+
+export const VECTOR_CAPABILITY_CHECKS = [
+  "model-version",
+  "dimensions",
+  "backfill",
+  "similarity-scores",
+  "rank-parity",
+] as const;
+
+export type VectorCapabilityCheck =
+  (typeof VECTOR_CAPABILITY_CHECKS)[number];
+
+export type VectorCapabilityInput = Readonly<{
+  modelVersion?: string | null;
+  dimensions?: number | null;
+  backfill?: VectorBackfillMarker | null;
+  cachedResults?: readonly VectorSimilarityResult[] | null;
+  uncachedResults?: readonly VectorSimilarityResult[] | null;
+}>;
+
+export type VectorCapabilityRequirements = Readonly<{
+  modelVersion: string;
+  dimensions: number;
+}>;
+
+export type VectorCapabilityResult = Readonly<{
+  capable: boolean;
+  eligible: boolean;
+  productionEnabled: false;
+  activation: "disabled";
+  checks: Readonly<Record<VectorCapabilityCheck, boolean>>;
+  failedChecks: readonly VectorCapabilityCheck[];
+}>;
+
+export const DEFAULT_VECTOR_CAPABILITY_REQUIREMENTS: VectorCapabilityRequirements =
+  {
+    modelVersion: VECTOR_EMBEDDING_MODEL_VERSION,
+    dimensions: VECTOR_EMBEDDING_DIMENSIONS,
+  };
+
 export type WeightedRecommendationSeed = WeightedSeed & {
   title?: string;
   imdbId?: string;
@@ -133,6 +190,114 @@ function normalizedRandom(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return Number.MIN_VALUE;
   if (value >= 1) return 1 - Number.EPSILON;
   return value;
+}
+
+function isValidVectorSimilarityResult(
+  result: VectorSimilarityResult,
+): boolean {
+  return (
+    Number.isSafeInteger(result.tmdbId) &&
+    result.tmdbId > 0 &&
+    Number.isFinite(result.similarity)
+  );
+}
+
+/**
+ * Apply the one stable ordering used by both cached and uncached vector
+ * results. Invalid rows are omitted here; capability evaluation checks them
+ * explicitly so they cannot make a source eligible.
+ */
+export function rankVectorSimilarityResults(
+  results: readonly VectorSimilarityResult[],
+): VectorSimilarityResult[] {
+  return results
+    .filter(isValidVectorSimilarityResult)
+    .sort(
+      (left, right) =>
+        right.similarity - left.similarity || left.tmdbId - right.tmdbId,
+    );
+}
+
+function hasFinitePersistedScores(
+  results: readonly VectorSimilarityResult[] | null | undefined,
+): results is readonly VectorSimilarityResult[] {
+  return (
+    Array.isArray(results) &&
+    results.length > 0 &&
+    results.every(isValidVectorSimilarityResult)
+  );
+}
+
+function hasExactRankParity(
+  cachedResults: readonly VectorSimilarityResult[] | null | undefined,
+  uncachedResults: readonly VectorSimilarityResult[] | null | undefined,
+): boolean {
+  if (!hasFinitePersistedScores(cachedResults) || !hasFinitePersistedScores(uncachedResults)) {
+    return false;
+  }
+
+  const cachedRank = rankVectorSimilarityResults(cachedResults);
+  const uncachedRank = rankVectorSimilarityResults(uncachedResults);
+
+  return (
+    cachedRank.length === uncachedRank.length &&
+    cachedRank.every((result, index) => result.tmdbId === uncachedRank[index]?.tmdbId)
+  );
+}
+
+function hasCompleteMatchingBackfill(
+  marker: VectorBackfillMarker | null | undefined,
+  requirements: VectorCapabilityRequirements,
+): boolean {
+  return (
+    marker?.status === "complete" &&
+    marker.modelVersion === requirements.modelVersion &&
+    marker.dimensions === requirements.dimensions &&
+    Number.isSafeInteger(marker.expectedCount) &&
+    marker.expectedCount > 0 &&
+    Number.isSafeInteger(marker.completedCount) &&
+    marker.completedCount === marker.expectedCount &&
+    Number.isSafeInteger(marker.failureCount) &&
+    marker.failureCount === 0
+  );
+}
+
+/**
+ * Evaluate vector readiness without activating the source. The result is
+ * intentionally deterministic and exposes every failed gate by name.
+ */
+export function evaluateVectorCapability(
+  input: VectorCapabilityInput,
+  requirements: VectorCapabilityRequirements =
+    DEFAULT_VECTOR_CAPABILITY_REQUIREMENTS,
+): VectorCapabilityResult {
+  const checks: Record<VectorCapabilityCheck, boolean> = {
+    "model-version":
+      typeof input.modelVersion === "string" &&
+      input.modelVersion === requirements.modelVersion,
+    dimensions:
+      Number.isSafeInteger(input.dimensions) &&
+      input.dimensions === requirements.dimensions,
+    backfill: hasCompleteMatchingBackfill(input.backfill, requirements),
+    "similarity-scores": hasFinitePersistedScores(input.cachedResults),
+    "rank-parity": hasExactRankParity(
+      input.cachedResults,
+      input.uncachedResults,
+    ),
+  };
+  const failedChecks = VECTOR_CAPABILITY_CHECKS.filter(
+    (check) => !checks[check],
+  );
+  const capable = failedChecks.length === 0;
+
+  return {
+    capable,
+    eligible: capable,
+    productionEnabled: false,
+    activation: "disabled",
+    checks,
+    failedChecks,
+  };
 }
 
 export function getProviderConsensusLevel(

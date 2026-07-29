@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { generateMovieEmbeddingById } from "@/lib/embeddings";
+import { parseSimilarityLimit } from "@/lib/vectorSimilarityLimit";
 import {
   getCachedVectorSimilarity,
   setCachedVectorSimilarity,
 } from "@/lib/vectorSimilarityCache";
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 50;
 
 type SimilarityResult = {
   tmdbId: number;
@@ -25,10 +23,17 @@ async function getNeighborIds(
     });
 
     if (!error && Array.isArray(data)) {
-      return data.map((row: any) => ({
-        tmdbId: Number(row.tmdb_id),
-        similarity: Number(row.similarity ?? 0),
-      }));
+      return data
+        .map((row: any) => ({
+          tmdbId: Number(row.tmdb_id),
+          similarity: Number(row.similarity),
+        }))
+        .filter(
+          (result) =>
+            Number.isSafeInteger(result.tmdbId) &&
+            result.tmdbId > 0 &&
+            Number.isFinite(result.similarity),
+        );
     }
   } catch (e) {
     console.error("[VectorSimilarity] RPC match failed", e);
@@ -53,8 +58,13 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
-    const limitRaw = Number(body?.limit ?? DEFAULT_LIMIT);
-    const limit = Math.min(MAX_LIMIT, Math.max(1, limitRaw || DEFAULT_LIMIT));
+    const limit = parseSimilarityLimit(body?.limit);
+    if (limit === null) {
+      return NextResponse.json(
+        { ok: false, error: "limit must be a finite integer" },
+        { status: 400 },
+      );
+    }
 
     // TODO: add rate limiting for this endpoint
 
@@ -73,14 +83,11 @@ export async function POST(req: Request) {
     const aggregated = new Map<number, { score: number; count: number }>();
 
     for (const tmdbId of tmdbIds) {
-      const cachedNeighbors = await getCachedVectorSimilarity(tmdbId);
+      const cachedNeighbors = await getCachedVectorSimilarity(tmdbId, limit);
       let neighbors: SimilarityResult[] = [];
 
       if (cachedNeighbors) {
-        neighbors = cachedNeighbors.map((id) => ({
-          tmdbId: id,
-          similarity: 0,
-        }));
+        neighbors = cachedNeighbors.results;
       } else {
         const embedding = await generateMovieEmbeddingById(tmdbId);
         if (!embedding.length) {
@@ -90,10 +97,7 @@ export async function POST(req: Request) {
 
         try {
           neighbors = await getNeighborIds(embedding, limit);
-          await setCachedVectorSimilarity(
-            tmdbId,
-            neighbors.map((n) => n.tmdbId),
-          );
+          await setCachedVectorSimilarity(tmdbId, neighbors, limit);
         } catch (e) {
           console.error("[VectorSimilarity] Neighbor lookup failed", e);
           neighbors = [];
@@ -106,7 +110,7 @@ export async function POST(req: Request) {
           score: 0,
           count: 0,
         };
-        current.score += neighbor.similarity || 0;
+        current.score += neighbor.similarity;
         current.count += 1;
         aggregated.set(neighbor.tmdbId, current);
       }
@@ -118,7 +122,7 @@ export async function POST(req: Request) {
         score: data.score + data.count * 0.05,
         matches: data.count,
       }))
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => b.score - a.score || a.tmdbId - b.tmdbId)
       .slice(0, limit);
 
     console.log("[VectorSimilarity] Response", {

@@ -1,8 +1,17 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { type TMDBMovie, fetchTmdbMovieCached } from "@/lib/enrich";
+import {
+  VECTOR_EMBEDDING_DIMENSIONS,
+  VECTOR_EMBEDDING_MODEL_VERSION,
+} from "@/lib/recommendationCandidates";
 
-const OPENAI_EMBEDDINGS_MODEL = "text-embedding-ada-002";
-const OPENAI_EMBEDDINGS_DIMENSIONS = 1536;
+export {
+  VECTOR_EMBEDDING_DIMENSIONS,
+  VECTOR_EMBEDDING_MODEL_VERSION,
+} from "@/lib/recommendationCandidates";
+
+const OPENAI_EMBEDDINGS_MODEL = VECTOR_EMBEDDING_MODEL_VERSION;
+const OPENAI_EMBEDDINGS_DIMENSIONS = VECTOR_EMBEDDING_DIMENSIONS;
 const EMBEDDING_RATE_LIMIT_PER_MINUTE = 3000;
 const EMBEDDING_CONCURRENCY = 10;
 const EMBEDDING_TIMEOUT_MS = 12000;
@@ -16,10 +25,21 @@ const rateLimit = createRateLimiter(
 type MovieEmbeddingRow = {
   tmdb_id: number;
   embedding: number[];
-  model_version: string | null;
+  model_version: string;
+  embedding_dimensions: number;
   created_at?: string;
   updated_at?: string;
 };
+
+export type EmbeddingCacheRow = Readonly<{
+  embedding: unknown;
+  model_version: unknown;
+  embedding_dimensions: unknown;
+}>;
+
+export type EmbeddingCacheRowReader = (
+  tmdbId: number,
+) => Promise<EmbeddingCacheRow | null>;
 
 function pLimit(limit: number) {
   let active = 0;
@@ -159,20 +179,59 @@ function buildEmbeddingInput(movie: TMDBMovie): string {
   return parts.filter(Boolean).join(" ").trim();
 }
 
+function parseEmbeddingVector(value: unknown): number[] | null {
+  if (Array.isArray(value)) {
+    if (
+      !value.every(
+        (item): item is number =>
+          typeof item === "number" && Number.isFinite(item),
+      )
+    ) {
+      return null;
+    }
+    return [...value];
+  }
+
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null;
+
+  const contents = trimmed.slice(1, -1).trim();
+  if (!contents) return [];
+  const tokens = contents.split(",").map((token) => token.trim());
+  if (tokens.some((token) => token.length === 0)) return null;
+
+  const parsed = tokens.map((token) => Number(token));
+  return parsed.every((item) => Number.isFinite(item)) ? parsed : null;
+}
+
+async function readCachedEmbeddingRow(
+  tmdbId: number,
+): Promise<EmbeddingCacheRow | null> {
+  const { data, error } = await supabaseAdmin
+    .from("movie_embeddings")
+    .select("embedding, model_version, embedding_dimensions")
+    .eq("tmdb_id", tmdbId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as EmbeddingCacheRow;
+}
+
 async function getCachedEmbedding(
   tmdbId: number,
   modelVersion: string,
+  dimensions: number,
 ): Promise<number[] | null> {
   try {
-    const { data, error } = await supabaseAdmin
-      .from("movie_embeddings")
-      .select("embedding, model_version")
-      .eq("tmdb_id", tmdbId)
-      .maybeSingle();
+    const row = await readCachedEmbeddingRow(tmdbId);
+    if (!row?.embedding) return null;
+    if (row.model_version !== modelVersion) return null;
+    if (row.embedding_dimensions !== dimensions) return null;
 
-    if (error || !data?.embedding) return null;
-    if (data.model_version && data.model_version !== modelVersion) return null;
-    return data.embedding as number[];
+    const embedding = parseEmbeddingVector(row.embedding);
+    if (!embedding) return null;
+    return validateEmbeddingVector(embedding, dimensions);
   } catch (e) {
     console.error("[Embeddings] Cache read failed", e);
     return null;
@@ -183,12 +242,17 @@ async function setCachedEmbedding(
   tmdbId: number,
   embedding: number[],
   modelVersion: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
+    const compatibleEmbedding = validateEmbeddingVector(
+      embedding,
+      OPENAI_EMBEDDINGS_DIMENSIONS,
+    );
     const payload: MovieEmbeddingRow = {
       tmdb_id: tmdbId,
-      embedding,
+      embedding: compatibleEmbedding,
       model_version: modelVersion,
+      embedding_dimensions: OPENAI_EMBEDDINGS_DIMENSIONS,
       updated_at: new Date().toISOString(),
     };
 
@@ -198,21 +262,91 @@ async function setCachedEmbedding(
 
     if (error) {
       console.error("[Embeddings] Cache write failed", error);
+      return false;
     }
+    return true;
   } catch (e) {
     console.error("[Embeddings] Cache write exception", e);
+    return false;
   }
 }
 
-function normalizeEmbeddingDimensions(vector: number[]): number[] {
-  if (vector.length === OPENAI_EMBEDDINGS_DIMENSIONS) return vector;
-  if (vector.length > OPENAI_EMBEDDINGS_DIMENSIONS) {
-    return vector.slice(0, OPENAI_EMBEDDINGS_DIMENSIONS);
+export function validateEmbeddingVector(
+  vector: readonly number[],
+  expectedDimensions = OPENAI_EMBEDDINGS_DIMENSIONS,
+): number[] {
+  if (
+    !Array.isArray(vector) ||
+    vector.length !== expectedDimensions ||
+    !vector.every(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value),
+    )
+  ) {
+    throw new Error(
+      `[Embeddings] Incompatible embedding vector: expected ${expectedDimensions} finite values, received ${vector.length}`,
+    );
   }
 
-  const padded = vector.slice();
-  while (padded.length < OPENAI_EMBEDDINGS_DIMENSIONS) padded.push(0);
-  return padded;
+  return [...vector];
+}
+
+export function isEmbeddingCompletionConfirmed(
+  embedding: readonly number[],
+  persistenceConfirmed: boolean,
+): boolean {
+  return (
+    persistenceConfirmed &&
+    Array.isArray(embedding) &&
+    embedding.length === OPENAI_EMBEDDINGS_DIMENSIONS &&
+    embedding.every(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value),
+    )
+  );
+}
+
+export async function isEmbeddingPersisted(
+  tmdbId: number,
+  expectedEmbedding: readonly number[],
+  readRow: EmbeddingCacheRowReader = readCachedEmbeddingRow,
+): Promise<boolean> {
+  try {
+    if (!isEmbeddingCompletionConfirmed(expectedEmbedding, true)) return false;
+
+    const row = await readRow(tmdbId);
+    if (
+      !row ||
+      row.model_version !== OPENAI_EMBEDDINGS_MODEL ||
+      row.embedding_dimensions !== OPENAI_EMBEDDINGS_DIMENSIONS
+    ) {
+      return false;
+    }
+
+    const persistedEmbedding = parseEmbeddingVector(row.embedding);
+    return (
+      persistedEmbedding !== null &&
+      persistedEmbedding.length === expectedEmbedding.length &&
+      persistedEmbedding.every(
+        (value, index) =>
+          Math.fround(value) === Math.fround(expectedEmbedding[index]),
+      )
+    );
+  } catch (e) {
+    console.error("[Embeddings] Persistence verification failed", e);
+    return false;
+  }
+}
+
+export async function generateMovieEmbeddingWithPersistence(
+  movie: TMDBMovie,
+): Promise<{ embedding: number[]; persisted: boolean }> {
+  const embedding = await generateMovieEmbedding(movie);
+  const persisted = isEmbeddingCompletionConfirmed(embedding, true)
+    ? await isEmbeddingPersisted(movie.id, embedding)
+    : false;
+
+  return { embedding, persisted };
 }
 
 export async function generateMovieEmbedding(
@@ -223,7 +357,11 @@ export async function generateMovieEmbedding(
     throw new Error("[Embeddings] This function must run server-side only");
   }
   const tmdbId = movie.id;
-  const cached = await getCachedEmbedding(tmdbId, OPENAI_EMBEDDINGS_MODEL);
+  const cached = await getCachedEmbedding(
+    tmdbId,
+    OPENAI_EMBEDDINGS_MODEL,
+    OPENAI_EMBEDDINGS_DIMENSIONS,
+  );
   if (cached) return cached;
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -266,7 +404,10 @@ export async function generateMovieEmbedding(
     const data = await r.json();
     const vector = data?.data?.[0]?.embedding;
     if (!Array.isArray(vector)) return [];
-    return normalizeEmbeddingDimensions(vector.map((v: number) => Number(v)));
+    return validateEmbeddingVector(
+      vector.map((v: number) => Number(v)),
+      OPENAI_EMBEDDINGS_DIMENSIONS,
+    );
   });
 
   if (result.length === OPENAI_EMBEDDINGS_DIMENSIONS) {
@@ -279,7 +420,11 @@ export async function generateMovieEmbedding(
 export async function generateMovieEmbeddingById(
   tmdbId: number,
 ): Promise<number[]> {
-  const cached = await getCachedEmbedding(tmdbId, OPENAI_EMBEDDINGS_MODEL);
+  const cached = await getCachedEmbedding(
+    tmdbId,
+    OPENAI_EMBEDDINGS_MODEL,
+    OPENAI_EMBEDDINGS_DIMENSIONS,
+  );
   if (cached) return cached;
 
   const movie = await fetchTmdbMovieCached(tmdbId);

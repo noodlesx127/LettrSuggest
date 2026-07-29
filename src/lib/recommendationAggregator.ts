@@ -1001,14 +1001,11 @@ async function fetchVectorSimilarityRecommendations(
     const aggregated = new Map<number, { score: number; count: number }>();
 
     for (const tmdbId of seedIds) {
-      const cachedNeighbors = await getCachedVectorSimilarity(tmdbId);
+      const cachedNeighbors = await getCachedVectorSimilarity(tmdbId, limit);
       let neighbors: Array<{ tmdbId: number; similarity: number }> = [];
 
       if (cachedNeighbors) {
-        neighbors = cachedNeighbors.map((id) => ({
-          tmdbId: id,
-          similarity: 0,
-        }));
+        neighbors = cachedNeighbors.results;
       } else {
         const embedding = await generateMovieEmbeddingById(tmdbId);
         if (!embedding.length) {
@@ -1027,14 +1024,18 @@ async function fetchVectorSimilarityRecommendations(
             },
           );
           if (!error && Array.isArray(data)) {
-            neighbors = data.map((row: Record<string, unknown>) => ({
-              tmdbId: Number(row.tmdb_id),
-              similarity: Number(row.similarity ?? 0),
-            }));
-            await setCachedVectorSimilarity(
-              tmdbId,
-              neighbors.map((n) => n.tmdbId),
-            );
+            neighbors = data
+              .map((row: Record<string, unknown>) => ({
+                tmdbId: Number(row.tmdb_id),
+                similarity: Number(row.similarity),
+              }))
+              .filter(
+                (neighbor) =>
+                  Number.isSafeInteger(neighbor.tmdbId) &&
+                  neighbor.tmdbId > 0 &&
+                  Number.isFinite(neighbor.similarity),
+              );
+            await setCachedVectorSimilarity(tmdbId, neighbors, limit);
           }
         } catch (e) {
           console.error(
@@ -1050,7 +1051,7 @@ async function fetchVectorSimilarityRecommendations(
           score: 0,
           count: 0,
         };
-        current.score += neighbor.similarity || 0;
+        current.score += neighbor.similarity;
         current.count += 1;
         aggregated.set(neighbor.tmdbId, current);
       }
@@ -1061,7 +1062,7 @@ async function fetchVectorSimilarityRecommendations(
         tmdbId: id,
         score: data.score + data.count * 0.05,
       }))
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => b.score - a.score || a.tmdbId - b.tmdbId)
       .slice(0, limit);
 
     for (const rec of sorted) {
