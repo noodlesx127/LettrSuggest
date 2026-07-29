@@ -1,11 +1,11 @@
 # Recommendation Remediation Program
 
 **Status:** In progress  
-**Current checkpoint:** 1D.1 - Cache revision and invalidation (Ready)
+**Current checkpoint:** 1D.2 - Source lifecycle and vector capability gate (Ready)
 
-**Next action:** Start 1D.1 with failing cache-revision tests covering every profile input.
+**Next action:** Start 1D.2 with failing vector capability tests covering model version, dimensions, backfill state, score persistence, and cached/uncached rank parity.
 
-**Safe stopping point:** Phase 1 remains In progress; 1A.4 is Complete and 1D.1 is Ready.
+**Safe stopping point:** Phase 1 remains In progress; 1D.1 is Complete and 1D.2 is Ready.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -56,8 +56,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 1C.1 Constrained reranking and backfill | Complete | 1B.2 | MMR direction, diversity relaxation, niche target, calibration window, and count pass | `fix: constrain recommendation reranking with backfill` |
 | 1A.3 v1 canonical adapter | Complete | 1C.1 | v1 fixture and endpoint behavior match canonical output | `refactor: route v1 through canonical recommendations` |
 | 1A.4 Web canonical adapter and legacy removal | Complete | 1A.3 | Web/v1 parity passes and no competing production orchestration remains | `refactor: converge web on canonical recommendations` |
-| 1D.1 Cache revision and invalidation | Ready | 1A.4 | Every profile input affects revision; stale cache fixture misses | Not started |
-| 1D.2 Source lifecycle and vector capability gate | Not started | 1D.1 | Vector remains disabled unless model/backfill/score-parity checks pass | Not started |
+| 1D.1 Cache revision and invalidation | Complete | 1A.4 | Every profile input affects revision; stale cache fixture misses | `fix: version recommendation profile cache inputs` |
+| 1D.2 Source lifecycle and vector capability gate | Ready | 1D.1 | Vector remains disabled unless model/backfill/score-parity checks pass | Not started |
 | 2A.1 Per-user local import state | Not started | Phase 1 | Auth transition and cross-user isolation tests pass | Not started |
 | 2A.2 Import normalization | Not started | 2A.1 | Blank years, watchlist timestamps, and watch-event dedup tests pass | Not started |
 | 2A.3 Atomic snapshot reconciliation | Not started | 2A.2 | Removed rows reconcile; failures cannot report success; revisions invalidate | Not started |
@@ -102,7 +102,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 12. Inactive/lossy vector source | 1D.2, 3.3 | Capability and cached-score parity evidence | Open |
 | 13. Seed weighting discarded | 1B.1 | Weighted-boundary test | Closed |
 | 14. Exploration/MMR direction | 1C.1 | Monotonic diversity test | Closed |
-| 15. Weak profile-cache invalidation | 1D.1 | Input-revision matrix | Open |
+| 15. Weak profile-cache invalidation | 1D.1 | Input-revision matrix | Closed |
 | 16. Global weak-seed blacklist | 1B.1 | Removal plus taste-neutral fixture | Closed |
 | 17. Input failures become generic results | 0C.1 | Degraded-state endpoint test | Closed |
 | 18. Advanced boosts discarded | 0C.2 | Rank-impact test | Closed |
@@ -131,6 +131,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 
 ## Verification Results
 
+- 2026-07-28 - Checkpoint 1D.1 COMPLETE: initial cache-revision RED failed because `recommendationRevision.ts` did not exist, and strengthened production-path coverage remained RED until cache decision/write seams were wired. `tests/unit/recommendationCache.test.ts` PASS, 11/11; focused recommendation suites PASS, 42/42 across 4 files; full `rtk npm run test` PASS, 169/169 across 14 files; `rtk npm run lint`, `rtk npm run typecheck`, `rtk npm run build`, and `rtk git diff --check` PASS. The build retained existing non-fatal dynamic-route and stale browser-data warnings. The diagnostics Playwright slice had 0 failures and 1 skip because authenticated credentials were unavailable. Migration first-run/rerun contracts were checked statically because a local Docker-backed database was unavailable; the migration was not applied remotely. Independent specification and code-quality reviews APPROVED after production-path, bounded quiz-state, and future-timestamp fixes.
 - 2026-07-28 - Checkpoint 1A.4 COMPLETE: `/suggest` and `/genre-suggest` use the authenticated canonical server entry; canonical ordering, niche and mixed-genre retrieval, watchlist-only eligibility, provider-family evidence, cache-first detail completion, and presentation-only watchlist/palate subsets are covered. Legacy `generateSmartCandidates` and unauthenticated `getAggregatedRecommendations` production paths are removed, and `recommendationAggregator.ts` remains outside canonical runtime so vector retrieval stays inactive. Focused tests PASS, 37/37; full `rtk npm run test` PASS, 158/158 across 13 files; `rtk npm run lint` PASS; `rtk npm run typecheck` PASS; `rtk npm run build` PASS with existing non-fatal dynamic-route and stale browser-data warnings; specialist specification and code-quality reviews APPROVED. `tests/recommendation-pages.spec.ts` ran with 0 failures and 1 expected skip because `TEST_USER_EMAIL`/`TEST_USER_PASSWORD` were unavailable.
 - 2026-07-25 - Checkpoint 1A.4 RED: `rtk npm run test -- tests/integration/recommendationAdapters.test.ts` - expected FAIL, 2 failed / 2 passed because `adaptWebRecommendationIntent` did not exist and `src/app/suggest/page.tsx` still directly called `generateSmartCandidates`.
 - 2026-07-25 - Checkpoint 1A.4 GREEN to review: focused canonical suites PASS, 23/23 across 3 files; full `rtk npm run test` PASS, 144/144 across 12 files; `rtk npm run typecheck` PASS; focused `next lint` PASS; and `rtk npm run build` PASS with the existing non-fatal dynamic-route and stale browser-data warnings. The primary `/suggest` generation, replacement, and section-refresh flows now use one authenticated canonical server entry and preserve canonical order. The authenticated Playwright suggest slice and repository-wide removal/proof for the separate legacy `genre-suggest` path remain before checkpoint completion. CodeRabbit review was unavailable because the CLI and installer-required `sh` runtime are absent on this Windows environment.
@@ -273,3 +274,4 @@ None. The approved 2026-07-20 gate exception remains limited to disabled leaked-
 - `fix: validate direct blocked context rows` - checkpoint 1A.2 direct-canonical blocked-source validation
 - `refactor: make recommendation retrieval deterministic` - checkpoint 1B.1 request-scoped RNG, weighted provider boundaries, stable retention, source/intent quotas, and taste-neutral seed handling
 - `fix: distinguish consensus from provider repetition` - checkpoint 1B.2 provider-family evidence, capped repetition strength, lossless attribution, and quota-aware retention
+- `fix: version recommendation profile cache inputs` - checkpoint 1D.1 deterministic input revisioning, versioned cache validity, bounded diagnostics, and legacy-row invalidation

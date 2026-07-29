@@ -15,6 +15,14 @@ import {
 } from "@/lib/recommendationNormalization";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import {
+  createRecommendationRevision,
+  createTasteProfileCacheWritePayload,
+  decideTasteProfileCache,
+  TASTE_PROFILE_METADATA_VERSION,
+  TASTE_PROFILE_MODEL_VERSION,
+  type RecommendationRevisionQuizState,
+} from "@/lib/recommendationRevision";
+import {
   applySourceIntentQuotas,
   createDeterministicRng,
   normalizeProviderFamilies,
@@ -76,6 +84,11 @@ type ExposureRow = {
 
 type BlockedSuggestionRow = {
   tmdb_id: number;
+};
+
+type QuizRevisionQueryRow = {
+  id: number;
+  created_at: string | null;
 };
 
 export const RECOMMENDATION_ENGINE_VERSION = "v1-phase0" as const;
@@ -141,6 +154,8 @@ type CachedTasteProfileRow = {
   profile: TasteProfile;
   film_count: number;
   computed_at: string;
+  input_revision: string | null;
+  profile_model_version: string | null;
 };
 
 type TmdbMovieCacheRow = {
@@ -205,7 +220,6 @@ type CandidateSourceResult = Readonly<{
 }>;
 
 const TMDB_BATCH_SIZE = 200;
-const TASTE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CANDIDATE_PROVIDER_CONCURRENCY = 5;
 /** Minimum positive signal count for explicit feedback to override a pattern-analysis "avoid" classification. */
 const SUBGENRE_POSITIVE_OVERRIDE_MIN = 10;
@@ -774,6 +788,10 @@ function isPositiveSafeInteger(value: unknown): value is number {
   );
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function isNonNegativeFiniteNumber(value: unknown): value is number {
   return isFiniteNumber(value) && value >= 0;
 }
@@ -1304,6 +1322,103 @@ export async function loadUserContext(
   }
 }
 
+function isQuizRevisionQueryRow(
+  value: unknown,
+): value is QuizRevisionQueryRow {
+  if (!isRecord(value)) return false;
+
+  return (
+    isPositiveSafeInteger(value.id) &&
+    (value.created_at === null || typeof value.created_at === "string")
+  );
+}
+
+async function loadQuizStateForRevision(
+  db: ReturnType<typeof getSupabaseAdmin>,
+  userId: string,
+): Promise<RecommendationRevisionQuizState> {
+  try {
+    const { data, error, count } = await db
+      .from("user_quiz_responses")
+      .select("id, created_at", {
+        count: "exact",
+      })
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1);
+
+    if (
+      error ||
+      !Array.isArray(data) ||
+      data.length > 1 ||
+      !data.every(isQuizRevisionQueryRow) ||
+      !isNonNegativeSafeInteger(count)
+    ) {
+      console.error("[ServerEngine] quiz revision source failed", {
+        code: error ? stableErrorIdentity(error) : "INVALID_SOURCE_PAYLOAD",
+      });
+      return { status: "unavailable" };
+    }
+
+    return {
+      status: "ok",
+      responseCount: count,
+      latestResponseId: data[0]?.id ?? null,
+      latestResponseAt: data[0]?.created_at ?? null,
+    };
+  } catch (error) {
+    console.error("[ServerEngine] quiz revision source exception", {
+      code: stableErrorIdentity(error),
+    });
+    return { status: "unavailable" };
+  }
+}
+
+function buildTasteProfileCacheRevision(
+  userContext: UserContext,
+  quizState: RecommendationRevisionQuizState,
+): { inputRevision: string; profileModelVersion: string } {
+  return {
+    inputRevision: createRecommendationRevision({
+      films: userContext.films.map((film) => ({
+        uri: film.uri,
+        title: film.title,
+        year: film.year,
+        rating: film.rating,
+        rewatch: film.rewatch,
+        lastDate: film.last_date,
+        watchCount: film.watch_count,
+        liked: film.liked,
+        onWatchlist: film.on_watchlist,
+      })),
+      mappings: userContext.mappingsArray.map((mapping) => ({
+        uri: mapping.uri,
+        tmdbId: mapping.tmdb_id,
+      })),
+      watchlist: userContext.films
+        .filter((film) => film.on_watchlist === true)
+        .map((film) => ({
+          uri: film.uri,
+          watchlistAddedAt: film.last_date,
+        })),
+      feedback: userContext.feedback.map((row) => ({
+        featureId: row.feature_id,
+        featureName: row.feature_name,
+        featureType: row.feature_type,
+        inferredPreference: row.inferred_preference,
+        positiveCount: row.positive_count,
+        negativeCount: row.negative_count,
+      })),
+      quizState,
+      blockedIds: Array.from(userContext.blockedIds),
+      metadataVersion: TASTE_PROFILE_METADATA_VERSION,
+      profileModelVersion: TASTE_PROFILE_MODEL_VERSION,
+    }),
+    profileModelVersion: TASTE_PROFILE_MODEL_VERSION,
+  };
+}
+
 export async function buildTasteProfileServer(
   userId: string,
   userContext: UserContext,
@@ -1318,10 +1433,17 @@ export async function buildTasteProfileServer(
   try {
     const db = getSupabaseAdmin();
     const currentFilmCount = userContext.films.length;
+    const quizState = await loadQuizStateForRevision(db, userId);
+    const currentRevision = buildTasteProfileCacheRevision(
+      userContext,
+      quizState,
+    );
 
     const { data: cachedRow, error: cacheError } = await db
       .from("user_taste_profile_cache")
-      .select("profile, film_count, computed_at")
+      .select(
+        "profile, film_count, computed_at, input_revision, profile_model_version",
+      )
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -1333,16 +1455,12 @@ export async function buildTasteProfileServer(
     }
 
     const cache = (cachedRow ?? null) as CachedTasteProfileRow | null;
-    if (cache) {
-      const computedAtMs = new Date(cache.computed_at).getTime();
-      const isFresh =
-        !Number.isNaN(computedAtMs) &&
-        Date.now() - computedAtMs < TASTE_CACHE_TTL_MS;
-      const filmCountMatches = cache.film_count === currentFilmCount;
-
-      if (isFresh && filmCountMatches) {
-        return cache.profile;
-      }
+    if (
+      quizState.status === "ok" &&
+      cache &&
+      decideTasteProfileCache(cache, currentRevision) === "hit"
+    ) {
+      return cache.profile;
     }
 
     const relevantTmdbIds = getRelevantTasteTmdbIds(userContext);
@@ -1366,22 +1484,29 @@ export async function buildTasteProfileServer(
       userId,
     });
 
-    const { error: upsertError } = await db
-      .from("user_taste_profile_cache")
-      .upsert(
-        {
-          user_id: userId,
-          profile: tasteProfile,
-          film_count: currentFilmCount,
-          computed_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" },
-      );
+    if (quizState.status === "ok") {
+      const { error: upsertError } = await db
+        .from("user_taste_profile_cache")
+        .upsert(
+          createTasteProfileCacheWritePayload({
+            userId,
+            profile: tasteProfile,
+            filmCount: currentFilmCount,
+            computedAt: new Date().toISOString(),
+            revision: currentRevision,
+          }),
+          { onConflict: "user_id" },
+        );
 
-    if (upsertError) {
-      console.error(
-        "[ServerEngine] taste profile cache upsert error:",
-        upsertError,
+      if (upsertError) {
+        console.error(
+          "[ServerEngine] taste profile cache upsert error:",
+          upsertError,
+        );
+      }
+    } else {
+      console.warn(
+        "[ServerEngine] skipping taste profile cache write because quiz state is unavailable",
       );
     }
 

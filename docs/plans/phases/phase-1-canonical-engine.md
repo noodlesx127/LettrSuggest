@@ -127,7 +127,7 @@
 
 ## Checkpoint 1D.1: Cache Revision and Invalidation
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Create: `src/lib/recommendationRevision.ts`
@@ -136,13 +136,15 @@
 - Modify: `src/lib/serverSuggestionsEngine.ts`
 - Modify: `src/app/api/v1/admin/diagnostics/route.ts`
 
-- [ ] Write tests varying ratings, dates, mappings, watchlist, feedback, quiz state, blocks, metadata version, and profile model version one at a time. Assert each changes the deterministic revision and stale entries miss.
-- [ ] Run tests; expect failure because cache validity uses film count/time only.
-- [ ] Implement stable canonical serialization and hash revision. Add revision/model columns and migration/backfill behavior; compare revisions on reads and expose only bounded revision/version diagnostics.
-- [ ] Run unit tests, migration tests, typecheck, and diagnostics API tests; expect pass.
-- [ ] Commit with `rtk git commit -m "fix: version recommendation profile cache inputs"`.
+- [x] Write tests varying ratings, dates, mappings, watchlist, feedback, quiz state, blocks, metadata version, and profile model version one at a time. Assert each changes the deterministic revision and stale entries miss.
+- [x] Run tests; the RED fixture failed because the revision module did not exist, then production-path coverage failed until cache decision and write seams were wired.
+- [x] Implement stable canonical serialization and hash revision. Add revision/model columns and migration/backfill behavior; compare revisions on reads and expose only bounded revision/version diagnostics.
+- [x] Run unit tests, static migration assertions, typecheck, and the diagnostics API slice; automated gates passed, while the authenticated Playwright test skipped because credentials were unavailable. The migration was not applied remotely.
+- [x] Commit with `rtk git commit -m "fix: version recommendation profile cache inputs"`.
 
 ## Checkpoint 1D.2: Source Lifecycle and Vector Capability Gate
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Modify: `src/lib/recommendationCandidates.ts`

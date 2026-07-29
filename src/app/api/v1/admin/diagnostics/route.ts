@@ -3,6 +3,7 @@ import { getCacheTableStats } from "../../_lib/adminCache";
 import { requireAdmin } from "../../_lib/permissions";
 import { apiSuccess, ApiError } from "../../_lib/responseEnvelope";
 import { supabaseAdmin } from "../../_lib/supabaseAdmin";
+import { getBoundedTasteProfileCacheDiagnostics } from "@/lib/recommendationRevision";
 
 interface ApiKeyUsageRow {
   user_id: string;
@@ -46,7 +47,9 @@ export async function GET(req: Request) {
         getCacheTableStats(),
         supabaseAdmin
           .from("user_taste_profile_cache")
-          .select("user_id, film_count, computed_at")
+          .select(
+            "user_id, film_count, computed_at, input_revision, profile_model_version",
+          )
           .eq("user_id", auth.userId)
           .maybeSingle(),
         supabaseAdmin
@@ -81,6 +84,8 @@ export async function GET(req: Request) {
       }
 
       const tasteProfileRow = tasteProfileResult.data;
+      const tasteProfileCacheDiagnostics =
+        getBoundedTasteProfileCacheDiagnostics(tasteProfileRow);
       const feedbackCount = feedbackCountResult.count;
       const exposureCount = exposureCountResult.count;
       const activeUsers = new Set(
@@ -112,6 +117,9 @@ export async function GET(req: Request) {
               )
             : null,
           taste_profile_film_count: tasteProfileRow?.film_count ?? null,
+          taste_profile_input_revision: tasteProfileCacheDiagnostics.revision,
+          taste_profile_model_version:
+            tasteProfileCacheDiagnostics.modelVersion,
           feedback_signal_count: feedbackCount ?? 0,
           exposure_log_count: exposureCount ?? 0,
         },
