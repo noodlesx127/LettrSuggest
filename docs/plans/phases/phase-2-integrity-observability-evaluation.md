@@ -1,12 +1,12 @@
 # Phase 2: Integrity, Observability, and Evaluation
 
-**Phase state:** Ready  
+**Phase state:** In progress  
 **Entry condition:** Phase 1 complete  
 **Exit condition:** Import inputs are user-safe and atomic, request/exposure diagnostics explain output, and offline/online evaluation gates are operational.
 
 ## Checkpoint 2A.1: Per-User Local Import State
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Create: `src/lib/importStorage.ts`
@@ -14,13 +14,15 @@
 - Modify: `src/lib/importStore.tsx`
 - Modify: `src/lib/db.ts`
 
-- [ ] Write tests for anonymous-to-user, user-A-to-user-B, logout, remount, and stale-local-versus-cloud transitions. Assert keys include authenticated user ID and one user never receives another user's collection.
-- [ ] Run tests; expect failure because `lettr-import-v1` is global and state loads only on mount.
-- [ ] Implement a storage adapter with explicit anonymous/user namespaces and auth-transition reload/clear behavior. Treat authenticated cloud state as authoritative; do not select by row count.
-- [ ] Run tests and typecheck; expect pass.
-- [ ] Commit with `rtk git commit -m "fix: isolate import state by authenticated user"`.
+- [x] Write tests for anonymous-to-user, user-A-to-user-B, logout, remount, and stale-local-versus-cloud transitions. Assert keys include authenticated user ID and one user never receives another user's collection.
+- [x] Run tests; expect failure because `lettr-import-v1` is global and state loads only on mount.
+- [x] Implement a storage adapter with explicit anonymous/user namespaces and auth-transition reload/clear behavior. Treat authenticated cloud state as authoritative; do not select by row count.
+- [x] Run tests and typecheck; expect pass.
+- [x] Commit with `rtk git commit -m "fix: isolate import state by authenticated user"`.
 
 ## Checkpoint 2A.2: Import Normalization
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `tests/unit/importNormalization.test.ts`

@@ -1,160 +1,176 @@
 'use client';
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { FilmEvent } from '@/lib/normalize';
+import {
+  clearLocalFilms,
+  createImportStateController,
+  runForImportIdentity,
+  saveLocalFilms,
+  type ImportIdentity,
+} from '@/lib/importStorage';
 import { supabase } from './supabaseClient';
 
 type ImportState = {
   films: FilmEvent[] | null;
   setFilms: (films: FilmEvent[] | null) => void;
+  setFilmsForIdentity: (userId: string, films: FilmEvent[] | null) => void;
   clear: () => void;
   loading: boolean;
 };
 
 const ImportContext = createContext<ImportState | null>(null);
-const LS_KEY = 'lettr-import-v1';
+
+async function loadCloudFilms(userId: string): Promise<FilmEvent[]> {
+  if (!supabase) throw new Error('Supabase not initialized');
+
+  // Supabase/PostgREST commonly defaults to a max of 1000 rows per request.
+  const pageSize = 250;
+  let from = 0;
+  const allRows: Array<Record<string, unknown>> = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('film_events')
+      .select('*')
+      .eq('user_id', userId)
+      .order('uri', { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error('[ImportStore] Supabase error', {
+        message: error.message,
+        code: error.code,
+        hint: error.hint,
+        details: error.details,
+        pageSize,
+        from,
+      });
+      throw error;
+    }
+
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    allRows.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return allRows.map((row) => ({
+    uri: String(row.uri),
+    title: String(row.title ?? ''),
+    year: row.year == null ? null : Number(row.year),
+    rating: row.rating == null ? undefined : Number(row.rating),
+    rewatch: row.rewatch === true,
+    lastDate: row.last_date == null ? undefined : String(row.last_date),
+    watchCount:
+      row.watch_count == null ? undefined : Number(row.watch_count),
+    liked: row.liked === true,
+    onWatchlist: row.on_watchlist === true,
+    watchlistAddedAt:
+      row.watchlist_added_at == null
+        ? undefined
+        : String(row.watchlist_added_at),
+  }));
+}
 
 export function ImportDataProvider({ children }: { children: ReactNode }) {
   const [films, setFilmsState] = useState<FilmEvent[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const identityRef = useRef<ImportIdentity | undefined>(undefined);
+  const controllerRef = useRef<ReturnType<typeof createImportStateController> | null>(null);
 
-  // Load from Supabase on mount, with localStorage as fallback
-  // IMPORTANT: Use whichever source has MORE data (more complete import)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const loadFilms = async () => {
-      console.log('[ImportStore] Loading films');
-      setLoading(true);
+    let disposed = false;
+    const controller = createImportStateController({
+      loadCloud: loadCloudFilms,
+      onStateChange: (update) => {
+        if (disposed) return;
+        identityRef.current = update.identity;
+        setFilmsState(update.films);
+        setLoading(update.loading);
+      },
+    });
+    controllerRef.current = controller;
 
-      try {
-        // Load from localStorage first
-        let localFilms: FilmEvent[] = [];
-        try {
-          const raw = window.localStorage.getItem(LS_KEY);
-          if (raw) {
-            localFilms = JSON.parse(raw) as FilmEvent[];
-            console.log('[ImportStore] Found localStorage data', { count: localFilms.length });
-          }
-        } catch (e) {
-          console.warn('[ImportStore] Failed to parse localStorage', e);
-        }
-
-        // Try to load from Supabase
-        let supabaseFilms: FilmEvent[] = [];
-        if (supabase) {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const uid = sessionData?.session?.user?.id;
-
-          if (uid) {
-            console.log('[ImportStore] Fetching from Supabase', { uid });
-            // IMPORTANT: Supabase/PostgREST commonly defaults to a max of 1000 rows per request.
-            // Page through all rows so users with >1000 films get complete data.
-            // Reduced page size to prevent query timeouts
-            const pageSize = 250;
-            let from = 0;
-            const allRows: any[] = [];
-            let pagingError: any = null;
-
-            while (true) {
-              const { data, error } = await supabase
-                .from('film_events')
-                .select('*')
-                .eq('user_id', uid)
-                // Ordering by URI is often faster than title if not indexed for text search
-                .order('uri', { ascending: true })
-                .range(from, from + pageSize - 1);
-
-              if (error) {
-                pagingError = error;
-                break;
-              }
-
-              const rows = data ?? [];
-              allRows.push(...rows);
-
-              if (rows.length < pageSize) break;
-              from += pageSize;
-            }
-
-            if (pagingError) {
-              console.error('[ImportStore] Supabase error', {
-                message: pagingError.message,
-                code: pagingError.code,
-                hint: pagingError.hint,
-                details: pagingError.details,
-                pageSize,
-                from
-              });
-            } else if (allRows.length > 0) {
-              console.log('[ImportStore] Loaded from Supabase', { count: allRows.length });
-              supabaseFilms = allRows.map(row => ({
-                uri: row.uri,
-                title: row.title,
-                year: row.year,
-                rating: row.rating ? Number(row.rating) : undefined,
-                rewatch: row.rewatch ?? false,
-                lastDate: row.last_date ?? undefined,
-                watchCount: row.watch_count ?? undefined,
-                liked: row.liked ?? false,
-                onWatchlist: row.on_watchlist ?? false
-              }));
-            }
-          }
-        }
-
-        // Use whichever source has MORE films (indicates more complete data)
-        // This handles the case where enrichment was interrupted and localStorage has the full import
-        if (localFilms.length > supabaseFilms.length) {
-          console.log('[ImportStore] Using localStorage (more complete)', {
-            localStorage: localFilms.length,
-            supabase: supabaseFilms.length
-          });
-          setFilmsState(localFilms);
-        } else if (supabaseFilms.length > 0) {
-          console.log('[ImportStore] Using Supabase', {
-            localStorage: localFilms.length,
-            supabase: supabaseFilms.length
-          });
-          setFilmsState(supabaseFilms);
-          // Update localStorage with Supabase data
-          window.localStorage.setItem(LS_KEY, JSON.stringify(supabaseFilms));
-        } else if (localFilms.length > 0) {
-          console.log('[ImportStore] Using localStorage (only source)', { count: localFilms.length });
-          setFilmsState(localFilms);
-        } else {
-          console.log('[ImportStore] No film data found in either source');
-          setFilmsState(null);
-        }
-      } catch (e) {
-        console.error('[ImportStore] Error loading films', e);
-        // Try localStorage as final fallback
-        try {
-          const raw = window.localStorage.getItem(LS_KEY);
-          if (raw) {
-            const parsed = JSON.parse(raw) as FilmEvent[];
-            setFilmsState(parsed);
-          }
-        } catch { }
-      } finally {
-        setLoading(false);
-      }
+    const loadForIdentity = (nextIdentity: ImportIdentity) => {
+      if (disposed) return;
+      void controller.transition(nextIdentity);
     };
 
-    void loadFilms();
+    let subscription: { unsubscribe: () => void } | undefined;
+    if (supabase) {
+      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        loadForIdentity(session?.user?.id ?? null);
+      });
+      subscription = data.subscription;
+
+      void supabase.auth
+        .getSession()
+        .then(({ data: sessionData, error }) => {
+          if (disposed || controller.getIdentity() !== undefined) return;
+          if (error) {
+            console.error('[ImportStore] Failed to determine auth state', error);
+            identityRef.current = null;
+            setFilmsState(null);
+            setLoading(false);
+            return;
+          }
+          loadForIdentity(sessionData.session?.user?.id ?? null);
+        })
+        .catch((error: unknown) => {
+          if (disposed || controller.getIdentity() !== undefined) return;
+          console.error('[ImportStore] Failed to determine auth state', error);
+          identityRef.current = null;
+          setFilmsState(null);
+          setLoading(false);
+        });
+    } else {
+      loadForIdentity(null);
+    }
+
+    return () => {
+      disposed = true;
+      controller.dispose();
+      if (controllerRef.current === controller) controllerRef.current = null;
+      subscription?.unsubscribe();
+      identityRef.current = undefined;
+    };
   }, []);
 
   const setFilms = (next: FilmEvent[] | null) => {
-    setFilmsState(next);
-    if (typeof window !== 'undefined') {
-      if (next) window.localStorage.setItem(LS_KEY, JSON.stringify(next));
-      else window.localStorage.removeItem(LS_KEY);
+    const identity = identityRef.current;
+    if (identity === undefined) {
+      setFilmsState(next);
+      return;
     }
+    const controller = controllerRef.current;
+    if (controller) {
+      controller.apply(identity, next);
+      return;
+    }
+    setFilmsState(next);
+    if (next) saveLocalFilms(identity, next);
+    else clearLocalFilms(identity);
   };
 
   const clear = () => setFilms(null);
 
+  const setFilmsForIdentity = (userId: string, next: FilmEvent[] | null) => {
+    const controller = controllerRef.current;
+    if (controller) {
+      controller.apply(userId, next);
+      return;
+    }
+    runForImportIdentity(userId, identityRef.current, () => {
+      setFilmsState(next);
+      if (next) saveLocalFilms(userId, next);
+      else clearLocalFilms(userId);
+    });
+  };
+
   return (
-    <ImportContext.Provider value={{ films, setFilms, clear, loading }}>{children}</ImportContext.Provider>
+    <ImportContext.Provider value={{ films, setFilms, setFilmsForIdentity, clear, loading }}>{children}</ImportContext.Provider>
   );
 }
 

@@ -1,11 +1,11 @@
 # Recommendation Remediation Program
 
 **Status:** In progress  
-**Current checkpoint:** 2A.1 - Per-user local import state (Ready)
+**Current checkpoint:** 2A.2 - Import normalization (Ready)
 
-**Next action:** Write failing import-storage tests for auth transitions, user isolation, remounts, and stale local versus authoritative cloud state.
+**Next action:** Start the 2A.2 RED normalization fixtures for nullable years, watchlist timestamps, and watch-event deduplication.
 
-**Safe stopping point:** Phase 1 is Complete; 2A.1 is Ready and canonical production vector retrieval remains disabled.
+**Safe stopping point:** Phase 1 and checkpoint 2A.1 are Complete; 2A.2 is Ready and canonical production vector retrieval remains disabled.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -58,8 +58,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 1A.4 Web canonical adapter and legacy removal | Complete | 1A.3 | Web/v1 parity passes and no competing production orchestration remains | `refactor: converge web on canonical recommendations` |
 | 1D.1 Cache revision and invalidation | Complete | 1A.4 | Every profile input affects revision; stale cache fixture misses | `fix: version recommendation profile cache inputs` |
 | 1D.2 Source lifecycle and vector capability gate | Complete | 1D.1 | Vector remains disabled unless model/backfill/score-parity checks pass | `fix: gate vector recommendations by capability` |
-| 2A.1 Per-user local import state | Ready | Phase 1 | Auth transition and cross-user isolation tests pass | Not started |
-| 2A.2 Import normalization | Not started | 2A.1 | Blank years, watchlist timestamps, and watch-event dedup tests pass | Not started |
+| 2A.1 Per-user local import state | Complete | Phase 1 | Auth transition and cross-user isolation tests pass | `fix: isolate import state by authenticated user` |
+| 2A.2 Import normalization | Ready | 2A.1 | Blank years, watchlist timestamps, and watch-event dedup tests pass | Not started |
 | 2A.3 Atomic snapshot reconciliation | Not started | 2A.2 | Removed rows reconcile; failures cannot report success; revisions invalidate | Not started |
 | 2B.1 Bounded request diagnostics | Not started | 2A.3 | Stage counts/drop reasons/version/seed emitted without private lists or secrets | Not started |
 | 2B.2 Exposure schema and diagnostics integration | Not started | 2B.1 | Pre/post rank and source-share telemetry persists with bounded retention | Not started |
@@ -108,8 +108,8 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 | 18. Advanced boosts discarded | 0C.2 | Rank-impact test | Closed |
 | 19. Case-sensitive negative matching | 0C.2 | Mixed-case test | Closed |
 | 20. Unseeded randomness | 1B.1 | Repeat-run equality test | Closed |
-| Cross-user local import state | 2A.1 | Auth-transition isolation tests | Open |
-| Larger-row-count state selection | 2A.1 | Cloud-authoritative reconciliation test | Open |
+| Cross-user local import state | 2A.1 | Auth-transition isolation tests | Closed |
+| Larger-row-count state selection | 2A.1 | Cloud-authoritative reconciliation test | Closed |
 | Blank year becomes zero | 2A.2 | Null-year normalization test | Open |
 | Watchlist timestamp loss | 2A.2 | Timestamp round-trip test | Open |
 | Duplicate watch events | 2A.2 | Deduplication test | Open |
@@ -131,6 +131,7 @@ Run relevant Playwright slices where endpoint or UI behavior changed. Database p
 
 ## Verification Results
 
+- 2026-07-29 - Checkpoint 2A.1 COMPLETE: RED/GREEN storage contracts now cover anonymous/user namespaces, anonymous-to-user, user-A-to-user-B, logout, remount, cloud-empty authority, cloud-failure fallback, stale state/cache suppression, identity-bound import writes, and explicit import versus pending-load races. IndexedDB uses user-scoped compound keys and clears unowned legacy rows on the v4 upgrade. Focused import/database tests PASS, 16/16; full `rtk npm run test` PASS, 221/221 across 19 files; `rtk npm run lint`, `rtk npm run typecheck`, `rtk npm run build`, and `rtk git diff --check` PASS. Build output retained the existing non-fatal dynamic-route and stale browser-data warnings. No import Playwright spec exists. Independent specification and code-quality reviews APPROVED; residual browser-level Dexie migration and mounted React/Supabase lifecycle integration remain deferred test-depth risks, not acceptance defects. The previously unapplied Phase 1 migrations `version_taste_profile_cache` and `vector_capability_lifecycle` were applied to linked Supabase after correcting pgvector references to the installed `extensions` schema (`3c76ef0`). Remote schema, lifecycle function ACL/security properties, and migration ledger were verified. Security advisors retained only the five pre-existing authenticated/body-authorized `SECURITY DEFINER` warnings plus the dated Free-plan HIBP exception; performance findings remain INFO-only unused-index candidates.
 - 2026-07-29 - Checkpoint 1D.2 COMPLETE and Phase 1 gate: initial `tests/unit/vectorCapability.test.ts` RED failed 9/9 because the capability contract did not exist. Review-driven RED cycles then failed for persistence confirmation, malformed scores, neighbor-window coverage, lifecycle constraints, float32 pgvector round trips, the explicit `productionEnabled` guard, stable pagination, command failure semantics, integer route limits, and atomic backfill ownership. Focused GREEN PASS, 54/54 across `vectorCapability`, `recommendationCandidates`, `recommendationCache`, `generateEmbeddings`, and `vectorSimilarityRoute`; final full `rtk npm run test` PASS, 205/205 across 17 files; `rtk npm run lint`, `rtk npm run typecheck`, `rtk npm run build`, and `rtk git diff --check` PASS. Build output retained the existing non-fatal dynamic-route and stale browser-data warnings. `rtk npx playwright test tests/recommendation-pages.spec.ts` completed with 0 failures and 1 authenticated skip because test credentials were unavailable. The local `rtk npx supabase test db` gate could not connect to `127.0.0.1:54322`; migration behavior is covered by static contract tests and the migration was not applied remotely. Read-only linked production queries recorded 0 compatible embedding rows out of the 5,000-row target and 0 vector-cache rows, which is capability evidence rather than an activation claim. Linked Supabase security advisors reported the same five intentionally authenticated/body-authorized `SECURITY DEFINER` warnings plus the dated Free-plan HIBP exception; performance advisors reported INFO-only unused-index candidates. Independent specification, code-quality, and final holistic reviews APPROVED after atomic service-role-only ownership prevented concurrent backfill runs and non-owner lifecycle writes. Canonical vector retrieval remains inactive and `productionEnabled` remains false.
 - 2026-07-28 - Checkpoint 1D.1 COMPLETE: initial cache-revision RED failed because `recommendationRevision.ts` did not exist, and strengthened production-path coverage remained RED until cache decision/write seams were wired. `tests/unit/recommendationCache.test.ts` PASS, 11/11; focused recommendation suites PASS, 42/42 across 4 files; full `rtk npm run test` PASS, 169/169 across 14 files; `rtk npm run lint`, `rtk npm run typecheck`, `rtk npm run build`, and `rtk git diff --check` PASS. The build retained existing non-fatal dynamic-route and stale browser-data warnings. The diagnostics Playwright slice had 0 failures and 1 skip because authenticated credentials were unavailable. Migration first-run/rerun contracts were checked statically because a local Docker-backed database was unavailable; the migration was not applied remotely. Independent specification and code-quality reviews APPROVED after production-path, bounded quiz-state, and future-timestamp fixes.
 - 2026-07-28 - Checkpoint 1A.4 COMPLETE: `/suggest` and `/genre-suggest` use the authenticated canonical server entry; canonical ordering, niche and mixed-genre retrieval, watchlist-only eligibility, provider-family evidence, cache-first detail completion, and presentation-only watchlist/palate subsets are covered. Legacy `generateSmartCandidates` and unauthenticated `getAggregatedRecommendations` production paths are removed, and `recommendationAggregator.ts` remains outside canonical runtime so vector retrieval stays inactive. Focused tests PASS, 37/37; full `rtk npm run test` PASS, 158/158 across 13 files; `rtk npm run lint` PASS; `rtk npm run typecheck` PASS; `rtk npm run build` PASS with existing non-fatal dynamic-route and stale browser-data warnings; specialist specification and code-quality reviews APPROVED. `tests/recommendation-pages.spec.ts` ran with 0 failures and 1 expected skip because `TEST_USER_EMAIL`/`TEST_USER_PASSWORD` were unavailable.

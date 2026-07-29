@@ -17,6 +17,12 @@ import {
 import { seedPreferencesFromHistory } from "@/lib/quizLearning";
 import { upsertDiaryEvents } from "@/lib/diary";
 import { saveFilmsLocally } from "@/lib/db";
+import {
+  createImportOperationGuard,
+  ImportIdentityChangedError,
+  runGuardedImportWrite,
+  type ImportOperationGuard,
+} from "@/lib/importStorage";
 import type { FilmEvent } from "@/lib/normalize";
 
 // Import step definitions
@@ -147,8 +153,29 @@ function parseCsv(text: string) {
     );
 }
 
+async function captureImportOperation(): Promise<ImportOperationGuard> {
+  const client = supabase;
+  if (!client) throw new Error("Supabase not initialized");
+
+  const { data, error } = await client.auth.getSession();
+  if (error) throw error;
+
+  const userId = data.session?.user?.id;
+  if (!userId) throw new Error("Not signed in");
+
+  return createImportOperationGuard(userId, async () => {
+    const { data: currentSession, error: currentSessionError } =
+      await client.auth.getSession();
+    if (currentSessionError) {
+      console.warn("[Import] Failed to verify auth identity", currentSessionError);
+      return null;
+    }
+    return currentSession.session?.user?.id ?? null;
+  });
+}
+
 export default function ImportPage() {
-  const { films, setFilms } = useImportData();
+  const { films, setFilmsForIdentity } = useImportData();
   const [data, setData] = useState<ParsedData>({});
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -185,91 +212,88 @@ export default function ImportPage() {
     setCompletedSteps((prev) => new Set([...prev, step]));
   }, []);
 
-  const autoSaveToSupabase = useCallback(async (filmList: FilmEvent[]) => {
-    try {
-      if (!supabase) throw new Error("Supabase not initialized");
-      const { data: sessionRes, error: sessErr } =
-        await supabase.auth.getSession();
-      if (sessErr) throw sessErr;
-      const uid = sessionRes.session?.user?.id;
-      if (!uid) throw new Error("Not signed in");
-      setSaving(true);
-      setError(null);
-      setSavedCount(0);
-      const total = filmList.length;
-      setStatus(`Saving to Supabase… 0/${total}`);
-      const batchSize = 500;
-      let saved = 0;
-      for (let i = 0; i < filmList.length; i += batchSize) {
-        const chunk = filmList.slice(i, i + batchSize).map((f) => ({
-          user_id: uid,
-          uri: f.uri,
-          title: f.title,
-          year: f.year ?? null,
-          rating: f.rating ?? null,
-          rewatch: f.rewatch ?? null,
-          last_date: f.lastDate ?? null,
-          watch_count: f.watchCount ?? null,
-          liked: f.liked === true,
-          on_watchlist: f.onWatchlist === true,
-        }));
+  const autoSaveToSupabase = useCallback(
+    async (filmList: FilmEvent[], operation: ImportOperationGuard) => {
+      try {
+        if (!supabase) throw new Error("Supabase not initialized");
+        await operation.assertCurrent();
+        const uid = operation.userId;
+        setSaving(true);
+        setError(null);
+        setSavedCount(0);
+        const total = filmList.length;
+        setStatus(`Saving to Supabase… 0/${total}`);
+        const batchSize = 500;
+        let saved = 0;
+        for (let i = 0; i < filmList.length; i += batchSize) {
+          const chunk = filmList.slice(i, i + batchSize).map((f) => ({
+            user_id: uid,
+            uri: f.uri,
+            title: f.title,
+            year: f.year ?? null,
+            rating: f.rating ?? null,
+            rewatch: f.rewatch ?? null,
+            last_date: f.lastDate ?? null,
+            watch_count: f.watchCount ?? null,
+            liked: f.liked === true,
+            on_watchlist: f.onWatchlist === true,
+          }));
 
-        // Retry logic for schema cache errors
-        let retries = 2;
-        let lastError = null;
-        while (retries >= 0) {
-          const { error } = await supabase
-            .from("film_events")
-            .upsert(chunk, { onConflict: "user_id,uri" });
-          if (!error) {
-            break; // Success
-          }
-
-          lastError = error;
-          // If schema cache error, wait and retry
-          if (
-            error.message?.includes("schema cache") ||
-            error.message?.includes("column")
-          ) {
-            console.warn(
-              `[Import] Schema cache error, retrying... (${retries} retries left)`,
-              error.message,
+          // Retry logic for schema cache errors
+          let retries = 2;
+          let lastError = null;
+          while (retries >= 0) {
+            const { error } = await runGuardedImportWrite(operation, () =>
+              supabase!
+                .from("film_events")
+                .upsert(chunk, { onConflict: "user_id,uri" }),
             );
-            retries--;
-            if (retries >= 0) {
-              await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds
-              continue;
+            if (!error) {
+              break; // Success
             }
+
+            lastError = error;
+            // If schema cache error, wait and retry
+            if (
+              error.message?.includes("schema cache") ||
+              error.message?.includes("column")
+            ) {
+              console.warn(
+                `[Import] Schema cache error, retrying... (${retries} retries left)`,
+                error.message,
+              );
+              retries--;
+              if (retries >= 0) {
+                await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds
+                continue;
+              }
+            }
+            throw error; // Non-retryable error
           }
-          throw error; // Non-retryable error
+
+          if (lastError) throw lastError;
+
+          saved += chunk.length;
+          setSavedCount(saved);
+          setStatus(`Saving to Supabase… ${saved}/${total}`);
         }
-
-        if (lastError) throw lastError;
-
-        saved += chunk.length;
-        setSavedCount(saved);
-        setStatus(`Saving to Supabase… ${saved}/${total}`);
+        setStatus(`Saved ${saved} films to Supabase`);
+      } catch (e: any) {
+        setError(e?.message ?? "Failed to save to Supabase");
+        if (e instanceof ImportIdentityChangedError) throw e;
+      } finally {
+        setSaving(false);
       }
-      setStatus(`Saved ${saved} films to Supabase`);
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to save to Supabase");
-    } finally {
-      setSaving(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   const autoMapBatch = useCallback(
-    async (filmList: FilmEvent[]) => {
+    async (filmList: FilmEvent[], operation: ImportOperationGuard) => {
       try {
+        await operation.assertCurrent();
         setAutoMappingActive(true);
-        const { data: sessionRes } = supabase
-          ? await supabase.auth.getSession()
-          : ({ data: { session: null } } as any);
-        const uid = sessionRes?.session?.user?.id;
-        if (!uid) {
-          setAutoMappingActive(false);
-          return;
-        }
+        const uid = operation.userId;
 
         // First, get existing mappings to skip already-mapped films (unless force re-enrich)
         let existingMappings = new Set<string>();
@@ -377,7 +401,7 @@ export default function ImportPage() {
         const skippedFilms: UnmappedFilm[] = []; // Track films that couldn't be mapped
 
         // Store userId for modal
-        setUserId(uid);
+        setUserId(operation.userId);
 
         setMappingProgress({ current: 0, total: toTry.length });
         setStatus(
@@ -419,7 +443,9 @@ export default function ImportPage() {
 
                 if (enrichedMovie) {
                   // Movie was found and enriched - create mapping
-                  await upsertFilmMapping(uid, f.uri, enrichedMovie.id);
+                  await runGuardedImportWrite(operation, () =>
+                    upsertFilmMapping(operation.userId, f.uri, enrichedMovie.id),
+                  );
                   enriched += 1;
                   success = true;
                   setMappingProgress({
@@ -456,6 +482,7 @@ export default function ImportPage() {
                 }
                 break; // Success (enriched or no results), exit retry loop
               } catch (e: any) {
+                if (e instanceof ImportIdentityChangedError) throw e;
                 retries--;
                 if (retries > 0) {
                   console.warn(
@@ -489,6 +516,7 @@ export default function ImportPage() {
           }
         };
         await Promise.all(Array.from({ length: concurrency }, () => worker()));
+        await operation.assertCurrent();
 
         // Store unmapped films for manual mapping
         if (skippedFilms.length > 0) {
@@ -508,6 +536,7 @@ export default function ImportPage() {
         console.error("[Import] autoMapBatch error", e);
         setAutoMappingActive(false);
         setMappingProgress(null);
+        if (e instanceof ImportIdentityChangedError) throw e;
       }
     },
     [forceReenrich],
@@ -522,6 +551,17 @@ export default function ImportPage() {
       setCurrentStep("upload");
       setCompletedSteps(new Set());
       setStatus("Processing files…");
+
+      let operation: ImportOperationGuard;
+      try {
+        operation = await captureImportOperation();
+      } catch (e: any) {
+        console.error("[Import] Could not start import", e);
+        setError(e?.message ?? "Import failed");
+        setStatus("");
+        return;
+      }
+
       const next: ParsedData = {};
 
       // Mark upload complete, start parse
@@ -652,18 +692,22 @@ export default function ImportPage() {
           distinctFilms: norm.distinctFilms,
         });
         setDistinct(norm.distinctFilms);
-        setFilms(norm.films);
+        await runGuardedImportWrite(operation, () =>
+          setFilmsForIdentity(operation.userId, norm.films),
+        );
 
         // Parse complete, move to save
         completeStep("parse");
         setCurrentStep("save");
 
         // Persist locally (IndexedDB)
-        await saveFilmsLocally(norm.films);
+        await runGuardedImportWrite(operation, () =>
+          saveFilmsLocally(operation.userId, norm.films),
+        );
         console.log("[Import] films saved locally");
         setStatus("Saving to cloud…");
         console.log("[Import] autoSaveToSupabase start");
-        await autoSaveToSupabase(norm.films);
+        await autoSaveToSupabase(norm.films, operation);
         console.log("[Import] autoSaveToSupabase done");
 
         // Upsert diary events for accurate watch counts if view/table exists
@@ -672,29 +716,26 @@ export default function ImportPage() {
             console.log("[Import] upserting diary events", {
               count: next.diary.length,
             });
-            const { data: sessionRes } = supabase
-              ? await supabase.auth.getSession()
-              : ({ data: { session: null } } as any);
-            const uid = sessionRes?.session?.user?.id;
-            if (uid) {
-              const diaryRows = (next.diary || [])
-                .map((r) => ({
-                  user_id: uid,
-                  uri: r["Letterboxd URI"] || "",
-                  watched_date: r["Watched Date"] || r["Date"] || null,
-                  rating: r["Rating"] ? Number(r["Rating"]) : null,
-                  rewatch: (r["Rewatch"] || "").toLowerCase() === "yes",
-                }))
-                .filter((d) => d.uri);
-              console.log("[Import] diary rows prepared", {
-                count: diaryRows.length,
-              });
-              await upsertDiaryEvents(diaryRows);
-              console.log("[Import] upsertDiaryEvents done");
-            }
+            const diaryRows = (next.diary || [])
+              .map((r) => ({
+                user_id: operation.userId,
+                uri: r["Letterboxd URI"] || "",
+                watched_date: r["Watched Date"] || r["Date"] || null,
+                rating: r["Rating"] ? Number(r["Rating"]) : null,
+                rewatch: (r["Rewatch"] || "").toLowerCase() === "yes",
+              }))
+              .filter((d) => d.uri);
+            console.log("[Import] diary rows prepared", {
+              count: diaryRows.length,
+            });
+            await runGuardedImportWrite(operation, () =>
+              upsertDiaryEvents(diaryRows),
+            );
+            console.log("[Import] upsertDiaryEvents done");
           }
         } catch (diaryErr) {
           console.warn("[Import] diary upsert failed (non-fatal):", diaryErr);
+          if (diaryErr instanceof ImportIdentityChangedError) throw diaryErr;
         }
 
         // Save complete, move to enrich
@@ -705,7 +746,7 @@ export default function ImportPage() {
         console.log("[Import] autoMapBatch start", {
           filmCount: norm.films.length,
         });
-        await autoMapBatch(norm.films);
+        await autoMapBatch(norm.films, operation);
         console.log("[Import] autoMapBatch complete");
 
         // Enrich complete, move to learn
@@ -715,11 +756,8 @@ export default function ImportPage() {
         // Phase 5+: Batch learn from historical ratings
         console.log("[Import] Starting batch learning from historical data");
         setStatus("Analyzing your taste preferences…");
-        const { data: sessionRes2 } = supabase
-          ? await supabase.auth.getSession()
-          : ({ data: { session: null } } as any);
-        const uid2 = sessionRes2?.session?.user?.id;
-        if (uid2) {
+        await operation.assertCurrent();
+        if (supabase) {
           try {
             // Get TMDB mappings for seeding (paginated - PostgREST defaults to 1000 max per request)
             const pageSize = 1000;
@@ -730,7 +768,7 @@ export default function ImportPage() {
               const { data: pageData, error } = await supabase!
                 .from("film_tmdb_map")
                 .select("uri, tmdb_id")
-                .eq("user_id", uid2)
+                .eq("user_id", operation.userId)
                 .range(from, from + pageSize - 1);
 
               if (error) {
@@ -768,20 +806,25 @@ export default function ImportPage() {
 
             // Seed feature preferences from watch history
             setStatus("Learning your preferences…");
-            const seedResult = await seedPreferencesFromHistory(
-              uid2,
-              filmsForSeeding,
-              (current, total) => {
-                setStatus(`Learning preferences… ${current}/${total}`);
-              },
+            const seedResult = await runGuardedImportWrite(operation, () =>
+              seedPreferencesFromHistory(
+                operation.userId,
+                filmsForSeeding,
+                (current, total) => {
+                  setStatus(`Learning preferences… ${current}/${total}`);
+                },
+              ),
             );
             console.log("[Import] Feature seeding complete", seedResult);
 
             // Also run existing learning for genre transitions
-            await learnFromHistoricalData(uid2);
+            await runGuardedImportWrite(operation, () =>
+              learnFromHistoricalData(operation.userId),
+            );
             console.log("[Import] Batch learning complete");
           } catch (e) {
             console.error("[Import] Batch learning failed (non-critical):", e);
+            if (e instanceof ImportIdentityChangedError) throw e;
           }
         }
 
@@ -795,10 +838,12 @@ export default function ImportPage() {
         console.error("[Import] error in handleFiles normalization/save", e);
         setError(e?.message ?? "Import failed");
         setStatus("");
+      } finally {
+        operation.cancel();
       }
       console.log("[Import] handleFiles end");
     },
-    [setFilms, autoSaveToSupabase, autoMapBatch, completeStep],
+    [setFilmsForIdentity, autoSaveToSupabase, autoMapBatch, completeStep],
   );
 
   const summary = useMemo(() => {
