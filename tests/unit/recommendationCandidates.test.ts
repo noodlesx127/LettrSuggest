@@ -5,19 +5,7 @@ import {
   type TasteProfile,
   type UserContext,
 } from "@/lib/serverSuggestionsEngine";
-import { discoverMoviesByProfile, generateSmartCandidates } from "@/lib/trending";
-
-const getAggregatedRecommendations = vi.fn(
-  async (_params: {
-    seedMovies: Array<{ tmdbId: number; weight?: number }>;
-    requestSeed?: string;
-  }) =>
-    [],
-);
-
-vi.mock("@/app/actions/recommendations", () => ({
-  getAggregatedRecommendations,
-}));
+import { discoverMoviesByProfile } from "@/lib/trending";
 
 type ProviderCall = {
   path: string;
@@ -52,19 +40,6 @@ const tasteProfile = {
   topGenres: [],
 } as unknown as TasteProfile;
 
-const smartProfile = {
-  highlyRatedIds: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120],
-  watchlistIds: [201, 202, 203, 204, 205],
-  savedSuggestionIds: [301],
-  topGenres: [],
-  topKeywords: [],
-  topDirectors: [],
-  topActors: [],
-  topStudios: [],
-  topDecades: [],
-  tmdbDetailsMap: new Map([[301, { title: "Saved intent" }]]),
-};
-
 function createProvider(calls: ProviderCall[]) {
   return async <T>(
     path: string,
@@ -81,32 +56,6 @@ function createProvider(calls: ProviderCall[]) {
 }
 
 describe("deterministic recommendation retrieval", () => {
-  it("keeps weighted seeds at the provider boundary", async () => {
-    getAggregatedRecommendations.mockClear();
-
-    await (generateSmartCandidates as unknown as (
-      profile: typeof smartProfile,
-      options: { requestSeed: string },
-    ) => Promise<unknown>)(smartProfile, {
-      requestSeed: "weighted-provider-boundary",
-    });
-
-    const seedMovies = getAggregatedRecommendations.mock.calls[0]?.[0]
-      ?.seedMovies as Array<{ tmdbId: number; weight?: number }>;
-
-    expect(seedMovies).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ tmdbId: 301, weight: 1.5 }),
-      ]),
-    );
-    expect(seedMovies.every((seed) => typeof seed.weight === "number")).toBe(
-      true,
-    );
-    expect(getAggregatedRecommendations.mock.calls[0]?.[0]?.requestSeed).toBe(
-      "weighted-provider-boundary",
-    );
-  });
-
   it("uses the request seed instead of ambient randomness for provider pages", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -258,5 +207,61 @@ describe("deterministic recommendation retrieval", () => {
         .filter((call) => call.path.endsWith("/recommendations"))
         .map((call) => Number(call.path.split("/")[2])),
     ).toContain(9352);
+  });
+
+  it("allows watchlist-only mapped films into candidates without re-recommending watched films", async () => {
+    const watchlistOnlyContext: UserContext = {
+      ...emptyContext,
+      films: [
+        {
+          uri: "letterboxd://film/watchlist-only",
+          title: "Watchlist Only",
+          year: 2024,
+          rating: null,
+          rewatch: false,
+          last_date: null,
+          watch_count: null,
+          liked: false,
+          on_watchlist: true,
+        },
+        {
+          uri: "letterboxd://film/watched",
+          title: "Watched",
+          year: 2023,
+          rating: 4,
+          rewatch: false,
+          last_date: "2026-01-03",
+          watch_count: 1,
+          liked: false,
+          on_watchlist: false,
+        },
+      ],
+      mappings: new Map([
+        ["letterboxd://film/watchlist-only", 10],
+        ["letterboxd://film/watched", 20],
+      ]),
+    };
+    const calls: ProviderCall[] = [];
+    const provider = async <T>(
+      path: string,
+      params?: Record<string, string | number | undefined>,
+    ): Promise<T> => {
+      calls.push({ path, params });
+      if (path.startsWith("/trending/movie/")) {
+        return { results: [{ id: 10 }, { id: 20 }] } as T;
+      }
+      return { results: [] } as T;
+    };
+
+    const result = await generateServerCandidates(
+      "watchlist-candidate-user",
+      watchlistOnlyContext,
+      tasteProfile,
+      [],
+      { requestSeed: "watchlist-candidate", provider },
+    );
+
+    expect(result.candidateIds).toContain(10);
+    expect(result.candidateIds).not.toContain(20);
   });
 });

@@ -143,6 +143,8 @@ export type RecommendationCandidate = Readonly<{
   score: number;
   evidence: CandidateEvidence;
   attribution: ScoreAttribution;
+  reasons?: readonly string[];
+  explanation?: string;
 }>;
 
 export type RecommendationResult = Readonly<{

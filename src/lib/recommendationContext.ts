@@ -7,6 +7,7 @@ import {
   type SourceHealth,
 } from "@/lib/recommendationTypes";
 import {
+  hasGenuineWatchEvidence,
   normalizeFilmTuples,
   type NormalizedFilmTuple,
 } from "@/lib/recommendationNormalization";
@@ -40,6 +41,9 @@ export type RecommendationFilmRecord = RecordValue & {
   rewatch?: boolean | null;
   liked?: boolean | null;
   on_watchlist?: boolean | null;
+  watch_count?: number | null;
+  watchCount?: number | null;
+  watched?: boolean | null;
   last_date?: string | null;
   lastDate?: string | null;
 };
@@ -993,7 +997,18 @@ export async function loadRecommendationContext(
       mode,
       hasPersonalizedEvidence,
       watchedTmdbIds: new Set(
-        orderedTuples.map((tuple) => tuple.tmdbId),
+        orderedTuples
+          .filter((tuple) =>
+            hasGenuineWatchEvidence({
+              watchDate: tuple.watchDate,
+              rating: tuple.rating,
+              liked: tuple.film.liked,
+              rewatch: tuple.film.rewatch,
+              watched: tuple.film.watched,
+              watchCount: tuple.film.watch_count ?? tuple.film.watchCount,
+            }),
+          )
+          .map((tuple) => tuple.tmdbId),
       ),
       blockedTmdbIds,
       inputRevisionMaterial: revisionMaterial,

@@ -1,6 +1,6 @@
 "use client";
 import Image from "next/image";
-import { refreshTmdbCacheForIdsAction } from "@/app/actions/enrichment";
+import { generateCanonicalWebRecommendations } from "@/app/actions/recommendations";
 import AuthGate from "@/components/AuthGate";
 import MovieCard, { FeatureEvidenceContext } from "@/components/MovieCard";
 import ProgressIndicator from "@/components/ProgressIndicator";
@@ -10,25 +10,18 @@ import { supabase } from "@/lib/supabaseClient";
 import {
   getFilmMappings,
   getBulkTmdbDetails,
-  suggestByOverlap,
   buildTasteProfile,
   findIncompleteCollections,
-  discoverFromLists,
   getBlockedSuggestions,
   blockSuggestion,
   unblockSuggestion,
   addFeedback,
-  getFeedback,
-  getAvoidedFeatures,
   getMovieFeaturesForPopup,
   boostExplicitFeedback,
-  fetchSourceReliability,
   recordPairwiseEvent,
   applyPairwiseFeatureLearning,
   getFeatureEvidenceSummary,
   neutralizeFeedback,
-  logSuggestionExposure,
-  getRecentExposures,
   findPairwiseCandidate,
   makePairId,
   reasonTypeTags,
@@ -36,34 +29,21 @@ import {
   type FeatureEvidenceSummary,
   type FeatureType,
 } from "@/lib/enrich";
-import {
-  fetchTrendingIds,
-  fetchSimilarMovieIds,
-  generateSmartCandidates,
-  getDecadeCandidates,
-  getSmartDiscoveryCandidates,
-  generateExploratoryPicks,
-  getWeightedSeedIds,
-  type FilmForSeeding,
-} from "@/lib/trending";
 import { usePostersSWR } from "@/lib/usePostersSWR";
 import {
   getCurrentSeasonalGenres,
   getSeasonalRecommendationConfig,
 } from "@/lib/genreEnhancement";
 import { saveMovie, getSavedMovies } from "@/lib/lists";
-import { calibrateRecommendations } from "@/lib/calibration";
+import {
+  selectCanonicalPalateCleanser,
+  selectCanonicalWatchlistPicks,
+} from "@/lib/recommendationAdapters";
 import {
   detectGenreFatigue,
-  generatePalateCleanser,
   type FatigueDetection,
 } from "@/lib/counterProgramming";
-import {
-  updateExplorationStats,
-  getAdaptiveExplorationRate,
-  getGenreTransitions,
-  handleNegativeFeedback,
-} from "@/lib/adaptiveLearning";
+import { handleNegativeFeedback } from "@/lib/adaptiveLearning";
 import UserQuiz from "@/components/UserQuiz";
 import type { FilmEvent } from "@/lib/normalize";
 
@@ -109,6 +89,8 @@ type MovieItem = {
   // Additional metadata for new sections
   runtime?: number; // in minutes
   original_language?: string;
+  critic_score?: number;
+  explanation?: string;
   spoken_languages?: string[];
   production_countries?: string[];
   streamingSources?: Array<{
@@ -118,6 +100,12 @@ type MovieItem = {
   }>;
   keyword_names?: string[]; // NEW: Added for exact subgenre matching
 };
+
+async function requestCanonicalWebItems(
+  params: Parameters<typeof generateCanonicalWebRecommendations>[0],
+) {
+  return generateCanonicalWebRecommendations(params);
+}
 
 type CategorizedSuggestions = {
   watchlistPicks: MovieItem[]; // NEW: Picks from user's Letterboxd watchlist
@@ -260,6 +248,7 @@ export default function SuggestPage() {
   const [watchlistTmdbIds, setWatchlistTmdbIds] = useState<Set<number>>(
     new Set(),
   );
+  const watchlistIdsHydrationRef = useRef<Promise<Set<number>> | null>(null);
   const [excludeGenres, setExcludeGenres] = useState<string>("");
   const [yearMin, setYearMin] = useState<string>("");
   const [yearMax, setYearMax] = useState<string>("");
@@ -665,8 +654,8 @@ export default function SuggestPage() {
         return titleMatch || genreMatch || reasonsMatch;
       };
 
-      // Sort all by score first
-      const sorted = [...items].sort((a, b) => b.score - a.score);
+      // Preserve canonical order while partitioning items into UI sections.
+      const sorted = [...items];
 
       // Track used IDs to prevent duplicates across sections
       const usedIds = new Set<number>();
@@ -875,13 +864,6 @@ export default function SuggestPage() {
         SECTION_ITEM_LIMIT * 2,
       ); // Increased to catch more
 
-      // Helper to sort by rating
-      const sortByRating = (items: MovieItem[]) => {
-        return [...items].sort(
-          (a, b) => (b.vote_average || 0) - (a.vote_average || 0),
-        );
-      };
-
       if (process.env.NODE_ENV === "development") {
         if (process.env.NODE_ENV === "development") {
           console.log("[Suggest] Categorization complete", {
@@ -915,32 +897,32 @@ export default function SuggestPage() {
 
       return {
         watchlistPicks: [], // Will be populated separately from watchlistPicks state
-        seasonalPicks: sortByRating(seasonalPicks),
+        seasonalPicks,
         seasonalConfig,
-        perfectMatches: sortByRating(perfectMatches),
-        recentWatchMatches: sortByRating(recentWatchMatches),
-        studioMatches: sortByRating(studioMatches),
-        directorMatches: sortByRating(directorMatches),
-        actorMatches: sortByRating(actorMatches),
-        genreMatches: sortByRating(genreMatches),
-        documentaries: sortByRating(documentaries),
-        decadeMatches: sortByRating(decadeMatches),
-        smartDiscovery: sortByRating(smartDiscovery),
-        hiddenGems: sortByRating(hiddenGems),
-        cultClassics: sortByRating(cultClassics),
-        crowdPleasers: sortByRating(crowdPleasers),
-        newReleases: sortByRating(newReleases),
-        recentClassics: sortByRating(recentClassics),
-        deepCuts: sortByRating(deepCuts),
-        fromCollections: sortByRating(fromCollections),
-        multiSourceConsensus: sortByRating(multiSourceConsensus),
-        internationalCinema: sortByRating(internationalCinema),
-        animationPicks: sortByRating(animationPicks),
-        quickWatches: sortByRating(quickWatches),
-        epicFilms: sortByRating(epicFilms),
-        criticallyAcclaimed: sortByRating(criticallyAcclaimed),
-        nicheMatches: sortByRating(nicheMatches),
-        moreRecommendations: sortByRating(moreRecommendations),
+        perfectMatches,
+        recentWatchMatches,
+        studioMatches,
+        directorMatches,
+        actorMatches,
+        genreMatches,
+        documentaries,
+        decadeMatches,
+        smartDiscovery,
+        hiddenGems,
+        cultClassics,
+        crowdPleasers,
+        newReleases,
+        recentClassics,
+        deepCuts,
+        fromCollections,
+        multiSourceConsensus,
+        internationalCinema,
+        animationPicks,
+        quickWatches,
+        epicFilms,
+        criticallyAcclaimed,
+        nicheMatches,
+        moreRecommendations,
       };
     },
     [topDecade],
@@ -1278,6 +1260,56 @@ export default function SuggestPage() {
     [films, fallbackFilms],
   );
 
+  // Presentation-only hydration for headers, watchlist badges, and section text.
+  useEffect(() => {
+    let active = true;
+    const loadPresentationState = async (): Promise<Set<number>> => {
+      if (!uid || sourceFilms.length === 0) return new Set<number>();
+
+      try {
+        const mappings = await getFilmMappings(
+          uid,
+          sourceFilms.map((film) => film.uri),
+        );
+        if (!active) return new Set<number>();
+
+        const watchlistIds = new Set<number>();
+        const watchlistFilms = sourceFilms.filter((film) => {
+          const tmdbId = mappings.get(film.uri);
+          if (film.onWatchlist && tmdbId) watchlistIds.add(tmdbId);
+          return Boolean(film.onWatchlist && tmdbId);
+        });
+        setMappingCoverage({ mapped: mappings.size, total: sourceFilms.length });
+        setWatchlistTmdbIds(watchlistIds);
+
+        const details = await getBulkTmdbDetails(Array.from(mappings.values()));
+        const profile = await buildTasteProfile({
+          films: sourceFilms,
+          mappings,
+          topN: 40,
+          tmdbDetails: details,
+          watchlistFilms,
+          userId: uid,
+        });
+        if (!active) return new Set<number>();
+
+        setTasteProfile(profile);
+        setTopDecade(profile.topDecades[0]?.decade ?? null);
+        return watchlistIds;
+      } catch (error) {
+        console.error("[Suggest] Failed to load presentation profile", error);
+        return new Set<number>();
+      }
+    };
+
+    const watchlistIdsPromise = loadPresentationState();
+    watchlistIdsHydrationRef.current = watchlistIdsPromise;
+    void watchlistIdsPromise;
+    return () => {
+      active = false;
+    };
+  }, [sourceFilms, uid]);
+
   const recentFilmTitle = useMemo(() => {
     if (!sourceFilms.length) return undefined;
     const recentFilm = sourceFilms
@@ -1396,1116 +1428,112 @@ export default function SuggestPage() {
 
   const runSuggest = useCallback(async () => {
     try {
-      // Generate new cache key to bust browser and API caches
-      const freshCacheKey = Date.now();
-      setCacheKey(freshCacheKey);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] runSuggest start", {
-            uid,
-            hasSourceFilms: sourceFilms.length,
-            excludeGenres,
-            yearMin,
-            yearMax,
-            mode,
-            cacheKey: freshCacheKey,
-          });
-        }
-      }
-
-      // Clear previous state completely
+      setCacheKey(Date.now());
       setItems(null);
       setError(null);
       setNoCandidatesReason(null);
       setLoading(true);
-      setProgress({
-        current: 0,
-        total: 7,
-        stage: "init",
-        details: "Preparing recommendation engine...",
-      });
-
-      // Reset pairwise state when refreshing suggestions
       setPairwisePair(null);
       setPairwiseCount(0);
       setPairHistory(new Set());
-      if (!supabase) throw new Error("Supabase not initialized");
-      if (!uid) throw new Error("Not signed in");
-      // Apply quick filters to source films
-      const gExclude = new Set(
-        excludeGenres
-          .split(",")
-          .map((s) => s.trim().toLowerCase())
-          .filter(Boolean),
-      );
-      const yMin = Number(yearMin) || undefined;
-      const yMax = Number(yearMax) || undefined;
-      const filteredFilms = sourceFilms.filter((f) => {
-        if (yMin && f.year != null && f.year < yMin) return false;
-        if (yMax && f.year != null && f.year > yMax) return false;
-        return true; // genre filter will apply on candidates via overlap features
-      });
-      const uris = filteredFilms.map((f) => f.uri);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] fetching mappings for", uris.length, "films");
-        }
-      }
+      setWatchlistPicks([]);
+      setPalateCleanser([]);
+      setFatigueDetection(null);
       setProgress({
         current: 1,
-        total: 7,
+        total: 3,
         stage: "library",
-        details: `Loading ${uris.length} films from your Letterboxd...`,
+        details: "Authenticating your recommendation request...",
       });
-      const mappings = await getFilmMappings(uid, uris);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] mappings loaded", {
-            mappingCount: mappings.size,
-            totalFilms: uris.length,
-          });
-        }
-      }
 
-      // Track mapping coverage for UI feedback
-      setMappingCoverage({ mapped: mappings.size, total: uris.length });
+      if (!supabase || !uid) throw new Error("Not signed in");
+      const { data, error } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (error || !accessToken) throw new Error("Authentication required");
 
-      // Build watched TMDB id set
-      const watchedIds = new Set<number>();
-      // Build watchlist TMDB id set
-      const watchlistIds = new Set<number>();
-
-      for (const f of filteredFilms) {
-        const mid = mappings.get(f.uri);
-        if (mid) {
-          watchedIds.add(mid);
-          if (f.onWatchlist) {
-            watchlistIds.add(mid);
-          }
-        }
-      }
-
-      setWatchlistTmdbIds(watchlistIds);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] watchlist IDs", { count: watchlistIds.size });
-        }
-      }
-
-      // Pre-fetch all TMDB details from cache for better taste profile analysis
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] Pre-fetching TMDB details from cache");
-        }
-      }
-      const allMappedIds = Array.from(mappings.values());
       setProgress({
         current: 2,
-        total: 7,
-        stage: "cache",
-        details: `Loading metadata for ${allMappedIds.length} movies...`,
-      });
-      const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
-      const cacheHitRate = (
-        (tmdbDetailsMap.size / allMappedIds.length) *
-        100
-      ).toFixed(1);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] TMDB details loaded from cache", {
-            requested: allMappedIds.length,
-            found: tmdbDetailsMap.size,
-            coverage: `${cacheHitRate}%`,
-          });
-        }
-      }
-      setProgress({
-        current: 2,
-        total: 7,
-        stage: "cache",
-        details: `Found ${tmdbDetailsMap.size}/${allMappedIds.length} movies in cache (${cacheHitRate}%)`,
-      });
-
-      // Build taste profile with IDs for smarter discovery
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] Building taste profile for smart discovery");
-        }
-      }
-      setProgress({
-        current: 3,
-        total: 7,
-        stage: "taste",
-        details: "Learning from your ratings and preferences...",
-      });
-
-      // Fetch negative feedback to learn from dislikes
-      let negativeFeedbackIds: number[] = [];
-      try {
-        const feedbackMap = await getFeedback(uid);
-        negativeFeedbackIds = Array.from(feedbackMap.entries())
-          .filter(
-            (entry): entry is [number, "negative" | "positive"] =>
-              entry[1] === "negative",
-          )
-          .map((entry) => entry[0]);
-        if (process.env.NODE_ENV === "development") {
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Suggest] Found negative feedback", {
-              count: negativeFeedbackIds.length,
-            });
-          }
-        }
-      } catch (e) {
-        console.error("[Suggest] Failed to fetch feedback", e);
-      }
-
-      // Fetch feature-level feedback (learned from "Not Interested" / "More Like This" clicks)
-      // This identifies specific actors, keywords, franchises user has shown aversion/preference to
-      let featureFeedback = null;
-      try {
-        featureFeedback = await getAvoidedFeatures(uid);
-        if (process.env.NODE_ENV === "development") {
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Suggest] Loaded feature feedback", {
-              avoidActors: featureFeedback.avoidActors
-                .map((a) => a.name)
-                .slice(0, 3),
-              avoidKeywords: featureFeedback.avoidKeywords
-                .map((k) => k.name)
-                .slice(0, 5),
-              avoidFranchises: featureFeedback.avoidFranchises.map(
-                (f) => f.name,
-              ),
-              preferActors: featureFeedback.preferActors
-                .map((a) => a.name)
-                .slice(0, 3),
-              preferKeywords: featureFeedback.preferKeywords
-                .map((k) => k.name)
-                .slice(0, 5),
-            });
-          }
-        }
-      } catch (e) {
-        console.error("[Suggest] Failed to fetch feature feedback", e);
-      }
-
-      // Get watchlist films for intent signals
-      const watchlistFilms = sourceFilms.filter(
-        (f) => f.onWatchlist && mappings.has(f.uri),
-      );
-      const watchlistEntries = watchlistFilms.map((f) => ({
-        tmdbId: mappings.get(f.uri)!,
-        addedAt: f.watchlistAddedAt ?? null,
-      }));
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            "[Suggest] Watchlist films for taste profile:",
-            watchlistFilms.length,
-          );
-        }
-      }
-
-      setProgress({
-        current: 3,
-        total: 7,
-        stage: "taste",
-        details: `Analyzing ${filteredFilms.length} films from your library...`,
-      });
-      const tasteProfile = await buildTasteProfile({
-        films: filteredFilms,
-        mappings,
-        topN: 40, // Increased from 10 to capture more subgenre variety
-        negativeFeedbackIds,
-        tmdbDetails: tmdbDetailsMap, // Pass pre-fetched details to analyze ALL movies, not just 100
-        watchlistFilms, // Pass watchlist for intent signals
-        userId: uid ?? undefined, // Pass user ID for explicit preference fetching
-      });
-      setTasteProfile(tasteProfile);
-
-      // Update progress with taste profile results
-      const topGenresPreview = tasteProfile.topGenres
-        .slice(0, 3)
-        .map((g) => g.name)
-        .join(", ");
-      setProgress({
-        current: 3,
-        total: 7,
-        stage: "taste",
-        details: `Found preferences: ${topGenresPreview}${tasteProfile.topGenres.length > 3 ? "..." : ""}`,
-      });
-
-      // === GENERATE WATCHLIST PICKS ===
-      // Get unwatched watchlist films (onWatchlist=true but not watched)
-      const unwatchedWatchlist = sourceFilms.filter(
-        (f) =>
-          f.onWatchlist &&
-          (!f.watchCount || f.watchCount === 0) &&
-          mappings.has(f.uri),
-      );
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            "[Suggest] Unwatched watchlist films:",
-            unwatchedWatchlist.length,
-          );
-        }
-      }
-
-      // Get recent watches for similarity scoring (last 30 days)
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const recentWatches = filteredFilms
-        .filter(
-          (f) =>
-            f.lastDate &&
-            new Date(f.lastDate) >= thirtyDaysAgo &&
-            (f.rating ?? 0) >= 3,
-        )
-        .sort(
-          (a, b) =>
-            new Date(b.lastDate!).getTime() - new Date(a.lastDate!).getTime(),
-        )
-        .slice(0, 20);
-
-      // Get TMDB IDs and details for recent watches
-      const recentWatchDetails: Array<{
-        tmdbId: number;
-        genres: number[];
-        keywords: number[];
-      }> = [];
-      for (const film of recentWatches) {
-        const tmdbId = mappings.get(film.uri);
-        if (!tmdbId) continue;
-        const details = tmdbDetailsMap.get(tmdbId);
-        if (details) {
-          recentWatchDetails.push({
-            tmdbId,
-            genres: (details.genres || []).map((g: any) => g.id),
-            keywords: (details.keywords?.keywords || [])
-              .map((k: any) => k.id)
-              .slice(0, 10),
-          });
-        }
-      }
-
-      // Score watchlist films
-      const scoredWatchlist: Array<{
-        film: FilmEvent;
-        tmdbId: number;
-        score: number;
-        reasons: string[];
-      }> = [];
-      for (const film of unwatchedWatchlist) {
-        const tmdbId = mappings.get(film.uri);
-        if (!tmdbId) continue;
-
-        const details = tmdbDetailsMap.get(tmdbId);
-        if (!details) continue;
-
-        const filmGenres = new Set(
-          (details.genres || []).map((g: any) => g.id),
-        );
-        const filmKeywords = new Set(
-          (details.keywords?.keywords || []).map((k: any) => k.id),
-        );
-
-        let similarityScore = 0;
-        let genreScore = 0;
-        const reasons: string[] = ["From your Letterboxd watchlist"];
-
-        // 60%: Similarity to recent watches
-        for (const recent of recentWatchDetails) {
-          const genreOverlap = recent.genres.filter((g) =>
-            filmGenres.has(g),
-          ).length;
-          const keywordOverlap = recent.keywords.filter((k) =>
-            filmKeywords.has(k),
-          ).length;
-          similarityScore += genreOverlap * 3 + keywordOverlap * 2;
-        }
-        if (recentWatchDetails.length > 0) {
-          similarityScore = (similarityScore / recentWatchDetails.length) * 0.6;
-          if (similarityScore > 0) {
-            reasons.push("Similar to your recent watches");
-          }
-        }
-
-        // 20%: Match with top genres from taste profile
-        const topGenreIds = new Set(
-          tasteProfile.topGenres.slice(0, 5).map((g) => g.id),
-        );
-        for (const genreId of filmGenres) {
-          if (topGenreIds.has(genreId)) {
-            genreScore += 5;
-            const genreName = tasteProfile.topGenres.find(
-              (g) => g.id === genreId,
-            )?.name;
-            if (genreName && !reasons.some((r) => r.includes(genreName))) {
-              reasons.push(`Matches your love of ${genreName}`);
-            }
-          }
-        }
-        genreScore = genreScore * 0.2;
-
-        // 20%: Random factor for variety
-        const randomScore = Math.random() * 10 * 0.2;
-
-        const totalScore = similarityScore + genreScore + randomScore;
-        scoredWatchlist.push({ film, tmdbId, score: totalScore, reasons });
-      }
-
-      // Sort by score and take top 5 (keep it short and sweet)
-      scoredWatchlist.sort((a, b) => b.score - a.score);
-      const topWatchlistPicks = scoredWatchlist.slice(0, 5);
-
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            "[Suggest] Top watchlist picks:",
-            topWatchlistPicks.length,
-          );
-        }
-      }
-
-      // Fetch full details for watchlist picks
-      const watchlistPicksWithDetails: MovieItem[] = [];
-      for (const pick of topWatchlistPicks) {
-        try {
-          const u = new URL("/api/tmdb/movie", getBaseUrl());
-          u.searchParams.set("id", String(pick.tmdbId));
-          u.searchParams.set("_t", String(freshCacheKey));
-          const r = await fetch(u.toString(), { cache: "no-store" });
-          const j = await r.json();
-
-          if (j.ok && j.movie) {
-            const movie = j.movie;
-            const videos = movie.videos?.results || [];
-            const trailer =
-              videos.find(
-                (v: any) =>
-                  v.site === "YouTube" && v.type === "Trailer" && v.official,
-              ) ||
-              videos.find(
-                (v: any) => v.site === "YouTube" && v.type === "Trailer",
-              );
-
-            watchlistPicksWithDetails.push({
-              id: pick.tmdbId,
-              title: movie.title || pick.film.title,
-              year:
-                movie.release_date?.slice(0, 4) || String(pick.film.year || ""),
-              reasons: pick.reasons,
-              poster_path: movie.poster_path,
-              score: pick.score,
-              trailerKey: trailer?.key || null,
-              voteCategory: "standard",
-              collectionName: movie.belongs_to_collection?.name,
-              genres: (movie.genres || []).map((g: any) => g.name),
-              vote_average: movie.vote_average,
-              vote_count: movie.vote_count,
-              overview: movie.overview,
-              runtime: movie.runtime,
-              original_language: movie.original_language,
-            });
-          }
-        } catch (e) {
-          console.error(
-            `[Suggest] Failed to fetch watchlist pick ${pick.tmdbId}`,
-            e,
-          );
-        }
-      }
-
-      // Set watchlist picks state
-      setWatchlistPicks(watchlistPicksWithDetails);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            "[Suggest] Watchlist picks ready:",
-            watchlistPicksWithDetails.length,
-          );
-        }
-      }
-
-      // Refresh poster cache for watchlist picks
-      if (watchlistPicksWithDetails.length > 0) {
-        try {
-          const watchlistIdsForCache = watchlistPicksWithDetails.map(
-            (p) => p.id,
-          );
-          const result =
-            await refreshTmdbCacheForIdsAction(watchlistIdsForCache);
-          if (result.error) {
-            console.error(
-              "[Suggest] Failed to refresh watchlist poster cache",
-              result.error,
-            );
-          }
-        } catch (e) {
-          console.error(
-            "[Suggest] Failed to refresh watchlist poster cache",
-            e,
-          );
-        }
-      }
-      // === END WATCHLIST PICKS ===
-
-      // Set top decade for UI
-      if (tasteProfile.topDecades.length > 0) {
-        setTopDecade(tasteProfile.topDecades[0].decade);
-      }
-
-      // Update adaptive learning stats (fire and forget)
-      if (uid) {
-        updateExplorationStats(
-          uid,
-          filteredFilms,
-          tasteProfile.topGenres.map((g) => g.name),
-        ).catch((e) =>
-          console.error("[Suggest] Failed to update exploration stats", e),
-        );
-      }
-
-      // Get highly-rated film IDs for similar movie recommendations
-      // Uses weighted scoring based on rating, liked, rewatch, recency, and genre diversity
-      const filmsForSeeding: FilmForSeeding[] = filteredFilms
-        .filter((f) => mappings.has(f.uri))
-        .map((f) => ({
-          uri: f.uri,
-          tmdbId: mappings.get(f.uri)!,
-          rating: f.rating,
-          liked: f.liked,
-          rewatch: f.rewatch,
-          lastDate: f.lastDate,
-          genreIds:
-            tmdbDetailsMap
-              .get(mappings.get(f.uri)!)
-              ?.genres?.map((g: any) => g.id) || [],
-        }));
-      const highlyRated = getWeightedSeedIds(filmsForSeeding, 100, true, {
-        topGenres: tasteProfile.topGenres,
-        topDecades: tasteProfile.topDecades,
-        useSignatureScoring: true,
-      });
-
-      // Get watchlist film IDs for intent-based discovery (P1.3 improvement)
-      const watchlistIdArray = filteredFilms
-        .filter((f) => f.onWatchlist === true)
-        .map((f) => mappings.get(f.uri))
-        .filter((id): id is number => id != null);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            "[Suggest] Watchlist IDs for discovery:",
-            watchlistIdArray.length,
-          );
-        }
-      }
-
-      // Fetch saved suggestions for seed enrichment
-      const { data: savedSuggestions } = await supabase
-        .from("saved_suggestions")
-        .select("tmdb_id")
-        .order("created_at", { ascending: false })
-        .limit(100);
-      const savedIds = savedSuggestions?.map((s) => s.tmdb_id) || [];
-
-      // Generate smart candidates using multiple TMDB discovery strategies
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] Generating smart candidates");
-        }
-      }
-      setProgress({
-        current: 4,
-        total: 7,
-        stage: "discover",
-        details: "Searching across TMDB, TasteDive, and more...",
-      });
-      const smartCandidates = await generateSmartCandidates({
-        highlyRatedIds: highlyRated,
-        watchlistIds: watchlistIdArray, // Pass watchlist for intent-based discovery (P1.3)
-        savedSuggestionIds: savedIds,
-        topGenres: tasteProfile.topGenres,
-        topKeywords: tasteProfile.topKeywords,
-        topDirectors: tasteProfile.topDirectors,
-        topActors: tasteProfile.topActors,
-        topStudios: tasteProfile.topStudios,
-        tmdbDetailsMap, // Pass details for TasteDive to use titles
-        nichePreferences: tasteProfile.nichePreferences, // Issue #7 implementation
-        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds, // NEW: Sub-genre discovery
-      });
-
-      // Fetch decade candidates
-      let decadeCandidates: number[] = [];
-      if (tasteProfile.topDecades.length > 0) {
-        const topDecade = tasteProfile.topDecades[0].decade;
-        decadeCandidates = await getDecadeCandidates(topDecade);
-      }
-
-      // Fetch smart discovery candidates (hidden gems)
-      const discoveryCandidates =
-        await getSmartDiscoveryCandidates(tasteProfile);
-
-      // Fetch candidates from TMDB lists containing user's favorites
-      let listCandidates: number[] = [];
-      try {
-        // Build seed films with titles for list discovery
-        const seedFilmsForLists = highlyRated.slice(0, 10).map((tmdbId) => {
-          const details = tmdbDetailsMap.get(tmdbId);
-          const film = filteredFilms.find(
-            (f) => mappings.get(f.uri) === tmdbId,
-          );
-          return {
-            tmdbId,
-            title: details?.title ?? "",
-            rating: film?.rating,
-          };
-        });
-
-        const seedFilmsForListsWithTitles = seedFilmsForLists.filter(
-          (s) => s.title,
-        );
-
-        if (process.env.NODE_ENV === "development") {
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Suggest] List discovery seed quality", {
-              totalSeeds: seedFilmsForLists.length,
-              seedsWithTitles: seedFilmsForListsWithTitles.length,
-              seedsWithoutTitles:
-                seedFilmsForLists.length - seedFilmsForListsWithTitles.length,
-            });
-          }
-        }
-
-        listCandidates = await discoverFromLists(seedFilmsForListsWithTitles);
-        if (process.env.NODE_ENV === "development") {
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Suggest] List candidates:", listCandidates.length);
-          }
-        }
-      } catch (e) {
-        console.error("[Suggest] List discovery failed", e);
-      }
-
-      // Phase 5+: Adaptive exploration rate (5-30% based on user feedback)
-      const explorationRate = await getAdaptiveExplorationRate(uid);
-      const exploratoryCount = Math.floor(150 * explorationRate);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest][Phase5+] Using adaptive exploration", {
-            rate: explorationRate,
-            count: exploratoryCount,
-            message:
-              explorationRate !== 0.15
-                ? "Rate adjusted based on your feedback!"
-                : "Using default rate (will adjust after rating exploratory picks)",
-          });
-        }
-      }
-
-      const exploratoryPicks = await generateExploratoryPicks(
-        {
-          topGenres: tasteProfile.topGenres,
-          avoidGenres: tasteProfile.avoidGenres,
-        },
-        {
-          count: exploratoryCount,
-          minVoteAverage: 7.0,
-          minVoteCount: 500,
-        },
-      );
-
-      // Combine all candidate sources
-      let candidatesRaw: number[] = [];
-      candidatesRaw.push(...smartCandidates.trending);
-      candidatesRaw.push(...smartCandidates.similar);
-      candidatesRaw.push(...smartCandidates.discovered);
-      candidatesRaw.push(...decadeCandidates);
-      candidatesRaw.push(...discoveryCandidates);
-      candidatesRaw.push(...listCandidates); // Add list-discovered candidates
-      candidatesRaw.push(...exploratoryPicks); // Add exploratory picks
-
-      const sourceSummary = `TMDB: ${smartCandidates.trending.length + smartCandidates.similar.length + smartCandidates.discovered.length}, Decades: ${decadeCandidates.length}, TasteDive: ${discoveryCandidates.length}`;
-      setProgress({
-        current: 4,
-        total: 7,
-        stage: "discover",
-        details: `Found ${candidatesRaw.length} candidates (${sourceSummary})`,
-      });
-
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] Smart candidates breakdown", {
-            trending: smartCandidates.trending.length,
-            similar: smartCandidates.similar.length,
-            discovered: smartCandidates.discovered.length,
-            decade: decadeCandidates.length,
-            discovery: discoveryCandidates.length,
-            lists: listCandidates.length,
-            exploratory: exploratoryPicks.length,
-            totalRaw: candidatesRaw.length,
-          });
-        }
-      }
-
-      // Filter out already watched films, blocked suggestions, and deduplicate
-      const candidatesFiltered = candidatesRaw
-        .filter((id, idx, arr) => arr.indexOf(id) === idx) // dedupe
-        .filter((id) => !watchedIds.has(id)) // exclude watched
-        .filter((id) => !blockedIds.has(id)) // exclude blocked
-        .filter((id) => !shownIds.has(id)); // exclude previously shown on refresh
-
-      // Shuffle candidates aggressively using crypto-quality randomness
-      const shuffled = [...candidatesFiltered].sort(() => {
-        // Use crypto random for better distribution
-        return Math.random() - 0.5;
-      });
-      const candidates = shuffled.slice(0, mode === "quick" ? 1000 : 2000); // Much larger pool for variety
-
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] candidate pool", {
-            blockedCount: blockedIds.size,
-            mode,
-            totalCandidates: candidatesRaw.length,
-            afterFilter: candidates.length,
-            watchedCount: watchedIds.size,
-          });
-        }
-      }
-
-      if (candidates.length === 0) {
-        const reason =
-          "No candidates available. Please check your TMDB API key or try again later.";
-        setNoCandidatesReason(reason);
-      }
-
-      // Fetch learned genre transitions
-      const adjacentGenres = await getGenreTransitions(uid);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] Loaded genre transitions", {
-            count: adjacentGenres.size,
-          });
-        }
-      }
-
-      // Fetch per-source reliability multipliers from past feedback
-      const userSourceReliability = await fetchSourceReliability(uid);
-
-      // Get recent genres from taste profile (already calculated in buildTasteProfile but not returned explicitly as list)
-      // We can extract them from topGenres or we might need to look at recent films again.
-      // `tasteProfile` has `topGenres` but those are overall.
-      // Let's use the `filteredFilms` (source films) to find recent genres.
-      const recentFilms = filteredFilms
-        .sort(
-          (a, b) =>
-            (b.lastDate ? new Date(b.lastDate).getTime() : 0) -
-            (a.lastDate ? new Date(a.lastDate).getTime() : 0),
-        )
-        .slice(0, 5);
-
-      // We need genres for these. We have mappings but not genres in `filteredFilms`.
-      // `buildTasteProfile` does this internally.
-      // Ideally `buildTasteProfile` should return `recentGenres`.
-      // Let's assume for now we pass `topGenres` as a proxy for "active" interest if we can't get recent easily,
-      // OR we modify `buildTasteProfile` to return `recentGenres`.
-      // Actually, `enrich.ts` has `recentGenres` in `pref` object but it's not returned.
-
-      // Let's just pass `tasteProfile.topGenres` names as "recent" for now? No, that's wrong.
-      // Transitions are "From X -> To Y". If I like X generally, I might like Y.
-      // So passing top genres as "recent" is a decent approximation of "current state".
-      const recentGenreNames = tasteProfile.topGenres
-        .slice(0, 5)
-        .map((g) => g.name);
-
-      // Fetch recent exposures to apply repeat penalty
-      // This penalizes movies shown recently to favor fresh content
-      const recentExposures = await getRecentExposures(uid, 14);
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            "[Suggest] Recent exposures for repeat prevention:",
-            recentExposures.size,
-          );
-        }
-      }
-
-      let mmrExplorationRate = 0.15;
-      try {
-        const { data, error } = await supabase
-          .from("user_exploration_stats")
-          .select("exploration_rate")
-          .eq("user_id", uid)
-          .maybeSingle();
-
-        if (error) {
-          console.error(
-            "[Suggest] Failed to fetch user exploration stats",
-            error,
-          );
-        } else if (typeof data?.exploration_rate === "number") {
-          mmrExplorationRate = data.exploration_rate;
-        }
-      } catch (e) {
-        console.error("[Suggest] Failed to load exploration rate", e);
-      }
-
-      const lambda = 0.3 + (mmrExplorationRate / 0.3) * 0.4;
-      const dynamicMmrLambda = Math.max(0.3, Math.min(0.7, lambda));
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Suggest] Dynamic MMR lambda", {
-          explorationRate: mmrExplorationRate,
-          lambdaRaw: lambda,
-          lambdaClamped: dynamicMmrLambda,
-        });
-      }
-
-      const context = computeContext();
-      setSourceLabel("Based on your watched & liked films + trending releases");
-      const lite = filteredFilms.map((f) => ({
-        uri: f.uri,
-        title: f.title,
-        year: f.year,
-        rating: f.rating,
-        liked: f.liked,
-      }));
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] calling suggestByOverlap", {
-            liteCount: lite.length,
-            candidatesCount: candidates.length,
-          });
-        }
-      }
-      setProgress({
-        current: 5,
-        total: 7,
+        total: 3,
         stage: "score",
-        details: `Ranking ${candidates.length} candidates...`,
+        details: "Generating canonical recommendations...",
       });
-      const suggestions = await suggestByOverlap({
-        userId: uid,
-        films: lite,
-        mappings,
-        candidates,
-        excludeGenres: gExclude.size ? gExclude : undefined,
-        maxCandidates: mode === "quick" ? 1000 : 2000,
-        concurrency: 6,
-        excludeWatchedIds: watchedIds,
-        desiredResults: 600, // Increased to fill all sections (e.g. 24 × 24 = 576 potential items)
-        sourceMetadata: smartCandidates.sourceMetadata, // Pass multi-source metadata for badge display
-        sourceReliability: userSourceReliability,
-        mmrLambda: dynamicMmrLambda,
-        mmrTopKFactor: 2.5 + (discoveryLevel / 100) * 1.5,
-        // Feature-level feedback from explicit user interactions
-        featureFeedback: featureFeedback || undefined,
-        watchlistEntries,
-        context,
-        recentExposures, // Apply repeat penalty to recently shown movies
-        enhancedProfile: {
-          topKeywords: tasteProfile.topKeywords,
-          topActors: tasteProfile.topActors,
-          topStudios: tasteProfile.topStudios,
-          topCountries: tasteProfile.topCountries,
-          topLanguages: tasteProfile.topLanguages,
-          avoidGenres: tasteProfile.avoidGenres,
-          avoidKeywords: tasteProfile.avoidKeywords,
-          avoidDirectors: tasteProfile.avoidDirectors,
-          adjacentGenres,
-          recentGenres: recentGenreNames,
-          topDecades: tasteProfile.topDecades,
-          watchlistGenres: tasteProfile.watchlistGenres?.map((w) => w.name),
-          watchlistKeywords: tasteProfile.watchlistKeywords?.map((w) => w.name),
-          watchlistDirectors: tasteProfile.watchlistDirectors?.map(
-            (w) => w.name,
-          ),
-        },
+      const canonical = await requestCanonicalWebItems({
+        accessToken,
+        count: 100,
+        excludeTmdbIds: [...new Set([...blockedIds, ...shownIds])],
+        requestSeed: `web-${refreshTick}-${mode}`,
       });
-      // Best-effort: ensure posters/backdrops exist for suggested ids.
-      if (suggestions.length) {
-        try {
-          const idsForCache = suggestions.map((s) => s.tmdbId);
-          if (process.env.NODE_ENV === "development") {
-            if (process.env.NODE_ENV === "development") {
-              console.log(
-                "[Suggest] refreshing TMDB cache for suggested ids",
-                idsForCache.length,
-              );
-            }
-          }
-          const result = await refreshTmdbCacheForIdsAction(idsForCache);
-          if (result.error) {
-            console.error(
-              "[Suggest] Failed to refresh TMDB cache for suggested ids",
-              result.error,
-            );
-          }
-          await refreshPosters();
-        } catch {
-          // ignore poster refresh errors; core suggestions still work
+      const localWatchlistIds = await (watchlistIdsHydrationRef.current ??
+        Promise.resolve(new Set<number>()));
+      const excludedGenres = new Set(
+        excludeGenres
+          .split(",")
+          .map((genre) => genre.trim().toLowerCase())
+          .filter(Boolean),
+      );
+      const minimumYear = Number(yearMin) || null;
+      const maximumYear = Number(yearMax) || null;
+      const details = (canonical.items as MovieItem[]).filter((item) => {
+        const itemYear = item.year ? Number(item.year) : null;
+        if (minimumYear && itemYear !== null && itemYear < minimumYear) {
+          return false;
         }
-      }
-
-      // Track these IDs as shown for next refresh, but limit to last 500 to prevent indefinite accumulation
-      const newShownIds = new Set([
-        ...shownIds,
-        ...suggestions.map((s) => s.tmdbId),
-      ]);
-      // Keep only the most recent 500 shown IDs for variety
-      const recentShownIds = Array.from(newShownIds).slice(-500);
-      setShownIds(new Set(recentShownIds));
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log("[Suggest] Tracking shown IDs", {
-            total: recentShownIds.length,
-            newThisRound: suggestions.length,
-            limited: newShownIds.size > 500,
-          });
+        if (maximumYear && itemYear !== null && itemYear > maximumYear) {
+          return false;
         }
-      }
-
-      // Fetch full movie data for each suggestion to get videos, collections, etc.
-      setProgress({
-        current: 6,
-        total: 7,
-        stage: "details",
-        details: `Loading full details for ${suggestions.length} suggestions...`,
+        return !item.genres?.some((genre) =>
+          excludedGenres.has(genre.toLowerCase()),
+        );
       });
-      const detailsPromises = suggestions.map(async (s) => {
-        try {
-          let movie = null;
+      setWatchlistPicks(selectCanonicalWatchlistPicks(details, localWatchlistIds));
 
-          // Fetch from TMDB API
-          // Note: TuiMDB integration requires UID mapping which we skip for now
-          const u = new URL("/api/tmdb/movie", getBaseUrl());
-          u.searchParams.set("id", String(s.tmdbId));
-          u.searchParams.set("_t", String(freshCacheKey)); // Cache buster
-          const r = await fetch(u.toString(), { cache: "no-store" });
-          const j = await r.json();
-
-          if (j.ok && j.movie) {
-            movie = j.movie;
-          }
-
-          if (movie) {
-            // Extract trailer key (first official trailer or first trailer)
-            const videos = movie.videos?.results || [];
-            const trailer =
-              videos.find(
-                (v: any) =>
-                  v.site === "YouTube" && v.type === "Trailer" && v.official,
-              ) ||
-              videos.find(
-                (v: any) => v.site === "YouTube" && v.type === "Trailer",
-              );
-
-            // Use voteCategory from suggestByOverlap result (already calculated there)
-            const voteCategory = s.voteCategory || "standard";
-
-            // Extract collection name
-            const collection = movie.belongs_to_collection;
-            const collectionName = collection?.name || undefined;
-
-            // Extract genres
-            const genres = (movie.genres || []).map((g: any) => g.name);
-
-            // Extract additional metadata for new sections
-            const runtime = movie.runtime || undefined;
-            const original_language = movie.original_language || undefined;
-            const spoken_languages = (movie.spoken_languages || []).map(
-              (l: any) => l.iso_639_1,
-            );
-            const production_countries = (movie.production_countries || []).map(
-              (c: any) => c.iso_3166_1,
-            );
-
-            // P2.3: Fetch streaming availability from Watchmode via API route
-            let streamingSources: any[] = [];
-            try {
-              const watchmodeUrl = new URL(
-                "/api/watchmode/streaming",
-                getBaseUrl(),
-              );
-              watchmodeUrl.searchParams.set("tmdbId", String(s.tmdbId));
-              const watchmodeRes = await fetch(watchmodeUrl.toString(), {
-                cache: "no-store",
-              });
-              const watchmodeData = await watchmodeRes.json();
-              if (watchmodeData.ok && watchmodeData.sources) {
-                streamingSources = watchmodeData.sources;
-              }
-            } catch (e) {
-              console.warn(
-                `[Suggest] Failed to fetch streaming sources for ${s.tmdbId}`,
-                e,
-              );
-            }
-
-            // Extract keywords for subgenre matching
-            const keyword_names = (
-              movie.keywords?.keywords ||
-              movie.keywords?.results ||
-              []
-            ).map((k: any) => k.name);
-
-            return {
-              id: s.tmdbId,
-              title: s.title ?? movie.title ?? `#${s.tmdbId}`,
-              year:
-                s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
-              reasons: s.reasons,
-              poster_path: s.poster_path || movie.poster_path,
-              score: s.score,
-              trailerKey: trailer?.key || null,
-              voteCategory,
-              collectionName,
-              genres,
-              vote_average: movie.vote_average,
-              vote_count: movie.vote_count,
-              overview: movie.overview,
-              contributingFilms: s.contributingFilms,
-              sources: s.sources,
-              consensusLevel: s.consensusLevel,
-              reliabilityMultiplier: s.reliabilityMultiplier,
-              runtime,
-              original_language,
-              spoken_languages,
-              production_countries,
-              streamingSources, // P2.3 implementation
-              keyword_names, // NEW: Sub-genre matching improvement
-            };
-          }
-        } catch (e) {
-          console.error(`[Suggest] Failed to fetch details for ${s.tmdbId}`, e);
-        }
-
-        // Fallback if fetch fails
-        return {
-          id: s.tmdbId,
-          title: s.title ?? `#${s.tmdbId}`,
-          year: s.release_date?.slice(0, 4),
-          reasons: s.reasons,
-          poster_path: s.poster_path,
-          score: s.score,
-          trailerKey: null,
-          voteCategory: "standard" as const,
-          collectionName: undefined,
-          genres: [],
-          sources: s.sources,
-          consensusLevel: s.consensusLevel,
-          reliabilityMultiplier: s.reliabilityMultiplier,
-          runtime: undefined,
-          original_language: undefined,
-          spoken_languages: undefined,
-          production_countries: undefined,
-        };
-      });
-
-      const details = await Promise.all(detailsPromises);
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Suggest] suggestions ready with full details", {
-          count: details.length,
-        });
-      }
-
-      // Track shown IDs for future refreshes
-      setShownIds((prev) => {
-        const updated = new Set(prev);
-        details.forEach((d) => updated.add(d.id));
-        return updated;
-      });
-
-      const calibratedDetails = await calibrateRecommendations(uid, details, {
-        strength: 0.7,
-      });
-      setItems(calibratedDetails);
-
-      // Detect genre fatigue and generate palate cleansers
       try {
         const fatigue = await detectGenreFatigue(uid);
         setFatigueDetection(fatigue);
-        if (fatigue) {
-          const cleansers = await generatePalateCleanser(uid, fatigue.type);
-          setPalateCleanser(cleansers);
-        } else {
-          setPalateCleanser([]);
-        }
-      } catch (e) {
-        console.error("[Suggest] Failed to generate palate cleansers", e);
+        setPalateCleanser(selectCanonicalPalateCleanser(details, fatigue));
+      } catch (fatigueError) {
+        console.error("[Suggest] Failed to load palate presentation state", fatigueError);
         setFatigueDetection(null);
         setPalateCleanser([]);
       }
 
-      // Log exposure for repeat-suggestion tracking and counterfactual analysis
-      try {
-        const context = computeContext();
-        const calculateMetadataCompleteness = (item: MovieItem): number => {
-          let score = 0;
-          if (item.poster_path) score += 0.25;
-          if (item.trailerKey) score += 0.25;
-          if (item.overview) score += 0.2;
-          if (item.genres && item.genres.length > 0) score += 0.15;
-          if (item.runtime) score += 0.15;
-          return score;
-        };
-
-        await logSuggestionExposure({
-          userId: uid,
-          suggestions: details.map((d) => ({
-            tmdbId: d.id,
-            baseScore: d.score,
-            consensusLevel: d.consensusLevel,
-            sources: d.sources,
-            reasons: d.reasons,
-            hasPoster: !!d.poster_path,
-            hasTrailer: !!d.trailerKey,
-            metadataCompleteness: calculateMetadataCompleteness(d),
-          })),
-          sessionContext: {
-            discoveryLevel,
-            excludeGenres,
-            yearMin,
-            yearMax,
-            mode,
-            contextMode: context.mode,
-          },
-        });
-      } catch (e) {
-        console.error("[Suggest] Failed to log exposures", e);
-      }
-
-      // Mark progress as complete
-      setProgress({
-        current: 7,
-        total: 7,
-        stage: "details",
-        details: `Loaded ${details.length} personalized suggestions!`,
+      setSourceLabel("Canonical recommendations from your taste profile");
+      setNoCandidatesReason(
+        details.length === 0
+          ? "No eligible recommendations are currently available."
+          : null,
+      );
+      setShownIds((previous) => {
+        const updated = new Set(previous);
+        details.forEach((item) => updated.add(item.id));
+        return updated;
       });
-    } catch (e: any) {
-      console.error("[Suggest] error in runSuggest", e);
-      setError(e?.message ?? "Failed to get suggestions");
+      setItems(details);
+      setProgress({
+        current: 3,
+        total: 3,
+        stage: "details",
+        details: `Loaded ${details.length} canonical recommendations!`,
+      });
+    } catch (error) {
+      console.error("[Suggest] error in runSuggest", error);
+      setError(
+        error instanceof Error ? error.message : "Failed to get suggestions",
+      );
     } finally {
-      console.log("[Suggest] runSuggest end");
       setLoading(false);
+      setRefreshingSections(new Set());
     }
   }, [
-    uid,
-    sourceFilms,
-    excludeGenres,
-    yearMin,
-    yearMax,
-    mode,
-    refreshPosters,
     blockedIds,
+    excludeGenres,
+    mode,
+    refreshTick,
     shownIds,
-    computeContext,
-    discoveryLevel,
+    uid,
+    yearMax,
+    yearMin,
   ]);
-
   // Fallback: if no local films, load from Supabase once
   useEffect(() => {
     const maybeLoad = async () => {
@@ -2583,19 +1611,16 @@ export default function SuggestPage() {
   useEffect(() => {
     const handler = () => {
       setItems(null);
-      void runSuggest();
     };
     const blockedHandler = async () => {
       if (uid) {
         const blocked = await getBlockedSuggestions(uid);
         setBlockedIds(blocked);
         setItems(null);
-        void runSuggest();
       }
     };
     const feedbackHandler = () => {
       setItems(null);
-      void runSuggest();
     };
     if (typeof window !== "undefined") {
       window.addEventListener("lettr:mappings-updated", handler);
@@ -2610,486 +1635,6 @@ export default function SuggestPage() {
       }
     };
   }, [runSuggest, uid]);
-
-  // Fetch a single replacement suggestion
-  const fetchReplacementSuggestion =
-    useCallback(async (): Promise<MovieItem | null> => {
-      if (!uid || !sourceFilms) return null;
-
-      try {
-        const filteredFilms = sourceFilms;
-        const uris = filteredFilms.map((f) => f.uri);
-        const mappings = await getFilmMappings(uid, uris);
-
-        // Fetch feature feedback for replacements too
-        let featureFeedback = undefined;
-        try {
-          featureFeedback = await getAvoidedFeatures(uid);
-        } catch (e) {
-          // ignore
-        }
-
-        // Build sets of watched and blocked IDs
-        const watchedIds = new Set<number>();
-        for (const f of filteredFilms) {
-          const mid = mappings.get(f.uri);
-          if (mid) watchedIds.add(mid);
-        }
-
-        // Get all currently shown IDs
-        const currentShownIds = new Set([
-          ...shownIds,
-          ...(items?.map((i) => i.id) ?? []),
-        ]);
-
-        // Generate candidates
-        const highlyRated = filteredFilms
-          .filter((f) => (f.rating ?? 0) >= 4 || f.liked)
-          .map((f) => mappings.get(f.uri))
-          .filter((id): id is number => id != null);
-
-        // Get watchlist films for intent signals
-        const watchlistFilmsForMore = sourceFilms.filter(
-          (f) => f.onWatchlist && mappings.has(f.uri),
-        );
-        const watchlistEntriesForMore = watchlistFilmsForMore.map((f) => ({
-          tmdbId: mappings.get(f.uri)!,
-          addedAt: f.watchlistAddedAt ?? null,
-        }));
-
-        // Fetch TMDB details for seed movie titles (needed for TasteDive/similar recommendations)
-        const allMappedIds = Array.from(mappings.values());
-        const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
-
-        const tasteProfile = await buildTasteProfile({
-          films: filteredFilms,
-          mappings,
-          topN: 40, // Increased to capture subgenre nuances
-          tmdbDetails: tmdbDetailsMap,
-          watchlistFilms: watchlistFilmsForMore,
-          userId: uid ?? undefined,
-        });
-
-        if (!supabase) throw new Error("Supabase not initialized");
-        const { data: savedSuggestions } = await supabase
-          .from("saved_suggestions")
-          .select("tmdb_id")
-          .order("created_at", { ascending: false })
-          .limit(100);
-        const savedIds = savedSuggestions?.map((s) => s.tmdb_id) || [];
-
-        const smartCandidates = await generateSmartCandidates({
-          highlyRatedIds: highlyRated,
-          watchlistIds: watchlistFilmsForMore.map((f) => mappings.get(f.uri)!), // Use watchlist for intent-based discovery
-          savedSuggestionIds: savedIds,
-          topGenres: tasteProfile.topGenres,
-          topKeywords: tasteProfile.topKeywords,
-          topDirectors: tasteProfile.topDirectors,
-          nichePreferences: tasteProfile.nichePreferences,
-          preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
-          tmdbDetailsMap, // Critical: enables seed movie titles for similar recommendations
-        });
-
-        let candidatesRaw: number[] = [];
-        candidatesRaw.push(...smartCandidates.trending);
-        candidatesRaw.push(...smartCandidates.similar);
-        candidatesRaw.push(...smartCandidates.discovered);
-
-        // Filter candidates
-        const candidatesFiltered = candidatesRaw
-          .filter((id, idx, arr) => arr.indexOf(id) === idx)
-          .filter((id) => !watchedIds.has(id))
-          .filter((id) => !blockedIds.has(id))
-          .filter((id) => !currentShownIds.has(id));
-
-        if (candidatesFiltered.length === 0) return null;
-
-        // Shuffle and take one
-        const shuffled = [...candidatesFiltered].sort(
-          () => Math.random() - 0.5,
-        );
-        const candidateId = shuffled[0];
-
-        // Get suggestion details
-        const lite = filteredFilms.map((f) => ({
-          uri: f.uri,
-          title: f.title,
-          year: f.year,
-          rating: f.rating,
-          liked: f.liked,
-        }));
-        const suggestions = await suggestByOverlap({
-          userId: uid,
-          films: lite,
-          mappings,
-          candidates: [candidateId],
-          excludeGenres: undefined,
-          maxCandidates: 1,
-          concurrency: 1,
-          excludeWatchedIds: watchedIds,
-          desiredResults: 1,
-          context: computeContext(),
-          watchlistEntries: watchlistEntriesForMore,
-          enhancedProfile: {
-            topKeywords: tasteProfile.topKeywords,
-            topActors: tasteProfile.topActors,
-            topStudios: tasteProfile.topStudios,
-            topCountries: tasteProfile.topCountries,
-            topLanguages: tasteProfile.topLanguages,
-            avoidGenres: tasteProfile.avoidGenres,
-            avoidKeywords: tasteProfile.avoidKeywords,
-            avoidDirectors: tasteProfile.avoidDirectors,
-            topDecades: tasteProfile.topDecades,
-            watchlistGenres: tasteProfile.watchlistGenres?.map((w) => w.name),
-            watchlistKeywords: tasteProfile.watchlistKeywords?.map(
-              (w) => w.name,
-            ),
-            watchlistDirectors: tasteProfile.watchlistDirectors?.map(
-              (w) => w.name,
-            ),
-            preferredSubgenreKeywordIds:
-              tasteProfile.preferredSubgenreKeywordIds,
-          },
-          featureFeedback,
-        });
-
-        if (suggestions.length === 0) return null;
-
-        const s = suggestions[0];
-
-        // Fetch full movie details from TMDB
-        let movie = null;
-
-        try {
-          const u = new URL("/api/tmdb/movie", window.location.origin);
-          u.searchParams.set("id", String(s.tmdbId));
-          u.searchParams.set("_t", String(Date.now())); // Cache buster
-          const r = await fetch(u.toString(), { cache: "no-store" });
-          const j = await r.json();
-
-          if (j.ok && j.movie) {
-            movie = j.movie;
-          }
-        } catch (e) {
-          console.error("[Suggest] Failed to fetch movie details", e);
-        }
-
-        if (movie) {
-          const videos = movie.videos?.results || [];
-          const trailer =
-            videos.find(
-              (v: any) =>
-                v.site === "YouTube" && v.type === "Trailer" && v.official,
-            ) ||
-            videos.find(
-              (v: any) => v.site === "YouTube" && v.type === "Trailer",
-            );
-
-          // Use voteCategory from suggestByOverlap result (already calculated there)
-          const voteCategory = s.voteCategory || "standard";
-
-          const collection = movie.belongs_to_collection;
-          const collectionName = collection?.name || undefined;
-
-          const genres = (movie.genres || []).map((g: any) => g.name);
-
-          return {
-            id: s.tmdbId,
-            title: s.title ?? movie.title ?? `#${s.tmdbId}`,
-            year:
-              s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
-            reasons: s.reasons,
-            poster_path: s.poster_path || movie.poster_path,
-            score: s.score,
-            trailerKey: trailer?.key || null,
-            voteCategory,
-            collectionName,
-            genres,
-            vote_average: movie.vote_average,
-            vote_count: movie.vote_count,
-            overview: movie.overview,
-            contributingFilms: s.contributingFilms,
-          };
-        }
-
-        return null;
-      } catch (e) {
-        console.error("[Suggest] Failed to fetch replacement:", e);
-        return null;
-      }
-    }, [uid, sourceFilms, blockedIds, shownIds, items, computeContext]);
-
-  // Fetch replacement suggestions for a specific section
-  const fetchSectionReplacements = useCallback(
-    async (sectionName: string, count: number = 12): Promise<MovieItem[]> => {
-      if (!uid || !sourceFilms || !items) return [];
-
-      try {
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            `[SectionRefresh] Fetching replacements for ${sectionName}`,
-          );
-        }
-
-        const filteredFilms = sourceFilms;
-        const uris = filteredFilms.map((f) => f.uri);
-        const mappings = await getFilmMappings(uid, uris);
-
-        // Fetch feature feedback
-        let featureFeedback = undefined;
-        try {
-          featureFeedback = await getAvoidedFeatures(uid);
-        } catch (e) {
-          // ignore
-        }
-
-        // Build sets of watched and blocked IDs
-        const watchedIds = new Set<number>();
-        for (const f of filteredFilms) {
-          const mid = mappings.get(f.uri);
-          if (mid) watchedIds.add(mid);
-        }
-
-        // Get all currently shown IDs
-        const currentShownIds = new Set([
-          ...shownIds,
-          ...(items?.map((i) => i.id) ?? []),
-        ]);
-
-        // Generate candidates (smaller batch for section refresh)
-        const highlyRated = filteredFilms
-          .filter((f) => (f.rating ?? 0) >= 4 || f.liked)
-          .map((f) => mappings.get(f.uri))
-          .filter((id): id is number => id != null);
-
-        // Fetch negative feedback to learn from dislikes
-        let negativeFeedbackIds: number[] = [];
-        try {
-          const feedbackMap = await getFeedback(uid);
-          negativeFeedbackIds = Array.from(feedbackMap.entries())
-            .filter(
-              (entry): entry is [number, "negative" | "positive"] =>
-                entry[1] === "negative",
-            )
-            .map((entry) => entry[0]);
-        } catch (e) {
-          console.error("[SectionRefresh] Failed to fetch feedback", e);
-        }
-
-        // Get watchlist films for intent signals
-        const watchlistFilmsForRefresh = sourceFilms.filter(
-          (f) => f.onWatchlist && mappings.has(f.uri),
-        );
-        const watchlistEntriesForRefresh = watchlistFilmsForRefresh.map(
-          (f) => ({
-            tmdbId: mappings.get(f.uri)!,
-            addedAt: f.watchlistAddedAt ?? null,
-          }),
-        );
-
-        // Fetch TMDB details for seed movie titles (needed for TasteDive/similar recommendations)
-        const allMappedIds = Array.from(mappings.values());
-        const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
-
-        const tasteProfile = await buildTasteProfile({
-          films: filteredFilms,
-          mappings,
-          topN: 40, // Increased to capture subgenre nuances
-          negativeFeedbackIds,
-          tmdbDetails: tmdbDetailsMap,
-          watchlistFilms: watchlistFilmsForRefresh,
-          userId: uid ?? undefined,
-        });
-
-        if (!supabase) throw new Error("Supabase not initialized");
-        const { data: savedSuggestions } = await supabase
-          .from("saved_suggestions")
-          .select("tmdb_id")
-          .order("created_at", { ascending: false })
-          .limit(100);
-        const savedIds = savedSuggestions?.map((s) => s.tmdb_id) || [];
-
-        const smartCandidates = await generateSmartCandidates({
-          highlyRatedIds: highlyRated,
-          watchlistIds: watchlistFilmsForRefresh.map(
-            (f) => mappings.get(f.uri)!,
-          ), // Use watchlist for intent-based discovery
-          savedSuggestionIds: savedIds,
-          topGenres: tasteProfile.topGenres,
-          topKeywords: tasteProfile.topKeywords,
-          topDirectors: tasteProfile.topDirectors,
-          nichePreferences: tasteProfile.nichePreferences,
-          preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
-          tmdbDetailsMap, // Critical: enables seed movie titles for similar recommendations
-        });
-
-        let candidatesRaw: number[] = [];
-        candidatesRaw.push(...smartCandidates.trending);
-        candidatesRaw.push(...smartCandidates.similar);
-        candidatesRaw.push(...smartCandidates.discovered);
-
-        // Filter candidates
-        const candidatesFiltered = candidatesRaw
-          .filter((id, idx, arr) => arr.indexOf(id) === idx)
-          .filter((id) => !watchedIds.has(id))
-          .filter((id) => !blockedIds.has(id))
-          .filter((id) => !currentShownIds.has(id));
-
-        // Shuffle and take a batch
-        const shuffled = [...candidatesFiltered].sort(
-          () => Math.random() - 0.5,
-        );
-        const candidates = shuffled.slice(0, 200); // Increased batch for section refresh
-
-        if (candidates.length === 0) {
-          if (process.env.NODE_ENV === "development") {
-            console.log(
-              `[SectionRefresh] No candidates available for ${sectionName}`,
-            );
-          }
-          return [];
-        }
-
-        // Score the candidates
-        const lite = filteredFilms.map((f) => ({
-          uri: f.uri,
-          title: f.title,
-          year: f.year,
-          rating: f.rating,
-          liked: f.liked,
-        }));
-        const suggestions = await suggestByOverlap({
-          userId: uid,
-          films: lite,
-          mappings,
-          candidates,
-          excludeGenres: undefined,
-          maxCandidates: 200,
-          concurrency: 3,
-          excludeWatchedIds: watchedIds,
-          desiredResults: count * 3, // Request more than needed to ensure enough after filtering
-          context: computeContext(),
-          watchlistEntries: watchlistEntriesForRefresh,
-          enhancedProfile: {
-            topKeywords: tasteProfile.topKeywords,
-            topActors: tasteProfile.topActors,
-            topStudios: tasteProfile.topStudios,
-            avoidGenres: tasteProfile.avoidGenres,
-            avoidKeywords: tasteProfile.avoidKeywords,
-            avoidDirectors: tasteProfile.avoidDirectors,
-            topDecades: tasteProfile.topDecades,
-            watchlistGenres: tasteProfile.watchlistGenres?.map((w) => w.name),
-            watchlistKeywords: tasteProfile.watchlistKeywords?.map(
-              (w) => w.name,
-            ),
-            watchlistDirectors: tasteProfile.watchlistDirectors?.map(
-              (w) => w.name,
-            ),
-            preferredSubgenreKeywordIds:
-              tasteProfile.preferredSubgenreKeywordIds,
-          },
-          featureFeedback,
-        });
-
-        if (suggestions.length === 0) return [];
-
-        // Fetch full movie details
-        const detailsPromises = suggestions.map(
-          async (s): Promise<MovieItem | null> => {
-            try {
-              const u = new URL("/api/tmdb/movie", window.location.origin);
-              u.searchParams.set("id", String(s.tmdbId));
-              u.searchParams.set("_t", String(Date.now()));
-              const r = await fetch(u.toString(), { cache: "no-store" });
-              const j = await r.json();
-
-              if (j.ok && j.movie) {
-                const movie = j.movie;
-                const videos = movie.videos?.results || [];
-                const trailer =
-                  videos.find(
-                    (v: any) =>
-                      v.site === "YouTube" &&
-                      v.type === "Trailer" &&
-                      v.official,
-                  ) ||
-                  videos.find(
-                    (v: any) => v.site === "YouTube" && v.type === "Trailer",
-                  );
-
-                const voteCategory = s.voteCategory || "standard";
-                const collection = movie.belongs_to_collection;
-                const collectionName = collection?.name || undefined;
-                const genres = (movie.genres || []).map((g: any) => g.name);
-
-                const movieItem: MovieItem = {
-                  id: s.tmdbId,
-                  title: s.title ?? movie.title ?? `#${s.tmdbId}`,
-                  year:
-                    s.release_date?.slice(0, 4) ||
-                    movie.release_date?.slice(0, 4),
-                  reasons: s.reasons,
-                  poster_path: s.poster_path || movie.poster_path,
-                  score: s.score,
-                  trailerKey: trailer?.key || null,
-                  voteCategory,
-                  collectionName,
-                  genres,
-                  vote_average: movie.vote_average,
-                  vote_count: movie.vote_count,
-                  overview: movie.overview,
-                  contributingFilms: s.contributingFilms,
-                };
-                return movieItem;
-              }
-            } catch (e) {
-              console.error(
-                `[SectionRefresh] Failed to fetch details for ${s.tmdbId}`,
-                e,
-              );
-            }
-            return null;
-          },
-        );
-
-        const allDetails = await Promise.all(detailsPromises);
-        const details: MovieItem[] = allDetails.filter(
-          (d): d is MovieItem => d !== null,
-        );
-
-        // Filter by section criteria
-        const seasonalConfig = getSeasonalRecommendationConfig();
-        const sectionFilter = getSectionFilter(sectionName, seasonalConfig);
-        const filtered = details.filter(sectionFilter) as MovieItem[];
-
-        // Sort by score and take top N
-        const sorted = filtered.sort((a, b) => b.score - a.score);
-        const result = sorted.slice(0, count);
-
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            `[SectionRefresh] Found ${result.length} replacements for ${sectionName}`,
-          );
-        }
-        return result;
-      } catch (e) {
-        console.error(
-          `[SectionRefresh] Failed to fetch replacements for ${sectionName}:`,
-          e,
-        );
-        return [];
-      }
-    },
-    [
-      uid,
-      sourceFilms,
-      blockedIds,
-      shownIds,
-      items,
-      getSectionFilter,
-      computeContext,
-    ],
-  );
 
   // Apply a single explicit reason (shared helper so multi-select can submit all)
   const applyExplicitReason = async (
@@ -3441,7 +1986,7 @@ export default function SuggestPage() {
           microSurveyCount < 2 &&
           (insights.strengthenedAvoidance.length > 0 ||
             insights.newAvoidance.length > 0) &&
-          Math.random() < 0.35;
+          (tmdbId + microSurveyCount) % 3 === 0;
 
         if (hasActors || hasFranchise || hasGenres || hasKeywords) {
           setFeedbackPopup({
@@ -3757,133 +2302,16 @@ export default function SuggestPage() {
     }
   };
 
-  // Handle refreshing a specific section
-  const handleRefreshSection = async (sectionName: string) => {
-    if (!uid || !categorizedSuggestions) return;
-
-    setRefreshingSections((prev) => new Set([...prev, sectionName]));
-
-    try {
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log(`[SectionRefresh] Refreshing section: ${sectionName}`);
-        }
-      }
-
-      // Special handling for watchlist picks - they come from a different source
-      if (sectionName === "watchlistPicks") {
-        // Re-shuffle watchlist picks by regenerating scores with more randomness
-        const currentPicks = categorizedSuggestions.watchlistPicks;
-        if (currentPicks.length > 0) {
-          // Shuffle and re-score with higher random factor
-          const shuffled = [...currentPicks]
-            .map((item) => ({
-              ...item,
-              score: item.score * 0.5 + Math.random() * 50, // Add more randomness
-            }))
-            .sort((a, b) => b.score - a.score);
-
-          // Update via setCategorizedSuggestions
-          setCategorizedSuggestions((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  watchlistPicks: shuffled,
-                }
-              : null,
-          );
-        }
-
-        setRefreshingSections((prev) => {
-          const next = new Set(prev);
-          next.delete(sectionName);
-          return next;
-        });
-        return;
-      }
-
-      // Get the movie IDs currently in this section (excluding dismissed ones)
-      const currentSectionMovies =
-        (categorizedSuggestions as any)[sectionName] || [];
-      const nonDismissedMovies = currentSectionMovies.filter(
-        (m: MovieItem) => !m.dismissed,
-      );
-      const dismissedMovies = currentSectionMovies.filter(
-        (m: MovieItem) => m.dismissed,
-      );
-      const currentSectionIds = new Set(
-        currentSectionMovies.map((m: MovieItem) => m.id),
-      );
-      const dismissedIds = new Set(dismissedMovies.map((m: MovieItem) => m.id));
-
-      if (process.env.NODE_ENV === "development") {
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            `[SectionRefresh] Current section has ${currentSectionIds.size} movies (${dismissedIds.size} dismissed)`,
-          );
-        }
-      }
-
-      // Fetch replacement movies for this section (replace both non-dismissed and dismissed)
-      const replacements = await fetchSectionReplacements(
-        sectionName,
-        currentSectionIds.size || 12,
-      );
-
-      if (replacements.length === 0) {
-        if (process.env.NODE_ENV === "development") {
-          if (process.env.NODE_ENV === "development") {
-            console.log(
-              `[SectionRefresh] No replacements found for ${sectionName}`,
-            );
-          }
-        }
-        setRefreshingSections((prev) => {
-          const next = new Set(prev);
-          next.delete(sectionName);
-          return next;
-        });
-        return;
-      }
-
-      //Remove old section movies and add new ones
-      setItems((prev) => {
-        if (!prev) return prev;
-
-        // Filter out the old section movies
-        const filtered = prev.filter((item) => !currentSectionIds.has(item.id));
-
-        // Add the new replacement movies
-        const updated = [...filtered, ...replacements];
-
-        if (process.env.NODE_ENV === "development") {
-          if (process.env.NODE_ENV === "development") {
-            console.log(
-              `[SectionRefresh] Updated items: removed ${currentSectionIds.size}, added ${replacements.length}, total now ${updated.length}`,
-            );
-          }
-        }
-
-        return updated;
-      });
-
-      // Track the new movies as shown
-      setShownIds((prev) => {
-        const updated = new Set(prev);
-        replacements.forEach((m) => updated.add(m.id));
-        // Keep only last 500
-        const recentShownIds = Array.from(updated).slice(-500);
-        return new Set(recentShownIds);
-      });
-    } catch (e) {
-      console.error("Failed to refresh section:", e);
-    } finally {
-      setRefreshingSections((prev) => {
-        const next = new Set(prev);
-        next.delete(sectionName);
-        return next;
-      });
+  // Section refreshes request a complete canonical rerun so section composition
+  // cannot reorder or merge independently generated recommendation batches.
+  const handleRefreshSection = (sectionName: string) => {
+    if (!uid || !categorizedSuggestions || loading) {
+      setRefreshingSections(new Set());
+      return;
     }
+    setRefreshingSections(new Set([sectionName]));
+    setRefreshTick((tick) => tick + 1);
+    setItems(null);
   };
 
   return (
@@ -4740,7 +3168,6 @@ export default function SuggestPage() {
                   setItems(null);
                   setShownIds(new Set());
                   setRefreshTick((x) => x + 1);
-                  void runSuggest();
                 }}
               >
                 Quick
@@ -4753,7 +3180,6 @@ export default function SuggestPage() {
                   setItems(null);
                   setShownIds(new Set());
                   setRefreshTick((x) => x + 1);
-                  void runSuggest();
                 }}
               >
                 Deep dive
@@ -4820,7 +3246,6 @@ export default function SuggestPage() {
                 setItems(null);
                 setShownIds(new Set());
                 setRefreshTick((x) => x + 1);
-                void runSuggest();
               }}
             >
               <span>🔄</span>
@@ -4898,7 +3323,6 @@ export default function SuggestPage() {
                         setItems(null);
                         setShownIds(new Set());
                         setRefreshTick((x) => x + 1);
-                        void runSuggest();
                       },
                       800,
                     );
@@ -4919,7 +3343,6 @@ export default function SuggestPage() {
                       setItems(null);
                       setShownIds(new Set());
                       setRefreshTick((x) => x + 1);
-                      void runSuggest();
                     }}
                     className="text-xs text-blue-600 hover:text-blue-800 hover:underline whitespace-nowrap"
                     title="Reset to default (50%)"

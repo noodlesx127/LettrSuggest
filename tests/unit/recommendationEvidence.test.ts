@@ -5,6 +5,8 @@ import {
   getProviderEvidenceBonus,
   getProviderConsensusLevel,
   mergeCandidateEvidence,
+  normalizeProviderFamily,
+  normalizeProviderFamilies,
 } from "@/lib/recommendationCandidates";
 
 const providerFamily = (source: string): string => {
@@ -94,6 +96,32 @@ describe("recommendation evidence semantics", () => {
     expect(getProviderEvidenceBonus(1, 30)).toBeLessThan(
       getProviderEvidenceBonus(2, 2),
     );
+  });
+
+  it("normalizes raw similar labels into stable families while preserving raw sources", () => {
+    expect(normalizeProviderFamily("similar:123")).toBe("tmdb");
+    expect(
+      normalizeProviderFamilies([
+        "similar:123",
+        "similar:456",
+        "tmdb",
+        "watchmode-similar",
+      ]),
+    ).toEqual(["tmdb", "watchmode"]);
+
+    const [merged] = mergeCandidateEvidence(
+      [
+        { tmdbId: 123, source: "similar:1", confidence: 0.8 },
+        { tmdbId: 123, source: "similar:2", confidence: 0.7 },
+      ],
+      normalizeProviderFamily,
+    );
+
+    expect(merged.providerFamilies).toEqual(["tmdb"]);
+    expect(merged.sources.map((source) => source.source)).toEqual([
+      "similar:1",
+      "similar:2",
+    ]);
   });
 
   it("preserves raw source confidence and reason attribution deterministically", () => {

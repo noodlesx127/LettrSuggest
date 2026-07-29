@@ -1,5 +1,5 @@
 "use client";
-import { refreshTmdbCacheForIdsAction } from "@/app/actions/enrichment";
+import { generateCanonicalWebRecommendations } from "@/app/actions/recommendations";
 import AuthGate from "@/components/AuthGate";
 import MovieCard, { FeatureEvidenceContext } from "@/components/MovieCard";
 import ProgressIndicator from "@/components/ProgressIndicator";
@@ -9,47 +9,23 @@ import { useImportData } from "@/lib/importStore";
 import { supabase } from "@/lib/supabaseClient";
 import {
   getFilmMappings,
-  getBulkTmdbDetails,
-  suggestByOverlap,
-  buildTasteProfile,
   getBlockedSuggestions,
   blockSuggestion,
   unblockSuggestion,
   addFeedback,
-  getFeedback,
-  getAvoidedFeatures,
   getMovieFeaturesForPopup,
   getFeatureEvidenceSummary,
-  fetchSourceReliability,
-  getRecentExposures,
   type FeedbackLearningInsights,
   type FeatureEvidenceSummary,
   type FeatureType,
 } from "@/lib/enrich";
-import {
-  generateSmartCandidates,
-  discoverMoviesByProfile,
-  getWeightedSeedIdsByGenre,
-  fetchSimilarMovieIds,
-  type FilmForSeeding,
-} from "@/lib/trending";
 import { usePostersSWR } from "@/lib/usePostersSWR";
 import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import { saveMovie, getSavedMovies } from "@/lib/lists";
-import {
-  getKeywordIdsForSubgenres,
-  SUBGENRE_TO_KEYWORD_IDS,
-  SUBGENRES_BY_PARENT,
-} from "@/lib/subgenreData";
+import { SUBGENRES_BY_PARENT } from "@/lib/subgenreData";
 import { detectSubgenres } from "@/lib/subgenreDetection";
+import { matchesNicheGenrePresentation } from "@/lib/recommendationAdapters";
 import type { FilmEvent } from "@/lib/normalize";
-
-function getBaseUrl(): string {
-  if (typeof window !== "undefined") {
-    return window.location.origin;
-  }
-  return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-}
 
 type MovieItem = {
   id: number;
@@ -76,6 +52,8 @@ type MovieItem = {
   reliabilityMultiplier?: number;
   runtime?: number;
   original_language?: string;
+  critic_score?: number;
+  explanation?: string;
   streamingSources?: Array<{
     name: string;
     type: "sub" | "buy" | "rent" | "free";
@@ -271,7 +249,7 @@ export default function GenreSuggestPage() {
     return [...new Set(ids)];
   }, [genreSuggestions, subgenreSuggestions]);
 
-  const { posters, mutate: refreshPosters } = usePostersSWR(allMovieIds);
+  const { posters } = usePostersSWR(allMovieIds);
 
   useEffect(() => {
     const init = async () => {
@@ -307,6 +285,36 @@ export default function GenreSuggestPage() {
     [films, fallbackFilms],
   );
 
+  // Watchlist membership is presentation state; canonical generation remains server-side.
+  useEffect(() => {
+    let active = true;
+    const loadWatchlistState = async () => {
+      if (!uid || sourceFilms.length === 0) return;
+
+      try {
+        const mappings = await getFilmMappings(
+          uid,
+          sourceFilms.map((film) => film.uri),
+        );
+        if (!active) return;
+
+        const watchlistIds = new Set<number>();
+        for (const film of sourceFilms) {
+          const tmdbId = mappings.get(film.uri);
+          if (film.onWatchlist && tmdbId) watchlistIds.add(tmdbId);
+        }
+        setWatchlistTmdbIds(watchlistIds);
+      } catch (error) {
+        console.error("[GenreSuggest] Failed to load watchlist state", error);
+      }
+    };
+
+    void loadWatchlistState();
+    return () => {
+      active = false;
+    };
+  }, [sourceFilms, uid]);
+
   const runGenreSuggest = useCallback(async () => {
     if (selectedGenres.length === 0) {
       setError("Please select at least one genre");
@@ -314,817 +322,124 @@ export default function GenreSuggestPage() {
     }
 
     try {
-      const freshCacheKey = Date.now();
-      setCacheKey(freshCacheKey);
-      console.log("[GenreSuggest] Starting", {
-        selectedGenres,
-        filmCount: sourceFilms.length,
-      });
-
+      setCacheKey(Date.now());
       setGenreSuggestions({});
+      setSubgenreSuggestions({});
       setError(null);
       setLoading(true);
       setProgress({
-        current: 0,
-        total: 7,
-        stage: "init",
-        details: "Preparing genre-based recommendations...",
-      });
-
-      if (!supabase) throw new Error("Supabase not initialized");
-      if (!uid) throw new Error("Not signed in");
-
-      const uris = sourceFilms.map((f) => f.uri);
-      setProgress({
         current: 1,
-        total: 7,
+        total: 3,
         stage: "library",
-        details: `Loading ${uris.length} films from your Letterboxd...`,
+        details: "Authenticating your genre recommendation request...",
       });
-      const mappings = await getFilmMappings(uid, uris);
 
-      const watchedIds = new Set<number>();
-      const watchlistIds = new Set<number>();
-      for (const f of sourceFilms) {
-        const mid = mappings.get(f.uri);
-        if (mid) {
-          watchedIds.add(mid);
-          if (f.onWatchlist) watchlistIds.add(mid);
-        }
+      if (!supabase || !uid) throw new Error("Not signed in");
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (sessionError || !accessToken) {
+        throw new Error("Authentication required");
       }
-      setWatchlistTmdbIds(watchlistIds);
 
-      // Pre-fetch TMDB details from cache
-      const allMappedIds = Array.from(mappings.values());
+      const selectedGenreNames = selectedGenres
+        .map((genreId) => ALL_GENRES.find((genre) => genre.id === genreId)?.name)
+        .filter((name): name is string => Boolean(name));
+
       setProgress({
         current: 2,
-        total: 7,
-        stage: "cache",
-        details: `Loading metadata for ${allMappedIds.length} movies...`,
-      });
-      const tmdbDetailsMap = await getBulkTmdbDetails(allMappedIds);
-
-      // Build taste profile
-      setProgress({
-        current: 3,
-        total: 7,
-        stage: "taste",
-        details: "Learning from your ratings...",
-      });
-
-      let negativeFeedbackIds: number[] = [];
-      try {
-        const feedbackMap = await getFeedback(uid);
-        negativeFeedbackIds = Array.from(feedbackMap.entries())
-          .filter(
-            (entry): entry is [number, "negative" | "positive"] =>
-              entry[1] === "negative",
-          )
-          .map((entry) => entry[0]);
-      } catch (e) {
-        console.error("[GenreSuggest] Failed to fetch feedback", e);
-      }
-
-      let featureFeedback = undefined;
-      try {
-        featureFeedback = await getAvoidedFeatures(uid);
-      } catch (e) {
-        console.error("[GenreSuggest] Failed to fetch feature feedback", e);
-      }
-
-      const watchlistFilms = sourceFilms.filter(
-        (f) => f.onWatchlist && mappings.has(f.uri),
-      );
-
-      const tasteProfile = await buildTasteProfile({
-        films: sourceFilms,
-        mappings,
-        topN: 10,
-        negativeFeedbackIds,
-        tmdbDetails: tmdbDetailsMap,
-        watchlistFilms,
-        userId: uid,
-      });
-
-      // Get highly-rated film IDs using weighted scoring
-      // Factors: rating, liked flag, rewatch status, recency, and genre diversity
-      const filmsForSeeding: FilmForSeeding[] = sourceFilms
-        .filter((f) => mappings.has(f.uri))
-        .map((f) => ({
-          uri: f.uri,
-          tmdbId: mappings.get(f.uri)!,
-          rating: f.rating,
-          liked: f.liked,
-          rewatch: f.rewatch,
-          lastDate: f.lastDate,
-          genreIds:
-            tmdbDetailsMap
-              .get(mappings.get(f.uri)!)
-              ?.genres?.map((g: any) => g.id) || [],
-        }));
-      // Use genre-filtered seeds: only include user's highly-rated films in the selected genres
-      // This ensures Horror selections seed with the user's top Horror films, not top Comedies
-      const highlyRated = getWeightedSeedIdsByGenre(
-        filmsForSeeding,
-        selectedGenres,
-        30,
-      );
-
-      const watchlistIdArray = sourceFilms
-        .filter((f) => f.onWatchlist === true)
-        .map((f) => mappings.get(f.uri))
-        .filter((id): id is number => id != null);
-
-      // Generate candidates
-      setProgress({
-        current: 4,
-        total: 7,
+        total: 3,
         stage: "discover",
-        details: "Finding movies in selected genres...",
+        details: "Generating canonical genre recommendations...",
       });
 
-      const smartCandidates = await generateSmartCandidates({
-        highlyRatedIds: highlyRated,
-        watchlistIds: watchlistIdArray,
-        topGenres: tasteProfile.topGenres,
-        topKeywords: tasteProfile.topKeywords,
-        topDirectors: tasteProfile.topDirectors,
-        topActors: tasteProfile.topActors,
-        topStudios: tasteProfile.topStudios,
-        nichePreferences: tasteProfile.nichePreferences,
-        preferredSubgenreKeywordIds: tasteProfile.preferredSubgenreKeywordIds,
-        tmdbDetailsMap: tmdbDetailsMap, // Critical: enables seed movie titles for similar recommendations
+      const canonical = await generateCanonicalWebRecommendations({
+        accessToken,
+        count: 100,
+        genreNames: selectedGenreNames,
+        excludeTmdbIds: [...new Set([...blockedIds, ...shownIds])],
+        requestSeed: `web-genre-${selectedGenres.join("-")}-${selectedSubgenres.join("-")}-${shownIds.size}`,
       });
-
-      let candidatesRaw: number[] = [];
-
-      // QUALITY FIX: Pre-filter smartCandidates to only include movies in selected genres
-      // This prevents trending/similar movies from polluting genre-specific sections
-      const selectedGenreSet = new Set(selectedGenres);
-      const filterBySelectedGenres = async (
-        ids: number[],
-      ): Promise<number[]> => {
-        if (selectedGenres.length === 0) return ids; // No filter if no genres selected
-
-        const filtered: number[] = [];
-        for (const id of ids) {
-          // Check if we have cached details
-          const cachedDetails = tmdbDetailsMap.get(id);
-          if (cachedDetails) {
-            const movieGenreIds =
-              cachedDetails.genres?.map((g: any) => g.id) || [];
-            if (
-              movieGenreIds.some((gid: number) => selectedGenreSet.has(gid))
-            ) {
-              filtered.push(id);
-            }
-          } else {
-            // No cached details - include it and let categorization filter later
-            filtered.push(id);
-          }
-        }
-        return filtered;
-      };
-
-      // Apply genre filter to smart candidates
-      const filteredTrending = await filterBySelectedGenres(
-        smartCandidates.trending,
-      );
-      const filteredSimilar = await filterBySelectedGenres(
-        smartCandidates.similar,
-      );
-      const filteredDiscovered = await filterBySelectedGenres(
-        smartCandidates.discovered,
-      );
-
-      candidatesRaw.push(...filteredTrending);
-      candidatesRaw.push(...filteredSimilar);
-      candidatesRaw.push(...filteredDiscovered);
-      console.log("[GenreSuggest] Smart candidates after genre filter:", {
-        trending: `${filteredTrending.length}/${smartCandidates.trending.length}`,
-        similar: `${filteredSimilar.length}/${smartCandidates.similar.length}`,
-        discovered: `${filteredDiscovered.length}/${smartCandidates.discovered.length}`,
-      });
-
-      // NEW: Add genre-specific discovery for each selected genre
-      // This ensures we get plenty of candidates for each genre the user selected
-      const tmdbGenreIds = selectedGenres.filter((id) => {
-        const genreInfo = ALL_GENRES.find((g) => g.id === id);
-        return genreInfo && genreInfo.source !== "tuimdb"; // Only TMDB genres
-      });
-
-      // Randomize keywords and people for discovery seeds to ensure variety on each run
-      const shuffledKeywords = [...tasteProfile.topKeywords]
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 5)
-        .map((k) => k.id);
-
-      const shuffledPeople = [
-        ...tasteProfile.topDirectors,
-        ...tasteProfile.topActors,
-      ]
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 3)
-        .map((p) => p.id);
-
-      if (tmdbGenreIds.length > 0) {
-        console.log(
-          "[GenreSuggest] Running genre-specific discovery for:",
-          tmdbGenreIds,
-        );
-
-        // Discover by selected genres with multiple sort strategies
-        const sortStrategies = [
-          "vote_average.desc",
-          "popularity.desc",
-          "primary_release_date.desc",
-        ] as const;
-
-        for (const sortBy of sortStrategies) {
-          const genreDiscovered = await discoverMoviesByProfile({
-            genres: tmdbGenreIds,
-            genreMode: "OR", // Match ANY of the selected genres
-            keywords:
-              shuffledKeywords.length > 0 ? shuffledKeywords : undefined,
-            people: shuffledPeople.length > 0 ? shuffledPeople : undefined,
-            sortBy,
-            minVotes: 50,
-            limit: 150,
-          });
-          candidatesRaw.push(...genreDiscovered);
-          console.log(
-            `[GenreSuggest] Genre discovery (${sortBy}):`,
-            genreDiscovered.length,
-          );
-        }
-
-        // Also do individual genre discovery for better coverage
-        for (const genreId of tmdbGenreIds.slice(0, 5)) {
-          // Limit to first 5 to avoid too many API calls
-          const singleGenreDiscovered = await discoverMoviesByProfile({
-            genres: [genreId],
-            keywords:
-              shuffledKeywords.length > 0 ? shuffledKeywords : undefined,
-            sortBy: "vote_average.desc", // Quality-first for genre discovery
-            minVotes: 30,
-            limit: 75,
-          });
-          candidatesRaw.push(...singleGenreDiscovered);
-        }
-      }
-
-      // CROSS-API COMPATIBLE: Enhanced genre-based discovery instead of sparse TMDB keywords
-      // Text-based detectSubgenres() will filter for specific subgenres regardless of API source
-      // This approach works with TasteDive and any other recommendation source
-      if (selectedSubgenres.length > 0) {
-        console.log(
-          "[GenreSuggest] Running enhanced genre discovery for subgenre filtering:",
-          {
-            subgenres: selectedSubgenres,
-            approach:
-              "genre-based discovery + text filtering (cross-API compatible)",
-          },
-        );
-
-        // --- NEW: Subgenre-specific seeding ---
-        // Find watched movies matching selected subgenres to use as seeds for Similar/Recommendations
-        const subgenreMatchedWatchedIds: number[] = [];
-        for (const f of sourceFilms) {
-          const mid = mappings.get(f.uri);
-          if (mid && f.rating && f.rating >= 3.0) {
-            const cachedDetails = tmdbDetailsMap.get(mid);
-            if (cachedDetails) {
-              const movieText =
-                `${cachedDetails.title || ""} ${cachedDetails.overview || ""}`.toLowerCase();
-              const movieKeywordIds = (
-                cachedDetails.keywords?.keywords ||
-                cachedDetails.keywords?.results ||
-                []
-              ).map((k: any) => k.id);
-              // Check if movie matches any selected subgenre
-              for (const subgenreKey of selectedSubgenres) {
-                const parentGenreName =
-                  subgenreKey.split("_")[0].charAt(0) +
-                  subgenreKey.split("_")[0].slice(1).toLowerCase();
-                const detected = detectSubgenres(
-                  parentGenreName,
-                  movieText,
-                  [],
-                  movieKeywordIds,
-                );
-                if (
-                  detected.has(subgenreKey) ||
-                  (SUBGENRE_TO_KEYWORD_IDS[subgenreKey] || []).some(
-                    (id: number) => movieKeywordIds.includes(id),
-                  )
-                ) {
-                  subgenreMatchedWatchedIds.push(mid);
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        // Seed similar discovery if we found matched subgenre movies
-        if (subgenreMatchedWatchedIds.length > 0) {
-          const subgenreSeeds = subgenreMatchedWatchedIds
-            .sort(() => Math.random() - 0.5)
-            .slice(0, 5);
-          try {
-            const similarToSubgenres =
-              await fetchSimilarMovieIds(subgenreSeeds);
-            candidatesRaw.push(...similarToSubgenres);
-            console.log(
-              `[GenreSuggest] Fetched ${similarToSubgenres.length} similar to subgenre seeds`,
-            );
-          } catch (e) {
-            console.error("[GenreSuggest] Similar to subgenre seeds failed", e);
-          }
-        }
-
-        // Fetch exactly using subgenre keyword IDs via discoverMoviesByProfile
-        const exactSubgenreKeywordIds =
-          getKeywordIdsForSubgenres(selectedSubgenres);
-        if (exactSubgenreKeywordIds.length > 0) {
-          try {
-            const exactDiscover = await discoverMoviesByProfile({
-              genres: tmdbGenreIds.length > 0 ? tmdbGenreIds : undefined,
-              genreMode: "OR",
-              keywords: exactSubgenreKeywordIds,
-              sortBy: "vote_average.desc",
-              minVotes: 20,
-              limit: 150,
-            });
-            candidatesRaw.push(...exactDiscover);
-            console.log(
-              `[GenreSuggest] Exact subgenre keyword discovery:`,
-              exactDiscover.length,
-            );
-          } catch (e) {
-            console.error("[GenreSuggest] Exact subgenre discovery failed", e);
-          }
-        }
-
-        // Fetch MORE genre candidates to maximize chance of finding subgenre matches
-        // Text detection will filter these down to matching subgenres
-        for (const sortBy of [
-          "vote_average.desc",
-          "popularity.desc",
-          "primary_release_date.desc",
-        ] as const) {
-          const genreDiscovered = await discoverMoviesByProfile({
-            genres: tmdbGenreIds.length > 0 ? tmdbGenreIds : undefined,
-            genreMode: "OR",
-            sortBy,
-            minVotes: sortBy === "primary_release_date.desc" ? 30 : 50,
-            limit: 200, // Increased to get more candidates for text filtering
-          });
-          candidatesRaw.push(...genreDiscovered);
-          console.log(
-            `[GenreSuggest] Enhanced genre discovery (${sortBy}):`,
-            genreDiscovered.length,
-          );
-        }
-
-        // Also fetch from different decades to increase diversity
-        const decades = [
-          [2015, 2026],
-          [2000, 2014],
-          [1985, 1999],
-        ];
-        for (const [yearMin, yearMax] of decades) {
-          const decadeDiscovered = await discoverMoviesByProfile({
-            genres: tmdbGenreIds.length > 0 ? tmdbGenreIds : undefined,
-            genreMode: "OR",
-            sortBy: "vote_average.desc",
-            minVotes: 50,
-            yearMin,
-            yearMax,
-            limit: 75,
-          });
-          candidatesRaw.push(...decadeDiscovered);
-        }
-      }
-
-      // Deduplicate and filter
-      const candidatesFiltered = candidatesRaw
-        .filter((id, idx, arr) => arr.indexOf(id) === idx)
-        .filter((id) => !watchedIds.has(id))
-        .filter((id) => !blockedIds.has(id))
-        .filter((id) => !shownIds.has(id));
-
-      console.log(
-        "[GenreSuggest] Candidates after filtering:",
-        candidatesFiltered.length,
-      );
-
-      if (candidatesFiltered.length === 0) {
-        setError(
-          "No candidates found. Try importing more films or clearing your shown history.",
-        );
-        setLoading(false);
+      const validMovies = canonical.items as MovieItem[];
+      if (validMovies.length === 0) {
+        setError("No eligible recommendations were found for these genres.");
         return;
       }
 
-      // Score candidates
       setProgress({
-        current: 5,
-        total: 7,
-        stage: "score",
-        details: "Scoring candidates...",
-      });
-
-      // Fetch source reliability for personalized scoring
-      let sourceReliability: Map<string, number> | undefined;
-      try {
-        sourceReliability = await fetchSourceReliability(uid);
-      } catch (e) {
-        console.error("[GenreSuggest] Failed to fetch source reliability", e);
-      }
-
-      // Fetch recent exposures for freshness
-      let recentExposures: Map<number, number> | undefined;
-      try {
-        recentExposures = await getRecentExposures(uid);
-      } catch (e) {
-        console.error("[GenreSuggest] Failed to fetch recent exposures", e);
-      }
-
-      const watchlistEntries = watchlistFilms.map((f) => ({
-        tmdbId: mappings.get(f.uri)!,
-        addedAt: f.watchlistAddedAt ?? null,
-      }));
-
-      const lite = sourceFilms.map((f) => ({
-        uri: f.uri,
-        title: f.title,
-        year: f.year,
-        rating: f.rating,
-        liked: f.liked,
-      }));
-      let suggestions = await suggestByOverlap({
-        userId: uid,
-        films: lite,
-        mappings,
-        candidates: candidatesFiltered.slice(0, 2000),
-        excludeGenres: undefined,
-        maxCandidates: 2000,
-        concurrency: 8,
-        excludeWatchedIds: watchedIds,
-        desiredResults: 600,
-        context: { mode: "auto", localHour: new Date().getHours() },
-        watchlistEntries,
-        sourceMetadata: smartCandidates.sourceMetadata,
-        sourceReliability,
-        recentExposures,
-        mmrLambda: 0.35,
-        mmrTopKFactor: 3.0,
-        enhancedProfile: {
-          topKeywords: tasteProfile.topKeywords,
-          topActors: tasteProfile.topActors,
-          topStudios: tasteProfile.topStudios,
-          topCountries: tasteProfile.topCountries,
-          topLanguages: tasteProfile.topLanguages,
-          avoidGenres: tasteProfile.avoidGenres,
-          avoidKeywords: tasteProfile.avoidKeywords,
-          avoidDirectors: tasteProfile.avoidDirectors,
-          topDecades: tasteProfile.topDecades,
-          watchlistGenres: tasteProfile.watchlistGenres?.map((w) => w.name),
-          watchlistKeywords: tasteProfile.watchlistKeywords?.map((w) => w.name),
-          watchlistDirectors: tasteProfile.watchlistDirectors?.map(
-            (w) => w.name,
-          ),
-        },
-        featureFeedback,
-        // Pass selected subgenres so they are NEVER filtered out
-        // (overrides historical avoidance patterns for explicit user selection)
-        // ALSO include ALL subgenres of selected parent genres to prevent over-filtering
-        // e.g., if user selects Horror genre, HORROR_MONSTER, HORROR_SLASHER etc. should not be filtered
-        allowSubgenres: (() => {
-          const allowed = new Set<string>(selectedSubgenres);
-          // Add all subgenres of selected parent genres
-          for (const genreId of selectedGenres) {
-            const genreSubgenres = SUBGENRES_BY_PARENT[genreId] || [];
-            for (const sub of genreSubgenres) {
-              allowed.add(sub.key);
-            }
-          }
-          return Array.from(allowed);
-        })(),
-      });
-
-      const tieredSuggestions = (() => {
-        const tierBuckets = new Map<number, typeof suggestions>();
-        const maxScore = Math.max(
-          1,
-          ...suggestions.map((suggestion) => suggestion.score),
-        );
-        for (const suggestion of suggestions) {
-          const baseScore = Math.max(0, suggestion.score);
-          const similarityPercent = (baseScore / maxScore) * 100;
-          const tierKey = Math.floor(similarityPercent / 5);
-          const bucket = tierBuckets.get(tierKey) ?? [];
-          bucket.push(suggestion);
-          tierBuckets.set(tierKey, bucket);
-        }
-
-        const sortedTierKeys = Array.from(tierBuckets.keys()).sort(
-          (a, b) => b - a,
-        );
-
-        const randomized: typeof suggestions = [];
-        for (const tierKey of sortedTierKeys) {
-          const bucket = tierBuckets.get(tierKey);
-          if (!bucket || bucket.length === 0) continue;
-
-          bucket.sort((a, b) => b.score - a.score);
-          const anchorCount = Math.min(
-            bucket.length,
-            Math.ceil(bucket.length * 0.3),
-          );
-          const anchors = bucket.slice(0, anchorCount);
-          const shufflePool = bucket.slice(anchorCount);
-
-          for (let i = shufflePool.length - 1; i > 0; i -= 1) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shufflePool[i], shufflePool[j]] = [shufflePool[j], shufflePool[i]];
-          }
-
-          randomized.push(...anchors, ...shufflePool);
-        }
-
-        return randomized;
-      })();
-
-      suggestions = tieredSuggestions;
-      console.log("[GenreSuggest] Suggestions scored:", suggestions.length);
-
-      // Fetch full movie details
-      setProgress({
-        current: 6,
-        total: 7,
+        current: 3,
+        total: 3,
         stage: "details",
-        details: `Loading details for ${suggestions.length} movies...`,
-      });
-
-      const movieItems: MovieItem[] = [];
-      const detailPromises = suggestions.slice(0, 300).map(async (s) => {
-        try {
-          const u = new URL("/api/tmdb/movie", getBaseUrl());
-          u.searchParams.set("id", String(s.tmdbId));
-          u.searchParams.set("_t", String(freshCacheKey));
-          const r = await fetch(u.toString(), { cache: "no-store" });
-          const j = await r.json();
-
-          if (j.ok && j.movie) {
-            const movie = j.movie;
-            const videos = movie.videos?.results || [];
-            const trailer =
-              videos.find(
-                (v: any) =>
-                  v.site === "YouTube" && v.type === "Trailer" && v.official,
-              ) ||
-              videos.find(
-                (v: any) => v.site === "YouTube" && v.type === "Trailer",
-              );
-
-            return {
-              id: s.tmdbId,
-              title: s.title ?? movie.title ?? `#${s.tmdbId}`,
-              year:
-                s.release_date?.slice(0, 4) || movie.release_date?.slice(0, 4),
-              reasons: s.reasons,
-              poster_path: s.poster_path || movie.poster_path,
-              score: s.score,
-              trailerKey: trailer?.key || null,
-              voteCategory: s.voteCategory || "standard",
-              collectionName: movie.belongs_to_collection?.name,
-              genres: (movie.genres || []).map((g: any) => g.name),
-              vote_average: movie.vote_average,
-              vote_count: movie.vote_count,
-              overview: movie.overview,
-              contributingFilms: s.contributingFilms,
-              runtime: movie.runtime,
-              original_language: movie.original_language,
-              sources: s.sources,
-              consensusLevel: s.consensusLevel,
-              genre_ids: (movie.genres || []).map((g: any) => g.id),
-              // Extract keyword IDs for sub-genre filtering
-              keyword_ids: (
-                movie.keywords?.keywords ||
-                movie.keywords?.results ||
-                []
-              ).map((k: any) => k.id),
-              // Extract keyword Names for exact sub-genre matching
-              keyword_names: (
-                movie.keywords?.keywords ||
-                movie.keywords?.results ||
-                []
-              ).map((k: any) => k.name),
-            } as MovieItem & {
-              genre_ids: number[];
-              keyword_ids: number[];
-              keyword_names: string[];
-            };
-          }
-          return null;
-        } catch (e) {
-          console.error(`[GenreSuggest] Failed to fetch movie ${s.tmdbId}`, e);
-          return null;
-        }
-      });
-
-      const detailResults = await Promise.all(detailPromises);
-      const validMovies = detailResults.filter(
-        (
-          m,
-        ): m is MovieItem & {
-          genre_ids: number[];
-          keyword_ids: number[];
-          keyword_names: string[];
-        } => m !== null,
-      );
-
-      // Categorize by selected genres and subgenres
-      setProgress({
-        current: 7,
-        total: 7,
-        stage: "details",
-        details: "Organizing by genre and sub-genre...",
+        details: "Organizing canonical results by genre and sub-genre...",
       });
 
       const genreMap: GenreSuggestions = {};
       const subgenreMap: SubgenreSuggestions = {};
+      const assignedIds = new Set<number>();
 
-      // Track movies assigned to subgenres to avoid duplicating them in parent genre sections
-      const assignedToSubgenre = new Set<number>();
-
-      // STEP 1: Create sub-genre sections FIRST
-      // For each selected subgenre, find movies that match its keyword IDs OR text-based detection
-      if (selectedSubgenres.length > 0) {
-        console.log(
-          "[GenreSuggest] Creating sub-genre sections for:",
-          selectedSubgenres,
-        );
-
-        for (const subgenreKey of selectedSubgenres) {
-          const keywordIds = SUBGENRE_TO_KEYWORD_IDS[subgenreKey] || [];
-          // Extract parent genre from subgenre key (e.g., HORROR_BODY -> Horror)
-          const parentGenreName =
-            subgenreKey.split("_")[0].charAt(0) +
-            subgenreKey.split("_")[0].slice(1).toLowerCase();
-
-          // Find movies that match via keyword IDs OR text-based detection
-          const matchingMovies = validMovies.filter((m) => {
-            const movieKeywordIds = m.keyword_ids || [];
-
-            // Method 1: Direct keyword ID match
-            const keywordMatch =
-              keywordIds.length > 0 &&
-              keywordIds.some((kwId) => movieKeywordIds.includes(kwId));
-
-            // Method 2: Text-based detection (same as scoring uses)
-            // Build text from title and overview, and keywords from movie
-            const movieText = `${m.title} ${m.overview || ""}`.toLowerCase();
-            // Get keyword names from the movie (we have keyword_ids, so we check via detection)
-            const movieKeywordNames = m.keyword_names || [];
-            const detected = detectSubgenres(
-              parentGenreName,
-              movieText,
-              movieKeywordNames,
-              movieKeywordIds,
-            );
-            const textMatch = detected.has(subgenreKey);
-
-            // Log matches for debugging
-            if (keywordMatch || textMatch) {
-              console.log(
-                `[SubgenreCateg] ${m.title}: keywordMatch=${keywordMatch}, textMatch=${textMatch}, subgenre=${subgenreKey}`,
-              );
-            }
-
-            return keywordMatch || textMatch;
-          });
-
-          // Sort by score and take top 36
-          matchingMovies.sort((a, b) => b.score - a.score);
-          const topMatches = matchingMovies.slice(0, 36);
-
-          if (topMatches.length > 0) {
-            subgenreMap[subgenreKey] = topMatches;
-            // Mark these movies as assigned to a subgenre
-            topMatches.forEach((m) => assignedToSubgenre.add(m.id));
-            console.log(
-              `[GenreSuggest] Sub-genre ${subgenreKey}: ${topMatches.length} movies (keywords: ${keywordIds.join(",")}, detection: keyword+text)`,
-            );
-          }
+      for (const subgenreKey of selectedSubgenres) {
+        const parentGenreName =
+          subgenreKey.split("_")[0].charAt(0) +
+          subgenreKey.split("_")[0].slice(1).toLowerCase();
+        const matchingMovies = validMovies.filter((movie) => {
+          if (assignedIds.has(movie.id)) return false;
+          const movieKeywordNames = movie.keyword_names ?? [];
+          const detected = detectSubgenres(
+            parentGenreName,
+            `${movie.title} ${movie.overview ?? ""}`.toLowerCase(),
+            movieKeywordNames,
+            movie.keyword_ids ?? [],
+          );
+          return detected.has(subgenreKey);
+        });
+        const topMatches = matchingMovies.slice(0, 36);
+        if (topMatches.length > 0) {
+          subgenreMap[subgenreKey] = topMatches;
+          topMatches.forEach((movie) => assignedIds.add(movie.id));
         }
       }
-
-      // STEP 2: Create parent genre sections
-      // Movies already assigned to a subgenre OR another parent genre are excluded
-      // This prevents cross-genre duplication (e.g., "Carrie" appearing in both Horror and Thriller)
-      const assignedToGenre = new Set<number>();
 
       for (const genreId of selectedGenres) {
-        const genreInfo = ALL_GENRES.find((g) => g.id === genreId);
+        const genreInfo = ALL_GENRES.find((genre) => genre.id === genreId);
         if (!genreInfo) continue;
-
-        // For TMDB genres, filter by genre_ids
-        // For TuiMDB niche genres, filter by genre name in genres array
-        let matchingMovies: (MovieItem & {
-          genre_ids: number[];
-          keyword_ids: number[];
-          keyword_names: string[];
-        })[];
-
-        if (genreInfo.source === "tuimdb") {
-          // Niche genre - match by name in genres array
-          const genreName = genreInfo.name.toLowerCase();
-          matchingMovies = validMovies.filter(
-            (m) =>
-              !assignedToSubgenre.has(m.id) &&
-              !assignedToGenre.has(m.id) &&
-              (m.genres?.some((g) => g.toLowerCase().includes(genreName)) ||
-                (genreName === "anime" && m.genres?.includes("Animation")) ||
-                (genreName === "stand up" &&
-                  m.title.toLowerCase().includes("stand-up")) ||
-                (genreName === "food" &&
-                  m.genres?.includes("Documentary") &&
-                  m.title.toLowerCase().match(/food|chef|cook|restaurant/)) ||
-                (genreName === "travel" &&
-                  m.genres?.includes("Documentary") &&
-                  m.title.toLowerCase().match(/travel|journey|world/))),
+        const genreName = genreInfo.name.toLowerCase();
+        const matchingMovies = validMovies.filter((movie) => {
+          if (assignedIds.has(movie.id)) return false;
+          const genres = movie.genres?.map((genre) => genre.toLowerCase()) ?? [];
+          return (
+            genres.some(
+              (genre) =>
+                genre === genreName ||
+                (genreInfo.source === "tuimdb" && genre.includes(genreName)),
+            ) ||
+            (genreName === "anime" && genres.includes("animation")) ||
+            matchesNicheGenrePresentation(genreName, movie.title, genres)
           );
-        } else {
-          // TMDB genre - match by ID, excluding movies already assigned
-          matchingMovies = validMovies.filter(
-            (m) =>
-              !assignedToSubgenre.has(m.id) &&
-              !assignedToGenre.has(m.id) &&
-              m.genre_ids?.includes(genreId),
-          );
-        }
-
-        // Sort by score and take top 36 per genre
-        matchingMovies.sort((a, b) => b.score - a.score);
+        });
         const topMatches = matchingMovies.slice(0, 36);
         genreMap[genreId] = topMatches;
-
-        // Mark these movies as assigned to prevent duplication in later genre sections
-        topMatches.forEach((m) => assignedToGenre.add(m.id));
+        topMatches.forEach((movie) => assignedIds.add(movie.id));
       }
 
-      // Update shownIds
-      const newShownIds = new Set(shownIds);
-      validMovies.forEach((m) => newShownIds.add(m.id));
-      setShownIds(newShownIds);
-
+      setShownIds((previous) => {
+        const next = new Set(previous);
+        validMovies.forEach((movie) => next.add(movie.id));
+        return new Set(Array.from(next).slice(-500));
+      });
       setSubgenreSuggestions(subgenreMap);
       setGenreSuggestions(genreMap);
-
-      // Best-effort: refresh TMDB cache for all suggested movies to ensure posters are available
-      try {
-        const allSuggestedIds = validMovies.map((m) => m.id);
-        console.log(
-          "[GenreSuggest] Refreshing TMDB cache for posters",
-          allSuggestedIds.length,
-        );
-        const result = await refreshTmdbCacheForIdsAction(allSuggestedIds);
-        if (result.error) {
-          console.error(
-            "[GenreSuggest] Failed to refresh TMDB cache",
-            result.error,
-          );
-        }
-        await refreshPosters();
-      } catch (e) {
-        console.error("[GenreSuggest] Failed to refresh poster cache", e);
-        // Continue anyway - suggestions still work without posters
-      }
-
-      setLoading(false);
-      console.log("[GenreSuggest] Complete", {
-        genres: Object.keys(genreMap).length,
-        subgenres: Object.keys(subgenreMap).length,
-        subgenreAssigned: assignedToSubgenre.size,
-      });
-    } catch (e) {
-      console.error("[GenreSuggest] Error:", e);
-      setError(e instanceof Error ? e.message : "An error occurred");
+    } catch (error) {
+      console.error("[GenreSuggest] Error:", error);
+      setError(error instanceof Error ? error.message : "An error occurred");
+    } finally {
       setLoading(false);
     }
   }, [
     selectedGenres,
     selectedSubgenres,
-    sourceFilms,
     uid,
     blockedIds,
     shownIds,
-    refreshPosters,
   ]);
-
   const handleSave = async (tmdbId: number, title: string) => {
     if (!uid) return;
     try {

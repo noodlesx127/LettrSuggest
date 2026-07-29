@@ -14,7 +14,10 @@ import {
   adaptV1RecommendationIntent,
   type V1RecommendationDetails,
 } from "@/lib/recommendationAdapters";
-import { createDeterministicRng } from "@/lib/recommendationCandidates";
+import {
+  createDeterministicRng,
+  normalizeProviderFamilies,
+} from "@/lib/recommendationCandidates";
 import { loadRecommendationContext } from "@/lib/recommendationContext";
 import {
   buildAdjacentGenreMap,
@@ -553,7 +556,7 @@ export async function POST(req: Request) {
               if (!item) {
                 throw new Error("Missing scored v1 recommendation candidate");
               }
-              const providerFamilies =
+              const rawSources =
                 sourceMetadata.get(tmdbId)?.sources ??
                 item.sources ??
                 ["overlap"];
@@ -562,8 +565,8 @@ export async function POST(req: Request) {
                 score: item.score,
                 evidence: {
                   seedAnchors: [...body.seed_tmdb_ids],
-                  providerFamilies: [...providerFamilies],
-                  providerOccurrences: providerFamilies.length,
+                  providerFamilies: normalizeProviderFamilies(rawSources),
+                  providerOccurrences: rawSources.length,
                   retrievalScore: item.score,
                 },
                 attribution: {

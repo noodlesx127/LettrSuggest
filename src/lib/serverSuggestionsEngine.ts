@@ -9,11 +9,15 @@ import {
   classifyPreferenceProbability,
   normalizeFeatureKey,
 } from "@/lib/recommendationPreference";
-import { sortByFilmRecency } from "@/lib/recommendationNormalization";
+import {
+  hasGenuineWatchEvidence,
+  sortByFilmRecency,
+} from "@/lib/recommendationNormalization";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   applySourceIntentQuotas,
   createDeterministicRng,
+  normalizeProviderFamilies,
   stableSortCandidates,
   type WeightedRecommendationSeed,
 } from "@/lib/recommendationCandidates";
@@ -142,6 +146,9 @@ type CachedTasteProfileRow = {
 type TmdbMovieCacheRow = {
   tmdb_id: number;
   data: TMDBMovie | null;
+  imdb_rating?: string | null;
+  rotten_tomatoes?: string | null;
+  metacritic?: string | null;
 };
 
 type UserContext = {
@@ -334,7 +341,7 @@ function addCandidateSource(
   const sources = new Set(existing?.sources ?? []);
   sources.add(source);
 
-  const sourceCount = sources.size;
+  const sourceCount = normalizeProviderFamilies([...sources]).length;
   const consensusLevel: "high" | "medium" | "low" =
     sourceCount >= 3 ? "high" : sourceCount >= 2 ? "medium" : "low";
   const intents = new Set(existing?.intents ?? []);
@@ -373,6 +380,21 @@ function parseFilmDate(value: string | null): number | null {
 
   const timestamp = new Date(value).getTime();
   return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function getWatchedTmdbIds(userContext: UserContext): number[] {
+  return userContext.films
+    .filter((film) =>
+      hasGenuineWatchEvidence({
+        watchDate: film.last_date,
+        rating: film.rating,
+        liked: film.liked,
+        rewatch: film.rewatch,
+        watchCount: film.watch_count,
+      }),
+    )
+    .map((film) => userContext.mappings.get(film.uri))
+    .filter((tmdbId): tmdbId is number => isFiniteNumber(tmdbId));
 }
 
 function compareSeedFilms(
@@ -484,7 +506,7 @@ export async function loadCachedTmdbDetails(
   for (const batch of chunkArray(tmdbIds, TMDB_BATCH_SIZE)) {
     const { data, error } = await db
       .from("tmdb_movies")
-      .select("tmdb_id, data")
+      .select("tmdb_id, data, imdb_rating, rotten_tomatoes, metacritic")
       .in("tmdb_id", batch);
 
     if (error) {
@@ -497,6 +519,17 @@ export async function loadCachedTmdbDetails(
         const movie = row.data;
         // Only cache entries with complete metadata — consistent with fetchTmdbMovieCached behavior
         if (movie.credits?.cast && movie.credits?.crew && movie.keywords) {
+          Object.assign(movie, {
+            ...(row.imdb_rating == null
+              ? {}
+              : { imdb_rating: row.imdb_rating }),
+            ...(row.rotten_tomatoes == null
+              ? {}
+              : { rotten_tomatoes: row.rotten_tomatoes }),
+            ...(row.metacritic == null
+              ? {}
+              : { metacritic: row.metacritic }),
+          });
           tmdbDetailsMap.set(row.tmdb_id, movie);
         }
       }
@@ -522,7 +555,7 @@ async function fetchTmdbMovieDetails(
   }
 }
 
-async function ensureCompleteTmdbDetails(
+export async function ensureCompleteTmdbDetails(
   tmdbIds: number[],
   existingMap: Map<number, TMDBMovie>,
 ): Promise<Map<number, TMDBMovie>> {
@@ -1407,7 +1440,7 @@ export async function generateServerCandidates(
   );
   const explicitSeedTmdbIds = explicitSeeds.map((seed) => seed.tmdbId);
   const seenIds = new Set<number>([
-    ...Array.from(userContext.mappings.values()),
+    ...getWatchedTmdbIds(userContext),
     ...Array.from(userContext.blockedIds.values()),
     ...explicitSeedTmdbIds,
   ]);

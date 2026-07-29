@@ -7,6 +7,15 @@ export type FilmTupleIdentity = {
   watchDate?: string | null;
 };
 
+export type GenuineWatchSignals = Readonly<{
+  watchDate?: string | null;
+  rating?: number | null;
+  liked?: boolean | null;
+  rewatch?: boolean | null;
+  watched?: boolean | null;
+  watchCount?: number | null;
+}>;
+
 export type NormalizedFilmTuple<TFilm, TDetails, TFeatures> = {
   uri: string;
   tmdbId: number;
@@ -23,6 +32,23 @@ function parseWatchDate(value: string | null | undefined): number | null {
 
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+export function hasGenuineWatchEvidence(
+  signals: GenuineWatchSignals,
+): boolean {
+  return (
+    parseWatchDate(signals.watchDate) !== null ||
+    signals.watched === true ||
+    signals.liked === true ||
+    signals.rewatch === true ||
+    (typeof signals.rating === "number" &&
+      Number.isFinite(signals.rating) &&
+      signals.rating > 0) ||
+    (typeof signals.watchCount === "number" &&
+      Number.isFinite(signals.watchCount) &&
+      signals.watchCount > 0)
+  );
 }
 
 export function sortByFilmRecency<T>(

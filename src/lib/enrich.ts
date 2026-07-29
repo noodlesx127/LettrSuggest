@@ -8921,9 +8921,11 @@ export async function scoreRecommendationsWithOverlap(
       ? [...item.sources]
       : ["overlap"];
     const retrievalScore = item.score;
-    return {
+      return {
         tmdbId: item.tmdbId,
         score: item.score,
+        reasons: [...item.reasons],
+        explanation: item.reasons[0],
         evidence: {
           seedAnchors: [],
           providerFamilies,

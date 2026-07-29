@@ -9,7 +9,12 @@ import {
   type RecommendationRetrieveParams,
   type RecommendationScoreParams,
 } from "@/lib/recommendationEngine";
-import type { RecommendationInputRevisionMaterial } from "@/lib/recommendationContext";
+import {
+  loadRecommendationContext,
+  type RecommendationContextRepository,
+  type RecommendationContextSourceSnapshot,
+  type RecommendationInputRevisionMaterial,
+} from "@/lib/recommendationContext";
 import { scoreRecommendationsWithOverlap } from "@/lib/enrich";
 import {
   MAX_DIAGNOSTIC_COUNT,
@@ -224,6 +229,87 @@ describe("recommendation engine", () => {
     });
     expect(telemetry).toHaveBeenCalledTimes(1);
     expect(telemetry.mock.calls[0]?.[0]).toEqual(result.diagnostics);
+  });
+
+  it("keeps watchlist-only mapped films while excluding genuinely watched films", async () => {
+    const snapshot: RecommendationContextSourceSnapshot = {
+      films: {
+        data: [
+          {
+            uri: "letterboxd://film/watchlist-only",
+            title: "Watchlist Only",
+            year: 2024,
+            rating: null,
+            liked: false,
+            rewatch: false,
+            on_watchlist: true,
+            last_date: null,
+          },
+          {
+            uri: "letterboxd://film/watched",
+            title: "Watched",
+            year: 2023,
+            rating: 4,
+            liked: false,
+            rewatch: false,
+            on_watchlist: false,
+            last_date: "2026-01-01",
+          },
+        ],
+      },
+      mappings: {
+        data: [
+          {
+            uri: "letterboxd://film/watchlist-only",
+            tmdbId: 111,
+          },
+          {
+            uri: "letterboxd://film/watched",
+            tmdbId: 222,
+          },
+        ],
+      },
+      metadata: { data: [] },
+      dates: { data: [] },
+      ratings: { data: [] },
+      features: { data: [] },
+      sources: {
+        feedback: { data: [] },
+        exploration: { data: [] },
+        adjacent_genres: { data: [] },
+        exposures: { data: [] },
+        blocked: { data: [] },
+      },
+    };
+    const repository: RecommendationContextRepository = {
+      load: async () => snapshot,
+    };
+    const recommendationContext = await loadRecommendationContext(
+      repository,
+      "engine-watchlist-user",
+    );
+    const scoredIds: number[][] = [];
+    const result = await createRecommendationEngine({
+      loadContext: async () => recommendationContext,
+      retrieveCandidates: async () => [{ tmdbId: 111 }, { tmdbId: 222 }],
+      scoreCandidates: async ({ candidates }) => {
+        scoredIds.push(candidates.map((candidate) => candidate.tmdbId));
+        return candidates.map(({ tmdbId }) => candidate(tmdbId, 1));
+      },
+      rerankCandidates: async ({ candidates }) => candidates,
+      rng: () => () => 0.5,
+      telemetry: () => undefined,
+    }).generate({
+      ...request,
+      userId: "engine-watchlist-user",
+      count: 2,
+      seeds: [],
+      excludeTmdbIds: [],
+    });
+
+    expect(recommendationContext.watchedTmdbIds).toEqual(new Set([222]));
+    expect(scoredIds).toEqual([[111]]);
+    expect(result.results.map((item) => item.tmdbId)).toEqual([111]);
   });
 
   it("bounds the seed count in a complete validated trace", async () => {

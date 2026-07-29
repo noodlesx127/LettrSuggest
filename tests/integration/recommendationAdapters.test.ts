@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 
 import {
   adaptCanonicalResultToV1,
+  adaptCanonicalResultToWeb,
   adaptV1RecommendationIntent,
+  adaptWebRecommendationIntent,
+  classifyVoteCategory,
+  extractCachedWebRecommendationMetadata,
+  getWebTmdbGenreFilterNames,
+  getWebTmdbRetrievalGenreNames,
+  matchesWebTmdbGenreFilter,
+  matchesNicheGenrePresentation,
+  normalizeWebRecommendationCount,
+  selectCanonicalPalateCleanser,
+  selectCanonicalWatchlistPicks,
 } from "@/lib/recommendationAdapters";
 import type {
   RecommendationCandidate,
@@ -135,5 +148,288 @@ describe("v1 canonical recommendation adapter", () => {
       health: "ok",
       row_count: 12,
     });
+  });
+});
+
+describe("web canonical recommendation adapter", () => {
+  it("maps rich canonical metadata and evidence without changing canonical order", () => {
+    const result: RecommendationResult = {
+      results: [
+        {
+          ...candidate(22, 9.1254),
+          reasons: ["Matches your favorite mystery films", "Runtime fits your usual window"],
+          explanation: "A mystery match with the pacing you usually enjoy.",
+        },
+        candidate(11, 8.5),
+      ],
+      diagnostics: {
+        mode: "personalized",
+        engineVersion: "v1-canonical-1",
+        contextMode: "neutral",
+        inputHealth: {
+          films: { health: "ok", rowCount: 1 },
+          mappings: { health: "ok", rowCount: 1 },
+          feedback: { health: "empty", rowCount: 0 },
+          exploration: { health: "empty", rowCount: 0 },
+          adjacent_genres: { health: "empty", rowCount: 0 },
+          exposures: { health: "empty", rowCount: 0 },
+          blocked: { health: "empty", rowCount: 0 },
+        },
+        failedSources: [],
+        requestSeedHash: "0000000000000001",
+        seedCount: 0,
+        candidateCount: 2,
+        resultCount: 2,
+        stageCounts: { retrieval: 2, scoring: 2, reranking: 2, final: 2 },
+        dropReasonCounts: {},
+      },
+    };
+    const details = new Map([
+      [
+        22,
+        {
+          title: "Canonical Mystery",
+          releaseDate: "2024-04-03",
+          runtime: 131,
+          originalLanguage: "ko",
+          criticScore: 87,
+          posterPath: "/22.jpg",
+          genres: ["Mystery"],
+          overview: "A useful canonical explanation.",
+        },
+      ],
+      [11, { title: "Eleven", runtime: 98, originalLanguage: "en" }],
+    ]);
+
+    const adapted = adaptCanonicalResultToWeb(result, details);
+
+    expect(adapted.map((item) => item.id)).toEqual([22, 11]);
+    expect(adapted[0]).toEqual(
+      expect.objectContaining({
+        id: 22,
+        runtime: 131,
+        original_language: "ko",
+        critic_score: 87,
+        reasons: [
+          "Matches your favorite mystery films",
+          "Runtime fits your usual window",
+        ],
+        explanation: "A mystery match with the pacing you usually enjoy.",
+      }),
+    );
+    expect(adapted[1].reasons).toEqual([
+      "Recommended from your canonical taste profile",
+    ]);
+  });
+
+  it("produces the same canonical request as equivalent v1 intent", () => {
+    const shared = {
+      userId: "parity-user",
+      limit: 12,
+      seedTmdbIds: [101, 202],
+      excludeTmdbIds: [303, 404],
+      genreNames: ["Mystery", "Drama"],
+      requestSeed: "adapter-parity-seed",
+    } as const;
+    const v1 = adaptV1RecommendationIntent({
+      ...shared,
+      genreIds: [9648, 18],
+      filterRelaxation: "threshold",
+      debug: false,
+    });
+    const web = adaptWebRecommendationIntent({
+      ...shared,
+      context: { mode: "neutral", localHour: null },
+    });
+
+    expect(web.request).toEqual(v1.request);
+    expect(web.request.seeds).toEqual(v1.request.seeds);
+  });
+
+  it("bounds web result counts to the canonical request contract", () => {
+    expect(normalizeWebRecommendationCount(600)).toBe(100);
+    expect(normalizeWebRecommendationCount(0)).toBe(1);
+    expect(normalizeWebRecommendationCount(Number.NaN)).toBe(1);
+    expect(normalizeWebRecommendationCount(Number.POSITIVE_INFINITY)).toBe(1);
+  });
+
+  it("leaves niche GenreSelector intent for presentation matching instead of TMDB filtering", () => {
+    const nicheGenreNames = [
+      "Anime",
+      "Food",
+      "Travel",
+      "Stand Up",
+      "Sports",
+    ];
+    const tmdbFilterNames = getWebTmdbGenreFilterNames(nicheGenreNames);
+
+    expect(tmdbFilterNames).toEqual([]);
+    expect(matchesWebTmdbGenreFilter(["Animation"], tmdbFilterNames)).toBe(
+      true,
+    );
+    expect(matchesWebTmdbGenreFilter(["Drama"], tmdbFilterNames)).toBe(true);
+  });
+
+  it("skips the exact prefilter when standard and niche genres are mixed", () => {
+    const tmdbFilterNames = getWebTmdbGenreFilterNames(["Action", "Sports"]);
+
+    expect(tmdbFilterNames).toEqual([]);
+    expect(matchesWebTmdbGenreFilter(["Drama"], tmdbFilterNames)).toBe(true);
+  });
+
+  it("maps niche and mixed genre intent into deterministic TMDB retrieval profiles", () => {
+    expect(getWebTmdbRetrievalGenreNames(["Anime"])).toEqual(["animation"]);
+    expect(getWebTmdbRetrievalGenreNames(["Action", "Sports"])).toEqual([
+      "action",
+      "documentary",
+    ]);
+  });
+
+  it("keeps exact filtering for standard TMDB genre intent", () => {
+    const tmdbFilterNames = getWebTmdbGenreFilterNames([
+      "Action",
+      "Mystery",
+    ]);
+
+    expect(tmdbFilterNames).toEqual(["action", "mystery"]);
+    expect(matchesWebTmdbGenreFilter(["Action"], tmdbFilterNames)).toBe(true);
+    expect(matchesWebTmdbGenreFilter(["Drama"], tmdbFilterNames)).toBe(false);
+  });
+
+  it("matches Sports niche presentation results in canonical order", () => {
+    expect(
+      matchesNicheGenrePresentation("Sports", "The Football Final", ["Drama"]),
+    ).toBe(true);
+    expect(
+      matchesNicheGenrePresentation("Sports", "A Quiet Conversation", ["Drama"]),
+    ).toBe(false);
+  });
+
+  it("restores vote categories and cached rating metadata for web items", () => {
+    expect(classifyVoteCategory(7.5, 999)).toBe("hidden-gem");
+    expect(classifyVoteCategory(7, 1001)).toBe("cult-classic");
+    expect(classifyVoteCategory(7, 10_001)).toBe("crowd-pleaser");
+    expect(classifyVoteCategory(6.9, 50_000)).toBe("standard");
+
+    expect(
+      extractCachedWebRecommendationMetadata({
+        vote_average: 7.2,
+        vote_count: 2_000,
+        imdb_rating: "8.1",
+        rotten_tomatoes: "91%",
+        metacritic: "82",
+        critic_score: 88,
+      }),
+    ).toEqual({
+      voteCategory: "cult-classic",
+      imdbRating: "8.1",
+      rottenTomatoes: "91%",
+      metacritic: "82",
+      criticScore: 88,
+    });
+  });
+
+  it("derives watchlist and palate sections by filtering canonical order", () => {
+    const ordered = [
+      { id: 30, score: 100, genres: ["Drama"] },
+      { id: 10, score: 1, genres: ["Comedy"] },
+      { id: 20, score: 99, genres: ["Horror"] },
+      { id: 40, score: 2, genres: ["Fantasy"] },
+    ];
+
+    const watchlistPicks = selectCanonicalWatchlistPicks(
+      ordered,
+      new Set([10, 20, 30]),
+      2,
+    );
+    const palateCleanser = selectCanonicalPalateCleanser(ordered, {
+      type: "intensity",
+      count: 7,
+      message: "Lighten the mood",
+    });
+
+    expect(watchlistPicks.map((item) => item.id)).toEqual([30, 10]);
+    expect(palateCleanser.map((item) => item.id)).toEqual([10, 40]);
+    expect(watchlistPicks[0]).toBe(ordered[0]);
+    expect(palateCleanser[0]).toBe(ordered[1]);
+  });
+
+  it("leaves production recommendation orchestration on the authenticated server", () => {
+    const page = readFileSync(
+      resolve(process.cwd(), "src/app/suggest/page.tsx"),
+      "utf8",
+    );
+    const action = readFileSync(
+      resolve(process.cwd(), "src/app/actions/recommendations.ts"),
+      "utf8",
+    );
+    const trending = readFileSync(
+      resolve(process.cwd(), "src/lib/trending.ts"),
+      "utf8",
+    );
+    const genrePage = readFileSync(
+      resolve(process.cwd(), "src/app/genre-suggest/page.tsx"),
+      "utf8",
+    );
+
+    expect(page).not.toMatch(/\bgenerateSmartCandidates\s*\(/);
+    expect(page).not.toMatch(/\bsuggestByOverlap\s*\(/);
+    expect(page).not.toMatch(/\bcalibrateRecommendations\s*\(/);
+    expect(page).toMatch(/loadPresentationState/);
+    expect(page).not.toMatch(/\blogSuggestionExposure\s*\(/);
+    expect(page).not.toMatch(/Math\.random\s*\(/);
+    expect(page).toMatch(/generateCanonicalWebRecommendations\s*\(/);
+    expect(page).toContain("const sorted = [...items];");
+    expect(page).not.toMatch(/fetchSectionReplacements\s*\(/);
+    expect(page).toMatch(/selectCanonicalWatchlistPicks\s*\(/);
+    expect(page).toMatch(/selectCanonicalPalateCleanser\s*\(/);
+    expect(page).not.toMatch(/\bgeneratePalateCleanser\s*\(/);
+    expect(genrePage).not.toMatch(/\bgenerateSmartCandidates\s*\(/);
+    expect(genrePage).not.toMatch(/\bsuggestByOverlap\s*\(/);
+    expect(genrePage).not.toMatch(/Math\.random\s*\(/);
+    expect(genrePage).toMatch(/generateCanonicalWebRecommendations\s*\(/);
+    expect(genrePage).not.toMatch(/matchingMovies\.sort\s*\(/);
+    expect(action).toMatch(/getUser\s*\(.*accessToken/s);
+    expect(action).toMatch(/typeof params\.accessToken !== "string"/);
+    expect(action).toContain('contextDiagnostics.mode === "degraded"');
+    expect(action).toContain("getWebTmdbGenreFilterNames");
+    expect(action).toContain("matchesWebTmdbGenreFilter");
+    expect(action).toContain("retrievalTasteProfile");
+    expect(action).toMatch(/runCanonicalServerRecommendations\s*\(/);
+    expect(action).toContain("normalizeWebRecommendationCount(params.count)");
+    expect(action).toContain("adapted.request.seeds");
+    expect(action).not.toMatch(/params\.userId/);
+    expect(action).not.toMatch(/\bgetAggregatedRecommendations\b/);
+    expect(action).not.toMatch(/\baggregateRecommendations\b/);
+    expect(action).not.toContain("@/lib/recommendationAggregator");
+    expect(trending).not.toMatch(/\bgenerateSmartCandidates\b/);
+    expect(trending).not.toMatch(/\bgetAggregatedRecommendations\b/);
+    expect(page.match(/\bvoid runSuggest\(\);/g) ?? []).toHaveLength(1);
+  });
+
+  it("scans all production TS and TSX for legacy orchestration imports and calls", () => {
+    const sourceRoot = resolve(process.cwd(), "src");
+    const collectSourceFiles = (directory: string): string[] =>
+      readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) return collectSourceFiles(path);
+        return /\.(ts|tsx)$/.test(entry.name) ? [path] : [];
+      });
+
+    const sourceFiles = collectSourceFiles(sourceRoot);
+    const integratedSources = sourceFiles.filter(
+      (filePath) => basename(filePath) !== "recommendationAggregator.ts",
+    );
+    const source = integratedSources
+      .map((filePath) => readFileSync(filePath, "utf8"))
+      .join("\n");
+
+    expect(source).not.toMatch(
+      /(?:from\s+["'][^"']+|import\s*\([^)]*)\b(?:generateSmartCandidates|getAggregatedRecommendations)\b/,
+    );
+    expect(source).not.toMatch(
+      /\b(?:generateSmartCandidates|getAggregatedRecommendations)\s*\(/,
+    );
+    expect(source).not.toMatch(/from\s+["'][^"']*recommendationAggregator["']/);
   });
 });

@@ -143,6 +143,40 @@ export function getProviderConsensusLevel(
   return "low";
 }
 
+export function normalizeProviderFamily(source: string): string {
+  const normalizedSource = source.trim();
+  if (
+    normalizedSource === "watchmode" ||
+    normalizedSource === "watchmode-similar"
+  ) {
+    return "watchmode";
+  }
+
+  if (
+    normalizedSource === "tmdb" ||
+    normalizedSource.startsWith("similar:") ||
+    normalizedSource === "trending-day" ||
+    normalizedSource === "trending-week" ||
+    normalizedSource === "discover-top-genres"
+  ) {
+    return "tmdb";
+  }
+
+  return normalizedSource;
+}
+
+export function normalizeProviderFamilies(
+  sources: readonly string[],
+): string[] {
+  return [
+    ...new Set(
+      sources
+        .map(normalizeProviderFamily)
+        .filter((source) => source.length > 0),
+    ),
+  ].sort();
+}
+
 export function getProviderEvidenceBonus(
   familyCount: number,
   providerOccurrences: number,
