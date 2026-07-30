@@ -4,6 +4,19 @@
 **Entry condition:** Phase 1 complete  
 **Exit condition:** Import inputs are user-safe and atomic, request/exposure diagnostics explain output, and offline/online evaluation gates are operational.
 
+## Task 5: Production Suggestion Timeout Blocker Closure
+
+**Task state:** Complete  
+**Checkpoint impact:** None; 2A.3 remains `Ready` and is the next action.
+
+- [x] Close the blocker with a deterministic/deduped shared web metadata window with max 300 entries, server TMDB concurrency 5 and a 5-second timeout, and `504 UPSTREAM_ERROR` classification for upstream timeouts.
+- [x] Reuse request-scoped metadata for canonical scoring, cold-start, strict genre filtering, and final adaptation. Defer `/suggest` presentation hydration as bounded (300) and non-blocking, including restored sessions; use shared payload validation and the bounded canonical path for `/genre-suggest`.
+- [x] Record verification: Prettier 12 files pass; diff check pass; focused 6 files/40 tests pass; lint pass; typecheck pass; full Vitest 23 files/245 tests pass; build pass 51/51 pages with non-fatal existing dynamic-server and stale browser-data warnings; Playwright recommendation page slice 1 passed, 1 skipped; final bounded code review approved.
+- [x] Confirm change impact was limited to canonical web generation, shared TMDB request/detail helpers, both pages and tests; the change-impact tool also surfaced unrelated pre-existing dirty files and no impacted symbols.
+- [x] Record that no production deploy/live import validation was performed because separate authorization is required.
+
+**Next action:** Resume 2A.3 Atomic Snapshot Reconciliation and retain fresh import-to-suggestions acceptance evidence, honest import failure, stale-row reconciliation, and recommendation-revision invalidation.
+
 ## Checkpoint 2A.1: Per-User Local Import State
 
 **Checkpoint state:** Complete
