@@ -573,7 +573,7 @@ export async function ensureCompleteTmdbDetails(
   tmdbIds: number[],
   existingMap: Map<number, TMDBMovie>,
 ): Promise<Map<number, TMDBMovie>> {
-  const idsToFetch = tmdbIds.filter(
+  const idsToFetch = [...new Set(tmdbIds)].filter(
     (tmdbId) => !isTmdbProfileComplete(existingMap.get(tmdbId)),
   );
 

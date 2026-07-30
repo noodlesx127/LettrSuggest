@@ -1,6 +1,7 @@
 import { ApiError } from "./responseEnvelope";
 
 const TMDB_API_BASE_URL = "https://api.themoviedb.org/3";
+const TMDB_REQUEST_TIMEOUT_MS = 5_000;
 
 interface TmdbErrorPayload {
   status_message?: string;
@@ -49,38 +50,49 @@ export async function fetchTmdb<T>(
     }
   }
 
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    TMDB_REQUEST_TIMEOUT_MS,
+  );
 
-  if (!response.ok) {
-    const body = await parseErrorPayload(response);
-    const upstreamMessage = getSafeUpstreamMessage(body);
-
-    console.error("[v1/tmdb] Upstream error:", {
-      status: response.status,
-      body,
+  try {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+      signal: controller.signal,
     });
 
-    const details = upstreamMessage
-      ? { upstream_message: upstreamMessage }
-      : undefined;
+    if (!response.ok) {
+      const body = await parseErrorPayload(response);
+      const upstreamMessage = getSafeUpstreamMessage(body);
 
-    if (response.status === 404) {
-      throw new ApiError(404, "NOT_FOUND", "Movie not found", details);
+      console.error("[v1/tmdb] Upstream error:", {
+        status: response.status,
+        body,
+      });
+
+      const details = upstreamMessage
+        ? { upstream_message: upstreamMessage }
+        : undefined;
+
+      if (response.status === 404) {
+        throw new ApiError(404, "NOT_FOUND", "Movie not found", details);
+      }
+
+      throw new ApiError(
+        response.status >= 500 ? 502 : response.status,
+        "UPSTREAM_ERROR",
+        "TMDB request failed",
+        details,
+      );
     }
 
-    throw new ApiError(
-      response.status >= 500 ? 502 : response.status,
-      "UPSTREAM_ERROR",
-      "TMDB request failed",
-      details,
-    );
+    return (await response.json()) as T;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return (await response.json()) as T;
 }
