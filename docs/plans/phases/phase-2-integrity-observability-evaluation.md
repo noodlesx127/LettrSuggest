@@ -22,22 +22,25 @@
 
 ## Checkpoint 2A.2: Import Normalization
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Create: `tests/unit/importNormalization.test.ts`
+- Create: `supabase/migrations/20260729100000_add_watchlist_added_at_to_film_events.sql`
 - Modify: `src/lib/normalize.ts`
 - Modify: `src/lib/diary.ts`
-- Modify: `src/lib/importEnrich.ts`
-- Modify: `src/lib/normalize.ts`
+- Modify: `src/app/import/page.tsx`
+- Modify: `src/lib/enrich.ts`
 
-- [ ] Write fixtures asserting blank/whitespace year becomes `null`, valid year remains numeric, `watchlist_added_at` round-trips, and duplicate diary/review events collapse under the persisted identity.
-- [ ] Run tests; expect failure because blank year becomes zero and watchlist time is not retained end-to-end.
-- [ ] Implement explicit nullable year parsing, timestamp propagation, and deterministic watch-event identity matching the database uniqueness contract.
-- [ ] Run tests and typecheck; expect pass.
-- [ ] Commit with `rtk git commit -m "fix: normalize imported film events consistently"`.
+- [x] Write fixtures asserting blank/whitespace year becomes `null`, valid year remains numeric, `watchlist_added_at` round-trips, and duplicate diary/review events collapse under the persisted identity.
+- [x] Run tests; expect failure because blank year becomes zero and watchlist time is not retained end-to-end.
+- [x] Implement explicit nullable year parsing, timestamp propagation, and deterministic watch-event identity matching the database uniqueness contract.
+- [x] Run tests and typecheck; expect pass.
+- [x] Commit with `rtk git commit -m "fix: normalize imported film events consistently"`.
 
 ## Checkpoint 2A.3: Atomic Snapshot Reconciliation
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `src/lib/importSnapshot.ts`

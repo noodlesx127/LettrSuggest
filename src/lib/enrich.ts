@@ -3089,7 +3089,7 @@ export async function buildTasteProfile(params: {
   topN?: number;
   negativeFeedbackIds?: number[]; // IDs of movies explicitly dismissed/disliked
   tmdbDetails?: Map<number, any>; // Pre-fetched details to avoid API calls
-  watchlistFilms?: Array<{ uri: string; watchlistAddedAt?: string }>; // Watchlist films - show user INTENT
+  watchlistFilms?: Array<{ uri: string; watchlistAddedAt?: string | null }>; // Watchlist films - show user INTENT
   userId?: string; // NEW: For fetching explicit preferences (Quiz, etc.)
 }): Promise<{
   topGenres: Array<{ id: number; name: string; weight: number; count: number }>;

@@ -1,12 +1,29 @@
 import { supabase } from '@/lib/supabaseClient';
+import {
+  deduplicateWatchEvents,
+  type WatchEvent,
+} from '@/lib/normalize';
 
-type DiaryRow = {
+export type DiaryRow = {
   user_id: string;
   uri: string;
   watched_date: string | null;
   rating: number | null;
   rewatch: boolean;
 };
+
+export function serializeWatchEvents(
+  userId: string,
+  events: WatchEvent[],
+): DiaryRow[] {
+  return deduplicateWatchEvents(events).map((event) => ({
+    user_id: userId,
+    uri: event.uri,
+    watched_date: event.watchedDate,
+    rating: event.rating,
+    rewatch: event.rewatch,
+  }));
+}
 
 /**
  * Upsert diary entries into the film_diary_events_raw table.
@@ -24,7 +41,6 @@ export async function upsertDiaryEvents(rows: DiaryRow[]) {
     const { error } = await supabase
       .from('film_diary_events_raw')
       .upsert(chunk, {
-        ignoreDuplicates: true,
         onConflict: 'user_id,uri,watched_date,rewatch',
       });
     if (error) throw error;

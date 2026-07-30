@@ -6,7 +6,10 @@ import UnmappedFilmModal, {
 import { useCallback, useMemo, useState, useEffect } from "react";
 import Papa from "papaparse";
 import JSZip from "jszip";
-import { normalizeData } from "@/lib/normalize";
+import {
+  normalizeData,
+  serializeFilmEventsForCloud,
+} from "@/lib/normalize";
 import { useImportData } from "@/lib/importStore";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -15,7 +18,7 @@ import {
   learnFromHistoricalData,
 } from "@/lib/enrich";
 import { seedPreferencesFromHistory } from "@/lib/quizLearning";
-import { upsertDiaryEvents } from "@/lib/diary";
+import { serializeWatchEvents, upsertDiaryEvents } from "@/lib/diary";
 import { saveFilmsLocally } from "@/lib/db";
 import {
   createImportOperationGuard,
@@ -226,18 +229,10 @@ export default function ImportPage() {
         const batchSize = 500;
         let saved = 0;
         for (let i = 0; i < filmList.length; i += batchSize) {
-          const chunk = filmList.slice(i, i + batchSize).map((f) => ({
-            user_id: uid,
-            uri: f.uri,
-            title: f.title,
-            year: f.year ?? null,
-            rating: f.rating ?? null,
-            rewatch: f.rewatch ?? null,
-            last_date: f.lastDate ?? null,
-            watch_count: f.watchCount ?? null,
-            liked: f.liked === true,
-            on_watchlist: f.onWatchlist === true,
-          }));
+          const chunk = serializeFilmEventsForCloud(
+            uid,
+            filmList.slice(i, i + batchSize),
+          );
 
           // Retry logic for schema cache errors
           let retries = 2;
@@ -710,26 +705,18 @@ export default function ImportPage() {
         await autoSaveToSupabase(norm.films, operation);
         console.log("[Import] autoSaveToSupabase done");
 
-        // Upsert diary events for accurate watch counts if view/table exists
+        // Upsert deduplicated diary and review events for accurate watch counts
         try {
-          if (next.diary?.length) {
+          const watchEventRows = serializeWatchEvents(
+            operation.userId,
+            norm.watchEvents,
+          );
+          if (watchEventRows.length) {
             console.log("[Import] upserting diary events", {
-              count: next.diary.length,
-            });
-            const diaryRows = (next.diary || [])
-              .map((r) => ({
-                user_id: operation.userId,
-                uri: r["Letterboxd URI"] || "",
-                watched_date: r["Watched Date"] || r["Date"] || null,
-                rating: r["Rating"] ? Number(r["Rating"]) : null,
-                rewatch: (r["Rewatch"] || "").toLowerCase() === "yes",
-              }))
-              .filter((d) => d.uri);
-            console.log("[Import] diary rows prepared", {
-              count: diaryRows.length,
+              count: watchEventRows.length,
             });
             await runGuardedImportWrite(operation, () =>
-              upsertDiaryEvents(diaryRows),
+              upsertDiaryEvents(watchEventRows),
             );
             console.log("[Import] upsertDiaryEvents done");
           }
