@@ -9,7 +9,7 @@ export async function GET(req: Request) {
 
     try {
       const tables = await getCacheTableStats();
-      return apiSuccess({ tables });
+      return apiSuccess(tables);
     } catch (error) {
       console.error("[v1/admin/cache] Error:", error);
       if (error instanceof ApiError) {

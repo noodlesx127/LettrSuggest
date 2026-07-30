@@ -1,5 +1,9 @@
 import { withApiAuth } from "../../_lib/apiKeyAuth";
-import { extractRole, type ProfileWithRoleRow } from "../../_lib/adminHelpers";
+import {
+  extractRole,
+  type ProfileWithRoleRow,
+  type UserRoleRelationRow,
+} from "../../_lib/adminHelpers";
 import {
   buildPagination,
   parsePage,
@@ -26,7 +30,7 @@ export async function GET(req: Request) {
 
       let usersQuery = supabaseAdmin
         .from("profiles")
-        .select("id, email, created_at, suspended_at, user_roles(role)", {
+        .select("id, email, created_at, suspended_at", {
           count: "exact",
         })
         .order("created_at", { ascending: false, nullsFirst: false });
@@ -45,15 +49,38 @@ export async function GET(req: Request) {
         throw new ApiError(500, "INTERNAL_ERROR", "Failed to fetch users");
       }
 
-      const users = ((data as ProfileWithRoleRow[] | null) ?? []).map(
-        (user) => ({
+      const profiles =
+        ((data as Omit<ProfileWithRoleRow, "user_roles">[] | null) ?? []);
+      const rolesByUserId = new Map<string, UserRoleRelationRow>();
+
+      if (profiles.length > 0) {
+        const { data: roleRows, error: rolesError } = await supabaseAdmin
+          .from("user_roles")
+          .select("user_id, role")
+          .in(
+            "user_id",
+            profiles.map((profile) => profile.id),
+          );
+
+        if (rolesError) {
+          console.error("[API v1] Failed to list admin user roles", rolesError);
+          throw new ApiError(500, "INTERNAL_ERROR", "Failed to fetch users");
+        }
+
+        for (const row of (roleRows as Array<
+          UserRoleRelationRow & { user_id: string }
+        > | null) ?? []) {
+          rolesByUserId.set(row.user_id, row);
+        }
+      }
+
+      const users = profiles.map((user) => ({
           id: user.id,
           email: user.email,
           created_at: user.created_at,
           suspended_at: user.suspended_at,
-          role: extractRole(user.user_roles),
-        }),
-      );
+          role: extractRole(rolesByUserId.get(user.id) ?? null),
+        }));
 
       return apiPaginated(users, buildPagination(page, perPage, count ?? 0));
     } catch (error) {

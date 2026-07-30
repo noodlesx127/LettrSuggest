@@ -3,6 +3,33 @@ import { expect, test } from "@playwright/test";
 const email = process.env.TEST_USER_EMAIL;
 const password = process.env.TEST_USER_PASSWORD;
 
+test("auth forms protect credentials before client handlers run", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+
+  try {
+    for (const [path, buttonName] of [
+      ["/auth/login", "Sign in"],
+      ["/auth/register", "Create account"],
+    ] as const) {
+      await page.goto(path);
+      const button = page.getByRole("button", {
+        name: buttonName,
+        exact: true,
+      });
+      await expect(button).toBeDisabled();
+      await expect(button.locator("xpath=ancestor::form")).toHaveAttribute(
+        "method",
+        "post",
+      );
+    }
+  } finally {
+    await context.close();
+  }
+});
+
 test.describe("authenticated recommendation pages", () => {
   test.beforeAll(() => {
     if (!email || !password) {

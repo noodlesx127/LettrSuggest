@@ -1,6 +1,6 @@
 'use client';
 import { useForm } from 'react-hook-form';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -9,7 +9,12 @@ type FormData = { email: string; password: string };
 export default function RegisterPage() {
   const { register, handleSubmit } = useForm<FormData>();
   const [error, setError] = useState<string | null>(null);
+  const [isHydrated, setIsHydrated] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const onSubmit = async (data: FormData) => {
     setError(null);
@@ -26,7 +31,7 @@ export default function RegisterPage() {
   return (
     <div className="max-w-sm">
       <h1 className="text-xl font-semibold mb-4">Create account</h1>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" suppressHydrationWarning>
+      <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-3" suppressHydrationWarning>
         <div suppressHydrationWarning>
           <label className="block text-sm mb-1">Email</label>
           <input {...register('email')} type="email" className="w-full border rounded px-3 py-2" required suppressHydrationWarning />
@@ -36,7 +41,7 @@ export default function RegisterPage() {
           <input {...register('password')} type="password" className="w-full border rounded px-3 py-2" required suppressHydrationWarning />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <button type="submit" className="px-4 py-2 bg-black text-white rounded">Create account</button>
+        <button type="submit" disabled={!isHydrated} className="px-4 py-2 bg-black text-white rounded disabled:cursor-wait disabled:opacity-60">Create account</button>
       </form>
       <p className="text-sm mt-3">
         Have an account? <a className="underline" href="/auth/login">Sign in</a>

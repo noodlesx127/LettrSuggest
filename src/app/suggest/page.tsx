@@ -3153,7 +3153,7 @@ export default function SuggestPage() {
               className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 transition-all shadow-sm flex items-center gap-1.5"
               title="Take a quick quiz to improve your suggestions"
             >
-              <span>🎯</span>
+              <span aria-hidden="true">🎯</span>
               <span>Improve Suggestions Quiz</span>
             </button>
           </div>

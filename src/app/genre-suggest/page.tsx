@@ -642,7 +642,7 @@ export default function GenreSuggestPage() {
                 </>
               ) : (
                 <>
-                  <span>🎬</span>
+                  <span aria-hidden="true">🎬</span>
                   <span>Get Genre Suggestions</span>
                 </>
               )}
