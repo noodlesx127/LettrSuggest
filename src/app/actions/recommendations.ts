@@ -18,7 +18,10 @@ import {
   normalizeProviderFamilies,
 } from "@/lib/recommendationCandidates";
 import { loadRecommendationContext } from "@/lib/recommendationContext";
-import { scoreRecommendationsWithOverlap } from "@/lib/enrich";
+import {
+  scoreRecommendationsWithOverlap,
+  type TMDBMovie,
+} from "@/lib/enrich";
 import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import {
     buildTasteProfileServer,
@@ -81,6 +84,11 @@ export async function generateCanonicalWebRecommendations(params: {
         context: { mode: "neutral", localHour: null },
         requestSeed: params.requestSeed,
     });
+    const scoringWindowSize = Math.min(
+        300,
+        Math.max(adapted.request.count * 3, 100),
+    );
+    let requestDetails = new Map<number, TMDBMovie>();
     const requestedGenreFilterNames = getWebTmdbGenreFilterNames(
         adapted.request.genres,
     );
@@ -128,29 +136,34 @@ export async function generateCanonicalWebRecommendations(params: {
                 { requestSeed: params.requestSeed },
             );
             sourceMetadata = generated.sourceMetadata;
-            if (requestedGenreFilterNames.length === 0) {
-                return generated.candidateIds.map((tmdbId) => ({ tmdbId }));
-            }
+            const scoringWindowIds = Array.from(
+                new Set(generated.candidateIds),
+            ).slice(0, scoringWindowSize);
             const cachedCandidateDetails = await loadCachedTmdbDetails(
-                generated.candidateIds,
+                scoringWindowIds,
             );
-            const candidateDetails = await ensureCompleteTmdbDetails(
-                generated.candidateIds,
+            requestDetails = await ensureCompleteTmdbDetails(
+                scoringWindowIds,
                 cachedCandidateDetails,
             );
-            return generated.candidateIds
-                .filter((tmdbId) =>
-                    matchesWebTmdbGenreFilter(
-                        (candidateDetails.get(tmdbId)?.genres ?? []).map(
+            return scoringWindowIds
+                .filter((tmdbId) => requestDetails.has(tmdbId))
+                .filter((tmdbId) => {
+                    if (requestedGenreFilterNames.length === 0) return true;
+                    return matchesWebTmdbGenreFilter(
+                        (requestDetails.get(tmdbId)?.genres ?? []).map(
                             (genre) => genre.name,
                         ),
                         requestedGenreFilterNames,
-                    ),
-                )
+                    );
+                })
                 .map((tmdbId) => ({ tmdbId }));
         },
         scoreCandidates: async (scoreParams) => {
-            const scored = await scoreRecommendationsWithOverlap(scoreParams);
+            const scored = await scoreRecommendationsWithOverlap(
+                scoreParams,
+                requestDetails,
+            );
             return scored.map((candidate) => {
                 const rawSources = sourceMetadata.get(candidate.tmdbId)?.sources;
                 if (!rawSources?.length) return candidate;
@@ -169,15 +182,29 @@ export async function generateCanonicalWebRecommendations(params: {
         telemetry: () => undefined,
     });
 
+    if (!result || !Array.isArray(result.results)) {
+        throw new Error("Canonical recommendation result is invalid");
+    }
+
     const finalTmdbIds = result.results.map((candidate) => candidate.tmdbId);
-    const cachedDetails = await loadCachedTmdbDetails(finalTmdbIds);
-    const details = await ensureCompleteTmdbDetails(
-        finalTmdbIds,
-        cachedDetails,
+    const unresolvedFinalTmdbIds = finalTmdbIds.filter(
+        (tmdbId) => !requestDetails.has(tmdbId),
     );
+    if (unresolvedFinalTmdbIds.length > 0) {
+        const cachedDetails = await loadCachedTmdbDetails(
+            unresolvedFinalTmdbIds,
+        );
+        const completedDetails = await ensureCompleteTmdbDetails(
+            unresolvedFinalTmdbIds,
+            cachedDetails,
+        );
+        for (const [tmdbId, movie] of completedDetails) {
+            requestDetails.set(tmdbId, movie);
+        }
+    }
     const detailsForWeb = new Map<number, WebRecommendationDetails>();
     for (const candidate of result.results) {
-      const movie = details.get(candidate.tmdbId);
+        const movie = requestDetails.get(candidate.tmdbId);
         const richMovie = movie as
             | (NonNullable<typeof movie> & {
                   runtime?: number;

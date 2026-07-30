@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   loadRecommendationContext: vi.fn(),
   loadUserContext: vi.fn(),
   runCanonicalServerRecommendations: vi.fn(),
+  scoreRecommendationsWithOverlap: vi.fn(),
 }));
 
 vi.mock("@/lib/supabaseAdmin", () => ({
@@ -28,7 +29,7 @@ vi.mock("@/lib/recommendationContext", () => ({
 }));
 
 vi.mock("@/lib/enrich", () => ({
-  scoreRecommendationsWithOverlap: vi.fn(),
+  scoreRecommendationsWithOverlap: mocks.scoreRecommendationsWithOverlap,
 }));
 
 vi.mock("@/lib/serverSuggestionsEngine", () => ({
@@ -57,40 +58,75 @@ describe("canonical web standard-genre detail completion", () => {
     });
     mocks.loadRecommendationContext.mockResolvedValue({});
     mocks.buildTasteProfileServer.mockResolvedValue({ topGenres: [] });
+    mocks.scoreRecommendationsWithOverlap.mockImplementation(
+      async (params: { candidates: readonly { tmdbId: number }[] }) =>
+        params.candidates.map(({ tmdbId }, index) => ({
+          tmdbId,
+          score: 10 - index,
+          evidence: {
+            seedAnchors: [],
+            providerFamilies: [],
+            providerOccurrences: 0,
+            retrievalScore: 1,
+          },
+          attribution: {
+            retrieval: 1,
+            preference: 0,
+            context: 0,
+            diversity: 0,
+            total: 1,
+          },
+        })),
+    );
     mocks.generateServerCandidates.mockResolvedValue({
       candidateIds: [101, 202],
       sourceMetadata: new Map(),
     });
     mocks.loadCachedTmdbDetails.mockResolvedValue(new Map());
     mocks.ensureCompleteTmdbDetails.mockImplementation(
-      async (_candidateIds: number[], cachedDetails: Map<number, unknown>) => {
+      async (candidateIds: number[], cachedDetails: Map<number, unknown>) => {
         const completedDetails = new Map(cachedDetails);
-        completedDetails.set(101, { genres: [{ name: "Action" }] });
-        completedDetails.set(202, { genres: [{ name: "Drama" }] });
+        for (const tmdbId of candidateIds) {
+          if (completedDetails.has(tmdbId)) continue;
+          completedDetails.set(tmdbId, {
+            id: tmdbId,
+            title: `Movie ${tmdbId}`,
+            genres: [
+              {
+                name: tmdbId === 101 ? "Action" : tmdbId === 202 ? "Drama" : "",
+              },
+            ],
+          });
+        }
         return completedDetails;
       },
     );
     mocks.runCanonicalServerRecommendations.mockImplementation(
-      async (_request: unknown, dependencies: { retrieveCandidates: () => Promise<Array<{ tmdbId: number }>> }) => {
+      async (
+        request: unknown,
+        dependencies: {
+          retrieveCandidates: () => Promise<Array<{ tmdbId: number }>>;
+          scoreCandidates: (params: {
+            request: unknown;
+            context: unknown;
+            mode: string;
+            candidates: Array<{ tmdbId: number }>;
+          }) => Promise<readonly unknown[]>;
+        },
+      ) => {
         const candidates = await dependencies.retrieveCandidates();
+        const scored = await dependencies.scoreCandidates({
+          request,
+          context: {},
+          mode: "personalized",
+          candidates,
+        });
+        const count =
+          typeof (request as { count?: unknown }).count === "number"
+            ? (request as { count: number }).count
+            : scored.length;
         return {
-          results: candidates.map(({ tmdbId }, index) => ({
-            tmdbId,
-            score: 10 - index,
-            evidence: {
-              seedAnchors: [],
-              providerFamilies: [],
-              providerOccurrences: 0,
-              retrievalScore: 1,
-            },
-            attribution: {
-              retrieval: 1,
-              preference: 0,
-              context: 0,
-              diversity: 0,
-              total: 1,
-            },
-          })),
+          results: scored.slice(0, count),
           diagnostics: {},
         };
       },
@@ -105,7 +141,7 @@ describe("canonical web standard-genre detail completion", () => {
       requestSeed: "web-genre-detail-completion",
     });
 
-    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledTimes(1);
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       [101, 202],
       expect.any(Map),
@@ -158,45 +194,38 @@ describe("canonical web standard-genre detail completion", () => {
         [202, { title: "Cached 202", genres: [] }],
       ]),
     );
-    mocks.runCanonicalServerRecommendations.mockResolvedValue({
-      results: [
-        {
-          tmdbId: 202,
-          score: 10,
-          evidence: {
-            seedAnchors: [],
-            providerFamilies: [],
-            providerOccurrences: 0,
-            retrievalScore: 1,
-          },
-          attribution: {
-            retrieval: 1,
-            preference: 0,
-            context: 0,
-            diversity: 0,
-            total: 1,
-          },
+    const completedDetails = new Map([
+      [101, { id: 101, title: "Completed 101", genres: [] }],
+      [202, { id: 202, title: "Completed 202", genres: [] }],
+      [303, { id: 303, title: "Completed 303", genres: [] }],
+    ]);
+    mocks.ensureCompleteTmdbDetails.mockResolvedValue(completedDetails);
+    mocks.runCanonicalServerRecommendations.mockImplementation(
+      async (
+        request: unknown,
+        dependencies: {
+          retrieveCandidates: () => Promise<Array<{ tmdbId: number }>>;
+          scoreCandidates: (params: {
+            request: unknown;
+            context: unknown;
+            mode: string;
+            candidates: Array<{ tmdbId: number }>;
+          }) => Promise<readonly { tmdbId: number }[]>;
         },
-        {
-          tmdbId: 303,
-          score: 9,
-          evidence: {
-            seedAnchors: [],
-            providerFamilies: [],
-            providerOccurrences: 0,
-            retrievalScore: 1,
-          },
-          attribution: {
-            retrieval: 1,
-            preference: 0,
-            context: 0,
-            diversity: 0,
-            total: 1,
-          },
-        },
-      ],
-      diagnostics: {},
-    });
+      ) => {
+        const candidates = await dependencies.retrieveCandidates();
+        const scored = await dependencies.scoreCandidates({
+          request,
+          context: {},
+          mode: "personalized",
+          candidates,
+        });
+        return {
+          results: scored.filter(({ tmdbId }) => tmdbId !== 101),
+          diagnostics: {},
+        };
+      },
+    );
 
     const result = await generateCanonicalWebRecommendations({
       accessToken: "final-hydration-token-1234567890",
@@ -204,11 +233,126 @@ describe("canonical web standard-genre detail completion", () => {
       requestSeed: "web-final-hydration",
     });
 
+    expect(mocks.loadCachedTmdbDetails).toHaveBeenCalledTimes(1);
+    expect(mocks.loadCachedTmdbDetails).toHaveBeenCalledWith([101, 202, 303]);
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledTimes(1);
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
-      [202, 303],
+      [101, 202, 303],
       expect.any(Map),
     );
+    expect(mocks.scoreRecommendationsWithOverlap.mock.calls[0][1]).toBe(
+      completedDetails,
+    );
     expect(result.items.map((item) => item.id)).toEqual([202, 303]);
+  });
+
+  it("bounds retrieval and scoring to the ordered unique candidate window", async () => {
+    const windowIds = Array.from({ length: 300 }, (_, index) => index + 1);
+    const generatedIds = [
+      ...Array.from({ length: 350 }, (_, index) => index + 1),
+      2,
+    ];
+    const completedDetails = new Map(
+      windowIds.map((tmdbId) => [
+        tmdbId,
+        { id: tmdbId, title: `Movie ${tmdbId}`, genres: [] },
+      ]),
+    );
+    mocks.generateServerCandidates.mockResolvedValue({
+      candidateIds: generatedIds,
+      sourceMetadata: new Map(),
+    });
+    mocks.loadCachedTmdbDetails.mockResolvedValue(new Map());
+    mocks.ensureCompleteTmdbDetails.mockResolvedValue(completedDetails);
+
+    await generateCanonicalWebRecommendations({
+      accessToken: "ordered-window-token-1234567890",
+      count: 100,
+      requestSeed: "web-ordered-window",
+    });
+
+    expect(mocks.loadCachedTmdbDetails).toHaveBeenCalledTimes(1);
+    expect(mocks.loadCachedTmdbDetails).toHaveBeenCalledWith(windowIds);
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
+      windowIds,
+      expect.any(Map),
+    );
+    expect(
+      mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates.map(
+        ({ tmdbId }: { tmdbId: number }) => tmdbId,
+      ),
+    ).toEqual(windowIds);
+    expect(
+      mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates,
+    ).toHaveLength(300);
+  });
+
+  it("applies strict genre filtering inside the bounded window", async () => {
+    const windowIds = Array.from({ length: 300 }, (_, index) => index + 1);
+    const generatedIds = Array.from({ length: 350 }, (_, index) => index + 1);
+    const completedDetails = new Map(
+      windowIds.map((tmdbId) => [
+        tmdbId,
+        {
+          id: tmdbId,
+          title: `Movie ${tmdbId}`,
+          genres: [
+            { name: tmdbId === 7 || tmdbId === 11 ? "Action" : "Drama" },
+          ],
+        },
+      ]),
+    );
+    mocks.generateServerCandidates.mockResolvedValue({
+      candidateIds: generatedIds,
+      sourceMetadata: new Map(),
+    });
+    mocks.loadCachedTmdbDetails.mockResolvedValue(new Map());
+    mocks.ensureCompleteTmdbDetails.mockResolvedValue(completedDetails);
+
+    const result = await generateCanonicalWebRecommendations({
+      accessToken: "strict-window-token-1234567890",
+      count: 100,
+      genreNames: ["Action"],
+      requestSeed: "web-strict-window",
+    });
+
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
+      windowIds,
+      expect.any(Map),
+    );
+    const scoredIds =
+      mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates.map(
+        ({ tmdbId }: { tmdbId: number }) => tmdbId,
+      );
+    expect(scoredIds).toEqual([7, 11]);
+    expect(scoredIds).not.toContain(301);
+    expect(scoredIds).not.toContain(350);
+    expect(result.items.map((item) => item.id)).toEqual([7, 11]);
+  });
+
+  it("rejects a missing canonical result before final hydration", async () => {
+    mocks.runCanonicalServerRecommendations.mockImplementation(
+      async (
+        _request: unknown,
+        dependencies: {
+          retrieveCandidates: () => Promise<Array<{ tmdbId: number }>>;
+        },
+      ) => {
+        await dependencies.retrieveCandidates();
+        return undefined;
+      },
+    );
+
+    await expect(
+      generateCanonicalWebRecommendations({
+        accessToken: "missing-result-token-1234567890",
+        count: 10,
+        requestSeed: "web-missing-canonical-result",
+      }),
+    ).rejects.toThrow("Canonical recommendation result is invalid");
+
+    expect(mocks.loadCachedTmdbDetails).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledTimes(1);
   });
 });

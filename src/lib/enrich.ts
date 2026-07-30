@@ -8861,6 +8861,7 @@ export type OverlapScoringContext = RecommendationScoreParams["context"];
 
 export async function scoreRecommendationsWithOverlap(
   params: RecommendationScoreParams,
+  tmdbDetailsCache?: Map<number, TMDBMovie>,
 ): Promise<RecommendationCandidate[]> {
   if (
     params.candidates.some(
@@ -8895,6 +8896,8 @@ export async function scoreRecommendationsWithOverlap(
     films,
     mappings,
     candidates: params.candidates.map((candidate) => candidate.tmdbId),
+    tmdbDetailsCache,
+    maxCandidates: params.candidates.length,
     feedbackMap: new Map(params.context.feedbackMap),
     desiredResults: params.request.count,
     excludeWatchedIds: new Set(params.context.watchedTmdbIds),
