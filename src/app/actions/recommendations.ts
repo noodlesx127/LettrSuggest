@@ -89,6 +89,12 @@ export async function generateCanonicalWebRecommendations(params: {
         Math.max(adapted.request.count * 3, 100),
     );
     let requestDetails = new Map<number, TMDBMovie>();
+    const excludedCandidateIds = new Set<number>([
+        ...adapted.request.seeds.map((seed) => seed.tmdbId),
+        ...adapted.request.excludeTmdbIds,
+        ...canonicalContext.watchedTmdbIds,
+        ...canonicalContext.blockedTmdbIds,
+    ]);
     const requestedGenreFilterNames = getWebTmdbGenreFilterNames(
         adapted.request.genres,
     );
@@ -138,7 +144,9 @@ export async function generateCanonicalWebRecommendations(params: {
             sourceMetadata = generated.sourceMetadata;
             const scoringWindowIds = Array.from(
                 new Set(generated.candidateIds),
-            ).slice(0, scoringWindowSize);
+            )
+                .filter((tmdbId) => !excludedCandidateIds.has(tmdbId))
+                .slice(0, scoringWindowSize);
             const cachedCandidateDetails = await loadCachedTmdbDetails(
                 scoringWindowIds,
             );

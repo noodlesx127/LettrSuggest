@@ -28,9 +28,15 @@ vi.mock("@/lib/recommendationContext", () => ({
   loadRecommendationContext: mocks.loadRecommendationContext,
 }));
 
-vi.mock("@/lib/enrich", () => ({
-  scoreRecommendationsWithOverlap: mocks.scoreRecommendationsWithOverlap,
-}));
+vi.mock("@/lib/enrich", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/enrich")>(
+    "@/lib/enrich",
+  );
+  return {
+    ...actual,
+    scoreRecommendationsWithOverlap: mocks.scoreRecommendationsWithOverlap,
+  };
+});
 
 vi.mock("@/lib/serverSuggestionsEngine", () => ({
   buildTasteProfileServer: mocks.buildTasteProfileServer,
@@ -43,6 +49,7 @@ vi.mock("@/lib/serverSuggestionsEngine", () => ({
 }));
 
 import { generateCanonicalWebRecommendations } from "@/app/actions/recommendations";
+import { suggestByOverlap, type TMDBMovie } from "@/lib/enrich";
 
 describe("canonical web standard-genre detail completion", () => {
   beforeEach(() => {
@@ -56,7 +63,10 @@ describe("canonical web standard-genre detail completion", () => {
       mode: "personalized",
       inputHealth: { blocked: { health: "ok" } },
     });
-    mocks.loadRecommendationContext.mockResolvedValue({});
+    mocks.loadRecommendationContext.mockResolvedValue({
+      watchedTmdbIds: new Set<number>(),
+      blockedTmdbIds: new Set<number>(),
+    });
     mocks.buildTasteProfileServer.mockResolvedValue({ topGenres: [] });
     mocks.scoreRecommendationsWithOverlap.mockImplementation(
       async (params: { candidates: readonly { tmdbId: number }[] }) =>
@@ -288,6 +298,41 @@ describe("canonical web standard-genre detail completion", () => {
     ).toHaveLength(300);
   });
 
+  it("filters canonical exclusions before filling the bounded window", async () => {
+    const generatedIds = Array.from({ length: 101 }, (_, index) => index + 1);
+    mocks.loadRecommendationContext.mockResolvedValue({
+      watchedTmdbIds: new Set(
+        Array.from({ length: 48 }, (_, index) => index + 3),
+      ),
+      blockedTmdbIds: new Set(
+        Array.from({ length: 50 }, (_, index) => index + 51),
+      ),
+    });
+    mocks.generateServerCandidates.mockResolvedValue({
+      candidateIds: generatedIds,
+      sourceMetadata: new Map(),
+    });
+
+    await generateCanonicalWebRecommendations({
+      accessToken: "exclusion-window-token-1234567890",
+      count: 1,
+      seedTmdbIds: [1],
+      excludeTmdbIds: [2],
+      requestSeed: "web-exclusion-window",
+    });
+
+    expect(mocks.loadCachedTmdbDetails).toHaveBeenCalledWith([101]);
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
+      [101],
+      expect.any(Map),
+    );
+    expect(
+      mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates.map(
+        ({ tmdbId }: { tmdbId: number }) => tmdbId,
+      ),
+    ).toEqual([101]);
+  });
+
   it("applies strict genre filtering inside the bounded window", async () => {
     const windowIds = Array.from({ length: 300 }, (_, index) => index + 1);
     const generatedIds = Array.from({ length: 350 }, (_, index) => index + 1);
@@ -354,5 +399,38 @@ describe("canonical web standard-genre detail completion", () => {
 
     expect(mocks.loadCachedTmdbDetails).toHaveBeenCalledTimes(1);
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses cached metadata for cold-start scoring", async () => {
+    const cachedMovie: TMDBMovie = {
+      id: 7001,
+      title: "Cached cold-start movie",
+      vote_average: 8.4,
+      vote_count: 1200,
+      genres: [{ id: 28, name: "Action" }],
+      credits: { cast: [], crew: [] },
+      keywords: { keywords: [] },
+    };
+    const fallbackFetch = vi.fn().mockRejectedValue(
+      new Error("unexpected cold-start metadata fetch"),
+    );
+    vi.stubGlobal("fetch", fallbackFetch);
+
+    try {
+      const results = await suggestByOverlap({
+        userId: "cold-start-cache-user",
+        films: [],
+        mappings: new Map(),
+        candidates: [7001],
+        tmdbDetailsCache: new Map([[7001, cachedMovie]]),
+        feedbackMap: new Map(),
+        desiredResults: 1,
+      });
+
+      expect(results.map((result) => result.tmdbId)).toEqual([7001]);
+      expect(fallbackFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

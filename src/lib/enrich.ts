@@ -4790,6 +4790,7 @@ function applyMMRRerank<
 async function getColdStartRecommendations(
   candidateIds: number[],
   limit: number,
+  tmdbDetailsCache?: Map<number, TMDBMovie>,
 ): Promise<
   Array<{
     tmdbId: number;
@@ -4814,7 +4815,7 @@ async function getColdStartRecommendations(
   // Fetch movie details for all candidates
   const candidates = await mapLimit(candidateIds, 10, async (id) => {
     try {
-      return await fetchTmdbMovieCached(id);
+      return tmdbDetailsCache?.get(id) ?? (await fetchTmdbMovieCached(id));
     } catch (e) {
       console.error(`[ColdStart] Failed to fetch movie ${id}`, e);
       return null;
@@ -5548,6 +5549,7 @@ export async function suggestByOverlap(params: {
     return getColdStartRecommendations(
       finalCandidates,
       params.desiredResults || 20,
+      params.tmdbDetailsCache,
     );
   }
 
