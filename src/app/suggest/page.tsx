@@ -335,6 +335,7 @@ export default function SuggestPage() {
 
   // Ref for focus trap in feedback popup modal (A11y Issue 2)
   const feedbackModalRef = useRef<HTMLDivElement>(null);
+  const runGenerationRef = useRef(0);
 
   // Focus trap effect for feedback popup modal (A11y Issue 2)
   useEffect(() => {
@@ -1452,6 +1453,9 @@ export default function SuggestPage() {
   }, [personalizedHeaderCount]);
 
   const runSuggest = useCallback(async () => {
+    const generation = runGenerationRef.current + 1;
+    runGenerationRef.current = generation;
+
     try {
       setPresentationHydrationEnabled(false);
       setCacheKey(Date.now());
@@ -1511,17 +1515,6 @@ export default function SuggestPage() {
         );
       });
       setWatchlistPicks(selectCanonicalWatchlistPicks(details, watchlistTmdbIds));
-
-      try {
-        const fatigue = await detectGenreFatigue(uid);
-        setFatigueDetection(fatigue);
-        setPalateCleanser(selectCanonicalPalateCleanser(details, fatigue));
-      } catch (fatigueError) {
-        console.error("[Suggest] Failed to load palate presentation state", fatigueError);
-        setFatigueDetection(null);
-        setPalateCleanser([]);
-      }
-
       setSourceLabel("Canonical recommendations from your taste profile");
       setNoCandidatesReason(
         details.length === 0
@@ -1540,6 +1533,22 @@ export default function SuggestPage() {
         stage: "details",
         details: `Loaded ${details.length} canonical recommendations!`,
       });
+
+      void detectGenreFatigue(uid)
+        .then((fatigue) => {
+          if (runGenerationRef.current !== generation) return;
+          setFatigueDetection(fatigue);
+          setPalateCleanser(selectCanonicalPalateCleanser(details, fatigue));
+        })
+        .catch((fatigueError) => {
+          console.error(
+            "[Suggest] Failed to load palate presentation state",
+            fatigueError,
+          );
+          if (runGenerationRef.current !== generation) return;
+          setFatigueDetection(null);
+          setPalateCleanser([]);
+        });
     } catch (error) {
       console.error("[Suggest] error in runSuggest", error);
       setError(
