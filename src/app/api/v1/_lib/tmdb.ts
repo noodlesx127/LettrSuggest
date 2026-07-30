@@ -92,6 +92,16 @@ export async function fetchTmdb<T>(
     }
 
     return (await response.json()) as T;
+  } catch (error) {
+    if (
+      controller.signal.aborted &&
+      error instanceof DOMException &&
+      error.name === "AbortError"
+    ) {
+      throw new ApiError(504, "UPSTREAM_ERROR", "TMDB request timed out");
+    }
+
+    throw error;
   } finally {
     clearTimeout(timeoutId);
   }
