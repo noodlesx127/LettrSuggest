@@ -12,7 +12,7 @@
 - [x] Close the blocker with a deterministic/deduped shared web metadata window with max 300 entries, server TMDB concurrency 5 and a 5-second timeout, and `504 UPSTREAM_ERROR` classification for upstream timeouts.
 - [x] Reuse request-scoped metadata for canonical scoring, cold-start, strict genre filtering, and final adaptation. Defer `/suggest` presentation hydration as bounded (300) and non-blocking, including restored sessions; use shared payload validation and the bounded canonical path for `/genre-suggest`.
 - [x] Record verification: Prettier 12 files pass; diff check pass; focused 6 files/40 tests pass; lint pass; typecheck pass; full Vitest 23 files/245 tests pass; build pass 51/51 pages with non-fatal existing dynamic-server and stale browser-data warnings; Playwright recommendation page slice 1 passed, 1 skipped; final bounded code review approved.
-- [x] Confirm change impact was limited to canonical web generation, shared TMDB request/detail helpers, both pages and tests; the change-impact tool also surfaced unrelated pre-existing dirty files and no impacted symbols.
+- [x] Record change-impact evidence: the commit-range scan identified the 12 expected hotfix source/test files, also surfaced unrelated existing dirty files, and returned no impacted symbols; therefore tests/review provided behavioral blast-radius evidence.
 - [x] Record that no production deploy/live import validation was performed because separate authorization is required.
 
 **Next action:** Resume 2A.3 Atomic Snapshot Reconciliation and retain fresh import-to-suggestions acceptance evidence, honest import failure, stale-row reconciliation, and recommendation-revision invalidation.
