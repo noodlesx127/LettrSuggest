@@ -39,6 +39,7 @@ import {
   selectCanonicalPalateCleanser,
   selectCanonicalWatchlistPicks,
 } from "@/lib/recommendationAdapters";
+import { parseCanonicalWebItems } from "@/lib/canonicalWebResponse";
 import {
   detectGenreFatigue,
   type FatigueDetection,
@@ -248,7 +249,8 @@ export default function SuggestPage() {
   const [watchlistTmdbIds, setWatchlistTmdbIds] = useState<Set<number>>(
     new Set(),
   );
-  const watchlistIdsHydrationRef = useRef<Promise<Set<number>> | null>(null);
+  const [presentationHydrationEnabled, setPresentationHydrationEnabled] =
+    useState(false);
   const [excludeGenres, setExcludeGenres] = useState<string>("");
   const [yearMin, setYearMin] = useState<string>("");
   const [yearMax, setYearMax] = useState<string>("");
@@ -1264,7 +1266,13 @@ export default function SuggestPage() {
   useEffect(() => {
     let active = true;
     const loadPresentationState = async (): Promise<Set<number>> => {
-      if (!uid || sourceFilms.length === 0) return new Set<number>();
+      if (
+        !presentationHydrationEnabled ||
+        !uid ||
+        sourceFilms.length === 0
+      ) {
+        return new Set<number>();
+      }
 
       try {
         const mappings = await getFilmMappings(
@@ -1282,7 +1290,19 @@ export default function SuggestPage() {
         setMappingCoverage({ mapped: mappings.size, total: sourceFilms.length });
         setWatchlistTmdbIds(watchlistIds);
 
-        const details = await getBulkTmdbDetails(Array.from(mappings.values()));
+        const presentationTmdbIds = [
+          ...new Set(
+            sourceFilms
+              .map((film) => mappings.get(film.uri))
+              .filter(
+                (tmdbId): tmdbId is number =>
+                  typeof tmdbId === "number" &&
+                  Number.isFinite(tmdbId) &&
+                  tmdbId > 0,
+              ),
+          ),
+        ].slice(0, 300);
+        const details = await getBulkTmdbDetails(presentationTmdbIds);
         const profile = await buildTasteProfile({
           films: sourceFilms,
           mappings,
@@ -1302,13 +1322,18 @@ export default function SuggestPage() {
       }
     };
 
-    const watchlistIdsPromise = loadPresentationState();
-    watchlistIdsHydrationRef.current = watchlistIdsPromise;
-    void watchlistIdsPromise;
+    void loadPresentationState();
     return () => {
       active = false;
     };
-  }, [sourceFilms, uid]);
+  }, [presentationHydrationEnabled, sourceFilms, uid]);
+
+  useEffect(() => {
+    if (!items) return;
+    setWatchlistPicks(
+      selectCanonicalWatchlistPicks(items, watchlistTmdbIds),
+    );
+  }, [items, watchlistTmdbIds]);
 
   const recentFilmTitle = useMemo(() => {
     if (!sourceFilms.length) return undefined;
@@ -1428,6 +1453,7 @@ export default function SuggestPage() {
 
   const runSuggest = useCallback(async () => {
     try {
+      setPresentationHydrationEnabled(false);
       setCacheKey(Date.now());
       setItems(null);
       setError(null);
@@ -1463,8 +1489,6 @@ export default function SuggestPage() {
         excludeTmdbIds: [...new Set([...blockedIds, ...shownIds])],
         requestSeed: `web-${refreshTick}-${mode}`,
       });
-      const localWatchlistIds = await (watchlistIdsHydrationRef.current ??
-        Promise.resolve(new Set<number>()));
       const excludedGenres = new Set(
         excludeGenres
           .split(",")
@@ -1473,7 +1497,8 @@ export default function SuggestPage() {
       );
       const minimumYear = Number(yearMin) || null;
       const maximumYear = Number(yearMax) || null;
-      const details = (canonical.items as MovieItem[]).filter((item) => {
+      const canonicalItems = parseCanonicalWebItems(canonical) as MovieItem[];
+      const details = canonicalItems.filter((item) => {
         const itemYear = item.year ? Number(item.year) : null;
         if (minimumYear && itemYear !== null && itemYear < minimumYear) {
           return false;
@@ -1485,7 +1510,7 @@ export default function SuggestPage() {
           excludedGenres.has(genre.toLowerCase()),
         );
       });
-      setWatchlistPicks(selectCanonicalWatchlistPicks(details, localWatchlistIds));
+      setWatchlistPicks(selectCanonicalWatchlistPicks(details, watchlistTmdbIds));
 
       try {
         const fatigue = await detectGenreFatigue(uid);
@@ -1522,6 +1547,7 @@ export default function SuggestPage() {
       );
     } finally {
       setLoading(false);
+      setPresentationHydrationEnabled(true);
       setRefreshingSections(new Set());
     }
   }, [
@@ -1531,6 +1557,7 @@ export default function SuggestPage() {
     refreshTick,
     shownIds,
     uid,
+    watchlistTmdbIds,
     yearMax,
     yearMin,
   ]);

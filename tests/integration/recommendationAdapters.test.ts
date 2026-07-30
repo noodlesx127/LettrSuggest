@@ -383,6 +383,11 @@ describe("web canonical recommendation adapter", () => {
     expect(page).not.toMatch(/fetchSectionReplacements\s*\(/);
     expect(page).toMatch(/selectCanonicalWatchlistPicks\s*\(/);
     expect(page).toMatch(/selectCanonicalPalateCleanser\s*\(/);
+    expect(page).toMatch(/parseCanonicalWebItems\s*\(/);
+    expect(genrePage).toMatch(/parseCanonicalWebItems\s*\(/);
+    expect(page).not.toMatch(/watchlistIdsHydrationRef/);
+    expect(page).toMatch(/presentationHydrationEnabled/);
+    expect(page).toContain(".slice(0, 300)");
     expect(page).not.toMatch(/\bgeneratePalateCleanser\s*\(/);
     expect(genrePage).not.toMatch(/\bgenerateSmartCandidates\s*\(/);
     expect(genrePage).not.toMatch(/\bsuggestByOverlap\s*\(/);

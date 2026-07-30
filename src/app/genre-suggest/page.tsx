@@ -24,6 +24,7 @@ import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import { saveMovie, getSavedMovies } from "@/lib/lists";
 import { SUBGENRES_BY_PARENT } from "@/lib/subgenreData";
 import { detectSubgenres } from "@/lib/subgenreDetection";
+import { parseCanonicalWebItems } from "@/lib/canonicalWebResponse";
 import { matchesNicheGenrePresentation } from "@/lib/recommendationAdapters";
 import type { FilmEvent } from "@/lib/normalize";
 
@@ -359,7 +360,7 @@ export default function GenreSuggestPage() {
         excludeTmdbIds: [...new Set([...blockedIds, ...shownIds])],
         requestSeed: `web-genre-${selectedGenres.join("-")}-${selectedSubgenres.join("-")}-${shownIds.size}`,
       });
-      const validMovies = canonical.items as MovieItem[];
+      const validMovies = parseCanonicalWebItems(canonical) as MovieItem[];
       if (validMovies.length === 0) {
         setError("No eligible recommendations were found for these genres.");
         return;
