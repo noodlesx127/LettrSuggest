@@ -621,7 +621,7 @@ describe("recommendation profile cache revision", () => {
   it("defines a safe migration/backfill contract for existing cache rows", () => {
     const migration = readFileSync(
       new URL(
-        "../../supabase/migrations/20260721120000_version_taste_profile_cache.sql",
+        "../../supabase/migrations/20260729225228_version_taste_profile_cache.sql",
         import.meta.url,
       ),
       "utf8",

@@ -132,7 +132,7 @@
 **Files:**
 - Create: `src/lib/recommendationRevision.ts`
 - Create: `tests/unit/recommendationCache.test.ts`
-- Create: `supabase/migrations/20260721120000_version_taste_profile_cache.sql`
+- Create: `supabase/migrations/20260729225228_version_taste_profile_cache.sql`
 - Modify: `src/lib/serverSuggestionsEngine.ts`
 - Modify: `src/app/api/v1/admin/diagnostics/route.ts`
 

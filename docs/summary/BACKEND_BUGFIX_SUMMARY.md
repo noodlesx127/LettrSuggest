@@ -23,7 +23,7 @@ This document summarizes fixes applied during the backend shakedown session.
 - Root cause: Bulk seed + incremental double-counting; no upper-bound validation; guard condition `=== 0` conflated "never seeded" with "zero exploratory films"
 - Fix: `src/lib/enrich.ts` — guard changed to `!currentStats` (only seed when no row exists)
 - Fix: `src/app/api/v1/stats/route.ts` — defensive cap `Math.min(exploratory_films_rated, total_rated)`
-- Fix: `supabase/migrations/20260403000000_fix_exploration_stats_constraint.sql` — CTE-based cleanup migration
+- Fix: `supabase/migrations/20260403222705_fix_exploration_stats_constraint.sql` — CTE-based cleanup migration
 
 ## Bug 5 — MEDIUM: TasteDive/Watchmode cache dead code + RLS (FIXED)
 
@@ -40,7 +40,7 @@ This document summarizes fixes applied during the backend shakedown session.
 
 - Root cause: TMDB 404s, missing `release_date`, no fallback from request body, no backfill on "already exists" path
 - Fix: `src/app/api/v1/suggestions/liked/route.ts` — added `body.year` as fallback, added `parseOptionalYear()` helper
-- Fix: `supabase/migrations/20260403100000_backfill_liked_suggestion_metadata.sql` — recreated `add_liked_suggestion` RPC to backfill null `year` and `poster_path` on "already exists" path
+- Fix: `supabase/migrations/20260403224926_backfill_liked_suggestion_metadata.sql` — recreated `add_liked_suggestion` RPC to backfill null `year` and `poster_path` on "already exists" path
 
 ---
 
@@ -50,7 +50,7 @@ Replaced the generic `aggregateRecommendations` flow in `POST /api/v1/suggestion
 
 ### Changes
 
-- **`supabase/migrations/20260403110000_user_taste_profile_cache.sql`** — New `user_taste_profile_cache` table with RLS. Caches computed taste profiles for 24h, invalidated when film count changes.
+- **`supabase/migrations/20260404015449_user_taste_profile_cache.sql`** — New `user_taste_profile_cache` table with RLS. Caches computed taste profiles for 24h, invalidated when film count changes.
 - **`src/lib/serverSuggestionsEngine.ts`** — New server-side data loading module:
   - `loadUserContext(userId)` — loads all user tables in parallel via `supabaseAdmin` with explicit user scoping
   - `buildTasteProfileServer(userId, userContext)` — builds/caches taste profiles server-side, passes `tmdbDetails` to avoid internal route fetches

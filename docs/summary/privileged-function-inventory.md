@@ -62,7 +62,7 @@ Four target bodies trust caller-supplied identifiers without checking the effect
 | --- | --- | --- | --- | --- |
 | `handle_new_user()` | `postgres` | `SET search_path = ''` | `PUBLIC`, `anon`, `authenticated`, `postgres`, `service_role` | Trigger-only: `on_auth_user_created` on `auth.users`. |
 | `handle_new_user_role()` | `postgres` | `SET search_path = public` | `PUBLIC`, `anon`, `authenticated`, `postgres`, `service_role` | Trigger-only: `on_auth_user_created_role` on `auth.users`. |
-| `is_admin(check_user_id uuid)` | `postgres` | `SET search_path = public` | `PUBLIC`, `anon`, `authenticated`, `postgres`, `service_role` | RLS helper used by policies created in `20260322001014_fix_user_roles_recursive_rls.sql` and `20260405120000_fix_rls_performance.sql`. Direct arbitrary-ID execution also exposes role status and should be reviewed in 0A.2. |
+| `is_admin(check_user_id uuid)` | `postgres` | `SET search_path = public` | `PUBLIC`, `anon`, `authenticated`, `postgres`, `service_role` | RLS helper used by policies created in `20260322001014_fix_user_roles_recursive_rls.sql` and `20260405234253_fix_rls_performance.sql`. Direct arbitrary-ID execution also exposes role status and should be reviewed in 0A.2. |
 | `prune_api_caches(retention_days integer)` | `postgres` | `SET search_path = ''` | `postgres`, `anon`, `authenticated`, `service_role` | Maintenance/cron operation; no application call site found. It should be service/maintenance-only. |
 | `sync_film_events_last_date()` | `postgres` | `SET search_path = public` | `PUBLIC`, `anon`, `authenticated`, `postgres`, `service_role` | Trigger-only: `trg_sync_film_events_last_date` on `public.film_diary_events_raw`. |
 

@@ -595,8 +595,8 @@ This issue is adjacent to the algorithm review but is more urgent than recommend
 
 **Evidence**
 
-- `supabase/migrations/20260405130000_fix_security_advisors.sql:14-45`
-- `supabase/migrations/20260405130000_fix_security_advisors.sql:88-104`
+- `supabase/migrations/20260405234351_fix_security_advisors.sql:14-45`
+- `supabase/migrations/20260405234351_fix_security_advisors.sql:88-104`
 
 `add_liked_suggestion(p_user_id, ...)` and `get_film_stats(p_user_id)` execute with definer privileges, accept arbitrary user IDs, and do not enforce `auth.uid() = p_user_id`.
 

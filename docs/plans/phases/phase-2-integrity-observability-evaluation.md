@@ -26,7 +26,7 @@
 
 **Files:**
 - Create: `tests/unit/importNormalization.test.ts`
-- Create: `supabase/migrations/20260729100000_add_watchlist_added_at_to_film_events.sql`
+- Create: `supabase/migrations/20260730020406_add_watchlist_added_at_to_film_events.sql`
 - Modify: `src/lib/normalize.ts`
 - Modify: `src/lib/diary.ts`
 - Modify: `src/app/import/page.tsx`

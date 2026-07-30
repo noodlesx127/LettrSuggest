@@ -13,8 +13,8 @@
 **Files:**
 - Create: `supabase/tests/database/privileged_functions.test.sql`
 - Create: `docs/summary/privileged-function-inventory.md`
-- Inspect: `supabase/migrations/20260405130000_fix_security_advisors.sql`
-- Inspect: `supabase/migrations/20260322130000_create_film_diary_events_raw.sql`
+- Inspect: `supabase/migrations/20260405234351_fix_security_advisors.sql`
+- Inspect: `supabase/migrations/20260322035647_create_film_diary_events_raw.sql`
 - Inspect: `src/app/api/v1/suggestions/liked/route.ts`
 - Inspect: `src/app/api/v1/stats/route.ts`
 - Inspect: `src/app/api/v1/_lib/rateLimiter.ts`

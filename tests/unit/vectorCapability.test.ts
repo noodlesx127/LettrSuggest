@@ -280,7 +280,7 @@ describe("vector capability gate", () => {
   it("defines strict lifecycle and neighbor-window migration contracts", () => {
     const migration = readFileSync(
       new URL(
-        "../../supabase/migrations/20260729090000_vector_capability_lifecycle.sql",
+        "../../supabase/migrations/20260729231305_vector_capability_lifecycle.sql",
         import.meta.url,
       ),
       "utf8",

@@ -344,7 +344,7 @@ describe("import normalization", () => {
     const migration = readFileSync(
       fileURLToPath(
         new URL(
-          "../../supabase/migrations/20260729100000_add_watchlist_added_at_to_film_events.sql",
+          "../../supabase/migrations/20260730020406_add_watchlist_added_at_to_film_events.sql",
           import.meta.url,
         ),
       ),
