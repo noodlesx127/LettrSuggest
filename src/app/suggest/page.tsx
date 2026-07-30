@@ -400,6 +400,7 @@ export default function SuggestPage() {
             );
           }
           setItems(parsed);
+          setPresentationHydrationEnabled(true);
         }
       }
     } catch (e) {

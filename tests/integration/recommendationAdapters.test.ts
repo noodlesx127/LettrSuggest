@@ -388,6 +388,9 @@ describe("web canonical recommendation adapter", () => {
     expect(genrePage).toMatch(/parseCanonicalWebItems\s*\(/);
     expect(page).not.toMatch(/watchlistIdsHydrationRef/);
     expect(page).toMatch(/presentationHydrationEnabled/);
+    expect(page).toMatch(
+      /setItems\(parsed\);\s*setPresentationHydrationEnabled\(true\);/,
+    );
     expect(page).toContain(".slice(0, 300)");
     expect(page).not.toMatch(/\bgeneratePalateCleanser\s*\(/);
     expect(genrePage).not.toMatch(/\bgenerateSmartCandidates\s*\(/);
