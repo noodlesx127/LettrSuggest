@@ -8,6 +8,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useImportData } from "@/lib/importStore";
 import { supabase } from "@/lib/supabaseClient";
 import {
+  getSuggestionStorageKeys,
+  parseStoredPairHistory,
+  parseStoredPairwiseCount,
+  parseStoredShownIds,
+  parseStoredSuggestionItems,
+} from "@/lib/suggestionStorage";
+import {
   getFilmMappings,
   getBulkTmdbDetails,
   buildTasteProfile,
@@ -239,7 +246,7 @@ const PROGRESS_STAGES = [
 
 export default function SuggestPage() {
   const { films, loading: loadingFilms } = useImportData();
-  const [uid, setUid] = useState<string | null>(null);
+  const [uid, setUid] = useState<string | null | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<MovieItem[] | null>(null);
@@ -336,6 +343,20 @@ export default function SuggestPage() {
   // Ref for focus trap in feedback popup modal (A11y Issue 2)
   const feedbackModalRef = useRef<HTMLDivElement>(null);
   const runGenerationRef = useRef(0);
+  const storageUidRef = useRef<string | null | undefined>(undefined);
+  const storageReadyUidRef = useRef<string | null>(null);
+
+  const updateUid = useCallback((nextUid: string | null) => {
+    const previousUid = storageUidRef.current;
+    storageUidRef.current = nextUid;
+
+    if (previousUid !== nextUid) {
+      storageReadyUidRef.current = null;
+      runGenerationRef.current += 1;
+    }
+
+    setUid(nextUid);
+  }, []);
 
   // Focus trap effect for feedback popup modal (A11y Issue 2)
   useEffect(() => {
@@ -386,144 +407,142 @@ export default function SuggestPage() {
     };
   }, [feedbackPopup]);
 
-  // Load from session storage on mount
+  // Restore only the authenticated user's namespace when auth has resolved.
   useEffect(() => {
+    storageReadyUidRef.current = null;
+    setItems(null);
+    setShownIds(new Set());
+    setPairHistory(new Set());
+    setPairwiseCount(0);
+    setPairwisePair(null);
+    setPairwiseVideoId(null);
+    setPresentationHydrationEnabled(false);
+    setHasCheckedStorage(false);
+
+    const keys = getSuggestionStorageKeys(uid ?? null);
+    if (!keys) {
+      if (uid !== undefined) setHasCheckedStorage(true);
+      return;
+    }
+
     try {
-      const stored = sessionStorage.getItem("lettrsuggest_items");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          if (process.env.NODE_ENV === "development") {
-            console.log(
-              "[Suggest] Restored items from session storage",
-              parsed.length,
-            );
-          }
-          setItems(parsed);
-          setPresentationHydrationEnabled(true);
+      const restoredItems = parseStoredSuggestionItems(
+        sessionStorage.getItem(keys.items),
+      );
+      const restoredShownIds = parseStoredShownIds(
+        localStorage.getItem(keys.shownIds),
+        Date.now(),
+      );
+      const restoredPairHistory = parseStoredPairHistory(
+        sessionStorage.getItem(keys.pairHistory),
+      );
+      const restoredPairwiseCount = parseStoredPairwiseCount(
+        sessionStorage.getItem(keys.pairwiseCount),
+      );
+
+      if (restoredItems) {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[Suggest] Restored items from user storage",
+            restoredItems.length,
+          );
         }
+        setItems(restoredItems as MovieItem[]);
+        setPresentationHydrationEnabled(true);
       }
-    } catch (e) {
-      console.error("[Suggest] Failed to restore from session storage", e);
+      if (restoredShownIds) setShownIds(new Set(restoredShownIds));
+      if (restoredPairHistory) setPairHistory(new Set(restoredPairHistory));
+      if (restoredPairwiseCount !== null) {
+        setPairwiseCount(restoredPairwiseCount);
+      }
+    } catch (error) {
+      console.error("[Suggest] Failed to restore user storage", error);
     } finally {
       setHasCheckedStorage(true);
     }
-  }, []);
+  }, [uid]);
 
-  // Load pairwise history (to avoid repeating the same comparison)
+  const isStorageReady = (storageUid: string | null | undefined) =>
+    typeof storageUid === "string" &&
+    storageReadyUidRef.current === storageUid;
+
+  // P1.4: Save shown IDs to the authenticated namespace (debounced).
   useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem("lettrsuggest_pair_history");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          setPairHistory(new Set(parsed));
-        }
+    const keys = getSuggestionStorageKeys(uid ?? null);
+    if (!keys || !isStorageReady(uid) || shownIds.size === 0) return;
+
+    const timeoutId = setTimeout(() => {
+      if (
+        storageUidRef.current !== uid ||
+        !isStorageReady(uid)
+      ) {
+        return;
       }
-    } catch (e) {
-      console.error("[Suggest] Failed to restore pair history", e);
-    }
-  }, []);
 
-  // Track how many pairwise prompts have been shown this session
-  useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem("lettrsuggest_pairwise_count");
-      if (stored != null) {
-        setPairwiseCount(Number(stored) || 0);
-      }
-    } catch (e) {
-      console.error("[Suggest] Failed to restore pairwise count", e);
-    }
-  }, []);
-
-  // P1.4: Load shownIds from localStorage on mount (7-day TTL to prevent stale data)
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem("lettrsuggest_shown_ids");
-      if (stored) {
-        const { ids, timestamp } = JSON.parse(stored);
-        const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-        const isValid = timestamp && Date.now() - timestamp < SEVEN_DAYS_MS;
-
-        if (isValid && Array.isArray(ids) && ids.length > 0) {
-          if (process.env.NODE_ENV === "development") {
-            console.log(
-              "[Suggest] Restored shown IDs from localStorage",
-              ids.length,
-            );
-          }
-          setShownIds(new Set(ids));
-        } else if (!isValid) {
-          // Clear expired data
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Suggest] Cleared expired shown IDs data");
-          }
-          localStorage.removeItem("lettrsuggest_shown_ids");
-        }
-      }
-    } catch (e) {
-      console.error("[Suggest] Failed to restore shown IDs", e);
-    }
-  }, []);
-
-  // P1.4: Save shownIds to localStorage when they change (debounced)
-  useEffect(() => {
-    if (shownIds.size > 0) {
-      const timeoutId = setTimeout(() => {
-        try {
-          const data = {
-            ids: Array.from(shownIds),
-            timestamp: Date.now(),
-          };
-          localStorage.setItem("lettrsuggest_shown_ids", JSON.stringify(data));
-          if (process.env.NODE_ENV === "development") {
-            console.log(
-              "[Suggest] Saved shown IDs to localStorage",
-              shownIds.size,
-            );
-          }
-        } catch (e) {
-          console.error("[Suggest] Failed to save shown IDs", e);
-        }
-      }, 500); // Debounce to avoid excessive writes
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [shownIds]);
-
-  // Save to session storage when items change
-  useEffect(() => {
-    if (items && items.length > 0) {
       try {
-        sessionStorage.setItem("lettrsuggest_items", JSON.stringify(items));
-      } catch (e) {
-        console.error("[Suggest] Failed to save to session storage", e);
+        const data = {
+          ids: Array.from(shownIds),
+          timestamp: Date.now(),
+        };
+        localStorage.setItem(keys.shownIds, JSON.stringify(data));
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[Suggest] Saved shown IDs to user storage",
+            shownIds.size,
+          );
+        }
+      } catch (error) {
+        console.error("[Suggest] Failed to save shown IDs", error);
       }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [shownIds, uid]);
+
+  // Save to session storage when items change.
+  useEffect(() => {
+    const keys = getSuggestionStorageKeys(uid ?? null);
+    if (!keys || !isStorageReady(uid) || !items || items.length === 0) return;
+
+    try {
+      sessionStorage.setItem(keys.items, JSON.stringify(items));
+    } catch (error) {
+      console.error("[Suggest] Failed to save items to user storage", error);
     }
-  }, [items]);
+  }, [items, uid]);
 
   useEffect(() => {
+    const keys = getSuggestionStorageKeys(uid ?? null);
+    if (!keys || !isStorageReady(uid)) return;
+
     try {
       sessionStorage.setItem(
-        "lettrsuggest_pair_history",
+        keys.pairHistory,
         JSON.stringify(Array.from(pairHistory)),
       );
-    } catch (e) {
-      console.error("[Suggest] Failed to persist pair history", e);
+    } catch (error) {
+      console.error("[Suggest] Failed to persist pair history", error);
     }
-  }, [pairHistory]);
+  }, [pairHistory, uid]);
 
   useEffect(() => {
+    const keys = getSuggestionStorageKeys(uid ?? null);
+    if (!keys || !isStorageReady(uid)) return;
+
     try {
-      sessionStorage.setItem(
-        "lettrsuggest_pairwise_count",
-        String(pairwiseCount),
-      );
-    } catch (e) {
-      console.error("[Suggest] Failed to persist pairwise count", e);
+      sessionStorage.setItem(keys.pairwiseCount, String(pairwiseCount));
+    } catch (error) {
+      console.error("[Suggest] Failed to persist pairwise count", error);
     }
-  }, [pairwiseCount]);
+  }, [pairwiseCount, uid]);
+
+  // Mark a namespace ready only after its restore pass has completed. This
+  // prevents the first render after an account transition from persisting the
+  // previous user's in-memory state into the next user's namespace.
+  useEffect(() => {
+    storageReadyUidRef.current =
+      typeof uid === "string" && hasCheckedStorage ? uid : null;
+  }, [hasCheckedStorage, uid]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1230,24 +1249,60 @@ export default function SuggestPage() {
   }, [contextMode, localHour]);
 
   useEffect(() => {
-    const init = async () => {
-      if (!supabase) return;
-      const { data } = await supabase.auth.getSession();
-      const userId = data.session?.user?.id ?? null;
-      setUid(userId);
+    const client = supabase;
+    if (!client) {
+      updateUid(null);
+      setBlockedIds(new Set());
+      return;
+    }
 
-      // Fetch blocked suggestions
-      if (userId) {
-        try {
-          const blocked = await getBlockedSuggestions(userId);
-          setBlockedIds(blocked);
-        } catch (e) {
-          console.error("Failed to fetch blocked suggestions:", e);
-        }
+    let active = true;
+    let authEventVersion = 0;
+
+    const applySession = (session: {
+      user?: { id?: string | undefined };
+    } | null) => {
+      const userId = session?.user?.id ?? null;
+      updateUid(userId);
+
+      if (!userId) {
+        setBlockedIds(new Set());
+        return;
       }
+
+      void getBlockedSuggestions(userId)
+        .then((blocked) => {
+          if (active && storageUidRef.current === userId) {
+            setBlockedIds(blocked);
+          }
+        })
+        .catch((error) => {
+          if (active && storageUidRef.current === userId) {
+            console.error("Failed to fetch blocked suggestions:", error);
+          }
+        });
+    };
+
+    const {
+      data: { subscription },
+    } = client.auth.onAuthStateChange((_event, session) => {
+      authEventVersion += 1;
+      applySession(session);
+    });
+
+    const init = async () => {
+      const versionAtStart = authEventVersion;
+      const { data } = await client.auth.getSession();
+      if (!active || versionAtStart !== authEventVersion) return;
+      applySession(data.session);
     };
     void init();
-  }, []);
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [updateUid]);
 
   // Load saved movies
   useEffect(() => {
@@ -1456,6 +1511,8 @@ export default function SuggestPage() {
   const runSuggest = useCallback(async () => {
     const generation = runGenerationRef.current + 1;
     runGenerationRef.current = generation;
+    const isCurrentRun = () =>
+      runGenerationRef.current === generation && storageUidRef.current === uid;
 
     try {
       setPresentationHydrationEnabled(false);
@@ -1477,10 +1534,13 @@ export default function SuggestPage() {
         details: "Authenticating your recommendation request...",
       });
 
-      if (!supabase || !uid) throw new Error("Not signed in");
-      const { data, error } = await supabase.auth.getSession();
+      const client = supabase;
+      if (!client || !uid) throw new Error("Not signed in");
+      const currentUid = uid;
+      const { data, error } = await client.auth.getSession();
       const accessToken = data.session?.access_token;
       if (error || !accessToken) throw new Error("Authentication required");
+      if (!isCurrentRun()) return;
 
       setProgress({
         current: 2,
@@ -1494,6 +1554,7 @@ export default function SuggestPage() {
         excludeTmdbIds: [...new Set([...blockedIds, ...shownIds])],
         requestSeed: `web-${refreshTick}-${mode}`,
       });
+      if (!isCurrentRun()) return;
       const excludedGenres = new Set(
         excludeGenres
           .split(",")
@@ -1535,9 +1596,9 @@ export default function SuggestPage() {
         details: `Loaded ${details.length} canonical recommendations!`,
       });
 
-      void detectGenreFatigue(uid)
+      void detectGenreFatigue(currentUid)
         .then((fatigue) => {
-          if (runGenerationRef.current !== generation) return;
+          if (!isCurrentRun()) return;
           setFatigueDetection(fatigue);
           setPalateCleanser(selectCanonicalPalateCleanser(details, fatigue));
         })
@@ -1546,16 +1607,18 @@ export default function SuggestPage() {
             "[Suggest] Failed to load palate presentation state",
             fatigueError,
           );
-          if (runGenerationRef.current !== generation) return;
+          if (!isCurrentRun()) return;
           setFatigueDetection(null);
           setPalateCleanser([]);
         });
     } catch (error) {
+      if (!isCurrentRun()) return;
       console.error("[Suggest] error in runSuggest", error);
       setError(
         error instanceof Error ? error.message : "Failed to get suggestions",
       );
     } finally {
+      if (!isCurrentRun()) return;
       setLoading(false);
       setPresentationHydrationEnabled(true);
       setRefreshingSections(new Set());

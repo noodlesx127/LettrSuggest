@@ -532,6 +532,28 @@ describe("web canonical recommendation adapter", () => {
     expect(page).not.toMatch(/\bsuggestByOverlap\s*\(/);
     expect(page).not.toMatch(/\bcalibrateRecommendations\s*\(/);
     expect(page).toMatch(/loadPresentationState/);
+    expect(page).toMatch(/\bgetSuggestionStorageKeys\s*\(/);
+    for (const legacyKey of [
+      "lettrsuggest_items",
+      "lettrsuggest_shown_ids",
+      "lettrsuggest_pair_history",
+      "lettrsuggest_pairwise_count",
+    ]) {
+      const escapedKey = legacyKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect(page).not.toMatch(
+        new RegExp(
+          `(?:sessionStorage|localStorage)\\s*\\.\\s*(?:getItem|setItem|removeItem)\\s*\\(\\s*["']${escapedKey}["']`,
+        ),
+      );
+    }
+    expect(page).toMatch(/auth\s*\.\s*onAuthStateChange\s*\(/);
+    expect(page).toMatch(/unsubscribe\s*\(\s*\)/);
+    expect(page).toMatch(
+      /setItems\(null\);[\s\S]*?setPairHistory\(new Set\(\)\);[\s\S]*?setPairwisePair\(null\);[\s\S]*?setPairwiseVideoId\(null\);/,
+    );
+    expect(page).toMatch(
+      /const timeoutId = setTimeout\([\s\S]*?return \(\) => clearTimeout\(timeoutId\);/,
+    );
     expect(page).not.toMatch(/\blogSuggestionExposure\s*\(/);
     expect(page).not.toMatch(/Math\.random\s*\(/);
     expect(page).toMatch(/generateCanonicalWebRecommendations\s*\(/);
@@ -545,7 +567,7 @@ describe("web canonical recommendation adapter", () => {
     expect(page).not.toMatch(/watchlistIdsHydrationRef/);
     expect(page).toMatch(/presentationHydrationEnabled/);
     expect(page).toMatch(
-      /setItems\(parsed\);\s*setPresentationHydrationEnabled\(true\);/,
+      /setItems\(\s*restoredItems(?:\s+as\s+MovieItem\[\])?\s*\);[\s\S]*?setPresentationHydrationEnabled\(\s*true\s*\)/,
     );
     expect(page).toContain(".slice(0, 300)");
     expect(page).not.toMatch(/\bgeneratePalateCleanser\s*\(/);

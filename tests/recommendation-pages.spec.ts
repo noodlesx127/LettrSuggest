@@ -46,15 +46,55 @@ test.describe("authenticated recommendation pages", () => {
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/$/);
 
-    // Keep /suggest's automatic generation guard closed with inert client-only state.
-    await page.evaluate(() => {
+    const uid = await page.evaluate(() => {
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (!key || !/^sb-.*-auth-token$/.test(key)) continue;
+        const raw = window.localStorage.getItem(key);
+        if (!raw) continue;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw) as unknown;
+        } catch {
+          continue;
+        }
+        if (
+          !parsed ||
+          typeof parsed !== "object" ||
+          Array.isArray(parsed)
+        ) {
+          continue;
+        }
+        const value = parsed as {
+          user?: { id?: unknown };
+          currentSession?: { user?: { id?: unknown } };
+          session?: { user?: { id?: unknown } };
+        };
+        const candidate =
+          value.user?.id ??
+          value.currentSession?.user?.id ??
+          value.session?.user?.id;
+        if (typeof candidate === "string" && candidate.trim().length > 0) {
+          return candidate;
+        }
+      }
+      throw new Error("Authenticated Supabase user ID was not found");
+    });
+
+    await page.evaluate((userId) => {
       window.sessionStorage.setItem(
-        "lettrsuggest_items",
+        `lettrsuggest:${userId}:items`,
         JSON.stringify([
           { id: 27205, title: "Smoke fixture", reasons: [], score: 0 },
         ]),
       );
-    });
+      window.sessionStorage.setItem(
+        "lettrsuggest_items",
+        JSON.stringify([
+          { id: 27206, title: "Legacy sentinel", reasons: [], score: 0 },
+        ]),
+      );
+    }, uid);
 
     const generationRequests: string[] = [];
     page.on("request", (request) => {
@@ -67,6 +107,10 @@ test.describe("authenticated recommendation pages", () => {
     });
 
     await page.goto("/suggest");
+    await expect(page.getByText("Smoke fixture", { exact: true })).toBeVisible();
+    await expect(page.getByText("Legacy sentinel", { exact: true })).toHaveCount(
+      0,
+    );
     await expect(
       page.getByRole("heading", { name: "Suggestions", exact: true }),
     ).toBeVisible();

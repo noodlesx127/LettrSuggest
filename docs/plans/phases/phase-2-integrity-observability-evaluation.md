@@ -12,13 +12,14 @@
 - [x] Land the original deterministic/deduped 300-entry metadata window and per-request five-second timeout.
 - [x] Restore web/v1 personalization-input parity through one shared normalized builder and scorer seam.
 - [x] Add a 20-second request-wide metadata deadline and reject unhealthy partial scoring pools.
-- [ ] Scope restored suggestion, exposure-suppression, and pairwise state to the authenticated user.
+- [x] Scope restored suggestion, exposure-suppression, and pairwise state to the authenticated user.
 - [ ] Record focused, full-gate, authenticated Playwright, live generation, review, and change-impact evidence.
 
 **Next action:** Complete this bounded correction, then resume 2A.3 Atomic Snapshot Reconciliation.
 
 **TDD evidence:**
 
+- 2026-07-30 - Original Task 4 RED: `rtk npm run test -- tests/unit/suggestionStorage.test.ts` - failed because `@/lib/suggestionStorage` did not exist.
 - 2026-07-30 - Original Task 2 RED: `rtk npm run test -- tests/unit/recommendationPersonalization.test.ts tests/unit/recommendationScoring.test.ts` - both suites failed because `src/lib/recommendationPersonalization.ts` and `src/lib/recommendationScoring.ts` did not yet exist.
 - 2026-07-30 - Adapter-parity RED: `rtk npm run test -- tests/integration/recommendationAdapters.test.ts -t "keeps normalized web and v1 scorer inputs in parity"` - the new test failed because `buildRecommendationScoringInputs` was not yet available.
 - 2026-07-30 - Task 3 RED: `rtk npm run test -- tests/unit/serverTmdbDetails.test.ts` - 6/6 failed because structured completion/helpers/options/taste cap were absent.
