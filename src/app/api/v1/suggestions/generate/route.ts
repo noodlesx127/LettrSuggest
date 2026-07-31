@@ -26,7 +26,10 @@ import {
   loadUserContext,
   runCanonicalServerRecommendations,
 } from "@/lib/serverSuggestionsEngine";
-import { buildRecommendationPersonalization } from "@/lib/recommendationPersonalization";
+import {
+  buildRecommendationPersonalization,
+  buildRecommendationScoringInputs,
+} from "@/lib/recommendationPersonalization";
 import {
   buildBlockedSourceFailureResponse,
   buildGenerationDiagnostics,
@@ -416,7 +419,7 @@ export async function POST(req: Request) {
         films: liteFilms,
         mappings: userContext.mappings,
         candidates: filteredCandidates,
-        ...personalization,
+        ...buildRecommendationScoringInputs(personalization, sourceMetadata),
         maxCandidates: Math.min(filteredCandidates.length, 1200),
         concurrency: 6,
         excludeWatchedIds: new Set(userContext.mappings.values()),

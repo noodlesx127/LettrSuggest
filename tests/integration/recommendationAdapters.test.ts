@@ -17,10 +17,18 @@ import {
   selectCanonicalPalateCleanser,
   selectCanonicalWatchlistPicks,
 } from "@/lib/recommendationAdapters";
+import {
+  buildRecommendationPersonalization,
+  buildRecommendationScoringInputs,
+} from "@/lib/recommendationPersonalization";
 import type {
   RecommendationCandidate,
   RecommendationResult,
 } from "@/lib/recommendationTypes";
+import type {
+  TasteProfile,
+  UserContext,
+} from "@/lib/serverSuggestionsEngine";
 
 const candidate = (tmdbId: number, score: number): RecommendationCandidate => ({
   tmdbId,
@@ -39,6 +47,94 @@ const candidate = (tmdbId: number, score: number): RecommendationCandidate => ({
     total: score,
   },
 });
+
+function makeParityUserContext(): UserContext {
+  return {
+    films: [
+      {
+        uri: "film/a/",
+        title: "A",
+        year: 2020,
+        rating: 4.5,
+        rewatch: false,
+        last_date: "2026-07-01",
+        watch_count: 1,
+        liked: true,
+        on_watchlist: true,
+      },
+    ],
+    mappings: new Map([["film/a/", 101]]),
+    mappingsArray: [{ uri: "film/a/", tmdb_id: 101 }],
+    feedback: [
+      {
+        feature_id: 7,
+        feature_name: "Director Seven",
+        feature_type: "director",
+        inferred_preference: 0.9,
+        positive_count: 3,
+        negative_count: 0,
+      },
+      {
+        feature_id: 8,
+        feature_name: "Keyword Eight",
+        feature_type: "keyword",
+        inferred_preference: 0.1,
+        positive_count: 0,
+        negative_count: 2,
+      },
+    ],
+    explorationRate: 0.15,
+    adjacentGenres: [
+      {
+        from_genre_name: "Drama",
+        to_genre_name: "Mystery",
+        success_rate: 0.8,
+      },
+    ],
+    recentExposures: new Map([[202, 3]]),
+    blockedIds: new Set(),
+    inputHealth: {} as UserContext["inputHealth"],
+    failedSources: [],
+    mode: "personalized",
+  };
+}
+
+function makeParityTasteProfile(): TasteProfile {
+  return {
+    topActors: [{ id: 1, name: "Actor One", weight: 1, count: 2 }],
+    topStudios: [{ id: 2, name: "Studio Two", weight: 0.8, count: 1 }],
+    topKeywords: [{ id: 3, name: "Keyword Three", weight: 0.7, count: 1 }],
+    topCountries: [{ name: "United States", count: 1 }],
+    topLanguages: [{ name: "English", count: 1 }],
+    avoidGenres: [{ id: 27, name: "Horror", weight: 1, count: 1 }],
+    avoidKeywords: [{ id: 4, name: "Keyword Four", weight: 1, count: 1 }],
+    avoidDirectors: [{ id: 5, name: "Director Five", weight: 1, count: 1 }],
+    preferredSubgenreKeywordIds: [99],
+    topDecades: [{ decade: 1990, weight: 1 }],
+    watchlistGenres: [{ name: "Drama", count: 1 }],
+    watchlistKeywords: [{ name: "Mystery", count: 1 }],
+    watchlistDirectors: [{ name: "Director Seven", count: 1 }],
+  } as unknown as TasteProfile;
+}
+
+function makeParitySourceMetadata() {
+  return new Map([
+    [
+      707,
+      {
+        sources: ["tmdb", "tastedive"],
+        consensusLevel: "high" as const,
+      },
+    ],
+    [
+      808,
+      {
+        sources: ["watchmode"],
+        consensusLevel: "low" as const,
+      },
+    ],
+  ]);
+}
 
 describe("v1 canonical recommendation adapter", () => {
   it("maps every parsed v1 intent field into canonical request and adapter options", () => {
@@ -244,6 +340,62 @@ describe("web canonical recommendation adapter", () => {
 
     expect(web.request).toEqual(v1.request);
     expect(web.request.seeds).toEqual(v1.request.seeds);
+  });
+
+  it("keeps normalized web and v1 scorer inputs in parity", () => {
+    const webScoringInputs = buildRecommendationScoringInputs(
+      buildRecommendationPersonalization(
+        makeParityUserContext(),
+        makeParityTasteProfile(),
+      ),
+      makeParitySourceMetadata(),
+    );
+    const v1ScoringInputs = buildRecommendationScoringInputs(
+      buildRecommendationPersonalization(
+        makeParityUserContext(),
+        makeParityTasteProfile(),
+      ),
+      makeParitySourceMetadata(),
+    );
+
+    expect(webScoringInputs.enhancedProfile).toEqual(
+      v1ScoringInputs.enhancedProfile,
+    );
+    expect(webScoringInputs.featureFeedback).toEqual(
+      v1ScoringInputs.featureFeedback,
+    );
+    expect(webScoringInputs.watchlistEntries).toEqual(
+      v1ScoringInputs.watchlistEntries,
+    );
+    expect(webScoringInputs.recentExposures).toEqual(
+      v1ScoringInputs.recentExposures,
+    );
+    expect(webScoringInputs.sourceMetadata).toEqual(
+      v1ScoringInputs.sourceMetadata,
+    );
+    expect(webScoringInputs.mmrLambda).toBe(v1ScoringInputs.mmrLambda);
+
+    expect(webScoringInputs.enhancedProfile).toEqual(
+      expect.objectContaining({
+        avoidKeywords: [
+          expect.objectContaining({ name: "Keyword Four" }),
+        ],
+        preferredSubgenreKeywordIds: [99],
+        watchlistGenres: ["Drama"],
+      }),
+    );
+    expect(webScoringInputs.featureFeedback).toEqual(
+      expect.objectContaining({
+        preferDirectors: [expect.objectContaining({ id: 7 })],
+        avoidKeywords: [expect.objectContaining({ id: 8 })],
+      }),
+    );
+    expect(webScoringInputs.watchlistEntries).toEqual([
+      { tmdbId: 101, addedAt: "2026-07-01" },
+    ]);
+    expect(webScoringInputs.recentExposures).toEqual(new Map([[202, 3]]));
+    expect(webScoringInputs.sourceMetadata).toEqual(makeParitySourceMetadata());
+    expect(webScoringInputs.mmrLambda).toBe(0.5);
   });
 
   it("bounds web result counts to the canonical request contract", () => {

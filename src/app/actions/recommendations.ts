@@ -19,6 +19,7 @@ import {
 } from "@/lib/recommendationCandidates";
 import { loadRecommendationContext } from "@/lib/recommendationContext";
 import {
+  buildRecommendationScoringInputs,
   buildRecommendationPersonalization,
 } from "@/lib/recommendationPersonalization";
 import { scoreRecommendationsWithOverlap } from "@/lib/recommendationScoring";
@@ -176,7 +177,7 @@ export async function generateCanonicalWebRecommendations(params: {
             const scored = await scoreRecommendationsWithOverlap(
                 scoreParams,
                 requestDetails,
-                { ...personalization, sourceMetadata },
+                buildRecommendationScoringInputs(personalization, sourceMetadata),
             );
             return scored.map((candidate) => {
                 const rawSources = sourceMetadata.get(candidate.tmdbId)?.sources;

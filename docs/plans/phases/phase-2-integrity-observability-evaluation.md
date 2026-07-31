@@ -17,6 +17,11 @@
 
 **Next action:** Complete this bounded correction, then resume 2A.3 Atomic Snapshot Reconciliation.
 
+**TDD evidence:**
+
+- 2026-07-30 - Original Task 2 RED: `rtk npm run test -- tests/unit/recommendationPersonalization.test.ts tests/unit/recommendationScoring.test.ts` - both suites failed because `src/lib/recommendationPersonalization.ts` and `src/lib/recommendationScoring.ts` did not yet exist.
+- 2026-07-30 - Adapter-parity RED: `rtk npm run test -- tests/integration/recommendationAdapters.test.ts -t "keeps normalized web and v1 scorer inputs in parity"` - the new test failed because `buildRecommendationScoringInputs` was not yet available.
+
 ## Checkpoint 2A.1: Per-User Local Import State
 
 **Checkpoint state:** Complete

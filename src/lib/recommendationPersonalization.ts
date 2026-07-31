@@ -16,6 +16,20 @@ export type RecommendationPersonalization = {
   mmrLambda: NonNullable<OverlapScoringParams["mmrLambda"]>;
 };
 
+export type RecommendationScoringInputs = RecommendationPersonalization & {
+  sourceMetadata: NonNullable<OverlapScoringParams["sourceMetadata"]>;
+};
+
+export function buildRecommendationScoringInputs(
+  personalization: RecommendationPersonalization,
+  sourceMetadata: RecommendationScoringInputs["sourceMetadata"],
+): RecommendationScoringInputs {
+  return {
+    ...personalization,
+    sourceMetadata,
+  };
+}
+
 function buildMmrLambda(explorationRate: number): number {
   const boundedExplorationRate = Number.isFinite(explorationRate)
     ? Math.min(0.3, Math.max(0, explorationRate))
