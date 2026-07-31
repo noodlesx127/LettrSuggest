@@ -192,14 +192,155 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       [101, 202],
       expect.any(Map),
-      { deadlineMs: 20_000 },
+      expect.objectContaining({ deadlineMs: expect.any(Number) }),
     );
+    const completionOptions = mocks.ensureCompleteTmdbDetails.mock.calls[0][2] as {
+      deadlineMs: number;
+    };
+    expect(Number.isFinite(completionOptions.deadlineMs)).toBe(true);
+    expect(completionOptions.deadlineMs).toBeGreaterThanOrEqual(0);
+    expect(completionOptions.deadlineMs).toBeLessThanOrEqual(20_000);
     const cachedDetails = mocks.ensureCompleteTmdbDetails.mock.calls[0][1] as Map<
       number,
       unknown
     >;
     expect(cachedDetails.size).toBe(0);
     expect(result.items.map((item) => item.id)).toEqual([101]);
+  });
+
+  it("passes one bounded deadline budget through scoring and final hydration", async () => {
+    const initialDetails = new Map([
+      [101, { id: 101, title: "Initial 101", genres: [] }],
+    ]);
+    const finalDetails = new Map([
+      [303, { id: 303, title: "Final 303", genres: [] }],
+    ]);
+    mocks.generateServerCandidates.mockResolvedValue({
+      candidateIds: [101],
+      sourceMetadata: new Map(),
+    });
+    mocks.loadCachedTmdbDetails
+      .mockResolvedValueOnce(new Map())
+      .mockResolvedValueOnce(new Map());
+    mocks.ensureCompleteTmdbDetails
+      .mockResolvedValueOnce({
+        details: initialDetails,
+        requested: 1,
+        completed: 1,
+        failed: 0,
+        deadlineExpired: false,
+      })
+      .mockResolvedValueOnce({
+        details: finalDetails,
+        requested: 1,
+        completed: 1,
+        failed: 0,
+        deadlineExpired: false,
+      });
+    mocks.runCanonicalServerRecommendations.mockImplementation(
+      async (
+        request: unknown,
+        dependencies: {
+          retrieveCandidates: () => Promise<Array<{ tmdbId: number }>>;
+          scoreCandidates: (params: {
+            request: unknown;
+            context: unknown;
+            mode: string;
+            candidates: Array<{ tmdbId: number }>;
+          }) => Promise<readonly unknown[]>;
+        },
+      ) => {
+        const candidates = await dependencies.retrieveCandidates();
+        const scored = await dependencies.scoreCandidates({
+          request,
+          context: {},
+          mode: "personalized",
+          candidates,
+        });
+        return {
+          results:
+            scored.length > 0
+              ? [
+                  {
+                    tmdbId: 303,
+                    score: 10,
+                    evidence: {
+                      seedAnchors: [],
+                      providerFamilies: [],
+                      providerOccurrences: 0,
+                      retrievalScore: 1,
+                    },
+                    attribution: {
+                      retrieval: 1,
+                      preference: 0,
+                      context: 0,
+                      diversity: 0,
+                      total: 1,
+                    },
+                  },
+                ]
+              : [],
+          diagnostics: {},
+        };
+      },
+    );
+
+    const result = await generateCanonicalWebRecommendations({
+      accessToken: "deadline-budget-token-1234567890",
+      count: 1,
+      requestSeed: "web-deadline-budget",
+    });
+
+    expect(mocks.loadCachedTmdbDetails).toHaveBeenNthCalledWith(1, [101]);
+    expect(mocks.loadCachedTmdbDetails).toHaveBeenNthCalledWith(2, [303]);
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenNthCalledWith(
+      1,
+      [101],
+      expect.any(Map),
+      { deadlineMs: expect.any(Number) },
+    );
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenNthCalledWith(
+      2,
+      [303],
+      expect.any(Map),
+      { deadlineMs: expect.any(Number) },
+    );
+
+    const readBoundedDeadline = (callIndex: number) => {
+      const options = mocks.ensureCompleteTmdbDetails.mock.calls[callIndex][2] as {
+        deadlineMs: number;
+      };
+      expect(Number.isFinite(options.deadlineMs)).toBe(true);
+      expect(options.deadlineMs).toBeGreaterThanOrEqual(0);
+      expect(options.deadlineMs).toBeLessThanOrEqual(20_000);
+      return options.deadlineMs;
+    };
+    const initialDeadlineMs = readBoundedDeadline(0);
+    const finalDeadlineMs = readBoundedDeadline(1);
+    expect(finalDeadlineMs).toBeLessThanOrEqual(initialDeadlineMs);
+    expect(result.items.map((item) => item.id)).toEqual([303]);
+  });
+
+  it("rejects unhealthy metadata before invoking scoring", async () => {
+    mocks.isMetadataCompletionHealthy.mockReturnValueOnce(false);
+
+    let rejection: unknown;
+    try {
+      await generateCanonicalWebRecommendations({
+        accessToken: "unhealthy-metadata-token-1234567890",
+        count: 10,
+        requestSeed: "web-unhealthy-metadata",
+      });
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).message).toBe(
+      "Movie metadata is temporarily unavailable. Please retry suggestions.",
+    );
+    expect(mocks.scoreRecommendationsWithOverlap).not.toHaveBeenCalled();
   });
 
   it("biases niche and mixed requests through the canonical TMDB genre profile", async () => {
@@ -338,8 +479,14 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       windowIds,
       expect.any(Map),
-      { deadlineMs: 20_000 },
+      expect.objectContaining({ deadlineMs: expect.any(Number) }),
     );
+    const completionOptions = mocks.ensureCompleteTmdbDetails.mock.calls[0][2] as {
+      deadlineMs: number;
+    };
+    expect(Number.isFinite(completionOptions.deadlineMs)).toBe(true);
+    expect(completionOptions.deadlineMs).toBeGreaterThanOrEqual(0);
+    expect(completionOptions.deadlineMs).toBeLessThanOrEqual(20_000);
     expect(
       mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates.map(
         ({ tmdbId }: { tmdbId: number }) => tmdbId,

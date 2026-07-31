@@ -155,6 +155,44 @@ describe("ensureCompleteTmdbDetails", () => {
     expect(serverTmdbMocks.fetchTmdb).toHaveBeenCalledTimes(1);
   });
 
+  it("returns successful metadata without awaiting cache persistence", async () => {
+    const rejectUpserts: Array<(reason?: unknown) => void> = [];
+    const upsert = vi.fn(
+      () =>
+        new Promise<{ error: null }>((_resolve, reject) => {
+          rejectUpserts.push(reject);
+        }),
+    );
+    const from = vi.fn(() => ({ upsert }));
+    serverTmdbMocks.getSupabaseAdmin.mockReturnValue({ from });
+    serverTmdbMocks.fetchTmdb.mockImplementation(async (path: string) =>
+      completeMovie(Number(path.split("/").at(-1))),
+    );
+
+    const completion = await Promise.race([
+      ensureCompleteTmdbDetails([101, 202], new Map()),
+      new Promise<"timed-out">((resolve) => {
+        setTimeout(() => resolve("timed-out"), 100);
+      }),
+    ]);
+
+    expect(completion).not.toBe("timed-out");
+    if (completion === "timed-out") return;
+    expect(completion).toMatchObject({
+      requested: 2,
+      completed: 2,
+      failed: 0,
+      deadlineExpired: false,
+    });
+    expect(Array.from(completion.details.keys())).toEqual([101, 202]);
+    expect(upsert).toHaveBeenCalledTimes(2);
+
+    rejectUpserts.forEach((reject) =>
+      reject(new Error("cache persistence unavailable")),
+    );
+    await Promise.resolve();
+  });
+
   it("reports failed metadata and rejects an unhealthy completion", async () => {
     const upsert = vi.fn(async () => ({ error: null }));
     const from = vi.fn(() => ({ upsert }));
@@ -243,6 +281,59 @@ describe("ensureCompleteTmdbDetails", () => {
     expect(Array.from(result.details.keys())).toEqual([
       101, 202, 303, 404, 505,
     ]);
+  });
+
+  it("does not claim queued metadata after the absolute deadline", async () => {
+    vi.useFakeTimers();
+
+    const startedAt = Date.now();
+    let startedRequests = 0;
+    const initialReleaseCallbacks: Array<() => void> = [];
+    const upsert = vi.fn(async () => ({ error: null }));
+    const from = vi.fn(() => ({ upsert }));
+    serverTmdbMocks.getSupabaseAdmin.mockReturnValue({ from });
+    serverTmdbMocks.fetchTmdb.mockImplementation((path: string) => {
+      startedRequests += 1;
+      const tmdbId = Number(path.split("/").at(-1));
+      if (startedRequests <= 5) {
+        return new Promise<TMDBMovie>((resolve) => {
+          initialReleaseCallbacks.push(() => resolve(completeMovie(tmdbId)));
+        });
+      }
+
+      return Promise.resolve(completeMovie(tmdbId));
+    });
+
+    const resultPromise = ensureCompleteTmdbDetails(
+      [101, 202, 303, 404, 505, 606, 707],
+      new Map(),
+      { deadlineMs: 20_000 },
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(startedRequests).toBe(5);
+
+    vi.setSystemTime(startedAt + 20_000);
+    try {
+      initialReleaseCallbacks[0]?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(startedRequests).toBe(5);
+    } finally {
+      initialReleaseCallbacks.slice(1).forEach((release) => release());
+    }
+
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      requested: 7,
+      completed: 5,
+      failed: 2,
+      deadlineExpired: true,
+    });
   });
 
   it("caps relevant taste metadata IDs in deterministic seed order", () => {

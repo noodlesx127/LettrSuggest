@@ -614,6 +614,39 @@ async function fetchTmdbMovieDetails(
   }
 }
 
+function persistTmdbDetailsBestEffort(
+  db: ReturnType<typeof getSupabaseAdmin>,
+  tmdbId: number,
+  movie: TMDBMovie,
+): void {
+  try {
+    const upsertRequest = db
+      .from("tmdb_movies")
+      .upsert({ tmdb_id: tmdbId, data: movie }, { onConflict: "tmdb_id" });
+
+    void Promise.resolve(upsertRequest)
+      .then(({ error }) => {
+        if (error) {
+          console.error("[ServerEngine] tmdb_movies upsert error:", {
+            tmdbId,
+            error,
+          });
+        }
+      })
+      .catch((error) => {
+        console.error("[ServerEngine] tmdb_movies upsert error:", {
+          tmdbId,
+          error,
+        });
+      });
+  } catch (error) {
+    console.error("[ServerEngine] tmdb_movies upsert error:", {
+      tmdbId,
+      error,
+    });
+  }
+}
+
 export async function ensureCompleteTmdbDetails(
   tmdbIds: number[],
   existingMap: Map<number, TMDBMovie>,
@@ -632,6 +665,13 @@ export async function ensureCompleteTmdbDetails(
     }
   }
 
+  const deadlineMs =
+    typeof options.deadlineMs === "number" && Number.isFinite(options.deadlineMs)
+      ? Math.max(0, options.deadlineMs)
+      : undefined;
+  const deadlineAt =
+    deadlineMs === undefined ? undefined : Date.now() + deadlineMs;
+
   if (idsToFetch.length === 0) {
     return Promise.resolve({
       details: detailsById,
@@ -642,11 +682,8 @@ export async function ensureCompleteTmdbDetails(
     });
   }
 
-  const deadlineMs =
-    typeof options.deadlineMs === "number" && Number.isFinite(options.deadlineMs)
-      ? Math.max(0, options.deadlineMs)
-      : undefined;
-  let deadlineExpired = deadlineMs === 0;
+  let deadlineExpired =
+    deadlineAt !== undefined && Date.now() >= deadlineAt;
   let nextIndex = 0;
   let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
   let resolveDeadline: (() => void) | undefined;
@@ -670,7 +707,13 @@ export async function ensureCompleteTmdbDetails(
   let completed = detailsById.size;
 
   const runWorker = async (): Promise<void> => {
-    while (!deadlineExpired) {
+    while (true) {
+      if (deadlineExpired) return;
+      if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+        markDeadlineExpired();
+        return;
+      }
+
       const index = nextIndex;
       nextIndex += 1;
       const tmdbId = idsToFetch[index];
@@ -683,23 +726,7 @@ export async function ensureCompleteTmdbDetails(
       detailsById.set(tmdbId, movie);
       completed += 1;
 
-      try {
-        const { error } = await db
-          .from("tmdb_movies")
-          .upsert({ tmdb_id: tmdbId, data: movie }, { onConflict: "tmdb_id" });
-
-        if (error) {
-          console.error("[ServerEngine] tmdb_movies upsert error:", {
-            tmdbId,
-            error,
-          });
-        }
-      } catch (error) {
-        console.error("[ServerEngine] tmdb_movies upsert error:", {
-          tmdbId,
-          error,
-        });
-      }
+      persistTmdbDetailsBestEffort(db, tmdbId, movie);
     }
   };
 
