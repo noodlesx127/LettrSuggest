@@ -69,6 +69,15 @@ function getBaseUrl(): string {
   return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 }
 
+function safeReadStorageItem(storage: Storage, key: string): string | null {
+  try {
+    return storage.getItem(key);
+  } catch {
+    console.error("[Suggest] Failed to read user storage item");
+    return null;
+  }
+}
+
 type MovieItem = {
   id: number;
   title: string;
@@ -339,6 +348,8 @@ export default function SuggestPage() {
     showMicroSurvey?: boolean;
   } | null>(null);
   const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
+  const [categorizedSuggestions, setCategorizedSuggestions] =
+    useState<CategorizedSuggestions | null>(null);
 
   // Ref for focus trap in feedback popup modal (A11y Issue 2)
   const feedbackModalRef = useRef<HTMLDivElement>(null);
@@ -346,17 +357,62 @@ export default function SuggestPage() {
   const storageUidRef = useRef<string | null | undefined>(undefined);
   const storageReadyUidRef = useRef<string | null>(null);
 
-  const updateUid = useCallback((nextUid: string | null) => {
-    const previousUid = storageUidRef.current;
-    storageUidRef.current = nextUid;
+  const resetUserScopedState = useCallback(() => {
+    storageReadyUidRef.current = null;
+    runGenerationRef.current += 1;
 
-    if (previousUid !== nextUid) {
-      storageReadyUidRef.current = null;
-      runGenerationRef.current += 1;
-    }
-
-    setUid(nextUid);
+    setLoading(false);
+    setError(null);
+    setItems(null);
+    setSourceLabel("");
+    setFallbackFilms(null);
+    setWatchlistTmdbIds(new Set());
+    setPresentationHydrationEnabled(false);
+    setNoCandidatesReason(null);
+    setBlockedIds(new Set());
+    setRefreshingSections(new Set());
+    setShownIds(new Set());
+    setCacheKey(Date.now());
+    setProgress({
+      current: 0,
+      total: 7,
+      stage: "",
+      details: undefined,
+    });
+    setFeedbackMessage(null);
+    setUndoToast(null);
+    setLastFeedback(null);
+    setTasteProfile(null);
+    setTopDecade(null);
+    setSavedMovieIds(new Set());
+    setHasCheckedStorage(false);
+    setMappingCoverage(null);
+    setWatchlistPicks([]);
+    setPalateCleanser([]);
+    setFatigueDetection(null);
+    setPairHistory(new Set());
+    setPairwisePair(null);
+    setPairwiseCount(0);
+    setFeatureEvidence({});
+    setMicroSurveyCount(0);
+    setPairwiseVideoId(null);
+    setQuizOpen(false);
+    setFeedbackPopup(null);
+    setSelectedReasons([]);
+    setCategorizedSuggestions(null);
   }, []);
+
+  const updateUid = useCallback(
+    (nextUid: string | null) => {
+      if (storageUidRef.current !== nextUid) {
+        storageUidRef.current = nextUid;
+        resetUserScopedState();
+      }
+
+      setUid(nextUid);
+    },
+    [resetUserScopedState],
+  );
 
   // Focus trap effect for feedback popup modal (A11y Issue 2)
   useEffect(() => {
@@ -409,57 +465,42 @@ export default function SuggestPage() {
 
   // Restore only the authenticated user's namespace when auth has resolved.
   useEffect(() => {
-    storageReadyUidRef.current = null;
-    setItems(null);
-    setShownIds(new Set());
-    setPairHistory(new Set());
-    setPairwiseCount(0);
-    setPairwisePair(null);
-    setPairwiseVideoId(null);
-    setPresentationHydrationEnabled(false);
-    setHasCheckedStorage(false);
-
     const keys = getSuggestionStorageKeys(uid ?? null);
     if (!keys) {
       if (uid !== undefined) setHasCheckedStorage(true);
       return;
     }
 
-    try {
-      const restoredItems = parseStoredSuggestionItems(
-        sessionStorage.getItem(keys.items),
-      );
-      const restoredShownIds = parseStoredShownIds(
-        localStorage.getItem(keys.shownIds),
-        Date.now(),
-      );
-      const restoredPairHistory = parseStoredPairHistory(
-        sessionStorage.getItem(keys.pairHistory),
-      );
-      const restoredPairwiseCount = parseStoredPairwiseCount(
-        sessionStorage.getItem(keys.pairwiseCount),
-      );
+    const restoredItems = parseStoredSuggestionItems(
+      safeReadStorageItem(sessionStorage, keys.items),
+    );
+    const restoredShownIds = parseStoredShownIds(
+      safeReadStorageItem(localStorage, keys.shownIds),
+      Date.now(),
+    );
+    const restoredPairHistory = parseStoredPairHistory(
+      safeReadStorageItem(sessionStorage, keys.pairHistory),
+    );
+    const restoredPairwiseCount = parseStoredPairwiseCount(
+      safeReadStorageItem(sessionStorage, keys.pairwiseCount),
+    );
 
-      if (restoredItems) {
-        if (process.env.NODE_ENV === "development") {
-          console.log(
-            "[Suggest] Restored items from user storage",
-            restoredItems.length,
-          );
-        }
-        setItems(restoredItems as MovieItem[]);
-        setPresentationHydrationEnabled(true);
+    if (restoredItems) {
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[Suggest] Restored items from user storage",
+          restoredItems.length,
+        );
       }
-      if (restoredShownIds) setShownIds(new Set(restoredShownIds));
-      if (restoredPairHistory) setPairHistory(new Set(restoredPairHistory));
-      if (restoredPairwiseCount !== null) {
-        setPairwiseCount(restoredPairwiseCount);
-      }
-    } catch (error) {
-      console.error("[Suggest] Failed to restore user storage", error);
-    } finally {
-      setHasCheckedStorage(true);
+      setItems(restoredItems as MovieItem[]);
+      setPresentationHydrationEnabled(true);
     }
+    if (restoredShownIds) setShownIds(new Set(restoredShownIds));
+    if (restoredPairHistory) setPairHistory(new Set(restoredPairHistory));
+    if (restoredPairwiseCount !== null) {
+      setPairwiseCount(restoredPairwiseCount);
+    }
+    setHasCheckedStorage(true);
   }, [uid]);
 
   const isStorageReady = (storageUid: string | null | undefined) =>
@@ -565,10 +606,6 @@ export default function SuggestPage() {
     return [...new Set([...mainIds, ...watchlistIds, ...palateIds])]; // Dedupe
   }, [items, watchlistPicks, palateCleanser]);
   const { posters, mutate: refreshPosters } = usePostersSWR(tmdbIds);
-
-  // Categorize suggestions into sections
-  const [categorizedSuggestions, setCategorizedSuggestions] =
-    useState<CategorizedSuggestions | null>(null);
 
   const categorizeItems = useCallback(
     (items: MovieItem[]): CategorizedSuggestions | null => {
@@ -1222,10 +1259,15 @@ export default function SuggestPage() {
   );
 
   const fetchEvidenceForFeatures = useCallback(
-    async (featureList: Array<{ type: FeatureType; name: string }>) => {
-      if (!uid || featureList.length === 0) return;
+    async (
+      featureList: Array<{ type: FeatureType; name: string }>,
+      isActive: () => boolean = () => true,
+    ) => {
+      const requestedUid = uid;
+      if (!requestedUid || featureList.length === 0) return;
       try {
-        const map = await getFeatureEvidenceSummary(uid, featureList);
+        const map = await getFeatureEvidenceSummary(requestedUid, featureList);
+        if (!isActive() || storageUidRef.current !== requestedUid) return;
         mergeFeatureEvidence(map);
       } catch (e) {
         console.error("[FeatureEvidence] Failed to fetch evidence", e);
@@ -1252,7 +1294,6 @@ export default function SuggestPage() {
     const client = supabase;
     if (!client) {
       updateUid(null);
-      setBlockedIds(new Set());
       return;
     }
 
@@ -1262,23 +1303,23 @@ export default function SuggestPage() {
     const applySession = (session: {
       user?: { id?: string | undefined };
     } | null) => {
-      const userId = session?.user?.id ?? null;
-      updateUid(userId);
+      if (!active) return;
+      const requestedUid = session?.user?.id ?? null;
+      updateUid(requestedUid);
 
-      if (!userId) {
-        setBlockedIds(new Set());
+      if (!requestedUid) {
         return;
       }
 
-      void getBlockedSuggestions(userId)
+      void getBlockedSuggestions(requestedUid)
         .then((blocked) => {
-          if (active && storageUidRef.current === userId) {
+          if (active && storageUidRef.current === requestedUid) {
             setBlockedIds(blocked);
           }
         })
         .catch((error) => {
-          if (active && storageUidRef.current === userId) {
-            console.error("Failed to fetch blocked suggestions:", error);
+          if (active && storageUidRef.current === requestedUid) {
+            console.error("[Suggest] Failed to fetch blocked suggestions", error);
           }
         });
     };
@@ -1306,12 +1347,30 @@ export default function SuggestPage() {
 
   // Load saved movies
   useEffect(() => {
+    let active = true;
+    const requestedUid = uid;
+
     const loadSavedMovies = async () => {
-      if (!uid) return;
-      const { movies } = await getSavedMovies(uid);
-      setSavedMovieIds(new Set(movies.map((m) => m.tmdb_id)));
+      if (!requestedUid) {
+        if (active) setSavedMovieIds(new Set());
+        return;
+      }
+
+      try {
+        const { movies } = await getSavedMovies(requestedUid);
+        if (!active || storageUidRef.current !== requestedUid) return;
+        setSavedMovieIds(new Set(movies.map((m) => m.tmdb_id)));
+      } catch (error) {
+        if (!active || storageUidRef.current !== requestedUid) return;
+        console.error("[Suggest] Failed to load saved movies", error);
+        setSavedMovieIds(new Set());
+      }
     };
     void loadSavedMovies();
+
+    return () => {
+      active = false;
+    };
   }, [uid]);
 
   const sourceFilms = useMemo(
@@ -1322,10 +1381,11 @@ export default function SuggestPage() {
   // Presentation-only hydration for headers, watchlist badges, and section text.
   useEffect(() => {
     let active = true;
+    const requestedUid = uid;
     const loadPresentationState = async (): Promise<Set<number>> => {
       if (
         !presentationHydrationEnabled ||
-        !uid ||
+        !requestedUid ||
         sourceFilms.length === 0
       ) {
         return new Set<number>();
@@ -1333,10 +1393,12 @@ export default function SuggestPage() {
 
       try {
         const mappings = await getFilmMappings(
-          uid,
+          requestedUid,
           sourceFilms.map((film) => film.uri),
         );
-        if (!active) return new Set<number>();
+        if (!active || storageUidRef.current !== requestedUid) {
+          return new Set<number>();
+        }
 
         const watchlistIds = new Set<number>();
         const watchlistFilms = sourceFilms.filter((film) => {
@@ -1366,9 +1428,11 @@ export default function SuggestPage() {
           topN: 40,
           tmdbDetails: details,
           watchlistFilms,
-          userId: uid,
+          userId: requestedUid,
         });
-        if (!active) return new Set<number>();
+        if (!active || storageUidRef.current !== requestedUid) {
+          return new Set<number>();
+        }
 
         setTasteProfile(profile);
         setTopDecade(profile.topDecades[0]?.decade ?? null);
@@ -1511,22 +1575,18 @@ export default function SuggestPage() {
   const runSuggest = useCallback(async () => {
     const generation = runGenerationRef.current + 1;
     runGenerationRef.current = generation;
+    const currentUid = uid;
     const isCurrentRun = () =>
-      runGenerationRef.current === generation && storageUidRef.current === uid;
+      runGenerationRef.current === generation &&
+      storageUidRef.current === currentUid;
+    let sessionValidated = false;
 
     try {
-      setPresentationHydrationEnabled(false);
-      setCacheKey(Date.now());
-      setItems(null);
+      const client = supabase;
+      if (!client || !currentUid) throw new Error("Not signed in");
+
       setError(null);
-      setNoCandidatesReason(null);
       setLoading(true);
-      setPairwisePair(null);
-      setPairwiseCount(0);
-      setPairHistory(new Set());
-      setWatchlistPicks([]);
-      setPalateCleanser([]);
-      setFatigueDetection(null);
       setProgress({
         current: 1,
         total: 3,
@@ -1534,13 +1594,25 @@ export default function SuggestPage() {
         details: "Authenticating your recommendation request...",
       });
 
-      const client = supabase;
-      if (!client || !uid) throw new Error("Not signed in");
-      const currentUid = uid;
       const { data, error } = await client.auth.getSession();
       const accessToken = data.session?.access_token;
       if (error || !accessToken) throw new Error("Authentication required");
+      if (data.session?.user?.id !== currentUid) {
+        throw new Error("Authentication changed");
+      }
       if (!isCurrentRun()) return;
+      sessionValidated = true;
+
+      setPresentationHydrationEnabled(false);
+      setCacheKey(Date.now());
+      setItems(null);
+      setNoCandidatesReason(null);
+      setPairwisePair(null);
+      setPairwiseCount(0);
+      setPairHistory(new Set());
+      setWatchlistPicks([]);
+      setPalateCleanser([]);
+      setFatigueDetection(null);
 
       setProgress({
         current: 2,
@@ -1620,7 +1692,7 @@ export default function SuggestPage() {
     } finally {
       if (!isCurrentRun()) return;
       setLoading(false);
-      setPresentationHydrationEnabled(true);
+      if (sessionValidated) setPresentationHydrationEnabled(true);
       setRefreshingSections(new Set());
     }
   }, [
@@ -1636,35 +1708,53 @@ export default function SuggestPage() {
   ]);
   // Fallback: if no local films, load from Supabase once
   useEffect(() => {
+    let active = true;
+    const requestedUid = uid;
+    const canCommit = () =>
+      active && storageUidRef.current === requestedUid;
+
     const maybeLoad = async () => {
+      if (!supabase || !requestedUid) {
+        if (canCommit()) setFallbackFilms(null);
+        return;
+      }
+      if (films && films.length) {
+        if (canCommit()) setFallbackFilms(null);
+        return;
+      }
+
+      if (canCommit()) setFallbackFilms(null);
       try {
-        if (!supabase || !uid) return;
-        if (films && films.length) return;
         const { data, error } = await supabase
           .from("film_events")
           .select("uri,title,year,rating,rewatch,last_date,liked,on_watchlist")
-          .eq("user_id", uid)
+          .eq("user_id", requestedUid)
           .limit(5000);
         if (error) throw error;
-        if (data && data.length) {
-          const mapped = data.map((r) => ({
-            uri: r.uri,
-            title: r.title,
-            year: r.year ?? null,
-            rating: r.rating ?? undefined,
-            rewatch: r.rewatch ?? undefined,
-            lastDate: r.last_date ?? undefined,
-            liked: r.liked ?? undefined,
-            onWatchlist: r.on_watchlist ?? undefined,
-            watchlistAddedAt: (r as any).watchlist_added_at ?? undefined,
-          })) as FilmEvent[];
-          setFallbackFilms(mapped);
-        }
-      } catch (e) {
-        // swallow for now; suggestions can still run with 0 films
+        if (!active || storageUidRef.current !== requestedUid) return;
+        const mapped = (data ?? []).map((r) => ({
+          uri: r.uri,
+          title: r.title,
+          year: r.year ?? null,
+          rating: r.rating ?? undefined,
+          rewatch: r.rewatch ?? undefined,
+          lastDate: r.last_date ?? undefined,
+          liked: r.liked ?? undefined,
+          onWatchlist: r.on_watchlist ?? undefined,
+          watchlistAddedAt: (r as any).watchlist_added_at ?? undefined,
+        })) as FilmEvent[];
+        setFallbackFilms(mapped.length > 0 ? mapped : null);
+      } catch (error) {
+        if (!active || storageUidRef.current !== requestedUid) return;
+        console.error("[Suggest] Failed to load fallback films", error);
+        setFallbackFilms(null);
       }
     };
     void maybeLoad();
+
+    return () => {
+      active = false;
+    };
   }, [uid, films]);
 
   // Auto-run suggestions when we have user and films
@@ -1698,25 +1788,48 @@ export default function SuggestPage() {
   }, [items, pairHistory, pairwiseCount, pairwisePair, PAIRWISE_SESSION_LIMIT]);
 
   useEffect(() => {
+    let active = true;
+    const requestedUid = uid;
     const loadEvidence = async () => {
-      if (!uid || !items || items.length === 0) return;
+      if (
+        !requestedUid ||
+        storageUidRef.current !== requestedUid ||
+        !items ||
+        items.length === 0
+      ) {
+        return;
+      }
       const requests = collectFeatureRequests(items);
       if (requests.length === 0) return;
-      await fetchEvidenceForFeatures(requests);
+      await fetchEvidenceForFeatures(
+        requests,
+        () => active && storageUidRef.current === requestedUid,
+      );
     };
     void loadEvidence();
+    return () => {
+      active = false;
+    };
   }, [uid, items, collectFeatureRequests, fetchEvidenceForFeatures]);
 
   // Recompute when mapping updates are emitted
   useEffect(() => {
+    let active = true;
     const handler = () => {
       setItems(null);
     };
     const blockedHandler = async () => {
-      if (uid) {
-        const blocked = await getBlockedSuggestions(uid);
-        setBlockedIds(blocked);
-        setItems(null);
+      const requestedUid = uid;
+      if (requestedUid) {
+        try {
+          const blocked = await getBlockedSuggestions(requestedUid);
+          if (!active || storageUidRef.current !== requestedUid) return;
+          setBlockedIds(blocked);
+          setItems(null);
+        } catch (error) {
+          if (!active || storageUidRef.current !== requestedUid) return;
+          console.error("[Suggest] Failed to refresh blocked suggestions", error);
+        }
       }
     };
     const feedbackHandler = () => {
@@ -1728,6 +1841,7 @@ export default function SuggestPage() {
       window.addEventListener("lettr:feedback-updated", feedbackHandler);
     }
     return () => {
+      active = false;
       if (typeof window !== "undefined") {
         window.removeEventListener("lettr:mappings-updated", handler);
         window.removeEventListener("lettr:blocked-updated", blockedHandler);

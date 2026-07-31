@@ -551,6 +551,195 @@ describe("web canonical recommendation adapter", () => {
     expect(page).toMatch(
       /setItems\(null\);[\s\S]*?setPairHistory\(new Set\(\)\);[\s\S]*?setPairwisePair\(null\);[\s\S]*?setPairwiseVideoId\(null\);/,
     );
+
+    const resetStateStart = page.indexOf(
+      "const resetUserScopedState = useCallback",
+    );
+    const updateUidStart = page.indexOf(
+      "const updateUid = useCallback",
+      resetStateStart,
+    );
+    expect(resetStateStart).toBeGreaterThanOrEqual(0);
+    expect(updateUidStart).toBeGreaterThan(resetStateStart);
+    const resetState = page.slice(resetStateStart, updateUidStart);
+    for (const resetCall of [
+      "storageReadyUidRef.current = null",
+      "runGenerationRef.current += 1",
+      "setLoading(false)",
+      "setError(null)",
+      "setItems(null)",
+      "setSourceLabel(\"\")",
+      "setFallbackFilms(null)",
+      "setWatchlistTmdbIds(new Set())",
+      "setNoCandidatesReason(null)",
+      "setBlockedIds(new Set())",
+      "setRefreshingSections(new Set())",
+      "setShownIds(new Set())",
+      "setProgress({",
+      "setFeedbackMessage(null)",
+      "setUndoToast(null)",
+      "setLastFeedback(null)",
+      "setTasteProfile(null)",
+      "setTopDecade(null)",
+      "setSavedMovieIds(new Set())",
+      "setHasCheckedStorage(false)",
+      "setMappingCoverage(null)",
+      "setWatchlistPicks([])",
+      "setPalateCleanser([])",
+      "setFatigueDetection(null)",
+      "setPairHistory(new Set())",
+      "setPairwisePair(null)",
+      "setPairwiseCount(0)",
+      "setPairwiseVideoId(null)",
+      "setFeatureEvidence({})",
+      "setMicroSurveyCount(0)",
+      "setFeedbackPopup(null)",
+      "setSelectedReasons([])",
+      "setCategorizedSuggestions(null)",
+      "setPresentationHydrationEnabled(false)",
+    ]) {
+      expect(resetState).toContain(resetCall);
+    }
+    expect(
+      resetState.indexOf("storageReadyUidRef.current = null"),
+    ).toBeLessThan(resetState.indexOf("runGenerationRef.current += 1"));
+    expect(resetState.indexOf("runGenerationRef.current += 1")).toBeLessThan(
+      resetState.indexOf("setLoading(false)"),
+    );
+    for (const preservedFilterOrMode of [
+      "setExcludeGenres(",
+      "setYearMin(",
+      "setYearMax(",
+      "setDiscoveryLevel(",
+      "setMode(",
+      "setContextMode(",
+    ]) {
+      expect(resetState).not.toContain(preservedFilterOrMode);
+    }
+
+    const updateUidEnd = page.indexOf("useEffect", updateUidStart);
+    expect(updateUidEnd).toBeGreaterThan(updateUidStart);
+    const updateUidSource = page.slice(updateUidStart, updateUidEnd);
+    const transitionBranch = updateUidSource.indexOf(
+      "if (storageUidRef.current !== nextUid)",
+    );
+    const resetInvocation = updateUidSource.indexOf(
+      "resetUserScopedState();",
+      transitionBranch,
+    );
+    const uidAssignment = updateUidSource.indexOf("setUid(nextUid);");
+    expect(transitionBranch).toBeGreaterThanOrEqual(0);
+    expect(updateUidSource).toContain("storageUidRef.current = nextUid");
+    expect(resetInvocation).toBeGreaterThanOrEqual(0);
+    expect(resetInvocation).toBeGreaterThan(transitionBranch);
+    expect(resetInvocation).toBeLessThan(uidAssignment);
+
+    const runSuggestStart = page.indexOf("const runSuggest = useCallback");
+    const sessionRead = page.indexOf(
+      "const { data, error } = await client.auth.getSession();",
+      runSuggestStart,
+    );
+    const canonicalRequest = page.indexOf(
+      "requestCanonicalWebItems({",
+      sessionRead,
+    );
+    expect(sessionRead).toBeGreaterThan(runSuggestStart);
+    expect(canonicalRequest).toBeGreaterThan(sessionRead);
+    const sessionGuard = page.slice(
+      sessionRead,
+      page.indexOf("      if (!isCurrentRun()) return;", sessionRead),
+    );
+    expect(sessionGuard).toContain(
+      "if (data.session?.user?.id !== currentUid)",
+    );
+    expect(sessionGuard).toContain("throw new Error(");
+
+    const savedEffectStart = page.indexOf("// Load saved movies");
+    const savedEffectEnd = page.indexOf("  const sourceFilms", savedEffectStart);
+    const savedEffect = page.slice(savedEffectStart, savedEffectEnd);
+    expect(savedEffect).toContain("let active = true");
+    expect(savedEffect).toContain("const requestedUid = uid");
+    expect(
+      savedEffect.match(
+        /!active \|\| storageUidRef\.current !== requestedUid/g,
+      ) ?? [],
+    ).toHaveLength(2);
+    expect(savedEffect).toMatch(
+      /return \(\) => \{\s*active = false;\s*\};/,
+    );
+
+    const fallbackEffectStart = page.indexOf(
+      "// Fallback: if no local films, load from Supabase once",
+    );
+    const fallbackEffectEnd = page.indexOf(
+      "  // Auto-run suggestions when we have user and films",
+      fallbackEffectStart,
+    );
+    const fallbackEffect = page.slice(fallbackEffectStart, fallbackEffectEnd);
+    expect(fallbackEffect).toContain("let active = true");
+    expect(fallbackEffect).toContain("const requestedUid = uid");
+    expect(
+      fallbackEffect.match(
+        /!active \|\| storageUidRef\.current !== requestedUid/g,
+      ) ?? [],
+    ).toHaveLength(2);
+    expect(fallbackEffect).toMatch(
+      /return \(\) => \{\s*active = false;\s*\};/,
+    );
+
+    const applySessionStart = page.indexOf("const applySession =");
+    const applySessionEnd = page.indexOf(
+      "    const {\n      data: { subscription },",
+      applySessionStart,
+    );
+    const applySession = page.slice(applySessionStart, applySessionEnd);
+    const applyUid = applySession.indexOf("updateUid(requestedUid)");
+    const noUserBranch = applySession.indexOf("if (!requestedUid)");
+    const blockedFetch = applySession.indexOf(
+      "void getBlockedSuggestions(requestedUid)",
+    );
+    expect(applyUid).toBeGreaterThanOrEqual(0);
+    expect(noUserBranch).toBeGreaterThan(applyUid);
+    expect(blockedFetch).toBeGreaterThan(noUserBranch);
+    expect(applySession).not.toContain("setBlockedIds(new Set())");
+
+    const loadEvidenceStart = page.indexOf("const loadEvidence = async");
+    const evidenceEffectStart = page.lastIndexOf(
+      "useEffect",
+      loadEvidenceStart,
+    );
+    const evidenceEffectEnd = page.indexOf(
+      "  // Recompute when mapping updates are emitted",
+      evidenceEffectStart,
+    );
+    const evidenceEffect = page.slice(evidenceEffectStart, evidenceEffectEnd);
+    expect(evidenceEffect).toContain("let active = true");
+    expect(evidenceEffect).toContain("const requestedUid = uid");
+    expect(evidenceEffect).toContain(
+      "() => active && storageUidRef.current === requestedUid",
+    );
+    expect(evidenceEffect).toMatch(
+      /return \(\) => \{\s*active = false;\s*\};/,
+    );
+
+    expect(page).toMatch(
+      /function safeReadStorageItem\(\s*storage: Storage,\s*key: string,?\s*\): string \| null \{[\s\S]*?storage\.getItem\(key\)[\s\S]*?catch[\s\S]*?console\.error\("\[Suggest\][^"]*"[\s\S]*?return null;/,
+    );
+    const restoreStart = page.indexOf(
+      "  // Restore only the authenticated user's namespace",
+    );
+    const restoreEnd = page.indexOf("  const isStorageReady", restoreStart);
+    const restoreSource = page.slice(restoreStart, restoreEnd);
+    for (const storageRead of [
+      "safeReadStorageItem(sessionStorage, keys.items)",
+      "safeReadStorageItem(localStorage, keys.shownIds)",
+      "safeReadStorageItem(sessionStorage, keys.pairHistory)",
+      "safeReadStorageItem(sessionStorage, keys.pairwiseCount)",
+    ]) {
+      expect(restoreSource).toContain(storageRead);
+    }
+    expect(restoreSource).not.toMatch(/(?:sessionStorage|localStorage)\.getItem\(/);
+
     expect(page).toMatch(
       /const timeoutId = setTimeout\([\s\S]*?return \(\) => clearTimeout\(timeoutId\);/,
     );

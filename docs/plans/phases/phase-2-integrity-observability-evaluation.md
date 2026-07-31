@@ -21,6 +21,7 @@
 
 - 2026-07-30 - Original Task 4 RED: `rtk npm run test -- tests/unit/suggestionStorage.test.ts` - failed because `@/lib/suggestionStorage` did not exist.
 - 2026-07-30 - Original Task 2 RED: `rtk npm run test -- tests/unit/recommendationPersonalization.test.ts tests/unit/recommendationScoring.test.ts` - both suites failed because `src/lib/recommendationPersonalization.ts` and `src/lib/recommendationScoring.ts` did not yet exist.
+- 2026-07-30 - Account-transition reset RED: `rtk npm run test -- tests/integration/recommendationAdapters.test.ts` - 1/15 tests failed because the synchronous user-scoped account-transition reset contract was missing.
 - 2026-07-30 - Adapter-parity RED: `rtk npm run test -- tests/integration/recommendationAdapters.test.ts -t "keeps normalized web and v1 scorer inputs in parity"` - the new test failed because `buildRecommendationScoringInputs` was not yet available.
 - 2026-07-30 - Task 3 RED: `rtk npm run test -- tests/unit/serverTmdbDetails.test.ts` - 6/6 failed because structured completion/helpers/options/taste cap were absent.
 - 2026-07-30 - Metadata deadline liveness RED: `rtk npm run test -- tests/unit/serverTmdbDetails.test.ts tests/integration/webRecommendationGenreDetails.test.ts` - 2/16 failed because cache upsert was awaited and queue claims relied only on timer state.
