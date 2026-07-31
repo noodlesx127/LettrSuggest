@@ -38,13 +38,13 @@ import type {
   RecommendationResult,
 } from "@/lib/recommendationTypes";
 
-type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
-type FeatureFeedback = Awaited<ReturnType<typeof getAvoidedFeatures>>;
+export type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
+export type FeatureFeedback = Awaited<ReturnType<typeof getAvoidedFeatures>>;
 type TasteProfileFilmInput = Parameters<
   typeof buildTasteProfile
 >[0]["films"][number];
 
-type FilmEventRow = {
+export type FilmEventRow = {
   uri: string;
   title: string;
   year: number | null;
@@ -56,12 +56,12 @@ type FilmEventRow = {
   on_watchlist: boolean | null;
 };
 
-type FilmMappingRow = {
+export type FilmMappingRow = {
   uri: string;
   tmdb_id: number;
 };
 
-type FeatureFeedbackRow = {
+export type FeatureFeedbackRow = {
   feature_id: number;
   feature_name: string;
   feature_type: string;
@@ -70,7 +70,7 @@ type FeatureFeedbackRow = {
   negative_count: number;
 };
 
-type AdjacentGenreRow = {
+export type AdjacentGenreRow = {
   from_genre_name: string;
   to_genre_name: string;
   success_rate: number;
@@ -166,7 +166,7 @@ type TmdbMovieCacheRow = {
   metacritic?: string | null;
 };
 
-type UserContext = {
+export type UserContext = {
   films: FilmEventRow[];
   mappings: Map<string, number>;
   mappingsArray: FilmMappingRow[];
@@ -1773,4 +1773,4 @@ export async function generateServerCandidates(
   };
 }
 
-export type { FeatureFeedback, SourceMetadata, TasteProfile, UserContext };
+export type { SourceMetadata };

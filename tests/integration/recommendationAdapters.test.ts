@@ -363,6 +363,10 @@ describe("web canonical recommendation adapter", () => {
       resolve(process.cwd(), "src/app/actions/recommendations.ts"),
       "utf8",
     );
+    const v1Route = readFileSync(
+      resolve(process.cwd(), "src/app/api/v1/suggestions/generate/route.ts"),
+      "utf8",
+    );
     const trending = readFileSync(
       resolve(process.cwd(), "src/lib/trending.ts"),
       "utf8",
@@ -405,6 +409,13 @@ describe("web canonical recommendation adapter", () => {
     expect(action).toContain("matchesWebTmdbGenreFilter");
     expect(action).toContain("retrievalTasteProfile");
     expect(action).toMatch(/runCanonicalServerRecommendations\s*\(/);
+    expect(action).toContain("buildRecommendationPersonalization");
+    expect(action).toMatch(
+      /scoreRecommendationsWithOverlap[\s\S]*from "@\/lib\/recommendationScoring"/,
+    );
+    expect(v1Route).toContain("buildRecommendationPersonalization");
+    expect(action).not.toMatch(/\bmmrLambda\s*=/);
+    expect(v1Route).not.toMatch(/\bmmrLambda\s*=/);
     expect(action).toContain("normalizeWebRecommendationCount(params.count)");
     expect(action).toContain("adapted.request.seeds");
     expect(action).not.toMatch(/params\.userId/);

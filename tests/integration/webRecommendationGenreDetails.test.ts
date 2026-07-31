@@ -1,6 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  buildAdjacentGenreMap: vi.fn(() => new Map()),
+  buildFeatureFeedbackFromRows: vi.fn(() => ({
+    avoidActors: [],
+    avoidKeywords: [],
+    avoidFranchises: [],
+    avoidDirectors: [],
+    avoidGenres: [],
+    avoidSubgenres: [],
+    preferActors: [],
+    preferKeywords: [],
+    preferDirectors: [],
+    preferGenres: [],
+    preferSubgenres: [],
+  })),
   buildTasteProfileServer: vi.fn(),
   createDeterministicRng: vi.fn(),
   ensureCompleteTmdbDetails: vi.fn(),
@@ -24,6 +38,10 @@ vi.mock("@/lib/recommendationCandidates", () => ({
   createDeterministicRng: mocks.createDeterministicRng,
 }));
 
+vi.mock("@/lib/recommendationScoring", () => ({
+  scoreRecommendationsWithOverlap: mocks.scoreRecommendationsWithOverlap,
+}));
+
 vi.mock("@/lib/recommendationContext", () => ({
   loadRecommendationContext: mocks.loadRecommendationContext,
 }));
@@ -39,6 +57,8 @@ vi.mock("@/lib/enrich", async () => {
 });
 
 vi.mock("@/lib/serverSuggestionsEngine", () => ({
+  buildAdjacentGenreMap: mocks.buildAdjacentGenreMap,
+  buildFeatureFeedbackFromRows: mocks.buildFeatureFeedbackFromRows,
   buildTasteProfileServer: mocks.buildTasteProfileServer,
   ensureCompleteTmdbDetails: mocks.ensureCompleteTmdbDetails,
   generateServerCandidates: mocks.generateServerCandidates,
@@ -58,7 +78,14 @@ describe("canonical web standard-genre detail completion", () => {
       data: { user: { id: "genre-user" } },
       error: null,
     });
-    mocks.loadUserContext.mockResolvedValue({});
+    mocks.loadUserContext.mockResolvedValue({
+      films: [],
+      mappings: new Map(),
+      feedback: [],
+      explorationRate: 0.15,
+      adjacentGenres: [],
+      recentExposures: new Map(),
+    });
     mocks.getUserContextDiagnostics.mockReturnValue({
       mode: "personalized",
       inputHealth: { blocked: { health: "ok" } },

@@ -19,9 +19,10 @@ import {
 } from "@/lib/recommendationCandidates";
 import { loadRecommendationContext } from "@/lib/recommendationContext";
 import {
-  scoreRecommendationsWithOverlap,
-  type TMDBMovie,
-} from "@/lib/enrich";
+  buildRecommendationPersonalization,
+} from "@/lib/recommendationPersonalization";
+import { scoreRecommendationsWithOverlap } from "@/lib/recommendationScoring";
+import type { TMDBMovie } from "@/lib/enrich";
 import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import {
     buildTasteProfileServer,
@@ -75,6 +76,10 @@ export async function generateCanonicalWebRecommendations(params: {
         userId,
     );
     const tasteProfile = await buildTasteProfileServer(userId, userContext);
+    const personalization = buildRecommendationPersonalization(
+        userContext,
+        tasteProfile,
+    );
     const adapted = adaptWebRecommendationIntent({
         userId,
         seedTmdbIds: params.seedTmdbIds ?? [],
@@ -171,6 +176,7 @@ export async function generateCanonicalWebRecommendations(params: {
             const scored = await scoreRecommendationsWithOverlap(
                 scoreParams,
                 requestDetails,
+                { ...personalization, sourceMetadata },
             );
             return scored.map((candidate) => {
                 const rawSources = sourceMetadata.get(candidate.tmdbId)?.sources;

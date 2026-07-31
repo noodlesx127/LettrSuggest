@@ -4,18 +4,18 @@
 **Entry condition:** Phase 1 complete  
 **Exit condition:** Import inputs are user-safe and atomic, request/exposure diagnostics explain output, and offline/online evaluation gates are operational.
 
-## Task 5: Production Suggestion Timeout Blocker Closure
+## Task 5: Production Suggestion Timeout And Quality Blocker Closure
 
-**Task state:** Complete  
-**Checkpoint impact:** None; 2A.3 remains `Ready` and is the next action.
+**Task state:** In progress  
+**Checkpoint impact:** None; 2A.3 remains `Ready` and is the next ordered checkpoint after this correction.
 
-- [x] Close the blocker with a deterministic/deduped shared web metadata window with max 300 entries, server TMDB concurrency 5 and a 5-second timeout, and `504 UPSTREAM_ERROR` classification for upstream timeouts.
-- [x] Reuse request-scoped metadata for canonical scoring, cold-start, strict genre filtering, and final adaptation. Defer `/suggest` presentation hydration as bounded (300) and non-blocking, including restored sessions; use shared payload validation and the bounded canonical path for `/genre-suggest`.
-- [x] Record verification: Prettier 12 files pass; diff check pass; focused 6 files/40 tests pass; lint pass; typecheck pass; full Vitest 23 files/245 tests pass; build pass 51/51 pages with non-fatal existing dynamic-server and stale browser-data warnings; Playwright recommendation page slice 1 passed, 1 skipped; final bounded code review approved.
-- [x] Record change-impact evidence: the commit-range scan identified the 12 expected hotfix source/test files, also surfaced unrelated existing dirty files, and returned no impacted symbols; therefore tests/review provided behavioral blast-radius evidence.
-- [x] Record that no production deploy/live import validation was performed because separate authorization is required.
+- [x] Land the original deterministic/deduped 300-entry metadata window and per-request five-second timeout.
+- [ ] Restore web/v1 personalization-input parity through one shared normalized builder and scorer seam.
+- [ ] Add a 20-second request-wide metadata deadline and reject unhealthy partial scoring pools.
+- [ ] Scope restored suggestion, exposure-suppression, and pairwise state to the authenticated user.
+- [ ] Record focused, full-gate, authenticated Playwright, live generation, review, and change-impact evidence.
 
-**Next action:** Resume 2A.3 Atomic Snapshot Reconciliation and retain fresh import-to-suggestions acceptance evidence, honest import failure, stale-row reconciliation, and recommendation-revision invalidation.
+**Next action:** Complete this bounded correction, then resume 2A.3 Atomic Snapshot Reconciliation.
 
 ## Checkpoint 2A.1: Per-User Local Import State
 

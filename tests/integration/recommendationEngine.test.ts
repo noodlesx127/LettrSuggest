@@ -15,7 +15,10 @@ import {
   type RecommendationContextSourceSnapshot,
   type RecommendationInputRevisionMaterial,
 } from "@/lib/recommendationContext";
-import { scoreRecommendationsWithOverlap } from "@/lib/enrich";
+import {
+  scoreRecommendationsWithOverlap,
+  type RecommendationScoringPersonalization,
+} from "@/lib/recommendationScoring";
 import {
   MAX_DIAGNOSTIC_COUNT,
   validateRecommendationDiagnostics,
@@ -23,8 +26,45 @@ import {
   type RecommendationDiagnostics,
 } from "@/lib/recommendationTypes";
 
-const overlapScorer: RecommendationEngineDependencies["scoreCandidates"] =
-  scoreRecommendationsWithOverlap;
+const emptyPersonalization: RecommendationScoringPersonalization = {
+  enhancedProfile: {
+    topActors: [],
+    topStudios: [],
+    topKeywords: [],
+    topCountries: [],
+    topLanguages: [],
+    avoidGenres: [],
+    avoidKeywords: [],
+    avoidDirectors: [],
+    preferredSubgenreKeywordIds: [],
+    topDecades: [],
+    adjacentGenres: new Map(),
+    watchlistGenres: [],
+    watchlistKeywords: [],
+    watchlistDirectors: [],
+  },
+  featureFeedback: {
+    avoidActors: [],
+    avoidKeywords: [],
+    avoidFranchises: [],
+    avoidDirectors: [],
+    avoidGenres: [],
+    avoidSubgenres: [],
+    preferActors: [],
+    preferKeywords: [],
+    preferDirectors: [],
+    preferGenres: [],
+    preferSubgenres: [],
+  },
+  watchlistEntries: [],
+  recentExposures: new Map(),
+  mmrLambda: 0.5,
+  sourceMetadata: new Map(),
+};
+
+const overlapScorer: RecommendationEngineDependencies["scoreCandidates"] = (
+  params,
+) => scoreRecommendationsWithOverlap(params, new Map(), emptyPersonalization);
 
 const inputHealth: RecommendationEngineContext["inputHealth"] = {
   films: { health: "ok" as const, rowCount: 1 },
@@ -123,8 +163,8 @@ function candidate(tmdbId: number, score: number): RecommendationCandidate {
 }
 
 describe("recommendation engine", () => {
-  it("accepts the overlap scorer directly as the scoring dependency", () => {
-    expect(overlapScorer).toBe(scoreRecommendationsWithOverlap);
+  it("exposes the overlap scorer through the canonical scoring seam", () => {
+    expect(scoreRecommendationsWithOverlap).toBeTypeOf("function");
   });
 
   it("passes an explicit empty feedback map to the overlap scorer", async () => {
@@ -133,7 +173,7 @@ describe("recommendation engine", () => {
       context,
       mode: "degraded",
       candidates: [{ tmdbId: 303 }],
-    });
+    }, new Map(), emptyPersonalization);
 
     expect(result).toEqual([]);
   });

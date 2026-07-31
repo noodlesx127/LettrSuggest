@@ -5,8 +5,7 @@ import {
   filterCandidatesByGenre,
   type FilterRelaxation,
 } from "@/lib/advancedFiltering";
-import { suggestByOverlap } from "@/lib/enrich";
-import type { TMDBMovie } from "@/lib/enrich";
+import { suggestByOverlap, type TMDBMovie } from "@/lib/enrich";
 import type { EnhancedTasteProfile } from "@/lib/enhancedProfile";
 import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import {
@@ -20,8 +19,6 @@ import {
 } from "@/lib/recommendationCandidates";
 import { loadRecommendationContext } from "@/lib/recommendationContext";
 import {
-  buildAdjacentGenreMap,
-  buildFeatureFeedbackFromRows,
   buildTasteProfileServer,
   generateServerCandidates,
   getUserContextDiagnostics,
@@ -29,6 +26,7 @@ import {
   loadUserContext,
   runCanonicalServerRecommendations,
 } from "@/lib/serverSuggestionsEngine";
+import { buildRecommendationPersonalization } from "@/lib/recommendationPersonalization";
 import {
   buildBlockedSourceFailureResponse,
   buildGenerationDiagnostics,
@@ -353,6 +351,10 @@ export async function POST(req: Request) {
         auth.userId,
         userContext,
       );
+      const personalization = buildRecommendationPersonalization(
+        userContext,
+        tasteProfile,
+      );
       const { candidateIds, sourceMetadata } = await generateServerCandidates(
         auth.userId,
         userContext,
@@ -392,52 +394,6 @@ export async function POST(req: Request) {
         });
       }
 
-      const adjacentGenresMap = buildAdjacentGenreMap(
-        userContext.adjacentGenres,
-      );
-      const enhancedProfile = {
-        topActors: tasteProfile.topActors ?? [],
-        topStudios: tasteProfile.topStudios ?? [],
-        topKeywords: tasteProfile.topKeywords,
-        topCountries: tasteProfile.topCountries,
-        topLanguages: tasteProfile.topLanguages,
-        avoidGenres: tasteProfile.avoidGenres ?? [],
-        avoidKeywords: tasteProfile.avoidKeywords ?? [],
-        avoidDirectors: tasteProfile.avoidDirectors ?? [],
-        preferredSubgenreKeywordIds:
-          tasteProfile.preferredSubgenreKeywordIds ?? [],
-        topDecades: tasteProfile.topDecades,
-        adjacentGenres: adjacentGenresMap,
-        watchlistGenres: (tasteProfile.watchlistGenres ?? []).map(
-          (genre: { name: string }) => genre.name,
-        ),
-        watchlistKeywords: (tasteProfile.watchlistKeywords ?? []).map(
-          (keyword: { name: string }) => keyword.name,
-        ),
-        watchlistDirectors: (tasteProfile.watchlistDirectors ?? []).map(
-          (director: { name: string }) => director.name,
-        ),
-      };
-
-      const featureFeedback = buildFeatureFeedbackFromRows(
-        userContext.feedback,
-      );
-
-      const watchlistEntries = userContext.films
-        .filter((film) => film.on_watchlist)
-        .map((film) => ({
-          tmdbId: userContext.mappings.get(film.uri),
-          addedAt: film.last_date ?? null,
-        }))
-        .filter(
-          (
-            entry,
-          ): entry is {
-            tmdbId: number;
-            addedAt: string | null;
-          } => typeof entry.tmdbId === "number" && entry.tmdbId > 0,
-        );
-
       const liteFilms = userContext.films.map((film) => ({
         uri: film.uri,
         title: film.title,
@@ -455,34 +411,22 @@ export async function POST(req: Request) {
         })),
       });
 
-      const explorationRate = Number.isFinite(userContext.explorationRate)
-        ? userContext.explorationRate
-        : 0.15;
-      const mmrLambda = Math.max(
-        0.3,
-        Math.min(0.7, 0.3 + (explorationRate / 0.3) * 0.4),
-      );
-
       const scored = await suggestByOverlap({
         userId: auth.userId,
         films: liteFilms,
         mappings: userContext.mappings,
         candidates: filteredCandidates,
+        ...personalization,
         maxCandidates: Math.min(filteredCandidates.length, 1200),
         concurrency: 6,
         excludeWatchedIds: new Set(userContext.mappings.values()),
         desiredResults: Math.min(body.limit * 4, 200),
         sourceMetadata,
-        mmrLambda,
         mmrTopKFactor: 2.5,
-        featureFeedback,
-        watchlistEntries,
         context: {
           mode: "neutral" as const,
           localHour: null,
         },
-        recentExposures: userContext.recentExposures,
-        enhancedProfile,
         tmdbDetailsCache: candidateTmdbCache,
       });
 
