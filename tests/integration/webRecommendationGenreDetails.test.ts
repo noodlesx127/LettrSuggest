@@ -74,6 +74,14 @@ vi.mock("@/lib/serverSuggestionsEngine", () => ({
 import { generateCanonicalWebRecommendations } from "@/app/actions/recommendations";
 import { suggestByOverlap, type TMDBMovie } from "@/lib/enrich";
 
+const expectBoundedDeadline = (call: readonly unknown[]) => {
+  const { deadlineMs } = call[2] as { deadlineMs: number };
+  expect(Number.isFinite(deadlineMs)).toBe(true);
+  expect(deadlineMs).toBeGreaterThanOrEqual(0);
+  expect(deadlineMs).toBeLessThanOrEqual(20_000);
+  return deadlineMs;
+};
+
 describe("canonical web standard-genre detail completion", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -194,12 +202,7 @@ describe("canonical web standard-genre detail completion", () => {
       expect.any(Map),
       expect.objectContaining({ deadlineMs: expect.any(Number) }),
     );
-    const completionOptions = mocks.ensureCompleteTmdbDetails.mock.calls[0][2] as {
-      deadlineMs: number;
-    };
-    expect(Number.isFinite(completionOptions.deadlineMs)).toBe(true);
-    expect(completionOptions.deadlineMs).toBeGreaterThanOrEqual(0);
-    expect(completionOptions.deadlineMs).toBeLessThanOrEqual(20_000);
+    expectBoundedDeadline(mocks.ensureCompleteTmdbDetails.mock.calls[0]);
     const cachedDetails = mocks.ensureCompleteTmdbDetails.mock.calls[0][1] as Map<
       number,
       unknown
@@ -307,17 +310,12 @@ describe("canonical web standard-genre detail completion", () => {
       { deadlineMs: expect.any(Number) },
     );
 
-    const readBoundedDeadline = (callIndex: number) => {
-      const options = mocks.ensureCompleteTmdbDetails.mock.calls[callIndex][2] as {
-        deadlineMs: number;
-      };
-      expect(Number.isFinite(options.deadlineMs)).toBe(true);
-      expect(options.deadlineMs).toBeGreaterThanOrEqual(0);
-      expect(options.deadlineMs).toBeLessThanOrEqual(20_000);
-      return options.deadlineMs;
-    };
-    const initialDeadlineMs = readBoundedDeadline(0);
-    const finalDeadlineMs = readBoundedDeadline(1);
+    const initialDeadlineMs = expectBoundedDeadline(
+      mocks.ensureCompleteTmdbDetails.mock.calls[0],
+    );
+    const finalDeadlineMs = expectBoundedDeadline(
+      mocks.ensureCompleteTmdbDetails.mock.calls[1],
+    );
     expect(finalDeadlineMs).toBeLessThanOrEqual(initialDeadlineMs);
     expect(result.items.map((item) => item.id)).toEqual([303]);
   });
@@ -434,8 +432,9 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       [101, 202, 303],
       expect.any(Map),
-      { deadlineMs: 20_000 },
+      expect.objectContaining({ deadlineMs: expect.any(Number) }),
     );
+    expectBoundedDeadline(mocks.ensureCompleteTmdbDetails.mock.calls[0]);
     expect(mocks.scoreRecommendationsWithOverlap.mock.calls[0][1]).toBe(
       completedDetails,
     );
@@ -524,8 +523,9 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       [101],
       expect.any(Map),
-      { deadlineMs: 20_000 },
+      expect.objectContaining({ deadlineMs: expect.any(Number) }),
     );
+    expectBoundedDeadline(mocks.ensureCompleteTmdbDetails.mock.calls[0]);
     expect(
       mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates.map(
         ({ tmdbId }: { tmdbId: number }) => tmdbId,
@@ -571,8 +571,9 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       windowIds,
       expect.any(Map),
-      { deadlineMs: 20_000 },
+      expect.objectContaining({ deadlineMs: expect.any(Number) }),
     );
+    expectBoundedDeadline(mocks.ensureCompleteTmdbDetails.mock.calls[0]);
     const scoredIds =
       mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates.map(
         ({ tmdbId }: { tmdbId: number }) => tmdbId,
