@@ -6,16 +6,18 @@
 
 ## Task 5: Production Suggestion Timeout And Quality Blocker Closure
 
-**Task state:** In progress  
+**Task state:** Complete  
 **Checkpoint impact:** None; 2A.3 remains `Ready` and is the next ordered checkpoint after this correction.
 
 - [x] Land the original deterministic/deduped 300-entry metadata window and per-request five-second timeout.
 - [x] Restore web/v1 personalization-input parity through one shared normalized builder and scorer seam.
 - [x] Add a 20-second request-wide metadata deadline and reject unhealthy partial scoring pools.
 - [x] Scope restored suggestion, exposure-suppression, and pairwise state to the authenticated user.
-- [ ] Record focused, full-gate, authenticated Playwright, live generation, review, and change-impact evidence.
+- [x] Record focused, full-gate, authenticated Playwright, live generation, review, and change-impact evidence.
 
-**Next action:** Complete this bounded correction, then resume 2A.3 Atomic Snapshot Reconciliation.
+**Verification:** 2026-07-31 - Focused recommendation suites PASS, 122/122 across 6 files; full Vitest PASS, 344/344 across 26 files; lint, typecheck, production build, formatting, and `git diff --check` PASS. The build retained the existing non-fatal dynamic-route and stale browser-data warnings. Authenticated recommendation-page Playwright PASS, 2/2. An authenticated canonical generation completed in 12.821 seconds with 74 stored outputs, 74 year-bearing outputs across 9 decades, no retryable metadata-health error, and visible multi-era coverage. Independent final review APPROVED after transport-safe retry results, post-retrieval metadata budgeting, and UID-plus-auth-epoch async guards closed all Critical/High/Medium findings. Codebase Memory depth-3 impact analysis from `c1af1cd` found no unexpected external runtime dependency; the broad affected graph remained inside the recommendation/suggestion subsystem, including expected scoring, metadata, feedback, pairwise, exposure, and presentation paths.
+
+**Next action:** Resume 2A.3 Atomic Snapshot Reconciliation.
 
 **TDD evidence:**
 
@@ -25,6 +27,8 @@
 - 2026-07-30 - Adapter-parity RED: `rtk npm run test -- tests/integration/recommendationAdapters.test.ts -t "keeps normalized web and v1 scorer inputs in parity"` - the new test failed because `buildRecommendationScoringInputs` was not yet available.
 - 2026-07-30 - Task 3 RED: `rtk npm run test -- tests/unit/serverTmdbDetails.test.ts` - 6/6 failed because structured completion/helpers/options/taste cap were absent.
 - 2026-07-30 - Metadata deadline liveness RED: `rtk npm run test -- tests/unit/serverTmdbDetails.test.ts tests/integration/webRecommendationGenreDetails.test.ts` - 2/16 failed because cache upsert was awaited and queue claims relied only on timer state.
+- 2026-07-31 - Final-review correction RED: focused action/deadline/account-transition tests failed 3/27 because metadata failures crossed the Server Action boundary as thrown errors, candidate retrieval consumed the metadata budget, and interactive operations lacked post-await identity guards.
+- 2026-07-31 - Auth-epoch RED: `rtk npm run test -- tests/integration/recommendationAdapters.test.ts` - 2/16 failed because UID-only guards could accept stale work after an A-to-B-to-A transition.
 
 ## Checkpoint 2A.1: Per-User Local Import State
 

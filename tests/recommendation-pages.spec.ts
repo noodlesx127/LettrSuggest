@@ -85,13 +85,13 @@ test.describe("authenticated recommendation pages", () => {
       window.sessionStorage.setItem(
         `lettrsuggest:${userId}:items`,
         JSON.stringify([
-          { id: 27205, title: "Smoke fixture", reasons: [], score: 0 },
+          { id: 999999937, title: "Smoke fixture", reasons: [], score: 10 },
         ]),
       );
       window.sessionStorage.setItem(
         "lettrsuggest_items",
         JSON.stringify([
-          { id: 27206, title: "Legacy sentinel", reasons: [], score: 0 },
+          { id: 999999938, title: "Legacy sentinel", reasons: [], score: 10 },
         ]),
       );
     }, uid);
@@ -107,6 +107,20 @@ test.describe("authenticated recommendation pages", () => {
     });
 
     await page.goto("/suggest");
+    await expect
+      .poll(() =>
+        page.evaluate((userId) => {
+          return {
+            path: window.location.pathname,
+            stored:
+              window.sessionStorage.getItem(
+                `lettrsuggest:${userId}:items`,
+              ) !== null,
+            rendered: document.body.innerText.includes("Smoke fixture"),
+          };
+        }, uid),
+      )
+      .toEqual({ path: "/suggest", stored: true, rendered: true });
     await expect(page.getByText("Smoke fixture", { exact: true })).toBeVisible();
     await expect(page.getByText("Legacy sentinel", { exact: true })).toHaveCount(
       0,
