@@ -47,6 +47,7 @@ import {
   selectCanonicalWatchlistPicks,
 } from "@/lib/recommendationAdapters";
 import { parseCanonicalWebItems } from "@/lib/canonicalWebResponse";
+import { isCanonicalWebRecommendationFailure } from "@/lib/recommendationActionTypes";
 import {
   detectGenreFatigue,
   type FatigueDetection,
@@ -355,6 +356,7 @@ export default function SuggestPage() {
   const feedbackModalRef = useRef<HTMLDivElement>(null);
   const runGenerationRef = useRef(0);
   const storageUidRef = useRef<string | null | undefined>(undefined);
+  const authTransitionEpochRef = useRef(0);
   const storageReadyUidRef = useRef<string | null>(null);
 
   const resetUserScopedState = useCallback(() => {
@@ -405,6 +407,7 @@ export default function SuggestPage() {
   const updateUid = useCallback(
     (nextUid: string | null) => {
       if (storageUidRef.current !== nextUid) {
+        authTransitionEpochRef.current += 1;
         storageUidRef.current = nextUid;
         resetUserScopedState();
       }
@@ -504,8 +507,15 @@ export default function SuggestPage() {
   }, [uid]);
 
   const isStorageReady = (storageUid: string | null | undefined) =>
-    typeof storageUid === "string" &&
-    storageReadyUidRef.current === storageUid;
+    typeof storageUid === "string" && storageReadyUidRef.current === storageUid;
+
+  const isActiveUid = (
+    requestedUid: string | null | undefined,
+    requestedEpoch: number,
+  ): requestedUid is string =>
+    typeof requestedUid === "string" &&
+    storageUidRef.current === requestedUid &&
+    authTransitionEpochRef.current === requestedEpoch;
 
   // P1.4: Save shown IDs to the authenticated namespace (debounced).
   useEffect(() => {
@@ -513,10 +523,7 @@ export default function SuggestPage() {
     if (!keys || !isStorageReady(uid) || shownIds.size === 0) return;
 
     const timeoutId = setTimeout(() => {
-      if (
-        storageUidRef.current !== uid ||
-        !isStorageReady(uid)
-      ) {
+      if (storageUidRef.current !== uid || !isStorageReady(uid)) {
         return;
       }
 
@@ -1300,9 +1307,11 @@ export default function SuggestPage() {
     let active = true;
     let authEventVersion = 0;
 
-    const applySession = (session: {
-      user?: { id?: string | undefined };
-    } | null) => {
+    const applySession = (
+      session: {
+        user?: { id?: string | undefined };
+      } | null,
+    ) => {
       if (!active) return;
       const requestedUid = session?.user?.id ?? null;
       updateUid(requestedUid);
@@ -1319,7 +1328,10 @@ export default function SuggestPage() {
         })
         .catch((error) => {
           if (active && storageUidRef.current === requestedUid) {
-            console.error("[Suggest] Failed to fetch blocked suggestions", error);
+            console.error(
+              "[Suggest] Failed to fetch blocked suggestions",
+              error,
+            );
           }
         });
     };
@@ -1406,7 +1418,10 @@ export default function SuggestPage() {
           if (film.onWatchlist && tmdbId) watchlistIds.add(tmdbId);
           return Boolean(film.onWatchlist && tmdbId);
         });
-        setMappingCoverage({ mapped: mappings.size, total: sourceFilms.length });
+        setMappingCoverage({
+          mapped: mappings.size,
+          total: sourceFilms.length,
+        });
         setWatchlistTmdbIds(watchlistIds);
 
         const presentationTmdbIds = [
@@ -1451,9 +1466,7 @@ export default function SuggestPage() {
 
   useEffect(() => {
     if (!items) return;
-    setWatchlistPicks(
-      selectCanonicalWatchlistPicks(items, watchlistTmdbIds),
-    );
+    setWatchlistPicks(selectCanonicalWatchlistPicks(items, watchlistTmdbIds));
   }, [items, watchlistTmdbIds]);
 
   const recentFilmTitle = useMemo(() => {
@@ -1627,6 +1640,10 @@ export default function SuggestPage() {
         requestSeed: `web-${refreshTick}-${mode}`,
       });
       if (!isCurrentRun()) return;
+      if (isCanonicalWebRecommendationFailure(canonical)) {
+        setError(canonical.error.message);
+        return;
+      }
       const excludedGenres = new Set(
         excludeGenres
           .split(",")
@@ -1648,7 +1665,9 @@ export default function SuggestPage() {
           excludedGenres.has(genre.toLowerCase()),
         );
       });
-      setWatchlistPicks(selectCanonicalWatchlistPicks(details, watchlistTmdbIds));
+      setWatchlistPicks(
+        selectCanonicalWatchlistPicks(details, watchlistTmdbIds),
+      );
       setSourceLabel("Canonical recommendations from your taste profile");
       setNoCandidatesReason(
         details.length === 0
@@ -1710,8 +1729,7 @@ export default function SuggestPage() {
   useEffect(() => {
     let active = true;
     const requestedUid = uid;
-    const canCommit = () =>
-      active && storageUidRef.current === requestedUid;
+    const canCommit = () => active && storageUidRef.current === requestedUid;
 
     const maybeLoad = async () => {
       if (!supabase || !requestedUid) {
@@ -1828,7 +1846,10 @@ export default function SuggestPage() {
           setItems(null);
         } catch (error) {
           if (!active || storageUidRef.current !== requestedUid) return;
-          console.error("[Suggest] Failed to refresh blocked suggestions", error);
+          console.error(
+            "[Suggest] Failed to refresh blocked suggestions",
+            error,
+          );
         }
       }
     };
@@ -1855,7 +1876,10 @@ export default function SuggestPage() {
     reason: string,
     popup: NonNullable<typeof feedbackPopup>,
   ) => {
-    if (!uid) return popup.insights.learningSummary;
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch))
+      return popup.insights.learningSummary;
     const isPositive = popup.feedbackType === "positive";
     let confirmMessage = popup.insights.learningSummary;
 
@@ -1870,22 +1894,30 @@ export default function SuggestPage() {
     } else if (reason === "dislike_all") {
       confirmMessage = "👎👎 Got it! We'll strongly avoid movies like this.";
       for (const actor of popup.leadActors) {
-        await boostExplicitFeedback(uid, "actor", actor, false, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "actor", actor, false, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
       for (const genre of popup.genres) {
-        await boostExplicitFeedback(uid, "genre", genre, false, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "genre", genre, false, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
       for (const keyword of popup.topKeywords || []) {
-        await boostExplicitFeedback(uid, "keyword", keyword, false, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "keyword", keyword, false, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
       if (popup.franchise) {
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
         await boostExplicitFeedback(
-          uid,
+          activeUid,
           "collection",
           popup.franchise,
           false,
           3,
         );
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
 
       // === POSITIVE FEEDBACK REASONS ===
@@ -1897,22 +1929,30 @@ export default function SuggestPage() {
     } else if (reason === "love_all") {
       confirmMessage = "❤️❤️ Amazing! We'll find more movies just like this!";
       for (const actor of popup.leadActors) {
-        await boostExplicitFeedback(uid, "actor", actor, true, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "actor", actor, true, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
       for (const genre of popup.genres) {
-        await boostExplicitFeedback(uid, "genre", genre, true, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "genre", genre, true, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
       for (const keyword of popup.topKeywords || []) {
-        await boostExplicitFeedback(uid, "keyword", keyword, true, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "keyword", keyword, true, 3);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
       if (popup.franchise) {
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
         await boostExplicitFeedback(
-          uid,
+          activeUid,
           "collection",
           popup.franchise,
           true,
           3,
         );
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
 
       // === SHARED REASONS (work for both positive and negative) ===
@@ -1920,52 +1960,74 @@ export default function SuggestPage() {
       const actorName = reason.replace("actor:", "");
       if (isPositive) {
         confirmMessage = `👍 Love it! More ${actorName} movies coming up.`;
-        await boostExplicitFeedback(uid, "actor", actorName, true, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "actor", actorName, true, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       } else {
         confirmMessage = `👎 Got it. ${actorName} movies will appear less often.`;
-        await boostExplicitFeedback(uid, "actor", actorName, false, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "actor", actorName, false, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
     } else if (reason === "franchise") {
       if (isPositive) {
         confirmMessage = `👍 Love the ${popup.franchise}! Showing more from this series.`;
         if (popup.franchise) {
+          if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
           await boostExplicitFeedback(
-            uid,
+            activeUid,
             "collection",
             popup.franchise,
             true,
             2,
           );
+          if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
         }
       } else {
         confirmMessage = `👎 ${popup.franchise} fatigue noted. Showing fewer from this series.`;
         if (popup.franchise) {
+          if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
           await boostExplicitFeedback(
-            uid,
+            activeUid,
             "collection",
             popup.franchise,
             false,
             2,
           );
+          if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
         }
       }
     } else if (reason.startsWith("genre:")) {
       const genreName = reason.replace("genre:", "");
       if (isPositive) {
         confirmMessage = `👍 Great! More ${genreName} movies for you.`;
-        await boostExplicitFeedback(uid, "genre", genreName, true, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "genre", genreName, true, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       } else {
         confirmMessage = `👎 Got it. Fewer ${genreName} movies coming up.`;
-        await boostExplicitFeedback(uid, "genre", genreName, false, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "genre", genreName, false, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
     } else if (reason.startsWith("keyword:")) {
       const keywordName = reason.replace("keyword:", "");
       if (isPositive) {
         confirmMessage = `👍 Noted! More "${keywordName}" themed movies coming up.`;
-        await boostExplicitFeedback(uid, "keyword", keywordName, true, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(activeUid, "keyword", keywordName, true, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       } else {
         confirmMessage = `👎 Got it. Fewer "${keywordName}" themed movies coming up.`;
-        await boostExplicitFeedback(uid, "keyword", keywordName, false, 2);
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
+        await boostExplicitFeedback(
+          activeUid,
+          "keyword",
+          keywordName,
+          false,
+          2,
+        );
+        if (!isActiveUid(activeUid, activeEpoch)) return confirmMessage;
       }
     }
 
@@ -1974,6 +2036,9 @@ export default function SuggestPage() {
 
   // Quick single-reason submit (still supported)
   const handleExplicitReason = async (reason: string) => {
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
     if (!feedbackPopup) return;
     const popupData = feedbackPopup;
     if (process.env.NODE_ENV === "development") {
@@ -1989,10 +2054,14 @@ export default function SuggestPage() {
       }
     }
     const confirmMessage = await applyExplicitReason(reason, popupData);
+    if (!isActiveUid(activeUid, activeEpoch)) return;
     setFeedbackPopup(null);
     setSelectedReasons([]);
     setFeedbackMessage(confirmMessage);
-    setTimeout(() => setFeedbackMessage(null), 3500);
+    setTimeout(() => {
+      if (!isActiveUid(activeUid, activeEpoch)) return;
+      setFeedbackMessage(null);
+    }, 3500);
   };
 
   const toggleReasonSelection = (reason: string) => {
@@ -2031,6 +2100,9 @@ export default function SuggestPage() {
     };
   };
   const handleSubmitSelectedReasons = async () => {
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
     if (!feedbackPopup || selectedReasons.length === 0) {
       setFeedbackPopup(null);
       setSelectedReasons([]);
@@ -2039,28 +2111,47 @@ export default function SuggestPage() {
     const popupData = feedbackPopup;
     let lastMessage = popupData.insights.learningSummary;
     for (const reason of selectedReasons) {
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       lastMessage = await applyExplicitReason(reason, popupData);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
     }
+    if (!isActiveUid(activeUid, activeEpoch)) return;
     setFeedbackPopup(null);
     setSelectedReasons([]);
     setFeedbackMessage(lastMessage);
-    setTimeout(() => setFeedbackMessage(null), 3500);
+    setTimeout(() => {
+      if (!isActiveUid(activeUid, activeEpoch)) return;
+      setFeedbackMessage(null);
+    }, 3500);
   };
 
   const handleFastNeutralize = async () => {
-    if (!feedbackPopup || !uid) return;
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
+    if (!feedbackPopup) return;
     try {
-      await neutralizeFeedback(uid, feedbackPopup.tmdbId);
+      await neutralizeFeedback(activeUid, feedbackPopup.tmdbId);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       await handleUndoDismiss(feedbackPopup.tmdbId);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       setFeedbackMessage(
         "Marked as neutral. We will stop penalizing this pick.",
       );
-      setTimeout(() => setFeedbackMessage(null), 3500);
+      setTimeout(() => {
+        if (!isActiveUid(activeUid, activeEpoch)) return;
+        setFeedbackMessage(null);
+      }, 3500);
     } catch (e) {
       console.error("[FeedbackPopup] Fast neutralize failed", e);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       setFeedbackMessage("Could not reset feedback right now.");
-      setTimeout(() => setFeedbackMessage(null), 3500);
+      setTimeout(() => {
+        if (!isActiveUid(activeUid, activeEpoch)) return;
+        setFeedbackMessage(null);
+      }, 3500);
     } finally {
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       setFeedbackPopup(null);
     }
   };
@@ -2068,20 +2159,27 @@ export default function SuggestPage() {
   const handleMicroSurveyChoice = async (
     choice: "cast" | "tone" | "runtime",
   ) => {
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
     if (!feedbackPopup) return;
     if (choice === "runtime") {
       await handleExplicitReason("too_long");
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       return;
     }
     if (choice === "cast" && feedbackPopup.leadActors.length > 0) {
       await handleExplicitReason(`actor:${feedbackPopup.leadActors[0]}`);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       return;
     }
     if (choice === "tone" && feedbackPopup.topKeywords.length > 0) {
       await handleExplicitReason(`keyword:${feedbackPopup.topKeywords[0]}`);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       return;
     }
     await handleExplicitReason("not_in_mood");
+    if (!isActiveUid(activeUid, activeEpoch)) return;
   };
 
   // Handle feedback
@@ -2090,7 +2188,9 @@ export default function SuggestPage() {
     type: "negative" | "positive",
     reasons?: string[],
   ) => {
-    if (!uid) return;
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
 
     // Find the movie title for the popup
     const movie = items?.find((i) => i.id === tmdbId);
@@ -2104,57 +2204,63 @@ export default function SuggestPage() {
       if (type === "negative") {
         // Block the suggestion in the background and get learning insights
         const [insights, movieFeatures] = await Promise.all([
-          addFeedback(uid, tmdbId, "negative", reasons, feedbackMeta),
-          blockSuggestion(uid, tmdbId).then(() =>
+          addFeedback(activeUid, tmdbId, "negative", reasons, feedbackMeta),
+          blockSuggestion(activeUid, tmdbId).then(() =>
             getMovieFeaturesForPopup(tmdbId),
           ),
         ]);
+        if (!isActiveUid(activeUid, activeEpoch)) return;
 
-        await fetchEvidenceForFeatures([
-          ...movieFeatures.leadActors.map((name) => ({
-            type: "actor" as FeatureType,
-            name,
-          })),
-          ...movieFeatures.genres.map((name) => ({
-            type: "genre" as FeatureType,
-            name,
-          })),
-          ...movieFeatures.topKeywords.map((name) => ({
-            type: "keyword" as FeatureType,
-            name,
-          })),
-          ...(movieFeatures.franchise
-            ? [
-                {
-                  type: "collection" as FeatureType,
-                  name: movieFeatures.franchise,
-                },
-              ]
-            : []),
-          ...(movieFeatures.director
-            ? [
-                {
-                  type: "director" as FeatureType,
-                  name: movieFeatures.director,
-                },
-              ]
-            : []),
-        ]);
-
+        await fetchEvidenceForFeatures(
+          [
+            ...movieFeatures.leadActors.map((name) => ({
+              type: "actor" as FeatureType,
+              name,
+            })),
+            ...movieFeatures.genres.map((name) => ({
+              type: "genre" as FeatureType,
+              name,
+            })),
+            ...movieFeatures.topKeywords.map((name) => ({
+              type: "keyword" as FeatureType,
+              name,
+            })),
+            ...(movieFeatures.franchise
+              ? [
+                  {
+                    type: "collection" as FeatureType,
+                    name: movieFeatures.franchise,
+                  },
+                ]
+              : []),
+            ...(movieFeatures.director
+              ? [
+                  {
+                    type: "director" as FeatureType,
+                    name: movieFeatures.director,
+                  },
+                ]
+              : []),
+          ],
+          () => isActiveUid(activeUid, activeEpoch),
+        );
+        if (!isActiveUid(activeUid, activeEpoch)) return;
         setBlockedIds((prev) => new Set([...prev, tmdbId]));
 
         // Store for persistent undo control
+        if (!isActiveUid(activeUid, activeEpoch)) return;
         setLastFeedback({ id: tmdbId, title: movieTitle });
 
         // Offer quick undo toast
+        if (!isActiveUid(activeUid, activeEpoch)) return;
         setUndoToast({ id: tmdbId, title: movieTitle });
-        setTimeout(
-          () =>
-            setUndoToast((curr) => (curr && curr.id === tmdbId ? null : curr)),
-          5000,
-        );
+        setTimeout(() => {
+          if (!isActiveUid(activeUid, activeEpoch)) return;
+          setUndoToast((curr) => (curr && curr.id === tmdbId ? null : curr));
+        }, 5000);
 
         // Mark the item as dismissed in items (source of truth for storage)
+        if (!isActiveUid(activeUid, activeEpoch)) return;
         setItems((prev) => {
           if (!prev) return prev;
           return prev.map((item) =>
@@ -2163,6 +2269,7 @@ export default function SuggestPage() {
         });
 
         // Mark the item as dismissed in categorizedSuggestions
+        if (!isActiveUid(activeUid, activeEpoch)) return;
         setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
           if (!prev) return prev;
           const next = { ...prev };
@@ -2203,6 +2310,7 @@ export default function SuggestPage() {
           (tmdbId + microSurveyCount) % 3 === 0;
 
         if (hasActors || hasFranchise || hasGenres || hasKeywords) {
+          if (!isActiveUid(activeUid, activeEpoch)) return;
           setFeedbackPopup({
             tmdbId,
             title: movieTitle,
@@ -2216,51 +2324,61 @@ export default function SuggestPage() {
             showMicroSurvey: shouldShowMicroSurvey,
           });
           if (shouldShowMicroSurvey) {
+            if (!isActiveUid(activeUid, activeEpoch)) return;
             setMicroSurveyCount((c) => c + 1);
           }
           // No auto-dismiss - let user take their time or close manually
         } else {
           // No interesting features to ask about, just show the learning message
+          if (!isActiveUid(activeUid, activeEpoch)) return;
           setFeedbackMessage(insights.learningSummary);
-          setTimeout(() => setFeedbackMessage(null), 4000);
+          setTimeout(() => {
+            if (!isActiveUid(activeUid, activeEpoch)) return;
+            setFeedbackMessage(null);
+          }, 4000);
         }
       } else {
         // Positive feedback - get learning insights AND show popup for explicit learning
         const [insights, movieFeatures] = await Promise.all([
-          addFeedback(uid, tmdbId, "positive", reasons, feedbackMeta),
+          addFeedback(activeUid, tmdbId, "positive", reasons, feedbackMeta),
           getMovieFeaturesForPopup(tmdbId),
         ]);
+        if (!isActiveUid(activeUid, activeEpoch)) return;
 
-        await fetchEvidenceForFeatures([
-          ...movieFeatures.leadActors.map((name) => ({
-            type: "actor" as FeatureType,
-            name,
-          })),
-          ...movieFeatures.genres.map((name) => ({
-            type: "genre" as FeatureType,
-            name,
-          })),
-          ...movieFeatures.topKeywords.map((name) => ({
-            type: "keyword" as FeatureType,
-            name,
-          })),
-          ...(movieFeatures.franchise
-            ? [
-                {
-                  type: "collection" as FeatureType,
-                  name: movieFeatures.franchise,
-                },
-              ]
-            : []),
-          ...(movieFeatures.director
-            ? [
-                {
-                  type: "director" as FeatureType,
-                  name: movieFeatures.director,
-                },
-              ]
-            : []),
-        ]);
+        await fetchEvidenceForFeatures(
+          [
+            ...movieFeatures.leadActors.map((name) => ({
+              type: "actor" as FeatureType,
+              name,
+            })),
+            ...movieFeatures.genres.map((name) => ({
+              type: "genre" as FeatureType,
+              name,
+            })),
+            ...movieFeatures.topKeywords.map((name) => ({
+              type: "keyword" as FeatureType,
+              name,
+            })),
+            ...(movieFeatures.franchise
+              ? [
+                  {
+                    type: "collection" as FeatureType,
+                    name: movieFeatures.franchise,
+                  },
+                ]
+              : []),
+            ...(movieFeatures.director
+              ? [
+                  {
+                    type: "director" as FeatureType,
+                    name: movieFeatures.director,
+                  },
+                ]
+              : []),
+          ],
+          () => isActiveUid(activeUid, activeEpoch),
+        );
+        if (!isActiveUid(activeUid, activeEpoch)) return;
 
         // Show popup for positive feedback too - let users tell us what they loved
         const hasActors = movieFeatures.leadActors.length > 0;
@@ -2269,6 +2387,7 @@ export default function SuggestPage() {
         const hasKeywords = movieFeatures.topKeywords.length > 0;
 
         if (hasActors || hasFranchise || hasGenres || hasKeywords) {
+          if (!isActiveUid(activeUid, activeEpoch)) return;
           setFeedbackPopup({
             tmdbId,
             title: movieTitle,
@@ -2281,14 +2400,18 @@ export default function SuggestPage() {
             director: movieFeatures.director,
           });
         } else {
+          if (!isActiveUid(activeUid, activeEpoch)) return;
           setFeedbackMessage(insights.learningSummary);
-          setTimeout(() => setFeedbackMessage(null), 3000);
+          setTimeout(() => {
+            if (!isActiveUid(activeUid, activeEpoch)) return;
+            setFeedbackMessage(null);
+          }, 3000);
         }
       }
     } catch (e) {
       console.error("Failed to submit feedback:", e);
       // On error for negative feedback, just remove the item from categories
-      if (type === "negative") {
+      if (type === "negative" && isActiveUid(activeUid, activeEpoch)) {
         setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
           if (!prev) return prev;
           const next = { ...prev };
@@ -2309,7 +2432,9 @@ export default function SuggestPage() {
   };
 
   const handlePairwiseVote = async (winnerId: number, loserId: number) => {
-    if (!uid) return;
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
 
     if (process.env.NODE_ENV === "development") {
       if (process.env.NODE_ENV === "development") {
@@ -2346,15 +2471,15 @@ export default function SuggestPage() {
       })();
 
       await Promise.all([
-        addFeedback(uid, winnerId, "positive", winner?.reasons, {
+        addFeedback(activeUid, winnerId, "positive", winner?.reasons, {
           sources: winner?.sources,
           consensusLevel: winner?.consensusLevel ?? "low",
         }),
-        addFeedback(uid, loserId, "negative", loser?.reasons, {
+        addFeedback(activeUid, loserId, "negative", loser?.reasons, {
           sources: loser?.sources,
           consensusLevel: loser?.consensusLevel ?? "low",
         }),
-        recordPairwiseEvent(uid, {
+        recordPairwiseEvent(activeUid, {
           winnerId,
           loserId,
           sharedReasonTags: sharedTags,
@@ -2364,14 +2489,19 @@ export default function SuggestPage() {
           loserConsensus: loser?.consensusLevel ?? "low",
         }),
       ]);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
 
-      await applyPairwiseFeatureLearning(uid, winnerId, loserId);
-
+      await applyPairwiseFeatureLearning(activeUid, winnerId, loserId);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       setFeedbackMessage("Got it — we will favor your pick.");
-      setTimeout(() => setFeedbackMessage(null), 2200);
+      setTimeout(() => {
+        if (!isActiveUid(activeUid, activeEpoch)) return;
+        setFeedbackMessage(null);
+      }, 2200);
     } catch (e) {
       console.error("[Pairwise] Failed to record preference", e);
     } finally {
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       // Find next pair from items that aren't blocked, or close modal if limit reached
       if (nextCount >= PAIRWISE_SESSION_LIMIT) {
         setPairwisePair(null);
@@ -2396,6 +2526,9 @@ export default function SuggestPage() {
   };
 
   const handlePairwiseSkip = (aId: number, bId: number) => {
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
     const nextCount = pairwiseCount + 1;
     const nextHistory = new Set(pairHistory);
     nextHistory.add(makePairId(aId, bId));
@@ -2431,11 +2564,16 @@ export default function SuggestPage() {
   };
 
   const handleUndoDismiss = async (tmdbId: number) => {
-    if (!uid) return;
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
     try {
-      await unblockSuggestion(uid, tmdbId);
+      await unblockSuggestion(activeUid, tmdbId);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       setUndoToast(null);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       setLastFeedback((curr) => (curr && curr.id === tmdbId ? null : curr));
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       setBlockedIds((prev) => {
         const next = new Set(prev);
         next.delete(tmdbId);
@@ -2447,6 +2585,7 @@ export default function SuggestPage() {
             item.id === tmdbId ? { ...item, dismissed: false } : item,
           ) ?? prev,
       );
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       setCategorizedSuggestions((prev: CategorizedSuggestions | null) => {
         if (!prev) return prev;
         const next = { ...prev } as CategorizedSuggestions;
@@ -2472,8 +2611,12 @@ export default function SuggestPage() {
   };
 
   const handleUndoLastFeedback = async () => {
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
     if (!lastFeedback) return;
     await handleUndoDismiss(lastFeedback.id);
+    if (!isActiveUid(activeUid, activeEpoch)) return;
   };
 
   // Handle saving a movie to the list
@@ -2483,22 +2626,31 @@ export default function SuggestPage() {
     year?: string,
     posterPath?: string | null,
   ) => {
-    if (!uid) return;
+    const activeUid = uid;
+    const activeEpoch = authTransitionEpochRef.current;
+    if (!isActiveUid(activeUid, activeEpoch)) return;
     try {
-      const result = await saveMovie(uid, {
+      const result = await saveMovie(activeUid, {
         tmdb_id: tmdbId,
         title,
         year: year || null,
         poster_path: posterPath || null,
       });
+      if (!isActiveUid(activeUid, activeEpoch)) return;
 
       if (result.success) {
+        if (!isActiveUid(activeUid, activeEpoch)) return;
         setSavedMovieIds((prev) => new Set([...prev, tmdbId]));
+        if (!isActiveUid(activeUid, activeEpoch)) return;
         setFeedbackMessage("Saved to your list!");
-        setTimeout(() => setFeedbackMessage(null), 3000);
+        setTimeout(() => {
+          if (!isActiveUid(activeUid, activeEpoch)) return;
+          setFeedbackMessage(null);
+        }, 3000);
       } else {
         console.error("Failed to save movie:", result.error);
         // Check if it's a duplicate error
+        if (!isActiveUid(activeUid, activeEpoch)) return;
         if (
           result.error?.includes("duplicate") ||
           result.error?.includes("unique")
@@ -2507,12 +2659,19 @@ export default function SuggestPage() {
         } else {
           setFeedbackMessage("Failed to save movie");
         }
-        setTimeout(() => setFeedbackMessage(null), 3000);
+        setTimeout(() => {
+          if (!isActiveUid(activeUid, activeEpoch)) return;
+          setFeedbackMessage(null);
+        }, 3000);
       }
     } catch (e) {
       console.error("Error saving movie:", e);
+      if (!isActiveUid(activeUid, activeEpoch)) return;
       setFeedbackMessage("Failed to save movie");
-      setTimeout(() => setFeedbackMessage(null), 3000);
+      setTimeout(() => {
+        if (!isActiveUid(activeUid, activeEpoch)) return;
+        setFeedbackMessage(null);
+      }, 3000);
     }
   };
 

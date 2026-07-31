@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   buildAdjacentGenreMap: vi.fn(() => new Map()),
@@ -48,9 +48,8 @@ vi.mock("@/lib/recommendationContext", () => ({
 }));
 
 vi.mock("@/lib/enrich", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/enrich")>(
-    "@/lib/enrich",
-  );
+  const actual =
+    await vi.importActual<typeof import("@/lib/enrich")>("@/lib/enrich");
   return {
     ...actual,
     scoreRecommendationsWithOverlap: mocks.scoreRecommendationsWithOverlap,
@@ -72,7 +71,18 @@ vi.mock("@/lib/serverSuggestionsEngine", () => ({
 }));
 
 import { generateCanonicalWebRecommendations } from "@/app/actions/recommendations";
+import {
+  isCanonicalWebRecommendationFailure,
+  type CanonicalWebRecommendationResult,
+} from "@/lib/recommendationActionTypes";
 import { suggestByOverlap, type TMDBMovie } from "@/lib/enrich";
+
+const successfulResult = (result: CanonicalWebRecommendationResult) => {
+  if (isCanonicalWebRecommendationFailure(result)) {
+    throw new Error(result.error.message);
+  }
+  return result;
+};
 
 const expectBoundedDeadline = (call: readonly unknown[]) => {
   const { deadlineMs } = call[2] as { deadlineMs: number };
@@ -83,6 +93,10 @@ const expectBoundedDeadline = (call: readonly unknown[]) => {
 };
 
 describe("canonical web standard-genre detail completion", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getUser.mockResolvedValue({
@@ -203,15 +217,18 @@ describe("canonical web standard-genre detail completion", () => {
       expect.objectContaining({ deadlineMs: expect.any(Number) }),
     );
     expectBoundedDeadline(mocks.ensureCompleteTmdbDetails.mock.calls[0]);
-    const cachedDetails = mocks.ensureCompleteTmdbDetails.mock.calls[0][1] as Map<
-      number,
-      unknown
-    >;
+    const cachedDetails = mocks.ensureCompleteTmdbDetails.mock
+      .calls[0][1] as Map<number, unknown>;
     expect(cachedDetails.size).toBe(0);
-    expect(result.items.map((item) => item.id)).toEqual([101]);
+    expect(successfulResult(result).items.map((item) => item.id)).toEqual([
+      101,
+    ]);
   });
 
   it("passes one bounded deadline budget through scoring and final hydration", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-30T00:00:00.000Z"));
+
     const initialDetails = new Map([
       [101, { id: 101, title: "Initial 101", genres: [] }],
     ]);
@@ -226,12 +243,15 @@ describe("canonical web standard-genre detail completion", () => {
       .mockResolvedValueOnce(new Map())
       .mockResolvedValueOnce(new Map());
     mocks.ensureCompleteTmdbDetails
-      .mockResolvedValueOnce({
-        details: initialDetails,
-        requested: 1,
-        completed: 1,
-        failed: 0,
-        deadlineExpired: false,
+      .mockImplementationOnce(async () => {
+        vi.advanceTimersByTime(1_250);
+        return {
+          details: initialDetails,
+          requested: 1,
+          completed: 1,
+          failed: 0,
+          deadlineExpired: false,
+        };
       })
       .mockResolvedValueOnce({
         details: finalDetails,
@@ -316,28 +336,70 @@ describe("canonical web standard-genre detail completion", () => {
     const finalDeadlineMs = expectBoundedDeadline(
       mocks.ensureCompleteTmdbDetails.mock.calls[1],
     );
-    expect(finalDeadlineMs).toBeLessThanOrEqual(initialDeadlineMs);
-    expect(result.items.map((item) => item.id)).toEqual([303]);
+    expect(finalDeadlineMs).toBeLessThanOrEqual(initialDeadlineMs - 1_250);
+    expect(successfulResult(result).items.map((item) => item.id)).toEqual([
+      303,
+    ]);
+  });
+
+  it("starts the shared metadata budget after retrieval builds the scoring window", async () => {
+    vi.useFakeTimers();
+
+    let releaseRetrieval!: () => void;
+    let retrievalStarted!: () => void;
+    const retrievalReady = new Promise<void>((resolve) => {
+      retrievalStarted = resolve;
+    });
+    const retrievalRelease = new Promise<void>((resolve) => {
+      releaseRetrieval = resolve;
+    });
+
+    mocks.generateServerCandidates.mockImplementationOnce(async () => {
+      retrievalStarted();
+      await retrievalRelease;
+      return {
+        candidateIds: [101],
+        sourceMetadata: new Map(),
+      };
+    });
+
+    const generation = generateCanonicalWebRecommendations({
+      accessToken: "metadata-start-token-1234567890",
+      count: 1,
+      requestSeed: "web-metadata-start",
+    });
+
+    await retrievalReady;
+    const retrievalStartedAt = Date.now();
+    vi.setSystemTime(retrievalStartedAt + 5_000);
+    releaseRetrieval();
+
+    await generation;
+
+    expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
+      [101],
+      expect.any(Map),
+      { deadlineMs: 20_000 },
+    );
   });
 
   it("rejects unhealthy metadata before invoking scoring", async () => {
     mocks.isMetadataCompletionHealthy.mockReturnValueOnce(false);
 
-    let rejection: unknown;
-    try {
-      await generateCanonicalWebRecommendations({
-        accessToken: "unhealthy-metadata-token-1234567890",
-        count: 10,
-        requestSeed: "web-unhealthy-metadata",
-      });
-    } catch (error) {
-      rejection = error;
-    }
+    const result = await generateCanonicalWebRecommendations({
+      accessToken: "unhealthy-metadata-token-1234567890",
+      count: 10,
+      requestSeed: "web-unhealthy-metadata",
+    });
 
-    expect(rejection).toBeInstanceOf(Error);
-    expect((rejection as Error).message).toBe(
-      "Movie metadata is temporarily unavailable. Please retry suggestions.",
-    );
+    expect(result).toEqual({
+      error: {
+        code: "METADATA_UNAVAILABLE",
+        message:
+          "Movie metadata is temporarily unavailable. Please retry suggestions.",
+        retryable: true,
+      },
+    });
     expect(mocks.scoreRecommendationsWithOverlap).not.toHaveBeenCalled();
   });
 
@@ -438,7 +500,9 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.scoreRecommendationsWithOverlap.mock.calls[0][1]).toBe(
       completedDetails,
     );
-    expect(result.items.map((item) => item.id)).toEqual([202, 303]);
+    expect(successfulResult(result).items.map((item) => item.id)).toEqual([
+      202, 303,
+    ]);
   });
 
   it("bounds retrieval and scoring to the ordered unique candidate window", async () => {
@@ -480,7 +544,8 @@ describe("canonical web standard-genre detail completion", () => {
       expect.any(Map),
       expect.objectContaining({ deadlineMs: expect.any(Number) }),
     );
-    const completionOptions = mocks.ensureCompleteTmdbDetails.mock.calls[0][2] as {
+    const completionOptions = mocks.ensureCompleteTmdbDetails.mock
+      .calls[0][2] as {
       deadlineMs: number;
     };
     expect(Number.isFinite(completionOptions.deadlineMs)).toBe(true);
@@ -581,7 +646,9 @@ describe("canonical web standard-genre detail completion", () => {
     expect(scoredIds).toEqual([7, 11]);
     expect(scoredIds).not.toContain(301);
     expect(scoredIds).not.toContain(350);
-    expect(result.items.map((item) => item.id)).toEqual([7, 11]);
+    expect(successfulResult(result).items.map((item) => item.id)).toEqual([
+      7, 11,
+    ]);
   });
 
   it("rejects a missing canonical result before final hydration", async () => {
@@ -619,9 +686,9 @@ describe("canonical web standard-genre detail completion", () => {
       credits: { cast: [], crew: [] },
       keywords: { keywords: [] },
     };
-    const fallbackFetch = vi.fn().mockRejectedValue(
-      new Error("unexpected cold-start metadata fetch"),
-    );
+    const fallbackFetch = vi
+      .fn()
+      .mockRejectedValue(new Error("unexpected cold-start metadata fetch"));
     vi.stubGlobal("fetch", fallbackFetch);
 
     try {

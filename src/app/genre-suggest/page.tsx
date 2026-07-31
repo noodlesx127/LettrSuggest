@@ -25,6 +25,7 @@ import { saveMovie, getSavedMovies } from "@/lib/lists";
 import { SUBGENRES_BY_PARENT } from "@/lib/subgenreData";
 import { detectSubgenres } from "@/lib/subgenreDetection";
 import { parseCanonicalWebItems } from "@/lib/canonicalWebResponse";
+import { isCanonicalWebRecommendationFailure } from "@/lib/recommendationActionTypes";
 import { matchesNicheGenrePresentation } from "@/lib/recommendationAdapters";
 import type { FilmEvent } from "@/lib/normalize";
 
@@ -343,7 +344,9 @@ export default function GenreSuggestPage() {
       }
 
       const selectedGenreNames = selectedGenres
-        .map((genreId) => ALL_GENRES.find((genre) => genre.id === genreId)?.name)
+        .map(
+          (genreId) => ALL_GENRES.find((genre) => genre.id === genreId)?.name,
+        )
         .filter((name): name is string => Boolean(name));
 
       setProgress({
@@ -360,6 +363,10 @@ export default function GenreSuggestPage() {
         excludeTmdbIds: [...new Set([...blockedIds, ...shownIds])],
         requestSeed: `web-genre-${selectedGenres.join("-")}-${selectedSubgenres.join("-")}-${shownIds.size}`,
       });
+      if (isCanonicalWebRecommendationFailure(canonical)) {
+        setError(canonical.error.message);
+        return;
+      }
       const validMovies = parseCanonicalWebItems(canonical) as MovieItem[];
       if (validMovies.length === 0) {
         setError("No eligible recommendations were found for these genres.");
@@ -405,7 +412,8 @@ export default function GenreSuggestPage() {
         const genreName = genreInfo.name.toLowerCase();
         const matchingMovies = validMovies.filter((movie) => {
           if (assignedIds.has(movie.id)) return false;
-          const genres = movie.genres?.map((genre) => genre.toLowerCase()) ?? [];
+          const genres =
+            movie.genres?.map((genre) => genre.toLowerCase()) ?? [];
           return (
             genres.some(
               (genre) =>
@@ -434,13 +442,7 @@ export default function GenreSuggestPage() {
     } finally {
       setLoading(false);
     }
-  }, [
-    selectedGenres,
-    selectedSubgenres,
-    uid,
-    blockedIds,
-    shownIds,
-  ]);
+  }, [selectedGenres, selectedSubgenres, uid, blockedIds, shownIds]);
   const handleSave = async (tmdbId: number, title: string) => {
     if (!uid) return;
     try {

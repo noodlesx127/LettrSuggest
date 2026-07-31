@@ -25,10 +25,7 @@ import type {
   RecommendationCandidate,
   RecommendationResult,
 } from "@/lib/recommendationTypes";
-import type {
-  TasteProfile,
-  UserContext,
-} from "@/lib/serverSuggestionsEngine";
+import type { TasteProfile, UserContext } from "@/lib/serverSuggestionsEngine";
 
 const candidate = (tmdbId: number, score: number): RecommendationCandidate => ({
   tmdbId,
@@ -253,7 +250,10 @@ describe("web canonical recommendation adapter", () => {
       results: [
         {
           ...candidate(22, 9.1254),
-          reasons: ["Matches your favorite mystery films", "Runtime fits your usual window"],
+          reasons: [
+            "Matches your favorite mystery films",
+            "Runtime fits your usual window",
+          ],
           explanation: "A mystery match with the pacing you usually enjoy.",
         },
         candidate(11, 8.5),
@@ -377,9 +377,7 @@ describe("web canonical recommendation adapter", () => {
 
     expect(webScoringInputs.enhancedProfile).toEqual(
       expect.objectContaining({
-        avoidKeywords: [
-          expect.objectContaining({ name: "Keyword Four" }),
-        ],
+        avoidKeywords: [expect.objectContaining({ name: "Keyword Four" })],
         preferredSubgenreKeywordIds: [99],
         watchlistGenres: ["Drama"],
       }),
@@ -406,13 +404,7 @@ describe("web canonical recommendation adapter", () => {
   });
 
   it("leaves niche GenreSelector intent for presentation matching instead of TMDB filtering", () => {
-    const nicheGenreNames = [
-      "Anime",
-      "Food",
-      "Travel",
-      "Stand Up",
-      "Sports",
-    ];
+    const nicheGenreNames = ["Anime", "Food", "Travel", "Stand Up", "Sports"];
     const tmdbFilterNames = getWebTmdbGenreFilterNames(nicheGenreNames);
 
     expect(tmdbFilterNames).toEqual([]);
@@ -438,10 +430,7 @@ describe("web canonical recommendation adapter", () => {
   });
 
   it("keeps exact filtering for standard TMDB genre intent", () => {
-    const tmdbFilterNames = getWebTmdbGenreFilterNames([
-      "Action",
-      "Mystery",
-    ]);
+    const tmdbFilterNames = getWebTmdbGenreFilterNames(["Action", "Mystery"]);
 
     expect(tmdbFilterNames).toEqual(["action", "mystery"]);
     expect(matchesWebTmdbGenreFilter(["Action"], tmdbFilterNames)).toBe(true);
@@ -453,7 +442,9 @@ describe("web canonical recommendation adapter", () => {
       matchesNicheGenrePresentation("Sports", "The Football Final", ["Drama"]),
     ).toBe(true);
     expect(
-      matchesNicheGenrePresentation("Sports", "A Quiet Conversation", ["Drama"]),
+      matchesNicheGenrePresentation("Sports", "A Quiet Conversation", [
+        "Drama",
+      ]),
     ).toBe(false);
   });
 
@@ -568,7 +559,7 @@ describe("web canonical recommendation adapter", () => {
       "setLoading(false)",
       "setError(null)",
       "setItems(null)",
-      "setSourceLabel(\"\")",
+      'setSourceLabel("")',
       "setFallbackFilms(null)",
       "setWatchlistTmdbIds(new Set())",
       "setNoCandidatesReason(null)",
@@ -623,14 +614,21 @@ describe("web canonical recommendation adapter", () => {
     const transitionBranch = updateUidSource.indexOf(
       "if (storageUidRef.current !== nextUid)",
     );
+    const epochIncrement = updateUidSource.indexOf(
+      "authTransitionEpochRef.current += 1;",
+      transitionBranch,
+    );
     const resetInvocation = updateUidSource.indexOf(
       "resetUserScopedState();",
       transitionBranch,
     );
     const uidAssignment = updateUidSource.indexOf("setUid(nextUid);");
     expect(transitionBranch).toBeGreaterThanOrEqual(0);
+    expect(epochIncrement).toBeGreaterThan(transitionBranch);
     expect(updateUidSource).toContain("storageUidRef.current = nextUid");
     expect(resetInvocation).toBeGreaterThanOrEqual(0);
+    expect(epochIncrement).toBeLessThan(resetInvocation);
+    expect(epochIncrement).toBeLessThan(uidAssignment);
     expect(resetInvocation).toBeGreaterThan(transitionBranch);
     expect(resetInvocation).toBeLessThan(uidAssignment);
 
@@ -655,7 +653,10 @@ describe("web canonical recommendation adapter", () => {
     expect(sessionGuard).toContain("throw new Error(");
 
     const savedEffectStart = page.indexOf("// Load saved movies");
-    const savedEffectEnd = page.indexOf("  const sourceFilms", savedEffectStart);
+    const savedEffectEnd = page.indexOf(
+      "  const sourceFilms",
+      savedEffectStart,
+    );
     const savedEffect = page.slice(savedEffectStart, savedEffectEnd);
     expect(savedEffect).toContain("let active = true");
     expect(savedEffect).toContain("const requestedUid = uid");
@@ -664,9 +665,7 @@ describe("web canonical recommendation adapter", () => {
         /!active \|\| storageUidRef\.current !== requestedUid/g,
       ) ?? [],
     ).toHaveLength(2);
-    expect(savedEffect).toMatch(
-      /return \(\) => \{\s*active = false;\s*\};/,
-    );
+    expect(savedEffect).toMatch(/return \(\) => \{\s*active = false;\s*\};/);
 
     const fallbackEffectStart = page.indexOf(
       "// Fallback: if no local films, load from Supabase once",
@@ -683,9 +682,7 @@ describe("web canonical recommendation adapter", () => {
         /!active \|\| storageUidRef\.current !== requestedUid/g,
       ) ?? [],
     ).toHaveLength(2);
-    expect(fallbackEffect).toMatch(
-      /return \(\) => \{\s*active = false;\s*\};/,
-    );
+    expect(fallbackEffect).toMatch(/return \(\) => \{\s*active = false;\s*\};/);
 
     const applySessionStart = page.indexOf("const applySession =");
     const applySessionEnd = page.indexOf(
@@ -718,9 +715,7 @@ describe("web canonical recommendation adapter", () => {
     expect(evidenceEffect).toContain(
       "() => active && storageUidRef.current === requestedUid",
     );
-    expect(evidenceEffect).toMatch(
-      /return \(\) => \{\s*active = false;\s*\};/,
-    );
+    expect(evidenceEffect).toMatch(/return \(\) => \{\s*active = false;\s*\};/);
 
     expect(page).toMatch(
       /function safeReadStorageItem\(\s*storage: Storage,\s*key: string,?\s*\): string \| null \{[\s\S]*?storage\.getItem\(key\)[\s\S]*?catch[\s\S]*?console\.error\("\[Suggest\][^"]*"[\s\S]*?return null;/,
@@ -738,7 +733,9 @@ describe("web canonical recommendation adapter", () => {
     ]) {
       expect(restoreSource).toContain(storageRead);
     }
-    expect(restoreSource).not.toMatch(/(?:sessionStorage|localStorage)\.getItem\(/);
+    expect(restoreSource).not.toMatch(
+      /(?:sessionStorage|localStorage)\.getItem\(/,
+    );
 
     expect(page).toMatch(
       /const timeoutId = setTimeout\([\s\S]*?return \(\) => clearTimeout\(timeoutId\);/,
@@ -814,5 +811,72 @@ describe("web canonical recommendation adapter", () => {
       /\b(?:generateSmartCandidates|getAggregatedRecommendations)\s*\(/,
     );
     expect(source).not.toMatch(/from\s+["'][^"']*recommendationAggregator["']/);
+  });
+
+  it("guards interactive user-owned handlers against account transitions", () => {
+    const page = readFileSync(
+      resolve(process.cwd(), "src/app/suggest/page.tsx"),
+      "utf8",
+    );
+
+    const handlerRanges = [
+      ["applyExplicitReason", "toggleReasonSelection"],
+      ["handleExplicitReason", "toggleReasonSelection"],
+      ["handleSubmitSelectedReasons", "handleFastNeutralize"],
+      ["handleFastNeutralize", "handleMicroSurveyChoice"],
+      ["handleMicroSurveyChoice", "handleFeedback"],
+      ["handleFeedback", "handlePairwiseVote"],
+      ["handlePairwiseVote", "handlePairwiseSkip"],
+      ["handlePairwiseSkip", "handleUndoDismiss"],
+      ["handleUndoDismiss", "handleUndoLastFeedback"],
+      ["handleUndoLastFeedback", "handleSave"],
+      ["handleSave", "handleRefreshSection"],
+    ] as const;
+
+    const getHandlerSource = (handler: string, nextHandler: string) => {
+      const start = page.indexOf(`const ${handler} =`);
+      const end = page.indexOf(`const ${nextHandler}`, start);
+      expect(start, `${handler} should exist`).toBeGreaterThanOrEqual(0);
+      expect(end, `${nextHandler} should follow ${handler}`).toBeGreaterThan(
+        start,
+      );
+      return page.slice(start, end);
+    };
+
+    for (const [handler, nextHandler] of handlerRanges) {
+      const source = getHandlerSource(handler, nextHandler);
+      expect(source).toContain("const activeUid = uid");
+      expect(source).toContain(
+        "const activeEpoch = authTransitionEpochRef.current",
+      );
+      expect(source).toContain("isActiveUid(activeUid, activeEpoch)");
+      expect(source).not.toMatch(/isActiveUid\(activeUid\)/);
+
+      for (const guard of source.matchAll(/isActiveUid\([^)]*\)/g)) {
+        expect(guard[0]).toBe("isActiveUid(activeUid, activeEpoch)");
+      }
+
+      if (source.includes("setTimeout")) {
+        expect(source).not.toMatch(
+          /setTimeout\([\s\S]*?\(\) => \{(?![\s\S]*?isActiveUid\(activeUid, activeEpoch\))/,
+        );
+      }
+    }
+
+    const pairwiseVote = getHandlerSource(
+      "handlePairwiseVote",
+      "handlePairwiseSkip",
+    );
+    expect(pairwiseVote).toMatch(
+      /await Promise\.all\(\[[\s\S]*?\]\);\s*if \(!isActiveUid\(activeUid, activeEpoch\)\) return;[\s\S]*?await applyPairwiseFeatureLearning\(activeUid, winnerId, loserId\);\s*if \(!isActiveUid\(activeUid, activeEpoch\)\) return;[\s\S]*?setFeedbackMessage\("Got it — we will favor your pick\."\);/,
+    );
+
+    const saveMovieHandler = getHandlerSource(
+      "handleSave",
+      "handleRefreshSection",
+    );
+    expect(saveMovieHandler).toMatch(
+      /const result = await saveMovie\([\s\S]*?\);\s*if \(!isActiveUid\(activeUid, activeEpoch\)\) return;[\s\S]*?setSavedMovieIds\(/,
+    );
   });
 });
