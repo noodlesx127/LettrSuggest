@@ -221,8 +221,39 @@ type CandidateSourceResult = Readonly<{
 
 const TMDB_BATCH_SIZE = 200;
 const CANDIDATE_PROVIDER_CONCURRENCY = 5;
+const TMDB_METADATA_CONCURRENCY = 5;
 /** Minimum positive signal count for explicit feedback to override a pattern-analysis "avoid" classification. */
 const SUBGENRE_POSITIVE_OVERRIDE_MIN = 10;
+
+export type TmdbMetadataCompletion = {
+  details: Map<number, TMDBMovie>;
+  requested: number;
+  completed: number;
+  failed: number;
+  deadlineExpired: boolean;
+};
+
+export const WEB_METADATA_DEADLINE_MS = 20_000;
+
+export function getRequiredMetadataCount(
+  candidateCount: number,
+  resultCount: number,
+): number {
+  return Math.min(
+    candidateCount,
+    Math.max(resultCount, Math.ceil(candidateCount * 0.6)),
+  );
+}
+
+export function isMetadataCompletionHealthy(
+  completion: TmdbMetadataCompletion,
+  resultCount: number,
+): boolean {
+  return (
+    completion.completed >=
+    getRequiredMetadataCount(completion.requested, resultCount)
+  );
+}
 
 function createEmptyFeatureFeedback(): FeatureFeedback {
   return {
@@ -476,7 +507,8 @@ function getTopSeedTmdbIds(
     .slice(0, limit);
 }
 
-function getRelevantTasteTmdbIds(userContext: UserContext): number[] {
+export function getRelevantTasteTmdbIds(userContext: UserContext): number[] {
+  const now = Date.now();
   const relevant = userContext.films
     .filter(
       (film) =>
@@ -485,12 +517,25 @@ function getRelevantTasteTmdbIds(userContext: UserContext): number[] {
           film.rewatch ||
           film.on_watchlist ||
           (film.rating ?? 0) >= 3.5 ||
-          ((film.rating ?? 0) > 0 && (film.rating ?? 0) <= 1.5)),
+           ((film.rating ?? 0) > 0 && (film.rating ?? 0) <= 1.5)),
     )
-    .map((film) => userContext.mappings.get(film.uri))
-    .filter((tmdbId): tmdbId is number => isFiniteNumber(tmdbId));
+    .sort((left, right) =>
+      compareSeedFilms(left, right, userContext.mappings, now),
+    );
 
-  return Array.from(new Set(relevant));
+  const seen = new Set<number>();
+  const relevantIds: number[] = [];
+  for (const film of relevant) {
+    const tmdbId = userContext.mappings.get(film.uri);
+    if (!isFiniteNumber(tmdbId) || tmdbId <= 0 || seen.has(tmdbId)) {
+      continue;
+    }
+
+    seen.add(tmdbId);
+    relevantIds.push(tmdbId);
+  }
+
+  return relevantIds.slice(0, 300);
 }
 
 function buildTasteProfileFilms(
@@ -572,26 +617,73 @@ async function fetchTmdbMovieDetails(
 export async function ensureCompleteTmdbDetails(
   tmdbIds: number[],
   existingMap: Map<number, TMDBMovie>,
-): Promise<Map<number, TMDBMovie>> {
-  const idsToFetch = [...new Set(tmdbIds)].filter(
-    (tmdbId) => !isTmdbProfileComplete(existingMap.get(tmdbId)),
-  );
+  options: { deadlineMs?: number } = {},
+): Promise<TmdbMetadataCompletion> {
+  const requestedIds = Array.from(new Set(tmdbIds));
+  const detailsById = new Map<number, TMDBMovie>();
+  const idsToFetch: number[] = [];
 
-  if (idsToFetch.length === 0) {
-    return existingMap;
+  for (const tmdbId of requestedIds) {
+    const cachedMovie = existingMap.get(tmdbId);
+    if (isTmdbProfileComplete(cachedMovie)) {
+      detailsById.set(tmdbId, cachedMovie);
+    } else {
+      idsToFetch.push(tmdbId);
+    }
   }
 
-  const limit = pLimit(5); // TMDB rate limit protection
+  if (idsToFetch.length === 0) {
+    return Promise.resolve({
+      details: detailsById,
+      requested: requestedIds.length,
+      completed: detailsById.size,
+      failed: requestedIds.length - detailsById.size,
+      deadlineExpired: false,
+    });
+  }
+
+  const deadlineMs =
+    typeof options.deadlineMs === "number" && Number.isFinite(options.deadlineMs)
+      ? Math.max(0, options.deadlineMs)
+      : undefined;
+  let deadlineExpired = deadlineMs === 0;
+  let nextIndex = 0;
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let resolveDeadline: (() => void) | undefined;
+  const deadlineReached = new Promise<void>((resolve) => {
+    resolveDeadline = resolve;
+  });
+
+  const markDeadlineExpired = () => {
+    if (deadlineExpired) return;
+    deadlineExpired = true;
+    resolveDeadline?.();
+  };
+
+  if (deadlineMs !== undefined && deadlineMs > 0) {
+    deadlineTimer = setTimeout(markDeadlineExpired, deadlineMs);
+  } else if (deadlineExpired) {
+    resolveDeadline?.();
+  }
+
   const db = getSupabaseAdmin();
+  let completed = detailsById.size;
 
-  const fetchResults = await Promise.allSettled(
-    idsToFetch.map((tmdbId) =>
-      limit(async () => {
-        const movie = await fetchTmdbMovieDetails(tmdbId);
-        if (!movie) return null;
+  const runWorker = async (): Promise<void> => {
+    while (!deadlineExpired) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const tmdbId = idsToFetch[index];
+      if (tmdbId === undefined) return;
 
-        existingMap.set(tmdbId, movie);
+      const movie = await fetchTmdbMovieDetails(tmdbId);
+      if (!movie) continue;
 
+      existingMap.set(tmdbId, movie);
+      detailsById.set(tmdbId, movie);
+      completed += 1;
+
+      try {
         const { error } = await db
           .from("tmdb_movies")
           .upsert({ tmdb_id: tmdbId, data: movie }, { onConflict: "tmdb_id" });
@@ -602,22 +694,44 @@ export async function ensureCompleteTmdbDetails(
             error,
           });
         }
+      } catch (error) {
+        console.error("[ServerEngine] tmdb_movies upsert error:", {
+          tmdbId,
+          error,
+        });
+      }
+    }
+  };
 
-        return movie;
-      }),
+  const workerCompletion = Promise.all(
+    Array.from(
+      { length: Math.min(TMDB_METADATA_CONCURRENCY, idsToFetch.length) },
+      () => runWorker(),
     ),
   );
 
-  for (const result of fetchResults) {
-    if (result.status === "rejected") {
-      console.error(
-        "[ServerEngine] ensure TMDB details failed:",
-        result.reason,
-      );
+  try {
+    if (deadlineMs !== undefined) {
+      await Promise.race([workerCompletion, deadlineReached]);
     }
+    await workerCompletion;
+  } finally {
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
   }
 
-  return existingMap;
+  const orderedDetails = new Map<number, TMDBMovie>();
+  for (const tmdbId of requestedIds) {
+    const movie = detailsById.get(tmdbId);
+    if (movie) orderedDetails.set(tmdbId, movie);
+  }
+
+  return {
+    details: orderedDetails,
+    requested: requestedIds.length,
+    completed,
+    failed: requestedIds.length - completed,
+    deadlineExpired,
+  };
 }
 
 export function buildFeatureFeedbackFromRows(
@@ -1465,10 +1579,12 @@ export async function buildTasteProfileServer(
 
     const relevantTmdbIds = getRelevantTasteTmdbIds(userContext);
     const cachedTmdbDetails = await loadCachedTmdbDetails(relevantTmdbIds);
-    const tmdbDetailsMap = await ensureCompleteTmdbDetails(
+    const completion = await ensureCompleteTmdbDetails(
       relevantTmdbIds,
       cachedTmdbDetails,
+      { deadlineMs: WEB_METADATA_DEADLINE_MS },
     );
+    const tmdbDetailsMap = completion.details;
 
     const tasteProfile = await buildTasteProfile({
       films: buildTasteProfileFilms(userContext.films, userContext.mappings),

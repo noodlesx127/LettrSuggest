@@ -26,13 +26,15 @@ import { scoreRecommendationsWithOverlap } from "@/lib/recommendationScoring";
 import type { TMDBMovie } from "@/lib/enrich";
 import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import {
-    buildTasteProfileServer,
-    ensureCompleteTmdbDetails,
-    generateServerCandidates,
-    getUserContextDiagnostics,
-    loadCachedTmdbDetails,
-    loadUserContext,
-    runCanonicalServerRecommendations,
+  WEB_METADATA_DEADLINE_MS,
+  buildTasteProfileServer,
+  ensureCompleteTmdbDetails,
+  generateServerCandidates,
+  getUserContextDiagnostics,
+  isMetadataCompletionHealthy,
+  loadCachedTmdbDetails,
+  loadUserContext,
+  runCanonicalServerRecommendations,
 } from "@/lib/serverSuggestionsEngine";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import type { RecommendationDiagnostics } from "@/lib/recommendationTypes";
@@ -156,10 +158,17 @@ export async function generateCanonicalWebRecommendations(params: {
             const cachedCandidateDetails = await loadCachedTmdbDetails(
                 scoringWindowIds,
             );
-            requestDetails = await ensureCompleteTmdbDetails(
-                scoringWindowIds,
-                cachedCandidateDetails,
+            const completion = await ensureCompleteTmdbDetails(
+              scoringWindowIds,
+              cachedCandidateDetails,
+              { deadlineMs: WEB_METADATA_DEADLINE_MS },
             );
+            if (!isMetadataCompletionHealthy(completion, adapted.request.count)) {
+              throw new Error(
+                "Movie metadata is temporarily unavailable. Please retry suggestions.",
+              );
+            }
+            requestDetails = completion.details;
             return scoringWindowIds
                 .filter((tmdbId) => requestDetails.has(tmdbId))
                 .filter((tmdbId) => {
@@ -213,9 +222,9 @@ export async function generateCanonicalWebRecommendations(params: {
             unresolvedFinalTmdbIds,
             cachedDetails,
         );
-        for (const [tmdbId, movie] of completedDetails) {
+          for (const [tmdbId, movie] of completedDetails.details) {
             requestDetails.set(tmdbId, movie);
-        }
+          }
     }
     const detailsForWeb = new Map<number, WebRecommendationDetails>();
     for (const candidate of result.results) {

@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   loadCachedTmdbDetails: vi.fn(),
   loadRecommendationContext: vi.fn(),
   loadUserContext: vi.fn(),
+  isMetadataCompletionHealthy: vi.fn(() => true),
   runCanonicalServerRecommendations: vi.fn(),
   scoreRecommendationsWithOverlap: vi.fn(),
 }));
@@ -57,12 +58,14 @@ vi.mock("@/lib/enrich", async () => {
 });
 
 vi.mock("@/lib/serverSuggestionsEngine", () => ({
+  WEB_METADATA_DEADLINE_MS: 20_000,
   buildAdjacentGenreMap: mocks.buildAdjacentGenreMap,
   buildFeatureFeedbackFromRows: mocks.buildFeatureFeedbackFromRows,
   buildTasteProfileServer: mocks.buildTasteProfileServer,
   ensureCompleteTmdbDetails: mocks.ensureCompleteTmdbDetails,
   generateServerCandidates: mocks.generateServerCandidates,
   getUserContextDiagnostics: mocks.getUserContextDiagnostics,
+  isMetadataCompletionHealthy: mocks.isMetadataCompletionHealthy,
   loadCachedTmdbDetails: mocks.loadCachedTmdbDetails,
   loadUserContext: mocks.loadUserContext,
   runCanonicalServerRecommendations: mocks.runCanonicalServerRecommendations,
@@ -135,7 +138,14 @@ describe("canonical web standard-genre detail completion", () => {
             ],
           });
         }
-        return completedDetails;
+        const requested = new Set(candidateIds).size;
+        return {
+          details: completedDetails,
+          requested,
+          completed: completedDetails.size,
+          failed: requested - completedDetails.size,
+          deadlineExpired: false,
+        };
       },
     );
     mocks.runCanonicalServerRecommendations.mockImplementation(
@@ -182,6 +192,7 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       [101, 202],
       expect.any(Map),
+      { deadlineMs: 20_000 },
     );
     const cachedDetails = mocks.ensureCompleteTmdbDetails.mock.calls[0][1] as Map<
       number,
@@ -236,7 +247,13 @@ describe("canonical web standard-genre detail completion", () => {
       [202, { id: 202, title: "Completed 202", genres: [] }],
       [303, { id: 303, title: "Completed 303", genres: [] }],
     ]);
-    mocks.ensureCompleteTmdbDetails.mockResolvedValue(completedDetails);
+    mocks.ensureCompleteTmdbDetails.mockResolvedValue({
+      details: completedDetails,
+      requested: 3,
+      completed: 3,
+      failed: 0,
+      deadlineExpired: false,
+    });
     mocks.runCanonicalServerRecommendations.mockImplementation(
       async (
         request: unknown,
@@ -276,6 +293,7 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       [101, 202, 303],
       expect.any(Map),
+      { deadlineMs: 20_000 },
     );
     expect(mocks.scoreRecommendationsWithOverlap.mock.calls[0][1]).toBe(
       completedDetails,
@@ -300,7 +318,13 @@ describe("canonical web standard-genre detail completion", () => {
       sourceMetadata: new Map(),
     });
     mocks.loadCachedTmdbDetails.mockResolvedValue(new Map());
-    mocks.ensureCompleteTmdbDetails.mockResolvedValue(completedDetails);
+    mocks.ensureCompleteTmdbDetails.mockResolvedValue({
+      details: completedDetails,
+      requested: 300,
+      completed: 300,
+      failed: 0,
+      deadlineExpired: false,
+    });
 
     await generateCanonicalWebRecommendations({
       accessToken: "ordered-window-token-1234567890",
@@ -314,6 +338,7 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       windowIds,
       expect.any(Map),
+      { deadlineMs: 20_000 },
     );
     expect(
       mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates.map(
@@ -352,6 +377,7 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       [101],
       expect.any(Map),
+      { deadlineMs: 20_000 },
     );
     expect(
       mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates.map(
@@ -380,7 +406,13 @@ describe("canonical web standard-genre detail completion", () => {
       sourceMetadata: new Map(),
     });
     mocks.loadCachedTmdbDetails.mockResolvedValue(new Map());
-    mocks.ensureCompleteTmdbDetails.mockResolvedValue(completedDetails);
+    mocks.ensureCompleteTmdbDetails.mockResolvedValue({
+      details: completedDetails,
+      requested: 300,
+      completed: 300,
+      failed: 0,
+      deadlineExpired: false,
+    });
 
     const result = await generateCanonicalWebRecommendations({
       accessToken: "strict-window-token-1234567890",
@@ -392,6 +424,7 @@ describe("canonical web standard-genre detail completion", () => {
     expect(mocks.ensureCompleteTmdbDetails).toHaveBeenCalledWith(
       windowIds,
       expect.any(Map),
+      { deadlineMs: 20_000 },
     );
     const scoredIds =
       mocks.scoreRecommendationsWithOverlap.mock.calls[0][0].candidates.map(
