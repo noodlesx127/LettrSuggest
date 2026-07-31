@@ -16,6 +16,44 @@ const validItem = {
   score: 0.75,
 };
 
+const validOptionalFields = {
+  year: "2024",
+  collectionName: "Modern Mysteries",
+  overview: "A thoughtful mystery.",
+  imdb_rating: "8.1",
+  rotten_tomatoes: "95%",
+  metacritic: "87",
+  awards: "Best Picture",
+  original_language: "en",
+  explanation: "It matches your recent favorites.",
+  poster_path: "/poster.jpg",
+  trailerKey: null,
+  vote_average: 8.2,
+  vote_count: 1234,
+  reliabilityMultiplier: 0.9,
+  runtime: 120,
+  critic_score: 91,
+  dismissed: false,
+  voteCategory: "hidden-gem",
+  imdb_source: "omdb",
+  consensusLevel: "high",
+  genres: ["Drama", "Mystery"],
+  sources: ["tmdb", "watchmode"],
+  spoken_languages: ["English"],
+  production_countries: ["US"],
+  keyword_names: ["neo-noir"],
+  streamingSources: [
+    {
+      name: "Example Streamer",
+      type: "sub",
+      url: "https://example.com/title/101",
+    },
+  ],
+  contributingFilms: {
+    sharedTaste: [{ id: 202, title: "Another valid film" }],
+  },
+};
+
 describe("suggestion storage keys", () => {
   it("namespaces every user-owned key by the authenticated UID", () => {
     expect(getSuggestionStorageKeys("user-a")).toEqual({
@@ -74,6 +112,116 @@ describe("parseStoredSuggestionItems", () => {
     ],
   ])("rejects %s", (payload, _reason) => {
     expect(parseStoredSuggestionItems(payload)).toBeNull();
+  });
+
+  it.each<[Record<string, unknown>, string]>([
+    [{ ...validItem, year: 2024 }, "non-string year"],
+    [{ ...validItem, collectionName: 123 }, "non-string collection name"],
+    [{ ...validItem, overview: false }, "non-string overview"],
+    [{ ...validItem, imdb_rating: 8.1 }, "non-string IMDb rating"],
+    [{ ...validItem, rotten_tomatoes: null }, "non-string Rotten Tomatoes rating"],
+    [{ ...validItem, metacritic: [] }, "non-string Metacritic rating"],
+    [{ ...validItem, awards: {} }, "non-string awards"],
+    [{ ...validItem, original_language: 42 }, "non-string original language"],
+    [{ ...validItem, explanation: true }, "non-string explanation"],
+    [{ ...validItem, poster_path: 123 }, "invalid nullable poster path"],
+    [{ ...validItem, trailerKey: false }, "invalid nullable trailer key"],
+    [{ ...validItem, vote_average: Number.NaN }, "NaN vote average"],
+    [{ ...validItem, vote_count: "1234" }, "non-number vote count"],
+    [
+      { ...validItem, reliabilityMultiplier: "0.9" },
+      "non-number reliability multiplier",
+    ],
+    [{ ...validItem, runtime: null }, "JSON-representable NaN runtime"],
+    [{ ...validItem, critic_score: true }, "non-number critic score"],
+    [{ ...validItem, dismissed: "false" }, "non-boolean dismissed flag"],
+    [{ ...validItem, voteCategory: "unknown" }, "invalid vote category"],
+    [{ ...validItem, imdb_source: "letterboxd" }, "invalid IMDb source"],
+    [{ ...validItem, consensusLevel: "excellent" }, "invalid consensus level"],
+    [{ ...validItem, genres: "Drama" }, "non-array genres"],
+    [{ ...validItem, genres: ["Drama", 42] }, "non-string genre member"],
+    [{ ...validItem, sources: "tmdb" }, "non-array sources"],
+    [{ ...validItem, sources: ["tmdb", 42] }, "non-string source member"],
+    [{ ...validItem, spoken_languages: {} }, "non-array spoken languages"],
+    [
+      { ...validItem, spoken_languages: ["English", null] },
+      "non-string spoken language member",
+    ],
+    [
+      { ...validItem, production_countries: "US" },
+      "non-array production countries",
+    ],
+    [
+      { ...validItem, production_countries: ["US", false] },
+      "non-string production country member",
+    ],
+    [{ ...validItem, keyword_names: 42 }, "non-array keyword names"],
+    [
+      { ...validItem, keyword_names: ["neo-noir", {}] },
+      "non-string keyword name member",
+    ],
+    [{ ...validItem, streamingSources: {} }, "non-array streaming sources"],
+    [
+      {
+        ...validItem,
+        streamingSources: [{ name: "Example Streamer", type: "invalid" }],
+      },
+      "invalid streaming source type",
+    ],
+    [
+      {
+        ...validItem,
+        streamingSources: [{ name: 123, type: "sub" }],
+      },
+      "non-string streaming source name",
+    ],
+    [
+      {
+        ...validItem,
+        streamingSources: [
+          { name: "Example Streamer", type: "sub", url: 123 },
+        ],
+      },
+      "non-string streaming source URL",
+    ],
+    [{ ...validItem, contributingFilms: [] }, "array contributing films"],
+    [
+      { ...validItem, contributingFilms: { sharedTaste: "not an array" } },
+      "non-array contributing film group",
+    ],
+    [
+      {
+        ...validItem,
+        contributingFilms: { sharedTaste: [{ id: 0, title: "Invalid film" }] },
+      },
+      "non-positive contributing film ID",
+    ],
+    [
+      {
+        ...validItem,
+        contributingFilms: { sharedTaste: [{ id: 202, title: 123 }] },
+      },
+      "non-string contributing film title",
+    ],
+  ])("rejects malformed known optional fields: %s", (item, _reason) => {
+    expect(parseStoredSuggestionItems(JSON.stringify([item]))).toBeNull();
+  });
+
+  it("sanitizes unknown fields while preserving a valid optional payload", () => {
+    const restored = parseStoredSuggestionItems(
+      JSON.stringify([
+        {
+          ...validItem,
+          ...validOptionalFields,
+          unknownField: "must be dropped",
+          unknownObject: { privateValue: "must be dropped" },
+        },
+      ]),
+    );
+
+    expect(restored).toEqual([{ ...validItem, ...validOptionalFields }]);
+    expect(restored?.[0]).not.toHaveProperty("unknownField");
+    expect(restored?.[0]).not.toHaveProperty("unknownObject");
   });
 
   it("accepts valid items and caps the restored array at 300 entries", () => {
