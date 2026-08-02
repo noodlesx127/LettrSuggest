@@ -13,7 +13,9 @@ import {
   type RecommendationRequest,
   type RecommendationRequestInput,
   type RecommendationResult,
+  type RecommendationTrace,
 } from "@/lib/recommendationTypes";
+import { buildRecommendationTrace } from "@/lib/recommendationTelemetry";
 
 export type RecommendationEngineContext = RecommendationContext;
 export type RecommendationRng = () => number;
@@ -79,6 +81,9 @@ export type RecommendationEngineDependencies = Readonly<{
   rng: RecommendationRngFactory;
   telemetry: RecommendationTelemetry;
 }>;
+
+export type RecommendationEngineResult = RecommendationResult &
+  Readonly<{ trace: RecommendationTrace }>;
 
 type CandidateWithId = Readonly<{ tmdbId: number }>;
 
@@ -229,12 +234,12 @@ export function createRecommendationEngine(
 ): Readonly<{
   generate: (
     request: RecommendationRequestInput,
-  ) => Promise<RecommendationResult>;
+  ) => Promise<RecommendationEngineResult>;
 }> {
   return {
     async generate(
       input: RecommendationRequestInput,
-    ): Promise<RecommendationResult> {
+    ): Promise<RecommendationEngineResult> {
       const request = normalizeRecommendationRequest(input);
       const context = await dependencies.loadContext(request.userId);
       const mode = deriveEngineMode(context);
@@ -289,9 +294,13 @@ export function createRecommendationEngine(
       if (!validateRecommendationResult(result, request)) {
         throw new Error("Invalid recommendation result");
       }
+      const trace = buildRecommendationTrace({
+        result,
+        inputRevisionMaterial: context.revisionMaterial,
+      });
       await emitTelemetry(dependencies.telemetry, diagnostics);
 
-      return result;
+      return { results, diagnostics, trace };
     },
   };
 }

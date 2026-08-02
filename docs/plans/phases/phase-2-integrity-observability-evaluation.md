@@ -101,22 +101,31 @@
 
 ## Checkpoint 2B.1: Bounded Request Diagnostics
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Create: `src/lib/recommendationTelemetry.ts`
 - Create: `tests/unit/recommendationTelemetry.test.ts`
 - Modify: `src/lib/recommendationEngine.ts`
 - Modify: `src/lib/recommendationTypes.ts`
+- Modify: `src/lib/recommendationAdapters.ts`
+- Modify: `src/lib/recommendationActionTypes.ts`
+- Modify: `src/lib/serverSuggestionsEngine.ts`
+- Modify: `src/app/actions/recommendations.ts`
 - Modify: `src/app/api/v1/suggestions/generate/route.ts`
+- Modify: `tests/integration/webRecommendationGenreDetails.test.ts`
 
-- [ ] Write tests for stage input/output counts, source shares, health/mode, relaxations, drop-reason counts, engine version, experiment bucket, input revision, and request seed. Assert serialized diagnostics contain no raw film lists, feedback text, JWTs, provider keys, or unbounded candidate arrays.
-- [ ] Run tests; expect failure before bounded trace construction exists.
-- [ ] Implement an allowlisted trace builder and emit the same canonical diagnostic structure through v1 and web adapters. Cap map cardinality and reason values.
-- [ ] Run tests, adapter parity, and API diagnostics tests; expect pass.
-- [ ] Commit with `rtk git commit -m "feat: add bounded recommendation diagnostics"`.
+- [x] Write tests for stage input/output counts, source shares, health/mode, relaxations, drop-reason counts, engine version, experiment bucket, input revision, and request seed. Assert serialized diagnostics contain no raw film lists, feedback text, JWTs, provider keys, or unbounded candidate arrays.
+- [x] Run tests; expect failure before bounded trace construction exists.
+- [x] Implement an allowlisted trace builder and emit the same canonical diagnostic structure through v1 and web adapters. Cap map cardinality and reason values.
+- [x] Run tests, adapter parity, and API diagnostics tests; expect pass.
+- [x] Commit with `rtk git commit -m "feat: add bounded recommendation diagnostics"`.
+
+**Execution note (2026-08-02):** COMPLETE. The initial telemetry test failed because the canonical builder module did not exist. The final exact-key trace is bounded and privacy-safe, uses fixed provider and experiment-bucket allowlists, hashes request seed and input revision material, records applied relaxation, and is required on successful web output while remaining additive in v1 metadata. Focused telemetry/web tests PASS, 35/35; related recommendation suites PASS, 133/133; full Vitest PASS, 496/496 across 34 files; lint, typecheck, production build, and `git diff --check` PASS. Existing build warnings remain non-fatal. Independent specification and code-quality reviews APPROVED. HTTP-level authenticated v1 trace coverage remains a residual test-depth gap.
 
 ## Checkpoint 2B.2: Exposure Schema and Diagnostics Integration
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `supabase/migrations/20260723120000_version_recommendation_exposure.sql`

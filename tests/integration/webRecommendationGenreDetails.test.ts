@@ -76,6 +76,12 @@ import {
   type CanonicalWebRecommendationResult,
 } from "@/lib/recommendationActionTypes";
 import { suggestByOverlap, type TMDBMovie } from "@/lib/enrich";
+import { buildRecommendationTrace } from "@/lib/recommendationTelemetry";
+import {
+  RECOMMENDATION_ENGINE_VERSION,
+  validateRecommendationTrace,
+  type RecommendationDiagnostics,
+} from "@/lib/recommendationTypes";
 
 const successfulResult = (result: CanonicalWebRecommendationResult) => {
   if (isCanonicalWebRecommendationFailure(result)) {
@@ -91,6 +97,31 @@ const expectBoundedDeadline = (call: readonly unknown[]) => {
   expect(deadlineMs).toBeLessThanOrEqual(20_000);
   return deadlineMs;
 };
+
+const WEB_MOCK_DIAGNOSTICS: RecommendationDiagnostics = {
+  mode: "personalized",
+  engineVersion: RECOMMENDATION_ENGINE_VERSION,
+  contextMode: "neutral",
+  inputHealth: {
+    films: { health: "ok", rowCount: 1 },
+    mappings: { health: "ok", rowCount: 1 },
+    feedback: { health: "empty", rowCount: 0 },
+    exploration: { health: "empty", rowCount: 0 },
+    adjacent_genres: { health: "empty", rowCount: 0 },
+    exposures: { health: "empty", rowCount: 0 },
+    blocked: { health: "ok", rowCount: 0 },
+  },
+  failedSources: [],
+  requestSeedHash: "0000000000000001",
+  seedCount: 0,
+  candidateCount: 0,
+  resultCount: 0,
+  stageCounts: { retrieval: 0, scoring: 0, reranking: 0, final: 0 },
+  dropReasonCounts: {},
+};
+const VALID_ENGINE_TRACE = buildRecommendationTrace({
+  result: { results: [], diagnostics: WEB_MOCK_DIAGNOSTICS },
+});
 
 describe("canonical web standard-genre detail completion", () => {
   afterEach(() => {
@@ -197,6 +228,7 @@ describe("canonical web standard-genre detail completion", () => {
         return {
           results: scored.slice(0, count),
           diagnostics: {},
+          trace: VALID_ENGINE_TRACE,
         };
       },
     );
@@ -223,6 +255,19 @@ describe("canonical web standard-genre detail completion", () => {
     expect(successfulResult(result).items.map((item) => item.id)).toEqual([
       101,
     ]);
+  });
+
+  it("includes a validated canonical trace on every successful web result", async () => {
+    const result = await generateCanonicalWebRecommendations({
+      accessToken: "genre-action-token-1234567890",
+      count: 10,
+      genreNames: ["Action"],
+      requestSeed: "web-trace-required",
+    });
+
+    const success = successfulResult(result);
+    expect(success.trace).toBeDefined();
+    expect(validateRecommendationTrace(success.trace)).toBe(true);
   });
 
   it("passes one bounded deadline budget through scoring and final hydration", async () => {

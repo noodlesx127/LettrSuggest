@@ -16,6 +16,33 @@ export const RECOMMENDATION_SOURCE_NAMES = [
 export type RecommendationSourceName =
   (typeof RECOMMENDATION_SOURCE_NAMES)[number];
 
+/**
+ * Fixed canonical allowlist of normalized retrieval provider families that may
+ * appear in bounded request diagnostics. Unknown values (including regex-valid
+ * UUIDs, user IDs, or API-key-like strings) are discarded by trace builders.
+ */
+export const RECOMMENDATION_PROVIDER_FAMILIES = [
+  "letterboxd",
+  "tastedive",
+  "tmdb",
+  "tuimdb",
+  "vector-similarity",
+  "watchmode",
+] as const;
+
+export type RecommendationProviderFamily =
+  (typeof RECOMMENDATION_PROVIDER_FAMILIES)[number];
+
+/**
+ * Controlled allowlist of experiment buckets emitted in bounded diagnostics.
+ * Only canonical labels are permitted; arbitrary/API-key/user-like values are
+ * normalized to the default. Stable assignment is checkpoint 2C.2.
+ */
+export const RECOMMENDATION_EXPERIMENT_BUCKETS = ["default"] as const;
+
+export type RecommendationExperimentBucket =
+  (typeof RECOMMENDATION_EXPERIMENT_BUCKETS)[number];
+
 export const REQUIRED_RECOMMENDATION_SOURCES = [
   "films",
   "mappings",
@@ -138,6 +165,40 @@ export type RecommendationDiagnostics = Readonly<{
   dropReasonCounts: Readonly<Partial<Record<DropReason, number>>>;
 }>;
 
+export const RECOMMENDATION_TRACE_RELAXATIONS = [
+  "none",
+  "threshold",
+  "genre",
+] as const;
+
+export type RecommendationTraceRelaxation =
+  (typeof RECOMMENDATION_TRACE_RELAXATIONS)[number];
+
+/**
+ * Bounded, allowlisted request diagnostics emitted identically through the v1
+ * and web adapters. Extends the canonical engine diagnostics with bounded
+ * source-family shares, relaxation, experiment bucket, and input revision.
+ * Contains only fixed scalar fields plus bounded maps/enums; never raw film
+ * lists, feedback text, JWTs, provider keys, or unbounded candidate arrays.
+ */
+export type RecommendationTrace = Readonly<{
+  engineVersion: RecommendationEngineVersion;
+  mode: RecommendationEngineMode;
+  contextMode: RecommendationContextMode;
+  inputHealth: RecommendationInputHealth;
+  failedSources: readonly RecommendationSourceName[];
+  requestSeedHash: string;
+  seedCount: number;
+  candidateCount: number;
+  resultCount: number;
+  stageCounts: Readonly<Record<RecommendationStage, number>>;
+  dropReasonCounts: Readonly<Partial<Record<DropReason, number>>>;
+  sourceShares: Readonly<Record<string, number>>;
+  relaxation: RecommendationTraceRelaxation;
+  experimentBucket: RecommendationExperimentBucket;
+  inputRevision: string;
+}>;
+
 export type RecommendationCandidate = Readonly<{
   tmdbId: number;
   score: number;
@@ -156,6 +217,12 @@ export const MAX_RECOMMENDATION_COUNT = 100;
 export const MAX_DIAGNOSTIC_COUNT = 10_000;
 export const MAX_DIAGNOSTIC_STRING_LENGTH = 128;
 export const RECOMMENDATION_REQUEST_SEED_HASH_LENGTH = 16;
+export const DEFAULT_EXPERIMENT_BUCKET = "default";
+export const DEFAULT_INPUT_REVISION_HASH = "0000000000000000";
+// Source share keys are restricted to the canonical provider-family allowlist,
+// so the bounded map capacity equals that canonical capacity.
+export const MAX_TRACE_SOURCE_SHARE_KEYS =
+  RECOMMENDATION_PROVIDER_FAMILIES.length;
 
 const RECOMMENDATION_CONTEXT_KEYS = ["mode", "localHour"] as const;
 const SOURCE_HEALTH_KEYS = ["health", "rowCount"] as const;
@@ -171,6 +238,23 @@ const RECOMMENDATION_DIAGNOSTIC_KEYS = [
   "resultCount",
   "stageCounts",
   "dropReasonCounts",
+] as const;
+const RECOMMENDATION_TRACE_KEYS = [
+  "engineVersion",
+  "mode",
+  "contextMode",
+  "inputHealth",
+  "failedSources",
+  "requestSeedHash",
+  "seedCount",
+  "candidateCount",
+  "resultCount",
+  "stageCounts",
+  "dropReasonCounts",
+  "sourceShares",
+  "relaxation",
+  "experimentBucket",
+  "inputRevision",
 ] as const;
 const SAFE_REQUEST_SEED = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const JWT_LIKE_STRING =
@@ -535,6 +619,89 @@ export function validateRecommendationDiagnostics(
     !isBoundedCount(value.resultCount) ||
     !isValidStageCounts(value.stageCounts) ||
     !isValidDropReasonCounts(value.dropReasonCounts)
+  ) {
+    return false;
+  }
+
+  return isDiagnosticsModeConsistent(value.mode, inputHealth);
+}
+
+function isTraceSourceShares(
+  value: unknown,
+): value is Readonly<Record<string, number>> {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length > MAX_TRACE_SOURCE_SHARE_KEYS) return false;
+
+  return keys.every(
+    (key) =>
+      RECOMMENDATION_PROVIDER_FAMILIES.includes(
+        key as RecommendationProviderFamily,
+      ) && isBoundedCount(value[key]),
+  );
+}
+
+function isTraceRelaxation(value: unknown): value is RecommendationTraceRelaxation {
+  return RECOMMENDATION_TRACE_RELAXATIONS.includes(
+    value as RecommendationTraceRelaxation,
+  );
+}
+
+function isExperimentBucket(
+  value: unknown,
+): value is RecommendationExperimentBucket {
+  return RECOMMENDATION_EXPERIMENT_BUCKETS.includes(
+    value as RecommendationExperimentBucket,
+  );
+}
+
+function isInputRevisionHash(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length === RECOMMENDATION_REQUEST_SEED_HASH_LENGTH &&
+    LOWERCASE_HEX.test(value)
+  );
+}
+
+export function validateRecommendationTrace(
+  value: unknown,
+): value is RecommendationTrace {
+  if (!isRecord(value) || !hasExactKeys(value, RECOMMENDATION_TRACE_KEYS)) {
+    return false;
+  }
+  if (value.engineVersion !== RECOMMENDATION_ENGINE_VERSION) return false;
+  if (
+    value.mode !== "personalized" &&
+    value.mode !== "cold_start" &&
+    value.mode !== "degraded"
+  ) {
+    return false;
+  }
+  if (!isContext({ mode: value.contextMode, localHour: null })) return false;
+  const inputHealth = value.inputHealth;
+  const failedSources = value.failedSources;
+  if (
+    !isInputHealth(inputHealth) ||
+    !isDenseArray(failedSources, isRecommendationSourceName) ||
+    failedSources.length > RECOMMENDATION_SOURCE_NAMES.length ||
+    new Set(failedSources).size !== failedSources.length
+  ) {
+    return false;
+  }
+  if (!hasSameSourceNames(failedSources, getFailedSourceNames(inputHealth))) {
+    return false;
+  }
+  if (
+    !isRequestSeedHash(value.requestSeedHash) ||
+    !isBoundedCount(value.seedCount) ||
+    !isBoundedCount(value.candidateCount) ||
+    !isBoundedCount(value.resultCount) ||
+    !isValidStageCounts(value.stageCounts) ||
+    !isValidDropReasonCounts(value.dropReasonCounts) ||
+    !isTraceSourceShares(value.sourceShares) ||
+    !isTraceRelaxation(value.relaxation) ||
+    !isExperimentBucket(value.experimentBucket) ||
+    !isInputRevisionHash(value.inputRevision)
   ) {
     return false;
   }

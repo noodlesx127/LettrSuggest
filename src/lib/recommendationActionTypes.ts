@@ -1,5 +1,8 @@
 import type { WebRecommendationItem } from "@/lib/recommendationAdapters";
-import type { RecommendationDiagnostics } from "@/lib/recommendationTypes";
+import type {
+  RecommendationDiagnostics,
+  RecommendationTrace,
+} from "@/lib/recommendationTypes";
 
 export type CanonicalWebRecommendationItem = WebRecommendationItem;
 
@@ -19,6 +22,7 @@ export type CanonicalWebRecommendationError = {
 export type CanonicalWebRecommendationSuccess = {
   items: CanonicalWebRecommendationItem[];
   diagnostics: RecommendationDiagnostics;
+  trace: RecommendationTrace;
 };
 
 export type CanonicalWebRecommendationFailure = {

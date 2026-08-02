@@ -32,6 +32,7 @@ import {
 import {
   createRecommendationEngine,
   type RecommendationEngineDependencies,
+  type RecommendationEngineResult,
 } from "@/lib/recommendationEngine";
 import type {
   RecommendationRequestInput,
@@ -146,7 +147,7 @@ export type UserContextSourceLoader = (
 export async function runCanonicalServerRecommendations(
   request: RecommendationRequestInput,
   dependencies: RecommendationEngineDependencies,
-): Promise<RecommendationResult> {
+): Promise<RecommendationEngineResult> {
   const engine = createRecommendationEngine(dependencies);
   return engine.generate(request);
 }

@@ -13,6 +13,7 @@ import {
   adaptV1RecommendationIntent,
   type V1RecommendationDetails,
 } from "@/lib/recommendationAdapters";
+import { deriveAppliedRelaxation } from "@/lib/recommendationTelemetry";
 import {
   createDeterministicRng,
   normalizeProviderFamilies,
@@ -549,6 +550,12 @@ export async function POST(req: Request) {
       const adaptedResult = adaptCanonicalResultToV1(
         canonicalResult,
         responseDetails,
+        {
+          relaxation: deriveAppliedRelaxation(
+            genreFilterResult.diagnostics.appliedStages,
+          ),
+          inputRevisionMaterial: canonicalContext.revisionMaterial,
+        },
       );
       const data = adaptedResult.data;
 

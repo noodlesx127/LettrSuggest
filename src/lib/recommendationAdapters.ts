@@ -1,9 +1,13 @@
 import type { FilterRelaxation } from "@/lib/advancedFiltering";
 import type { FatigueDetection } from "@/lib/counterProgramming";
 import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
+import type { RecommendationInputRevisionMaterial } from "@/lib/recommendationContext";
+import { buildRecommendationTrace } from "@/lib/recommendationTelemetry";
 import type {
   RecommendationRequest,
   RecommendationResult,
+  RecommendationTrace,
+  RecommendationTraceRelaxation,
 } from "@/lib/recommendationTypes";
 import { MAX_RECOMMENDATION_COUNT } from "@/lib/recommendationTypes";
 
@@ -383,6 +387,14 @@ export type V1RecommendationDetails = Readonly<{
   voteCategory?: VoteCategory;
 }>;
 
+export type V1RecommendationTraceOptions = Readonly<{
+  relaxation?: RecommendationTraceRelaxation;
+  experimentBucket?: string;
+  inputRevisionMaterial?: RecommendationInputRevisionMaterial | null;
+}>;
+
+export type WebRecommendationTraceOptions = V1RecommendationTraceOptions;
+
 export function adaptV1RecommendationIntent(
   intent: V1RecommendationIntent,
 ): Readonly<{
@@ -446,6 +458,7 @@ export function normalizeWebRecommendationCount(count: number): number {
 export function adaptCanonicalResultToV1(
   result: RecommendationResult,
   detailsByTmdbId: ReadonlyMap<number, V1RecommendationDetails>,
+  options?: V1RecommendationTraceOptions,
 ) {
   const data = result.results.map((candidate) => {
     const details = detailsByTmdbId.get(candidate.tmdbId);
@@ -483,6 +496,12 @@ export function adaptCanonicalResultToV1(
       request_seed_hash: diagnostics.requestSeedHash,
       stage_counts: { ...diagnostics.stageCounts },
       drop_reason_counts: { ...diagnostics.dropReasonCounts },
+      trace: buildRecommendationTrace({
+        result,
+        relaxation: options?.relaxation,
+        experimentBucket: options?.experimentBucket,
+        inputRevisionMaterial: options?.inputRevisionMaterial ?? null,
+      }),
     },
   };
 }
@@ -550,4 +569,30 @@ export function adaptCanonicalResultToWeb(
       keyword_names: details?.keywordNames ? [...details.keywordNames] : undefined,
     };
   });
+}
+
+export type CanonicalWebRecommendationEnvelope = Readonly<{
+  items: WebRecommendationItem[];
+  trace: RecommendationTrace;
+}>;
+
+/**
+ * Wrap the real web adapter output with the same canonical bounded trace the
+ * v1 adapter emits. The web item array contract is unchanged; the trace is
+ * provided through an additive, type-safe envelope built by the shared builder.
+ */
+export function adaptCanonicalResultToWebEnvelope(
+  result: RecommendationResult,
+  detailsByTmdbId: ReadonlyMap<number, WebRecommendationDetails>,
+  options?: WebRecommendationTraceOptions,
+): CanonicalWebRecommendationEnvelope {
+  return {
+    items: adaptCanonicalResultToWeb(result, detailsByTmdbId),
+    trace: buildRecommendationTrace({
+      result,
+      relaxation: options?.relaxation,
+      experimentBucket: options?.experimentBucket,
+      inputRevisionMaterial: options?.inputRevisionMaterial ?? null,
+    }),
+  };
 }

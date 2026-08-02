@@ -299,7 +299,9 @@ async function generateCanonicalWebRecommendationsInternal(
     detailsForWeb,
   );
 
-  return { items, diagnostics: result.diagnostics };
+  // The engine builds and validates this trace via the shared builder, so every
+  // successful web result carries the identical canonical diagnostic structure.
+  return { items, diagnostics: result.diagnostics, trace: result.trace };
 }
 
 export async function generateCanonicalWebRecommendations(
