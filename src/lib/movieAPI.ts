@@ -18,6 +18,27 @@ function getBaseUrl(): string {
 
 export type UnifiedMovie = TMDBMovie;
 
+/**
+ * Raised when a movie provider call fails. A provider failure is NOT a confirmed
+ * no-match: callers (e.g. import enrichment) must treat it as a fatal error
+ * rather than silently dropping a mapping. Only a genuinely successful search
+ * with zero matches resolves an empty array.
+ */
+export class MovieAPIError extends Error {
+  readonly code: string;
+  readonly status?: number;
+
+  constructor(
+    message: string,
+    options: { code: string; status?: number },
+  ) {
+    super(message);
+    this.name = "MovieAPIError";
+    this.code = options.code;
+    this.status = options.status;
+  }
+}
+
 export type MovieSearchOptions = {
   query: string;
   year?: number;
@@ -113,15 +134,33 @@ export async function searchMovies(options: MovieSearchOptions): Promise<Unified
   u.searchParams.set('_t', String(Date.now())); // Cache buster
   
   const r = await fetch(u.toString());
-  const j = await r.json();
-  if (!r.ok || !j.ok) {
-    console.error('[UnifiedAPI] TMDB search error', { status: r.status, body: j });
-    // Treat TMDB search failures as an empty result set instead of throwing so
-    // callers (like import enrichment) can continue without hard-failing.
-    return [] as TMDBMovie[];
+
+  let j: unknown;
+  try {
+    j = await r.json();
+  } catch (error) {
+    console.error('[UnifiedAPI] TMDB search returned a malformed body', {
+      status: r.status,
+      error,
+    });
+    throw new MovieAPIError('TMDB search returned a malformed response body', {
+      code: 'MALFORMED_RESPONSE',
+      status: r.status,
+    });
   }
 
-  return j.results as TMDBMovie[];
+  const body = j as { ok?: boolean; results?: unknown };
+  if (!r.ok || !body || body.ok !== true || !Array.isArray(body.results)) {
+    console.error('[UnifiedAPI] TMDB search error', { status: r.status, body: j });
+    // A provider failure is not a confirmed no-match; reject so callers treat it
+    // as a fatal error instead of silently dropping data.
+    throw new MovieAPIError('TMDB search failed', {
+      code: 'TMDB_ERROR',
+      status: r.status,
+    });
+  }
+
+  return body.results as TMDBMovie[];
 }
 
 /**

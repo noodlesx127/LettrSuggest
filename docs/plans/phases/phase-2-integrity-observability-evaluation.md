@@ -66,23 +66,42 @@
 
 ## Checkpoint 2A.3: Atomic Snapshot Reconciliation
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Create: `src/lib/importSnapshot.ts`
+- Create: `src/lib/importParse.ts`
+- Create: `src/lib/importMappings.ts`
+- Create: `src/lib/importPostWork.ts`
 - Create: `tests/integration/importIntegrity.test.ts`
-- Create: `supabase/migrations/20260722120000_reconcile_import_snapshot.sql`
+- Create: `supabase/migrations/20260801000000_reconcile_import_snapshot.sql`
+- Create: `supabase/tests/database/import_snapshot.test.sql`
 - Modify: `src/app/import/page.tsx`
-- Modify: `src/lib/recommendationRevision.ts`
+- Modify: `src/lib/enrich.ts`
+- Modify: `src/lib/importEnrich.ts`
+- Modify: `src/lib/movieAPI.ts`
+- Modify: `src/lib/quizLearning.ts`
+- Modify: `src/lib/serverSuggestionsEngine.ts`
+- Modify: `tests/unit/recommendationCache.test.ts`
+- Create: `tests/unit/importEnrich.test.ts`
+- Create: `tests/unit/importMappings.test.ts`
+- Create: `tests/unit/importParse.test.ts`
+- Create: `tests/unit/importPostWork.test.ts`
+- Create: `tests/unit/movieAPI.test.ts`
+- Create: `tests/unit/postImportLearningStrictness.test.ts`
 
-- [ ] Write integration tests for replacing a prior full snapshot, removing/deactivating absent rows, preserving valid mappings/events, rolling back on a mapping/persistence failure, and returning failure instead of success. Assert successful reconciliation changes the recommendation input revision.
-- [ ] Run tests; expect failure because current upserts leave stale rows and errors are swallowed.
-- [ ] Implement one authenticated transactional RPC accepting a snapshot/import ID or equivalent staging contract. Validate ownership, reconcile all user-scoped rows, and return structured counts/errors.
-- [ ] Extract page persistence into `importSnapshot.ts`; set UI success only after reconciliation and required post-import work succeed. Surface retryable failures without discarding local input.
-- [ ] Run integration, database, typecheck, and import UI tests; expect pass.
-- [ ] Commit with `rtk git commit -m "fix: reconcile imports as atomic snapshots"`.
+- [x] Write integration tests for replacing a prior full snapshot, removing/deactivating absent rows, preserving valid mappings/events, rolling back on a mapping/persistence failure, and returning failure instead of success. Assert successful reconciliation changes the recommendation input revision.
+- [x] Run tests; expect failure because current upserts leave stale rows and errors are swallowed.
+- [x] Implement one authenticated transactional RPC accepting a snapshot/import ID or equivalent staging contract. Validate ownership, reconcile all user-scoped rows, and return structured counts/errors.
+- [x] Extract page persistence into `importSnapshot.ts`; set UI success only after reconciliation and required post-import work succeed. Surface retryable failures without discarding local input.
+- [x] Run integration, database, typecheck, and import UI seam tests; expect pass.
+- [x] Commit with `rtk git commit -m "fix: reconcile imports as atomic snapshots"`.
+
+**Execution note (2026-08-01):** COMPLETE. Review-driven RED/GREEN hardening covers complete ZIP manifests, malformed/empty/duplicate/orphan snapshots, deterministic mapping preservation, provider failures, required post-import learning, persisted watchlist timestamps, exact full replacement/rollback, owner isolation, reentrant staging, advisory locking, and exact diary-derived `last_date`. Full Vitest PASS, 472/472 across 33 files; lint, typecheck, production build, and `git diff --check` PASS. Linked migration `20260802013015_reconcile_import_snapshot` applied successfully; transaction-isolated linked validation proved exact two-snapshot replacement counts, absent-row deletion, cross-user preservation, and stale `last_date` correction. Function ACL/security and DELETE policies match the contract. Hosted pgTAP is unavailable, so the 38-assertion suite is committed but not executed; two-connection lock behavior and a browser-level real-ZIP run remain residual test-depth risks. Supabase advisors introduced no checkpoint finding. Independent specification and code-quality reviews APPROVED.
 
 ## Checkpoint 2B.1: Bounded Request Diagnostics
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `src/lib/recommendationTelemetry.ts`

@@ -4,28 +4,42 @@ import UnmappedFilmModal, {
   type UnmappedFilm,
 } from "@/components/UnmappedFilmModal";
 import { useCallback, useMemo, useState, useEffect } from "react";
-import Papa from "papaparse";
 import JSZip from "jszip";
-import {
-  normalizeData,
-  serializeFilmEventsForCloud,
-} from "@/lib/normalize";
+import { normalizeData } from "@/lib/normalize";
 import { useImportData } from "@/lib/importStore";
 import { supabase } from "@/lib/supabaseClient";
-import {
-  searchTmdb,
-  upsertFilmMapping,
-  learnFromHistoricalData,
-} from "@/lib/enrich";
+import { learnFromHistoricalData } from "@/lib/enrich";
 import { seedPreferencesFromHistory } from "@/lib/quizLearning";
-import { serializeWatchEvents, upsertDiaryEvents } from "@/lib/diary";
 import { saveFilmsLocally } from "@/lib/db";
+import {
+  reconcileImportSnapshot,
+  type ImportSnapshotMapping,
+} from "@/lib/importSnapshot";
 import {
   createImportOperationGuard,
   ImportIdentityChangedError,
   runGuardedImportWrite,
   type ImportOperationGuard,
 } from "@/lib/importStorage";
+import {
+  parseImportCsv,
+  classifyImportPath,
+  assignImportGroup,
+  assertRecognizedImportFiles,
+  assertCompleteImportManifest,
+  assertNonEmptyImportSnapshot,
+  resolveImportFailure,
+  selectImportUpload,
+  type ParsedImportData,
+} from "@/lib/importParse";
+import {
+  loadAllExistingMappings,
+  mergeImportMappings,
+  selectFilmsToEnrich,
+  type EnrichmentOutcome,
+  type ExistingMappingRow,
+} from "@/lib/importMappings";
+import { runRequiredPostImportWork } from "@/lib/importPostWork";
 import type { FilmEvent } from "@/lib/normalize";
 
 // Import step definitions
@@ -139,23 +153,6 @@ type ParsedData = {
   tags?: Record<string, string>[];
 };
 
-function parseCsv(text: string) {
-  const res = Papa.parse<Record<string, string>>(text, {
-    header: true,
-    skipEmptyLines: true,
-  });
-  return (res.data ?? [])
-    .filter(Boolean)
-    .map((row) =>
-      Object.fromEntries(
-        Object.entries(row).map(([key, value]) => [
-          key.replace(/^\uFEFF/, "").trim(),
-          value,
-        ]),
-      ),
-    );
-}
-
 async function captureImportOperation(): Promise<ImportOperationGuard> {
   const client = supabase;
   if (!client) throw new Error("Supabase not initialized");
@@ -183,8 +180,6 @@ export default function ImportPage() {
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [distinct, setDistinct] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [savedCount, setSavedCount] = useState<number | null>(null);
   const [autoMappingActive, setAutoMappingActive] = useState(false);
   const [mappingProgress, setMappingProgress] = useState<{
     current: number;
@@ -215,133 +210,49 @@ export default function ImportPage() {
     setCompletedSteps((prev) => new Set([...prev, step]));
   }, []);
 
-  const autoSaveToSupabase = useCallback(
-    async (filmList: FilmEvent[], operation: ImportOperationGuard) => {
-      try {
-        if (!supabase) throw new Error("Supabase not initialized");
-        await operation.assertCurrent();
-        const uid = operation.userId;
-        setSaving(true);
-        setError(null);
-        setSavedCount(0);
-        const total = filmList.length;
-        setStatus(`Saving to Supabase… 0/${total}`);
-        const batchSize = 500;
-        let saved = 0;
-        for (let i = 0; i < filmList.length; i += batchSize) {
-          const chunk = serializeFilmEventsForCloud(
-            uid,
-            filmList.slice(i, i + batchSize),
-          );
-
-          // Retry logic for schema cache errors
-          let retries = 2;
-          let lastError = null;
-          while (retries >= 0) {
-            const { error } = await runGuardedImportWrite(operation, () =>
-              supabase!
-                .from("film_events")
-                .upsert(chunk, { onConflict: "user_id,uri" }),
-            );
-            if (!error) {
-              break; // Success
-            }
-
-            lastError = error;
-            // If schema cache error, wait and retry
-            if (
-              error.message?.includes("schema cache") ||
-              error.message?.includes("column")
-            ) {
-              console.warn(
-                `[Import] Schema cache error, retrying... (${retries} retries left)`,
-                error.message,
-              );
-              retries--;
-              if (retries >= 0) {
-                await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds
-                continue;
-              }
-            }
-            throw error; // Non-retryable error
-          }
-
-          if (lastError) throw lastError;
-
-          saved += chunk.length;
-          setSavedCount(saved);
-          setStatus(`Saving to Supabase… ${saved}/${total}`);
-        }
-        setStatus(`Saved ${saved} films to Supabase`);
-      } catch (e: any) {
-        setError(e?.message ?? "Failed to save to Supabase");
-        if (e instanceof ImportIdentityChangedError) throw e;
-      } finally {
-        setSaving(false);
-      }
-    },
-    [],
-  );
-
   const autoMapBatch = useCallback(
-    async (filmList: FilmEvent[], operation: ImportOperationGuard) => {
+    async (
+      filmList: FilmEvent[],
+      operation: ImportOperationGuard,
+    ): Promise<{ mappings: ImportSnapshotMapping[]; unmapped: UnmappedFilm[] }> => {
       try {
         await operation.assertCurrent();
         setAutoMappingActive(true);
         const uid = operation.userId;
 
-        // First, get existing mappings to skip already-mapped films (unless force re-enrich)
-        let existingMappings = new Set<string>();
-        if (!forceReenrich) {
-          try {
-            // Paginate through all mappings (PostgREST defaults to 1000 max per request)
-            const pageSize = 1000;
-            let from = 0;
-
-            while (true) {
-              const { data: pageData, error } = await supabase!
-                .from("film_tmdb_map")
-                .select("uri")
-                .eq("user_id", uid)
-                .range(from, from + pageSize - 1);
-
-              if (error) {
-                console.warn("[Import] Error fetching mappings page", {
-                  from,
-                  error,
-                });
-                break;
-              }
-
-              const rows = pageData ?? [];
-              for (const m of rows) {
-                existingMappings.add(m.uri);
-              }
-
-              // If we got fewer than pageSize, we've fetched all rows
-              if (rows.length < pageSize) break;
-              from += pageSize;
-            }
-
-            console.log(
-              `[Import] Found ${existingMappings.size} existing mappings`,
-            );
-          } catch (e) {
-            console.warn(
-              "[Import] Could not fetch existing mappings, will attempt all",
-              e,
-            );
-          }
-        } else {
-          console.log(
-            "[Import] Force re-enrich enabled, will re-enrich all films",
-          );
-        }
-
-        // Filter to only films that need mapping (or all if force re-enrich)
-        const toTry = filmList.filter(
-          (f) => f.title && !existingMappings.has(f.uri),
+        // Always fully load existing mappings. Force re-enrich controls search
+        // only, never whether prior mappings are known. Any page fetch error
+        // aborts the import rather than reconciling against a partial view.
+        const existingMappings = await loadAllExistingMappings(
+          async (from, to) => {
+            const { data: pageData, error } = await supabase!
+              .from("film_tmdb_map")
+              .select("uri, tmdb_id")
+              .eq("user_id", uid)
+              .order("uri", { ascending: true })
+              .range(from, to);
+            return {
+              data: (pageData as ExistingMappingRow[] | null) ?? null,
+              error,
+            };
+          },
         );
+        console.log(
+          `[Import] Found ${existingMappings.size} existing mappings`,
+        );
+
+        // Select films to search: force controls search, not mapping load.
+        const filmUris = filmList.map((f) => f.uri);
+        const titleByUri = new Map(filmList.map((f) => [f.uri, f.title]));
+        const toTryUris = new Set(
+          selectFilmsToEnrich(
+            filmUris,
+            (uri) => Boolean(titleByUri.get(uri)),
+            existingMappings,
+            forceReenrich,
+          ),
+        );
+        const toTry = filmList.filter((f) => toTryUris.has(f.uri));
         console.log(
           `[Import] Need to enrich ${toTry.length} of ${filmList.length} films (${existingMappings.size} already mapped, ${filmList.filter((f) => !f.title).length} have no title${forceReenrich ? ", FORCE RE-ENRICH" : ""}`,
         );
@@ -394,6 +305,7 @@ export default function ImportPage() {
         let lastRequestTime = 0;
         const minDelay = 300; // 300ms between requests (max ~3 requests/sec)
         const skippedFilms: UnmappedFilm[] = []; // Track films that couldn't be mapped
+        const outcomes: EnrichmentOutcome[] = [];
 
         // Store userId for modal
         setUserId(operation.userId);
@@ -437,10 +349,8 @@ export default function ImportPage() {
                 );
 
                 if (enrichedMovie) {
-                  // Movie was found and enriched - create mapping
-                  await runGuardedImportWrite(operation, () =>
-                    upsertFilmMapping(operation.userId, f.uri, enrichedMovie.id),
-                  );
+                  // Movie was found and enriched - record a match outcome.
+                  outcomes.push({ kind: "match", uri: f.uri, tmdbId: enrichedMovie.id });
                   enriched += 1;
                   success = true;
                   setMappingProgress({
@@ -456,7 +366,9 @@ export default function ImportPage() {
                     );
                   }
                 } else {
-                  // No results found - track for manual mapping
+                  // No results found - confirmed no-match retains any existing
+                  // mapping. Track for manual mapping.
+                  outcomes.push({ kind: "no-match", uri: f.uri });
                   skipped += 1;
                   skippedFilms.push({
                     uri: f.uri,
@@ -513,6 +425,14 @@ export default function ImportPage() {
         await Promise.all(Array.from({ length: concurrency }, () => worker()));
         await operation.assertCurrent();
 
+        // Enrichment failures are fatal: a partial enrichment must not be
+        // reconciled as a successful import.
+        if (failed > 0) {
+          throw new Error(
+            `Failed to enrich ${failed} film${failed !== 1 ? "s" : ""} after retries`,
+          );
+        }
+
         // Store unmapped films for manual mapping
         if (skippedFilms.length > 0) {
           setUnmappedFilms(skippedFilms);
@@ -521,17 +441,27 @@ export default function ImportPage() {
           );
         }
 
-        const totalEnriched = enriched + existingMappings.size;
+        // Build the final mapping set: existing mappings restricted to retained
+        // films, with match outcomes replacing and no-match outcomes retaining.
+        const mappings = mergeImportMappings({
+          filmUris,
+          existing: existingMappings,
+          outcomes,
+        });
+
         setStatus(
-          `✓ Successfully enriched ${totalEnriched} of ${filmList.length} films with multi-API data (${enriched} new, ${existingMappings.size} existing, ${skipped} no match, ${failed} failed)`,
+          `✓ Enriched ${mappings.length} of ${filmList.length} films with multi-API data (${enriched} new, ${existingMappings.size} existing, ${skipped} no match)`,
         );
         setMappingProgress(null);
         setAutoMappingActive(false);
+        return { mappings, unmapped: skippedFilms };
       } catch (e) {
         console.error("[Import] autoMapBatch error", e);
         setAutoMappingActive(false);
         setMappingProgress(null);
-        if (e instanceof ImportIdentityChangedError) throw e;
+        // Enrichment/mapping failures are fatal; surface them so the import
+        // cannot report success. Local input remains available for retry.
+        throw e;
       }
     },
     [forceReenrich],
@@ -542,7 +472,15 @@ export default function ImportPage() {
       console.log("[Import] handleFiles start", {
         fileCount: Array.from(files).length,
       });
+      // Clear stale state from any prior attempt so a retry starts clean and
+      // never surfaces leftover unmapped films, modals, breakdowns, or progress.
       setError(null);
+      setData({});
+      setDistinct(null);
+      setUnmappedFilms([]);
+      setShowUnmappedModal(false);
+      setNewFilmsBreakdown(null);
+      setMappingProgress(null);
       setCurrentStep("upload");
       setCompletedSteps(new Set());
       setStatus("Processing files…");
@@ -563,13 +501,13 @@ export default function ImportPage() {
       completeStep("upload");
       setCurrentStep("parse");
 
-      const fileArr = Array.from(files);
-      // If a ZIP is present, prefer it; otherwise parse CSVs directly
-      const zipFile = fileArr.find((f) =>
-        f.name.toLowerCase().endsWith(".zip"),
-      );
-      if (zipFile) {
-        try {
+      try {
+        const fileArr = Array.from(files);
+        // If a ZIP is present, prefer it; otherwise parse CSVs directly
+        const zipFile = fileArr.find((f) =>
+          f.name.toLowerCase().endsWith(".zip"),
+        );
+        if (zipFile) {
           console.log("[Import] detected ZIP", {
             name: zipFile.name,
             size: zipFile.size,
@@ -578,114 +516,65 @@ export default function ImportPage() {
           const entries = Object.keys(zip.files);
           console.log("[Import] ZIP entries", entries.length);
           for (const entry of entries) {
-            // Skip files in deleted/ or orphaned/ subdirectories
-            const lowerEntry = entry.toLowerCase();
-            if (
-              lowerEntry.includes("/deleted/") ||
-              lowerEntry.includes("/orphaned/") ||
-              lowerEntry.startsWith("deleted/") ||
-              lowerEntry.startsWith("orphaned/")
-            ) {
-              console.log("[Import] Skipping deleted/orphaned file:", entry);
-              continue;
-            }
-
-            const key = entry.replace(/^.*\//, "").toLowerCase();
-            // support likes/films.csv nested path
-            const logical = ((): keyof ParsedData | null => {
-              if (key === "watched.csv") return "watched";
-              if (key === "diary.csv") return "diary";
-              if (key === "ratings.csv") return "ratings";
-              if (key === "watchlist.csv") return "watchlist";
-              if (key === "reviews.csv") return "reviews";
-              if (key === "tags.csv") return "tags";
-              if (lowerEntry.endsWith("likes/films.csv")) return "likesFilms";
-              if (lowerEntry.includes("lists/") && lowerEntry.endsWith(".csv"))
-                return "lists";
-              return null;
-            })();
+            // Shared root-path classification: ignores deleted/orphaned entries,
+            // treats every lists/ CSV as an aggregated list (before basename
+            // matching), and recognizes required files only at the export root.
+            const logical = classifyImportPath(entry);
             if (!logical) continue;
             const fileText = await zip.files[entry].async("string");
-            const parsed = parseCsv(fileText);
-
-            if (logical === "lists") {
-              // Aggregate lists
-              next.lists = [...(next.lists || []), ...parsed];
-            } else {
-              (next as any)[logical] = parsed;
-            }
+            const parsed = parseImportCsv(fileText);
+            // Fails closed on a duplicate required file rather than overwriting.
+            assignImportGroup(next as ParsedImportData, logical, parsed);
           }
-        } catch (e: any) {
-          console.error("[Import] error reading ZIP", e);
-          setError(e?.message ?? "Failed to read ZIP");
+        } else {
+          // Handle individual CSVs; allow folder drag-and-drop
+          console.log("[Import] processing individual CSV files", {
+            fileCount: fileArr.length,
+          });
+          for (const f of fileArr) {
+            // Prefer the relative path (folder drag-and-drop) so wrapper-folder
+            // and lists/ structure survive classification; fall back to the bare
+            // file name for a plain multi-file selection. Shares the ZIP loop's
+            // root-path contract and duplicate-file guard.
+            const logical = classifyImportPath(f.webkitRelativePath || f.name);
+            if (!logical) continue;
+            const text = await f.text();
+            const parsed = parseImportCsv(text);
+            assignImportGroup(next as ParsedImportData, logical, parsed);
+          }
         }
-      } else {
-        // Handle individual CSVs; allow folder drag-and-drop
-        console.log("[Import] processing individual CSV files", {
-          fileCount: fileArr.length,
+
+        // Fail closed: no recognized files means nothing to reconcile.
+        assertRecognizedImportFiles(next as ParsedImportData);
+
+        // Fail closed: a full snapshot replace deletes absent categories, so it
+        // may only run when all six source groups are present. A partial export
+        // must never reach normalization/reconciliation.
+        assertCompleteImportManifest(next as ParsedImportData);
+
+        console.log("[Import] parsed raw data", {
+          watched: next.watched?.length ?? 0,
+          diary: next.diary?.length ?? 0,
+          ratings: next.ratings?.length ?? 0,
+          watchlist: next.watchlist?.length ?? 0,
+          likesFilms: next.likesFilms?.length ?? 0,
+          reviews: next.reviews?.length ?? 0,
+          lists: next.lists?.length ?? 0,
+          tags: next.tags?.length ?? 0,
         });
-        for (const f of fileArr) {
-          if (!f.name.toLowerCase().endsWith(".csv")) continue;
-          const lower =
-            f.webkitRelativePath?.toLowerCase() || f.name.toLowerCase();
+        setData(next);
 
-          // Skip files from deleted/ and orphaned/ subdirectories
-          if (
-            lower.includes("/deleted/") ||
-            lower.includes("/orphaned/") ||
-            lower.includes("\\deleted\\") ||
-            lower.includes("\\orphaned\\")
-          ) {
-            console.log("[Import] skipping deleted/orphaned file:", lower);
-            continue;
-          }
-
-          let logical: keyof ParsedData | null = null;
-          if (lower.endsWith("watched.csv")) logical = "watched";
-          else if (lower.endsWith("diary.csv")) logical = "diary";
-          else if (lower.endsWith("ratings.csv")) logical = "ratings";
-          else if (lower.endsWith("watchlist.csv")) logical = "watchlist";
-          else if (lower.endsWith("reviews.csv")) logical = "reviews";
-          else if (lower.endsWith("tags.csv")) logical = "tags";
-          // Handle both forward slashes (ZIP) and backslashes (Windows folder)
-          else if (
-            lower.endsWith("likes/films.csv") ||
-            lower.endsWith("likes\\films.csv")
-          )
-            logical = "likesFilms";
-          else if (lower.includes("lists/") || lower.includes("lists\\"))
-            logical = "lists";
-
-          if (!logical) continue;
-          const text = await f.text();
-          const parsed = parseCsv(text);
-
-          if (logical === "lists") {
-            next.lists = [...(next.lists || []), ...parsed];
-          } else {
-            (next as any)[logical] = parsed;
-          }
-        }
-      }
-
-      console.log("[Import] parsed raw data", {
-        watched: next.watched?.length ?? 0,
-        diary: next.diary?.length ?? 0,
-        ratings: next.ratings?.length ?? 0,
-        watchlist: next.watchlist?.length ?? 0,
-        likesFilms: next.likesFilms?.length ?? 0,
-        reviews: next.reviews?.length ?? 0,
-        lists: next.lists?.length ?? 0,
-        tags: next.tags?.length ?? 0,
-      });
-      setData(next);
-      try {
         console.log("[Import] normalizeData start");
         const norm = normalizeData(next);
         console.log("[Import] normalizeData done", {
           filmCount: norm.films.length,
           distinctFilms: norm.distinctFilms,
         });
+
+        // Fail closed: an empty normalized snapshot must not trigger a
+        // destructive full-snapshot replace.
+        assertNonEmptyImportSnapshot(norm);
+
         setDistinct(norm.distinctFilms);
         await runGuardedImportWrite(operation, () =>
           setFilmsForIdentity(operation.userId, norm.films),
@@ -695,105 +584,75 @@ export default function ImportPage() {
         completeStep("parse");
         setCurrentStep("save");
 
-        // Persist locally (IndexedDB)
+        // Persist locally (IndexedDB). This stays available so a later cloud
+        // failure does not discard the parsed import.
         await runGuardedImportWrite(operation, () =>
           saveFilmsLocally(operation.userId, norm.films),
         );
         console.log("[Import] films saved locally");
-        setStatus("Saving to cloud…");
-        console.log("[Import] autoSaveToSupabase start");
-        await autoSaveToSupabase(norm.films, operation);
-        console.log("[Import] autoSaveToSupabase done");
 
-        // Upsert deduplicated diary and review events for accurate watch counts
-        try {
-          const watchEventRows = serializeWatchEvents(
-            operation.userId,
-            norm.watchEvents,
-          );
-          if (watchEventRows.length) {
-            console.log("[Import] upserting diary events", {
-              count: watchEventRows.length,
-            });
-            await runGuardedImportWrite(operation, () =>
-              upsertDiaryEvents(watchEventRows),
-            );
-            console.log("[Import] upsertDiaryEvents done");
-          }
-        } catch (diaryErr) {
-          console.warn("[Import] diary upsert failed (non-fatal):", diaryErr);
-          if (diaryErr instanceof ImportIdentityChangedError) throw diaryErr;
-        }
-
-        // Save complete, move to enrich
+        // Local save complete, move to enrich
         completeStep("save");
         setCurrentStep("enrich");
 
-        // Auto-map (await to show progress)
+        // Auto-map (await to show progress). Collects the mapping set for the
+        // atomic snapshot; enrichment failures are fatal and thrown.
         console.log("[Import] autoMapBatch start", {
           filmCount: norm.films.length,
         });
-        await autoMapBatch(norm.films, operation);
-        console.log("[Import] autoMapBatch complete");
+        const { mappings } = await autoMapBatch(norm.films, operation);
+        console.log("[Import] autoMapBatch complete", {
+          mappingCount: mappings.length,
+        });
 
-        // Enrich complete, move to learn
+        // Enrich complete; reconcile the cloud snapshot atomically. This is the
+        // hard gate for success: a failed reconciliation throws and the import
+        // is not reported as complete.
         completeStep("enrich");
+        setStatus("Saving to cloud…");
+        console.log("[Import] reconcileImportSnapshot start");
+        const reconciliation = await runGuardedImportWrite(operation, () =>
+          reconcileImportSnapshot(operation.userId, {
+            films: norm.films,
+            watchEvents: norm.watchEvents,
+            mappings,
+          }),
+        );
+        console.log("[Import] reconcileImportSnapshot complete", reconciliation);
+
+        // Cloud persistence succeeded; move to learn.
         setCurrentStep("learn");
 
-        // Phase 5+: Batch learn from historical ratings
-        console.log("[Import] Starting batch learning from historical data");
+        // Required post-import work: seed preferences then learn from history.
+        // Both must succeed before the import is reported complete.
+        console.log("[Import] Starting required post-import work");
         setStatus("Analyzing your taste preferences…");
         await operation.assertCurrent();
-        if (supabase) {
-          try {
-            // Get TMDB mappings for seeding (paginated - PostgREST defaults to 1000 max per request)
-            const pageSize = 1000;
-            let from = 0;
-            const allMappings: Array<{ uri: string; tmdb_id: number }> = [];
 
-            while (true) {
-              const { data: pageData, error } = await supabase!
-                .from("film_tmdb_map")
-                .select("uri, tmdb_id")
-                .eq("user_id", operation.userId)
-                .range(from, from + pageSize - 1);
+        // Use the in-memory snapshot mappings rather than re-reading the
+        // cloud table, so learning reflects exactly what was reconciled.
+        const uriToTmdbId = new Map(
+          mappings.map((m) => [m.uri, m.tmdbId]),
+        );
+        console.log(
+          `[Import] Using ${uriToTmdbId.size} TMDB mappings for learning`,
+        );
 
-              if (error) {
-                console.warn(
-                  "[Import] Error fetching mappings page for learning",
-                  { from, error },
-                );
-                break;
-              }
+        // Prepare films with TMDB IDs for seeding
+        const filmsForSeeding = norm.films
+          .filter((f) => uriToTmdbId.has(f.uri))
+          .map((f) => ({
+            tmdbId: uriToTmdbId.get(f.uri)!,
+            rating: f.rating ?? undefined,
+            liked: f.liked ?? undefined,
+            rewatch: f.rewatch ?? undefined,
+          }));
 
-              const rows = pageData ?? [];
-              allMappings.push(...rows);
-
-              // If we got fewer than pageSize, we've fetched all rows
-              if (rows.length < pageSize) break;
-              from += pageSize;
-            }
-
-            console.log(
-              `[Import] Fetched ${allMappings.length} TMDB mappings for learning`,
-            );
-            const uriToTmdbId = new Map(
-              allMappings.map((m) => [m.uri, m.tmdb_id]),
-            );
-
-            // Prepare films with TMDB IDs for seeding
-            const filmsForSeeding = norm.films
-              .filter((f) => uriToTmdbId.has(f.uri))
-              .map((f) => ({
-                tmdbId: uriToTmdbId.get(f.uri)!,
-                rating: f.rating ?? undefined,
-                liked: f.liked ?? undefined,
-                rewatch: f.rewatch ?? undefined,
-              }));
-
-            // Seed feature preferences from watch history
-            setStatus("Learning your preferences…");
-            const seedResult = await runGuardedImportWrite(operation, () =>
+        setStatus("Learning your preferences…");
+        await runRequiredPostImportWork({
+          hasSupabase: Boolean(supabase),
+          seedPreferences: async () => {
+            const result = await runGuardedImportWrite(operation, () =>
               seedPreferencesFromHistory(
                 operation.userId,
                 filmsForSeeding,
@@ -802,18 +661,20 @@ export default function ImportPage() {
                 },
               ),
             );
-            console.log("[Import] Feature seeding complete", seedResult);
-
-            // Also run existing learning for genre transitions
-            await runGuardedImportWrite(operation, () =>
+            // Fail closed: seeding must report success before learning runs.
+            if (!result || result.success !== true) {
+              throw new Error(
+                "Preference seeding did not complete successfully",
+              );
+            }
+            return result;
+          },
+          learnFromHistory: () =>
+            runGuardedImportWrite(operation, () =>
               learnFromHistoricalData(operation.userId),
-            );
-            console.log("[Import] Batch learning complete");
-          } catch (e) {
-            console.error("[Import] Batch learning failed (non-critical):", e);
-            if (e instanceof ImportIdentityChangedError) throw e;
-          }
-        }
+            ),
+        });
+        console.log("[Import] Required post-import work complete");
 
         // All done!
         completeStep("learn");
@@ -822,15 +683,39 @@ export default function ImportPage() {
           "✓ Import complete! Your personalized recommendations are ready.",
         );
       } catch (e: any) {
-        console.error("[Import] error in handleFiles normalization/save", e);
-        setError(e?.message ?? "Import failed");
+        console.error("[Import] error in handleFiles workflow", e);
+        const resolution = resolveImportFailure(e);
+        setCurrentStep(resolution.step);
+        setError(resolution.message);
         setStatus("");
       } finally {
         operation.cancel();
       }
       console.log("[Import] handleFiles end");
     },
-    [setFilmsForIdentity, autoSaveToSupabase, autoMapBatch, completeStep],
+    [setFilmsForIdentity, autoMapBatch, completeStep],
+  );
+
+  // ZIP-only upload gate. The UI advertises a single Letterboxd export ZIP; any
+  // other selection (loose CSVs, folders, multiple ZIPs, non-ZIP) is rejected
+  // with an actionable message instead of silently doing nothing.
+  const beginImportFromSelection = useCallback(
+    (files: File[]) => {
+      const selection = selectImportUpload(files);
+      if (selection.kind === "rejected") {
+        console.warn("[Import] rejected upload selection", {
+          message: selection.message,
+          fileCount: files.length,
+        });
+        setError(selection.message);
+        setStatus("");
+        setCurrentStep("upload");
+        setCompletedSteps(new Set());
+        return;
+      }
+      void handleFiles([selection.file]);
+    },
+    [handleFiles],
   );
 
   const summary = useMemo(() => {
@@ -862,8 +747,10 @@ export default function ImportPage() {
     <AuthGate>
       <h1 className="text-xl font-semibold mb-2">Import Letterboxd data</h1>
       <p className="text-gray-600 text-sm mb-6">
-        Upload your Letterboxd export ZIP or drag in individual CSVs. Parsing
-        happens locally in your browser.
+        Upload your complete Letterboxd export ZIP. Parsing happens locally in
+        your browser. The ZIP must contain the full export — watched.csv,
+        diary.csv, ratings.csv, watchlist.csv, likes/films.csv, and reviews.csv
+        — because a full import replaces your cloud data and requires all six.
       </p>
 
       {/* Step Progress Indicator */}
@@ -871,6 +758,14 @@ export default function ImportPage() {
         currentStep={currentStep}
         completedSteps={completedSteps}
       />
+
+      {/* Error message - always visible regardless of step so failures are
+          actionable even when upload controls are restored */}
+      {error && (
+        <div className="mb-4 p-4 rounded-lg bg-red-50 border border-red-200">
+          <p className="text-sm font-medium text-red-800">{error}</p>
+        </div>
+      )}
 
       {/* Upload Area - shown when idle or in early stages */}
       {(currentStep === "idle" || currentStep === "upload") && (
@@ -894,10 +789,19 @@ export default function ImportPage() {
 
           <input
             type="file"
-            accept=".zip,.csv"
-            multiple
+            accept=".zip"
             className="block text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-            onChange={(e) => e.target.files && handleFiles(e.target.files)}
+            onChange={(e) => {
+              const input = e.target;
+              if (!input.files) return;
+              // Copy synchronously and clear the input so the same file can be
+              // selected again for a retry; a live FileList would be emptied by
+              // the reset and re-selecting an identical file would otherwise fire
+              // no change event.
+              const copy = Array.from(input.files);
+              input.value = "";
+              beginImportFromSelection(copy);
+            }}
           />
           <div
             onDragOver={(e) => {
@@ -907,27 +811,16 @@ export default function ImportPage() {
             onDragLeave={(e) => {
               e.currentTarget.classList.remove("border-blue-400", "bg-blue-50");
             }}
-            onDrop={async (e) => {
+            onDrop={(e) => {
               e.preventDefault();
               e.currentTarget.classList.remove("border-blue-400", "bg-blue-50");
-              if (e.dataTransfer.items) {
-                const items = Array.from(e.dataTransfer.items);
-                const filePromises: Promise<File | null>[] = items.map(
-                  async (it) => {
-                    if (it.kind === "file") {
-                      const f = it.getAsFile();
-                      return f;
-                    }
-                    return null;
-                  },
-                );
-                const files = (await Promise.all(filePromises)).filter(
-                  Boolean,
-                ) as File[];
-                if (files.length) await handleFiles(files);
-              } else if (e.dataTransfer.files && e.dataTransfer.files.length) {
-                await handleFiles(e.dataTransfer.files);
-              }
+              // ZIP-only: collect the dropped files and let the shared gate
+              // reject CSVs, folders, and non-ZIP drops with an actionable error
+              // rather than silently no-op'ing.
+              const files = e.dataTransfer.files
+                ? Array.from(e.dataTransfer.files)
+                : [];
+              beginImportFromSelection(files);
             }}
             className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-sm text-gray-500 bg-gray-50 transition-colors cursor-pointer hover:border-gray-400"
           >
@@ -945,10 +838,11 @@ export default function ImportPage() {
               />
             </svg>
             <p className="font-medium text-gray-700">
-              Drop your export ZIP here
+              Drop your complete export ZIP here
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              or the entire folder of CSVs
+              a single Letterboxd export ZIP (CSV files and folders are not
+              supported)
             </p>
           </div>
         </div>
@@ -983,13 +877,6 @@ export default function ImportPage() {
               >
                 {status}
               </p>
-            </div>
-          )}
-
-          {/* Error message */}
-          {error && (
-            <div className="p-4 rounded-lg bg-red-50 border border-red-200">
-              <p className="text-sm font-medium text-red-800">{error}</p>
             </div>
           )}
 

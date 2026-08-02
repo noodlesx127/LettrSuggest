@@ -1546,8 +1546,9 @@ export async function seedPreferencesFromHistory(
     erasSeeded: number;
 }> {
     if (!supabase) {
-        return { success: false, genresSeeded: 0, keywordsSeeded: 0, actorsSeeded: 0, directorsSeeded: 0, subgenresSeeded: 0, erasSeeded: 0 };
+        throw new Error('Supabase not initialized');
     }
+    const client = supabase;
 
     console.log('[SeedPreferences] Starting preference seeding', { userId: userId.slice(0, 8), filmCount: films.length });
 
@@ -1603,11 +1604,16 @@ export async function seedPreferencesFromHistory(
         }
 
         // Fetch movie features from cache
-        const { data: movieData } = await supabase
+        const { data: movieData, error: movieError } = await client
             .from('tmdb_movies')
             .select('data')
             .eq('tmdb_id', film.tmdbId)
             .maybeSingle();
+
+        if (movieError) {
+            console.error('[SeedPreferences] Failed to read tmdb_movies', { tmdbId: film.tmdbId, error: movieError });
+            throw movieError;
+        }
 
         if (!movieData?.data) {
             processed++;
@@ -1730,16 +1736,22 @@ export async function seedPreferencesFromHistory(
             });
 
             if (updates.length >= 50) {
-                if (supabase) {
-                    await supabase.from('user_feature_feedback').upsert(updates, { onConflict: 'user_id,feature_type,feature_id' });
+                const { error } = await client.from('user_feature_feedback').upsert(updates, { onConflict: 'user_id,feature_type,feature_id' });
+                if (error) {
+                    console.error('[SeedPreferences] Failed to upsert feature feedback', { type, error });
+                    throw error;
                 }
                 count += updates.length;
                 updates.length = 0;
             }
         }
 
-        if (updates.length > 0 && supabase) {
-            await supabase.from('user_feature_feedback').upsert(updates, { onConflict: 'user_id,feature_type,feature_id' });
+        if (updates.length > 0) {
+            const { error } = await client.from('user_feature_feedback').upsert(updates, { onConflict: 'user_id,feature_type,feature_id' });
+            if (error) {
+                console.error('[SeedPreferences] Failed to upsert feature feedback', { type, error });
+                throw error;
+            }
             count += updates.length;
         }
         return count;

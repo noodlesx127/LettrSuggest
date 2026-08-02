@@ -12,6 +12,7 @@ import {
   type RecommendationRevisionInput,
 } from "@/lib/recommendationRevision";
 import {
+  buildTasteProfileCacheRevision,
   buildTasteProfileServer,
   type UserContext,
 } from "@/lib/serverSuggestionsEngine";
@@ -19,6 +20,7 @@ import {
 const cachePathMocks = vi.hoisted(() => ({
   buildTasteProfile: vi.fn(),
   getSupabaseAdmin: vi.fn(),
+  fetchTmdb: vi.fn(),
 }));
 
 vi.mock("@/lib/enrich", () => ({
@@ -28,6 +30,10 @@ vi.mock("@/lib/enrich", () => ({
 
 vi.mock("@/lib/supabaseAdmin", () => ({
   getSupabaseAdmin: cachePathMocks.getSupabaseAdmin,
+}));
+
+vi.mock("@/app/api/v1/_lib/tmdb", () => ({
+  fetchTmdb: cachePathMocks.fetchTmdb,
 }));
 
 const NOW = Date.parse("2026-07-28T12:00:00.000Z");
@@ -255,10 +261,14 @@ describe("recommendation profile cache revision", () => {
   beforeEach(() => {
     cachePathMocks.buildTasteProfile.mockReset();
     cachePathMocks.getSupabaseAdmin.mockReset();
+    cachePathMocks.fetchTmdb.mockReset();
     cachePathMocks.buildTasteProfile.mockImplementation(
       async ({ films }: { films: unknown[] }) =>
         films.length === 0 ? { marker: "empty" } : { marker: "rebuilt" },
     );
+    // Keep the rebuild path offline: a rejected fetch resolves to a null movie
+    // immediately, so no real TMDB network call is made for relevant films.
+    cachePathMocks.fetchTmdb.mockRejectedValue(new Error("offline"));
   });
 
   it("uses the production cache decision and write-payload contract", () => {
@@ -652,5 +662,101 @@ describe("recommendation profile cache revision", () => {
         profile_model_version: "raw profile input and secret",
       }),
     ).toEqual({ revision: null, modelVersion: null });
+  });
+
+  it("derives the watchlist revision from persisted watchlist_added_at, not last_date", () => {
+    const quizState = { status: "unavailable" } as const;
+    const watchlistFilm = {
+      uri: "letterboxd://film/watchlist",
+      title: "Watchlist Film",
+      year: 2020,
+      rating: null,
+      rewatch: false,
+      last_date: "2026-07-01",
+      watch_count: 0,
+      liked: false,
+      on_watchlist: true,
+      watchlist_added_at: "2026-06-20T12:00:00.000Z",
+    };
+    const context: UserContext = {
+      ...productionContext,
+      films: [watchlistFilm],
+      mappings: new Map([["letterboxd://film/watchlist", 404]]),
+      mappingsArray: [{ uri: "letterboxd://film/watchlist", tmdb_id: 404 }],
+    };
+
+    const base = buildTasteProfileCacheRevision(context, quizState);
+    const movedTimestamp = buildTasteProfileCacheRevision(
+      {
+        ...context,
+        films: [
+          { ...watchlistFilm, watchlist_added_at: "2026-06-25T12:00:00.000Z" },
+        ],
+      },
+      quizState,
+    );
+
+    // The persisted watchlist timestamp is a genuine profile input: moving it
+    // (with last_date unchanged) must move the cache revision so stale taste
+    // profiles invalidate. Deriving it from last_date would leave these equal.
+    expect(movedTimestamp.inputRevision).not.toBe(base.inputRevision);
+  });
+
+  it("passes persisted watchlist_added_at (not last_date) into buildTasteProfile", async () => {
+    const upsertPayloads: unknown[] = [];
+    // Stale stored revision forces a cache miss so the production rebuild path
+    // (the second buildTasteProfile call) actually runs.
+    cachePathMocks.getSupabaseAdmin.mockReturnValue(
+      createMockDb(
+        {
+          profile: { marker: "stale" },
+          film_count: 1,
+          computed_at: new Date(Date.now() - 1_000).toISOString(),
+          input_revision: "0000000000000000",
+          profile_model_version: "taste-profile-v1",
+        },
+        upsertPayloads,
+      ),
+    );
+
+    // watchlist_added_at is deliberately distinct from last_date so a buggy
+    // `film.last_date` derivation is observable.
+    const watchlistFilm = {
+      uri: "letterboxd://film/watchlist",
+      title: "Watchlist Film",
+      year: 2020,
+      rating: null,
+      rewatch: false,
+      last_date: "2026-07-01",
+      watch_count: 0,
+      liked: false,
+      on_watchlist: true,
+      watchlist_added_at: "2026-06-20T12:00:00.000Z",
+    };
+    const context: UserContext = {
+      ...productionContext,
+      films: [watchlistFilm],
+      mappings: new Map([["letterboxd://film/watchlist", 404]]),
+      mappingsArray: [{ uri: "letterboxd://film/watchlist", tmdb_id: 404 }],
+    };
+
+    await buildTasteProfileServer("cache-user", context);
+
+    // The first call builds the empty fallback profile; the rebuild call is the
+    // one carrying real films and watchlistFilms.
+    const rebuildCall = cachePathMocks.buildTasteProfile.mock.calls.find(
+      (call: unknown[]) =>
+        Array.isArray((call[0] as { films?: unknown[] })?.films) &&
+        ((call[0] as { films: unknown[] }).films.length > 0),
+    );
+    expect(rebuildCall).toBeDefined();
+    expect((rebuildCall![0] as { watchlistFilms: unknown }).watchlistFilms).toEqual(
+      [
+        {
+          uri: "letterboxd://film/watchlist",
+          watchlistAddedAt: "2026-06-20T12:00:00.000Z",
+        },
+      ],
+    );
   });
 });

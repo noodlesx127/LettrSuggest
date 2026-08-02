@@ -54,6 +54,7 @@ export type FilmEventRow = {
   watch_count: number | null;
   liked: boolean | null;
   on_watchlist: boolean | null;
+  watchlist_added_at?: string | null;
 };
 
 export type FilmMappingRow = {
@@ -958,7 +959,9 @@ function isFilmEventRow(value: unknown): value is FilmEventRow {
     (value.watch_count === null ||
       isNonNegativeFiniteNumber(value.watch_count)) &&
     isNullableBoolean(value.liked) &&
-    isNullableBoolean(value.on_watchlist)
+    isNullableBoolean(value.on_watchlist) &&
+    (value.watchlist_added_at === undefined ||
+      isNullableDateString(value.watchlist_added_at))
   );
 }
 
@@ -1247,7 +1250,7 @@ async function loadDefaultUserContextSources(
     db
       .from("film_events")
       .select(
-        "uri, title, year, rating, rewatch, last_date, watch_count, liked, on_watchlist",
+        "uri, title, year, rating, rewatch, last_date, watch_count, liked, on_watchlist, watchlist_added_at",
       )
       .eq("user_id", userId)
       .limit(10000)
@@ -1400,6 +1403,7 @@ export async function loadUserContext(
       watch_count: row.watch_count ?? null,
       liked: row.liked ?? null,
       on_watchlist: row.on_watchlist ?? null,
+      watchlist_added_at: row.watchlist_added_at ?? null,
     }));
 
     const mappingsArray = Array.isArray(loaded.mappings.data)
@@ -1516,7 +1520,7 @@ async function loadQuizStateForRevision(
   }
 }
 
-function buildTasteProfileCacheRevision(
+export function buildTasteProfileCacheRevision(
   userContext: UserContext,
   quizState: RecommendationRevisionQuizState,
 ): { inputRevision: string; profileModelVersion: string } {
@@ -1541,7 +1545,7 @@ function buildTasteProfileCacheRevision(
         .filter((film) => film.on_watchlist === true)
         .map((film) => ({
           uri: film.uri,
-          watchlistAddedAt: film.last_date,
+          watchlistAddedAt: film.watchlist_added_at ?? null,
         })),
       feedback: userContext.feedback.map((row) => ({
         featureId: row.feature_id,
@@ -1622,7 +1626,7 @@ export async function buildTasteProfileServer(
         .filter((film) => film.on_watchlist)
         .map((film) => ({
           uri: film.uri,
-          watchlistAddedAt: film.last_date ?? undefined,
+          watchlistAddedAt: film.watchlist_added_at ?? undefined,
         })),
       userId,
     });

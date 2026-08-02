@@ -41,118 +41,115 @@ export async function enrichMovieForImport(
   year?: number,
   tmdbId?: number,
 ): Promise<EnrichedImportMovie | null> {
-  try {
-    console.log("[ImportEnrich] Starting enrichment", { title, year, tmdbId });
+  console.log("[ImportEnrich] Starting enrichment", { title, year, tmdbId });
 
-    // Step 1: Get TMDB data (either by ID or search)
-    // We do this on the client because searchMovies is optimized for client use
-    let tmdbMovie: TMDBMovie | null = null;
+  // Step 1: Get TMDB data (either by ID or search)
+  // We do this on the client because searchMovies is optimized for client use.
+  // A search/provider failure is NOT a confirmed no-match: it propagates so the
+  // caller can treat it as a fatal enrichment error rather than silently
+  // dropping the mapping. Only a genuinely empty result set returns null.
+  let tmdbMovie: TMDBMovie | null = null;
 
-    if (tmdbId) {
-      const searchResults = await searchMovies({
-        query: title,
-        year,
-        preferTuiMDB: true,
-      });
-      tmdbMovie =
-        searchResults.find((m) => m.id === tmdbId) || searchResults[0] || null;
-    } else {
-      const searchResults = await searchMovies({
-        query: title,
-        year,
-        preferTuiMDB: true,
-      });
-      tmdbMovie = searchResults[0] || null;
-    }
-
-    if (!tmdbMovie) {
-      console.log("[ImportEnrich] No TMDB match found", { title, year });
-      return null;
-    }
-
-    // Use a non-null variable for the rest of the function to avoid TS errors
-    let movie = tmdbMovie as EnrichedImportMovie;
-
-    console.log("[ImportEnrich] TMDB match found", {
-      tmdbId: movie.id,
-      title: movie.title,
+  if (tmdbId) {
+    const searchResults = await searchMovies({
+      query: title,
+      year,
+      preferTuiMDB: true,
     });
+    tmdbMovie =
+      searchResults.find((m) => m.id === tmdbId) || searchResults[0] || null;
+  } else {
+    const searchResults = await searchMovies({
+      query: title,
+      year,
+      preferTuiMDB: true,
+    });
+    tmdbMovie = searchResults[0] || null;
+  }
 
-    // Step 2: Server-Side Enrichment (Ratings, Watchmode, TuiMDB)
-    // This securely handles API keys on the server
-    try {
-      const serverData = await enrichMovieServerSide(
-        movie.id,
-        movie.tuimdb_uid,
-      );
-      console.log("[ImportEnrich] Server data received:", serverData);
-
-      // Merge full TMDB data if available (includes keywords, credits, etc.)
-      if (serverData.tmdbData) {
-        movie = { ...movie, ...serverData.tmdbData };
-      }
-
-      if (serverData.imdb_id) movie.imdb_id = serverData.imdb_id;
-
-      // Handle TuiMDB data
-      if (serverData.tuimdb_movie) {
-        const tuimdbData = serverData.tuimdb_movie;
-        if (tuimdbData.genres) {
-          console.log("[ImportEnrich] TuiMDB data fetched", {
-            genreCount: tuimdbData.genres.length,
-          });
-        }
-      }
-
-      if (serverData.ratings) {
-        const r = serverData.ratings;
-        // Ratings are already logged and handled by the aggregator
-        // We don't need to store them on the movie object if they aren't in TMDBMovie type
-        // The cache will store the full serverData if needed, or we rely on TMDB ratings.
-
-        console.log("[ImportEnrich] Ratings aggregated:", {
-          rating: r.rating,
-          source: r.rating_source,
-          rt: r.rotten_tomatoes,
-        });
-      }
-
-      if (serverData.watchmode_id) {
-        movie.watchmode_id = serverData.watchmode_id;
-      }
-
-      if (serverData.streaming_sources) {
-        movie.streaming_sources = serverData.streaming_sources;
-        console.log("[ImportEnrich] Watchmode streaming sources added", {
-          count: serverData.streaming_sources.length,
-        });
-      }
-    } catch (e) {
-      console.error("[ImportEnrich] Server enrichment failed", e);
-    }
-
-    // Step 3: Cache the enriched movie in Supabase
-    try {
-      const { error } = await upsertTmdbCacheAction(movie);
-      if (error) {
-        console.error("[ImportEnrich] Cache upsert failed", {
-          tmdbId: movie.id,
-          error,
-        });
-      } else {
-        console.log("[ImportEnrich] Cached enriched movie", {
-          tmdbId: movie.id,
-        });
-      }
-    } catch (e) {
-      console.error("[ImportEnrich] Cache upsert failed", e);
-    }
-
-    return movie;
-  } catch (error) {
-    console.error("[ImportEnrich] Enrichment failed", { title, year, error });
+  if (!tmdbMovie) {
+    console.log("[ImportEnrich] No TMDB match found", { title, year });
     return null;
   }
+
+  // Use a non-null variable for the rest of the function to avoid TS errors
+  let movie = tmdbMovie as EnrichedImportMovie;
+
+  console.log("[ImportEnrich] TMDB match found", {
+    tmdbId: movie.id,
+    title: movie.title,
+  });
+
+  // Step 2: Server-Side Enrichment (Ratings, Watchmode, TuiMDB)
+  // This securely handles API keys on the server. These detail failures may
+  // degrade the enriched payload but must not discard the confirmed mapping.
+  try {
+    const serverData = await enrichMovieServerSide(movie.id, movie.tuimdb_uid);
+    console.log("[ImportEnrich] Server data received:", serverData);
+
+    // Merge full TMDB data if available (includes keywords, credits, etc.)
+    if (serverData.tmdbData) {
+      movie = { ...movie, ...serverData.tmdbData };
+    }
+
+    if (serverData.imdb_id) movie.imdb_id = serverData.imdb_id;
+
+    // Handle TuiMDB data
+    if (serverData.tuimdb_movie) {
+      const tuimdbData = serverData.tuimdb_movie;
+      if (tuimdbData.genres) {
+        console.log("[ImportEnrich] TuiMDB data fetched", {
+          genreCount: tuimdbData.genres.length,
+        });
+      }
+    }
+
+    if (serverData.ratings) {
+      const r = serverData.ratings;
+      // Ratings are already logged and handled by the aggregator
+      // We don't need to store them on the movie object if they aren't in TMDBMovie type
+      // The cache will store the full serverData if needed, or we rely on TMDB ratings.
+
+      console.log("[ImportEnrich] Ratings aggregated:", {
+        rating: r.rating,
+        source: r.rating_source,
+        rt: r.rotten_tomatoes,
+      });
+    }
+
+    if (serverData.watchmode_id) {
+      movie.watchmode_id = serverData.watchmode_id;
+    }
+
+    if (serverData.streaming_sources) {
+      movie.streaming_sources = serverData.streaming_sources;
+      console.log("[ImportEnrich] Watchmode streaming sources added", {
+        count: serverData.streaming_sources.length,
+      });
+    }
+  } catch (e) {
+    console.error("[ImportEnrich] Server enrichment failed", e);
+  }
+
+  // Step 3: Cache the enriched movie in Supabase. A cache failure degrades
+  // gracefully; the confirmed mapping is still returned to the caller.
+  try {
+    const { error } = await upsertTmdbCacheAction(movie);
+    if (error) {
+      console.error("[ImportEnrich] Cache upsert failed", {
+        tmdbId: movie.id,
+        error,
+      });
+    } else {
+      console.log("[ImportEnrich] Cached enriched movie", {
+        tmdbId: movie.id,
+      });
+    }
+  } catch (e) {
+    console.error("[ImportEnrich] Cache upsert failed", e);
+  }
+
+  return movie;
 }
 
 /**

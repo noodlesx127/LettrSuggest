@@ -8103,7 +8103,10 @@ export async function updateAdjacentPreferences(
   userTopGenres: Array<{ id: number; name: string }>,
   rating: number,
 ) {
-  if (!supabase || !filmGenres || filmGenres.length === 0) return;
+  // An empty genre list is a legitimate no-op.
+  if (!filmGenres || filmGenres.length === 0) return;
+  // Fail closed: work to do requires a client.
+  if (!supabase) throw new Error("Supabase not initialized");
 
   try {
     const topGenreIds = new Set(userTopGenres.map((g) => g.id));
@@ -8116,13 +8119,17 @@ export async function updateAdjacentPreferences(
       // This is an adjacent genre - find which top genre it's adjacent to
       for (const topGenre of userTopGenres.slice(0, 3)) {
         // Check if this transition exists
-        const { data: existing } = await supabase
+        const { data: existing, error: existingError } = await supabase
           .from("user_adjacent_preferences")
           .select("*")
           .eq("user_id", userId)
           .eq("from_genre_id", topGenre.id)
           .eq("to_genre_id", filmGenre.id)
           .maybeSingle();
+
+        if (existingError) {
+          throw existingError;
+        }
 
         if (existing) {
           // Update existing preference
@@ -8133,7 +8140,7 @@ export async function updateAdjacentPreferences(
             existing.success_rate * existing.rating_count + (isSuccess ? 1 : 0);
           const newSuccessRate = successCount / newCount;
 
-          await supabase
+          const { error: updateError } = await supabase
             .from("user_adjacent_preferences")
             .update({
               rating_count: newCount,
@@ -8142,6 +8149,10 @@ export async function updateAdjacentPreferences(
               last_updated: new Date().toISOString(),
             })
             .eq("id", existing.id);
+
+          if (updateError) {
+            throw updateError;
+          }
 
           if (process.env.NODE_ENV === "development") {
             console.log("[AdjacentPreferences] Updated", {
@@ -8153,17 +8164,23 @@ export async function updateAdjacentPreferences(
           }
         } else {
           // Create new preference
-          await supabase.from("user_adjacent_preferences").insert({
-            user_id: userId,
-            from_genre_id: topGenre.id,
-            from_genre_name: topGenre.name,
-            to_genre_id: filmGenre.id,
-            to_genre_name: filmGenre.name,
-            rating_count: 1,
-            avg_rating: rating,
-            success_rate: isSuccess ? 1.0 : 0.0,
-            last_updated: new Date().toISOString(),
-          });
+          const { error: insertError } = await supabase
+            .from("user_adjacent_preferences")
+            .insert({
+              user_id: userId,
+              from_genre_id: topGenre.id,
+              from_genre_name: topGenre.name,
+              to_genre_id: filmGenre.id,
+              to_genre_name: filmGenre.name,
+              rating_count: 1,
+              avg_rating: rating,
+              success_rate: isSuccess ? 1.0 : 0.0,
+              last_updated: new Date().toISOString(),
+            });
+
+          if (insertError) {
+            throw insertError;
+          }
 
           if (process.env.NODE_ENV === "development") {
             console.log("[AdjacentPreferences] Created", {
@@ -8177,6 +8194,7 @@ export async function updateAdjacentPreferences(
     }
   } catch (e) {
     console.error("[AdjacentPreferences] Error:", e);
+    throw e;
   }
 }
 
@@ -8185,12 +8203,8 @@ export async function updateAdjacentPreferences(
  * This gives new users personalized recommendations immediately
  */
 export async function learnFromHistoricalData(userId: string) {
-  if (!supabase) {
-    if (process.env.NODE_ENV === "development") {
-      console.log("[BatchLearning] Supabase not initialized");
-    }
-    return;
-  }
+  // Fail closed: required post-import work must reject without a client.
+  if (!supabase) throw new Error("Supabase not initialized");
 
   try {
     if (process.env.NODE_ENV === "development") {
@@ -8215,11 +8229,12 @@ export async function learnFromHistoricalData(userId: string) {
         .from("film_events")
         .select("uri, title, rating, liked")
         .eq("user_id", userId)
+        .order("uri", { ascending: true })
         .range(from, from + pageSize - 1);
 
       if (pageError) {
         console.error("[BatchLearning] Error fetching films page:", pageError);
-        break;
+        throw pageError;
       }
 
       const rows = pageData ?? [];
@@ -8251,6 +8266,7 @@ export async function learnFromHistoricalData(userId: string) {
         .from("film_tmdb_map")
         .select("uri, tmdb_id")
         .eq("user_id", userId)
+        .order("uri", { ascending: true })
         .range(from, from + pageSize - 1);
 
       if (pageError) {
@@ -8258,7 +8274,7 @@ export async function learnFromHistoricalData(userId: string) {
           "[BatchLearning] Error fetching mappings page:",
           pageError,
         );
-        break;
+        throw pageError;
       }
 
       const rows = pageData ?? [];
@@ -8285,10 +8301,18 @@ export async function learnFromHistoricalData(userId: string) {
 
     for (let i = 0; i < tmdbIds.length; i += batchSize) {
       const batch = tmdbIds.slice(i, i + batchSize);
-      const { data: cached } = await supabase
+      const { data: cached, error: cachedError } = await supabase
         .from("tmdb_movies")
         .select("tmdb_id, data")
         .in("tmdb_id", batch);
+
+      if (cachedError) {
+        console.error("[BatchLearning] Error fetching TMDB details batch:", {
+          error: cachedError,
+          batchStart: i,
+        });
+        throw cachedError;
+      }
 
       cached?.forEach((row) => {
         if (row.data) {
@@ -8386,6 +8410,7 @@ export async function learnFromHistoricalData(userId: string) {
         "[BatchLearning] Failed to fetch current exploration stats",
         currentStatsError,
       );
+      throw currentStatsError;
     }
 
     // Only seed if no exploration stats row exists yet.
@@ -8396,13 +8421,23 @@ export async function learnFromHistoricalData(userId: string) {
         exploratory.length;
 
       // Seed exploration stats
-      await supabase.from("user_exploration_stats").upsert({
-        user_id: userId,
-        exploration_rate: 0.15, // Start at default
-        exploratory_films_rated: exploratory.length,
-        exploratory_avg_rating: Number(exploratoryAvg.toFixed(2)),
-        last_updated: new Date().toISOString(),
-      });
+      const { error: seedStatsError } = await supabase
+        .from("user_exploration_stats")
+        .upsert({
+          user_id: userId,
+          exploration_rate: 0.15, // Start at default
+          exploratory_films_rated: exploratory.length,
+          exploratory_avg_rating: Number(exploratoryAvg.toFixed(2)),
+          last_updated: new Date().toISOString(),
+        });
+
+      if (seedStatsError) {
+        console.error(
+          "[BatchLearning] Failed to seed exploration stats",
+          seedStatsError,
+        );
+        throw seedStatsError;
+      }
 
       if (process.env.NODE_ENV === "development") {
         console.log("[BatchLearning] Seeded exploration stats", {
@@ -8431,6 +8466,7 @@ export async function learnFromHistoricalData(userId: string) {
     }
   } catch (e) {
     console.error("[BatchLearning] Error during batch learning:", e);
+    throw e;
   }
 }
 
