@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const suggestByOverlap = vi.hoisted(() => vi.fn());
+const suggestByOverlapStaged = vi.hoisted(() => vi.fn());
+const rerankOverlapResults = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/enrich", () => ({ suggestByOverlap }));
+vi.mock("@/lib/enrich", () => ({
+  suggestByOverlapStaged,
+  rerankOverlapResults,
+}));
 
 import type { RecommendationEngineContext } from "@/lib/recommendationEngine";
 import { scoreRecommendationsWithOverlap } from "@/lib/recommendationScoring";
@@ -130,15 +134,21 @@ const movie: TMDBMovie = {
 
 describe("scoreRecommendationsWithOverlap", () => {
   beforeEach(() => {
-    suggestByOverlap.mockReset();
-    suggestByOverlap.mockResolvedValue([
+    suggestByOverlapStaged.mockReset();
+    rerankOverlapResults.mockReset();
+    const scoreOrdered = [
       {
         tmdbId: 707,
         score: 12,
         reasons: ["watchlist intent"],
         sources: ["fixture"],
       },
-    ]);
+    ];
+    suggestByOverlapStaged.mockResolvedValue({
+      scoreOrdered,
+      rerankInput: { count: 10, mmrLambda: 0.6 },
+    });
+    rerankOverlapResults.mockImplementation((results) => results);
   });
 
   it("forwards rich personalization and source metadata to overlap scoring", async () => {
@@ -161,7 +171,7 @@ describe("scoreRecommendationsWithOverlap", () => {
       { ...personalization, sourceMetadata },
     );
 
-    expect(suggestByOverlap).toHaveBeenCalledWith(
+    expect(suggestByOverlapStaged).toHaveBeenCalledWith(
       expect.objectContaining({
         enhancedProfile: personalization.enhancedProfile,
         featureFeedback: personalization.featureFeedback,
@@ -180,5 +190,63 @@ describe("scoreRecommendationsWithOverlap", () => {
         explanation: "watchlist intent",
       }),
     ]);
+  });
+
+  it("runs the existing overlap rerank from the staged score order", async () => {
+    const scoreOrdered = [
+      {
+        tmdbId: 707,
+        score: 12,
+        reasons: ["first"],
+        sources: ["fixture"],
+      },
+      {
+        tmdbId: 808,
+        score: 11,
+        reasons: ["second"],
+        sources: ["fixture"],
+      },
+    ];
+    const reranked = [scoreOrdered[1], scoreOrdered[0]];
+    suggestByOverlapStaged.mockResolvedValue({
+      scoreOrdered,
+      rerankInput: { count: 10, mmrLambda: 0.6 },
+    });
+    rerankOverlapResults.mockReturnValue(reranked);
+
+    const { scoreRecommendationsWithOverlapStaged } = await import(
+      "@/lib/recommendationScoring"
+    );
+    const outcome = await scoreRecommendationsWithOverlapStaged(
+      {
+        request: {
+          userId: "scoring-user",
+          count: 2,
+          seeds: [],
+          excludeTmdbIds: [],
+          genres: [],
+          context: { mode: "neutral", localHour: null },
+          requestSeed: "scoring-rerank-seed",
+        },
+        context,
+        mode: "personalized",
+        candidates: [{ tmdbId: 707 }, { tmdbId: 808 }],
+      },
+      new Map([[707, movie], [808, movie]]),
+      { ...personalization, sourceMetadata },
+    );
+
+    expect(outcome.candidates.map((candidate) => candidate.tmdbId)).toEqual([
+      707,
+      808,
+    ]);
+    expect(outcome.rerankCandidates().map((candidate) => candidate.tmdbId)).toEqual([
+      808,
+      707,
+    ]);
+    expect(rerankOverlapResults).toHaveBeenCalledWith(
+      scoreOrdered,
+      { count: 10, mmrLambda: 0.6 },
+    );
   });
 });

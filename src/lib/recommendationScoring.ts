@@ -1,9 +1,15 @@
-import { suggestByOverlap, type FilmEventLite, type TMDBMovie } from "@/lib/enrich";
+import {
+  rerankOverlapResults,
+  suggestByOverlapStaged,
+  type FilmEventLite,
+  type OverlapScoredResult,
+  type TMDBMovie,
+} from "@/lib/enrich";
 import type { RecommendationScoreParams } from "@/lib/recommendationEngine";
 import type { RecommendationCandidate } from "@/lib/recommendationTypes";
 import type { RecommendationPersonalization } from "@/lib/recommendationPersonalization";
 
-type OverlapScoringParams = Parameters<typeof suggestByOverlap>[0];
+type OverlapScoringParams = Parameters<typeof suggestByOverlapStaged>[0];
 
 export type OverlapScoringContext = RecommendationScoreParams["context"];
 
@@ -12,11 +18,58 @@ export type RecommendationScoringPersonalization =
     sourceMetadata: NonNullable<OverlapScoringParams["sourceMetadata"]>;
   };
 
-export async function scoreRecommendationsWithOverlap(
+export type OverlapScoringOutcome = Readonly<{
+  /** Score-ordered canonical candidates, before the existing overlap rerank. */
+  candidates: RecommendationCandidate[];
+  /**
+   * Performs the existing overlap rerank (MMR + niche prioritization +
+   * diversity stages) over the staged score order with identical
+   * params/behavior. Paths without a rerank stage (cold start) return the
+   * score-ordered candidates unchanged.
+   */
+  rerankCandidates: () => RecommendationCandidate[];
+}>;
+
+function toRecommendationCandidate(
+  item: OverlapScoredResult,
+): RecommendationCandidate {
+  const providerFamilies = item.sources?.length
+    ? [...item.sources]
+    : ["overlap"];
+  const retrievalScore = item.score;
+
+  return {
+    tmdbId: item.tmdbId,
+    score: item.score,
+    reasons: [...item.reasons],
+    explanation: item.reasons[0],
+    evidence: {
+      seedAnchors: [],
+      providerFamilies,
+      providerOccurrences: providerFamilies.length,
+      retrievalScore,
+    },
+    attribution: {
+      retrieval: retrievalScore,
+      preference: 0,
+      context: 0,
+      diversity: 0,
+      total: item.score,
+    },
+  };
+}
+
+/**
+ * Score candidates through the overlap seam and expose the scoring/rerank
+ * stages separately. candidates is the pure score order (pre-rerank) so the
+ * canonical engine can record a true pre-rank; rerankCandidates performs the
+ * existing overlap rerank with identical params/behavior.
+ */
+export async function scoreRecommendationsWithOverlapStaged(
   params: RecommendationScoreParams,
   tmdbDetailsCache: Map<number, TMDBMovie>,
   personalization: RecommendationScoringPersonalization,
-): Promise<RecommendationCandidate[]> {
+): Promise<OverlapScoringOutcome> {
   if (
     params.candidates.some(
       (candidate) =>
@@ -45,7 +98,7 @@ export async function scoreRecommendationsWithOverlap(
     if (tuple.tmdbId !== null) mappings.set(tuple.uri, tuple.tmdbId);
   }
 
-  const scored = await suggestByOverlap({
+  const { scoreOrdered, rerankInput } = await suggestByOverlapStaged({
     userId: params.request.userId,
     films,
     mappings,
@@ -64,7 +117,7 @@ export async function scoreRecommendationsWithOverlap(
   });
 
   if (
-    scored.some(
+    scoreOrdered.some(
       (item) =>
         !Number.isFinite(item.score) ||
         !Number.isSafeInteger(item.tmdbId) ||
@@ -74,30 +127,39 @@ export async function scoreRecommendationsWithOverlap(
     throw new Error("Invalid overlap scorer result");
   }
 
-  return scored.map((item) => {
-    const providerFamilies = item.sources?.length
-      ? [...item.sources]
-      : ["overlap"];
-    const retrievalScore = item.score;
+  const candidates = scoreOrdered.map(toRecommendationCandidate);
+  const candidateById = new Map(
+    candidates.map((candidate) => [candidate.tmdbId, candidate]),
+  );
 
-    return {
-      tmdbId: item.tmdbId,
-      score: item.score,
-      reasons: [...item.reasons],
-      explanation: item.reasons[0],
-      evidence: {
-        seedAnchors: [],
-        providerFamilies,
-        providerOccurrences: providerFamilies.length,
-        retrievalScore,
-      },
-      attribution: {
-        retrieval: retrievalScore,
-        preference: 0,
-        context: 0,
-        diversity: 0,
-        total: item.score,
-      },
-    };
-  });
+  return {
+    candidates,
+    rerankCandidates: () => {
+      if (!rerankInput) return candidates;
+      return rerankOverlapResults(scoreOrdered, rerankInput).flatMap(
+        (item) => {
+          const candidate = candidateById.get(item.tmdbId);
+          return candidate ? [candidate] : [];
+        },
+      );
+    },
+  };
+}
+
+/**
+ * Canonical scoring seam: returns the score-ordered (pre-rerank) candidates.
+ * Callers that also need the existing overlap rerank should use
+ * scoreRecommendationsWithOverlapStaged.
+ */
+export async function scoreRecommendationsWithOverlap(
+  params: RecommendationScoreParams,
+  tmdbDetailsCache: Map<number, TMDBMovie>,
+  personalization: RecommendationScoringPersonalization,
+): Promise<RecommendationCandidate[]> {
+  const { candidates } = await scoreRecommendationsWithOverlapStaged(
+    params,
+    tmdbDetailsCache,
+    personalization,
+  );
+  return candidates;
 }

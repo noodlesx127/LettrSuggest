@@ -314,7 +314,7 @@ describe("reconcile_import_snapshot migration contract", () => {
   const migration = readFileSync(
     fileURLToPath(
       new URL(
-        "../../supabase/migrations/20260801000000_reconcile_import_snapshot.sql",
+        "../../supabase/migrations/20260802013015_reconcile_import_snapshot.sql",
         import.meta.url,
       ),
     ),

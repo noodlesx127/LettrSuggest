@@ -376,6 +376,481 @@ export function selectCanonicalPalateCleanser<
     .slice(0, Math.max(0, Math.floor(limit)));
 }
 
+/**
+ * The committed presentation model shared by recommendation pages and their
+ * exposure telemetry. Section arrays remain available for JSX, while
+ * orderedItems/orderedTmdbIds represent the first visible occurrence of each
+ * card in the exact section order.
+ */
+export type FinalizedPresentationSection<T extends { id: number }> = Readonly<{
+  key: string;
+  items: readonly T[];
+}>;
+
+export type FinalizedPresentation<T extends { id: number }> = Readonly<{
+  sections: readonly FinalizedPresentationSection<T>[];
+  itemsByKey: ReadonlyMap<string, readonly T[]>;
+  orderedItems: readonly T[];
+  orderedTmdbIds: readonly number[];
+  postRanksById: ReadonlyMap<number, number>;
+}>;
+
+/**
+ * Finalize arbitrary visible sections without changing their order. Duplicate
+ * cards remain in the section arrays for JSX, but telemetry's ordered view
+ * records each card once at its first visible position.
+ */
+export function buildFinalizedPresentation<T extends { id: number }>(
+  sections: readonly FinalizedPresentationSection<T>[],
+): FinalizedPresentation<T> {
+  const normalizedSections = sections.map((section) => ({
+    key: section.key,
+    items: section.items.filter(
+      (item) =>
+        Number.isSafeInteger(item.id) && item.id > 0,
+    ),
+  }));
+  const itemsByKey = new Map<string, readonly T[]>();
+  const orderedItems: T[] = [];
+  const orderedTmdbIds: number[] = [];
+  const postRanksById = new Map<number, number>();
+  const seen = new Set<number>();
+
+  for (const section of normalizedSections) {
+    itemsByKey.set(section.key, section.items);
+    for (const item of section.items) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      orderedItems.push(item);
+      orderedTmdbIds.push(item.id);
+      postRanksById.set(item.id, orderedTmdbIds.length);
+    }
+  }
+
+  return {
+    sections: normalizedSections,
+    itemsByKey,
+    orderedItems,
+    orderedTmdbIds,
+    postRanksById,
+  };
+}
+
+/**
+ * Presentation section visibility for the /suggest page.
+ *
+ * The suggest page partitions the canonical ordered output into UI sections;
+ * some sections are initially collapsed behind the "Explore N More
+ * Categories" and "Show N more sections" toggles, and one categorized section
+ * (nicheMatches) has no render block at all. Both section rendering and
+ * exposure telemetry derive from these helpers so the presented order and the
+ * logged order cannot drift.
+ */
+
+export type SuggestSectionKey =
+  | "watchlistPicks"
+  | "seasonalPicks"
+  | "perfectMatches"
+  | "recentWatchMatches"
+  | "studioMatches"
+  | "directorMatches"
+  | "actorMatches"
+  | "genreMatches"
+  | "documentaries"
+  | "decadeMatches"
+  | "smartDiscovery"
+  | "hiddenGems"
+  | "cultClassics"
+  | "crowdPleasers"
+  | "newReleases"
+  | "recentClassics"
+  | "deepCuts"
+  | "fromCollections"
+  | "multiSourceConsensus"
+  | "internationalCinema"
+  | "animationPicks"
+  | "quickWatches"
+  | "epicFilms"
+  | "criticallyAcclaimed"
+  | "nicheMatches"
+  | "moreRecommendations";
+
+export const SUGGEST_ALL_SECTION_KEYS: readonly SuggestSectionKey[] = [
+  "watchlistPicks",
+  "seasonalPicks",
+  "perfectMatches",
+  "recentWatchMatches",
+  "studioMatches",
+  "directorMatches",
+  "actorMatches",
+  "genreMatches",
+  "documentaries",
+  "decadeMatches",
+  "smartDiscovery",
+  "hiddenGems",
+  "cultClassics",
+  "crowdPleasers",
+  "newReleases",
+  "recentClassics",
+  "deepCuts",
+  "fromCollections",
+  "multiSourceConsensus",
+  "internationalCinema",
+  "animationPicks",
+  "quickWatches",
+  "epicFilms",
+  "criticallyAcclaimed",
+  "nicheMatches",
+  "moreRecommendations",
+];
+
+const SUGGEST_ALWAYS_VISIBLE_SECTIONS: readonly SuggestSectionKey[] = [
+  "watchlistPicks",
+  "perfectMatches",
+  "nicheMatches",
+  "recentWatchMatches",
+  "seasonalPicks",
+  "multiSourceConsensus",
+];
+
+const SUGGEST_SECONDARY_SECTIONS: readonly SuggestSectionKey[] = [
+  "directorMatches",
+  "actorMatches",
+  "studioMatches",
+  "genreMatches",
+  "smartDiscovery",
+  "hiddenGems",
+];
+
+const SUGGEST_EXPLORE_SECTIONS: readonly SuggestSectionKey[] = [
+  "animationPicks",
+  "documentaries",
+  "internationalCinema",
+  "quickWatches",
+  "epicFilms",
+  "criticallyAcclaimed",
+  "fromCollections",
+  "cultClassics",
+  "crowdPleasers",
+  "deepCuts",
+  "decadeMatches",
+  "newReleases",
+  "recentClassics",
+  "moreRecommendations",
+];
+
+/**
+ * Exact JSX render order of the sections that own a render block on the
+ * page. nicheMatches is categorized but has no render block, so it is absent
+ * here and its cards never surface.
+ */
+const SUGGEST_SECTION_RENDER_ORDER: readonly SuggestSectionKey[] = [
+  "watchlistPicks",
+  "seasonalPicks",
+  "perfectMatches",
+  "recentWatchMatches",
+  "directorMatches",
+  "studioMatches",
+  "actorMatches",
+  "genreMatches",
+  "documentaries",
+  "decadeMatches",
+  "smartDiscovery",
+  "hiddenGems",
+  "cultClassics",
+  "crowdPleasers",
+  "newReleases",
+  "recentClassics",
+  "deepCuts",
+  "fromCollections",
+  "multiSourceConsensus",
+  "internationalCinema",
+  "animationPicks",
+  "quickWatches",
+  "epicFilms",
+  "criticallyAcclaimed",
+  "moreRecommendations",
+];
+
+export type SuggestSectionItems = Readonly<
+  Record<SuggestSectionKey, ReadonlyArray<Readonly<{ id: number }>>>
+>;
+
+export type SuggestSectionVisibilityFlags = Readonly<{
+  showAllSections: boolean;
+  showCollapsedSmallSections: boolean;
+}>;
+
+/** The initial /suggest presentation: both expansion toggles are off. */
+export const INITIAL_SUGGEST_SECTION_FLAGS: SuggestSectionVisibilityFlags = {
+  showAllSections: false,
+  showCollapsedSmallSections: false,
+};
+
+export type SuggestSectionVisibility = Readonly<{
+  /** Section keys that actually render, in exact JSX render order. */
+  renderedSectionKeys: readonly SuggestSectionKey[];
+  shouldRenderSection: (key: SuggestSectionKey) => boolean;
+  /** Collapsed explore sections behind "Explore N More Categories". */
+  exploreButtonCount: number;
+  /** Collapsed small sections behind "Show N more sections". */
+  smallSectionsButtonCount: number;
+}>;
+
+const SUGGEST_SECONDARY_VISIBILITY_THRESHOLD = 3;
+
+/**
+ * Compute which suggest sections render for the given toggle flags, mirroring
+ * the page presentation rules exactly: always-visible sections render when
+ * non-empty, secondary sections need at least three items, explore sections
+ * stay collapsed until showAllSections, small (1-2 item) sections stay
+ * collapsed until showCollapsedSmallSections, deepCuts renders whenever
+ * non-empty, and nicheMatches never renders.
+ */
+export function computeSuggestSectionVisibility(
+  sectionItems: SuggestSectionItems,
+  flags: SuggestSectionVisibilityFlags,
+): SuggestSectionVisibility {
+  const sectionCounts = Object.fromEntries(
+    SUGGEST_ALL_SECTION_KEYS.map((key) => [
+      key,
+      sectionItems[key]?.length ?? 0,
+    ]),
+  ) as Record<SuggestSectionKey, number>;
+
+  const prioritySections = SUGGEST_ALWAYS_VISIBLE_SECTIONS.filter(
+    (key) => sectionCounts[key] > 0,
+  );
+  const prioritySet = new Set(prioritySections);
+
+  const secondarySections = SUGGEST_SECONDARY_SECTIONS.filter(
+    (key) =>
+      !prioritySet.has(key) &&
+      sectionCounts[key] >= SUGGEST_SECONDARY_VISIBILITY_THRESHOLD,
+  );
+  const visibleSectionKeys = [...prioritySections, ...secondarySections];
+  const visibleSet = new Set(visibleSectionKeys);
+
+  const collapsedSmallSections = SUGGEST_ALL_SECTION_KEYS.filter(
+    (key) =>
+      !visibleSet.has(key) &&
+      sectionCounts[key] > 0 &&
+      sectionCounts[key] < SUGGEST_SECONDARY_VISIBILITY_THRESHOLD,
+  );
+  const collapsedSmallSet = new Set(collapsedSmallSections);
+
+  const exploreSections = SUGGEST_EXPLORE_SECTIONS.filter(
+    (key) => !collapsedSmallSet.has(key) && sectionCounts[key] > 0,
+  );
+  const collapsedExploreSections = exploreSections.filter(
+    (key) => !flags.showAllSections && !visibleSet.has(key),
+  );
+  const collapsedExploreSet = new Set(collapsedExploreSections);
+
+  const shouldRenderSection = (key: SuggestSectionKey): boolean => {
+    // deepCuts owns no collapse gate on the page; it renders when non-empty.
+    if (key === "deepCuts") return sectionCounts[key] > 0;
+    // nicheMatches owns no render block, so its cards never surface.
+    if (key === "nicheMatches") return false;
+    if (sectionCounts[key] === 0) return false;
+    if (!flags.showAllSections && collapsedExploreSet.has(key)) return false;
+    if (!flags.showCollapsedSmallSections && collapsedSmallSet.has(key)) {
+      return false;
+    }
+    return true;
+  };
+
+  const renderedSectionKeys = SUGGEST_SECTION_RENDER_ORDER.filter((key) =>
+    shouldRenderSection(key),
+  );
+
+  return {
+    renderedSectionKeys,
+    shouldRenderSection,
+    exploreButtonCount: flags.showAllSections
+      ? 0
+      : collapsedExploreSections.length,
+    smallSectionsButtonCount: flags.showCollapsedSmallSections
+      ? 0
+      : collapsedSmallSections.length,
+  };
+}
+
+export type SuggestPresentationSectionKey = SuggestSectionKey | "palateCleanser";
+
+export type SuggestPresentation<T extends { id: number }> =
+  FinalizedPresentation<T> &
+    Readonly<{
+      renderedSectionKeys: readonly SuggestPresentationSectionKey[];
+      shouldRenderSection: (
+        key: SuggestPresentationSectionKey,
+      ) => boolean;
+      exploreButtonCount: number;
+      smallSectionsButtonCount: number;
+    }>;
+
+export type CommittedExposurePresentation = Readonly<{
+  orderedTmdbIds: readonly number[];
+}>;
+
+export type CommittedExposureEmissionScope = Readonly<{
+  generation: number;
+  owner: string;
+}>;
+
+export type CommittedExposureEmissionState = Readonly<{
+  generation: number | null;
+  owner: string | null;
+  emittedIds: ReadonlySet<number>;
+}>;
+
+export type CommittedExposureEmission = Readonly<{
+  state: CommittedExposureEmissionState;
+  newlyVisibleIds: readonly number[];
+}>;
+
+/**
+ * Create the empty state for a committed-presentation exposure emitter.
+ * Keeping the state as an explicit value makes the emitter pure and lets
+ * callers reset it synchronously when an account or generation changes.
+ */
+export function createCommittedExposureEmissionState(): CommittedExposureEmissionState {
+  return {
+    generation: null,
+    owner: null,
+    emittedIds: new Set<number>(),
+  };
+}
+
+/**
+ * Return only the cards that became visible since the previous committed
+ * presentation for the same generation and owner. A changed scope starts a
+ * fresh emission set; input state and presentation are never mutated.
+ */
+export function emitNewCommittedExposureIds(
+  previousState: CommittedExposureEmissionState,
+  scope: CommittedExposureEmissionScope,
+  presentation: CommittedExposurePresentation | null | undefined,
+): CommittedExposureEmission {
+  const sameScope =
+    previousState.generation === scope.generation &&
+    previousState.owner === scope.owner;
+  const emittedIds = new Set<number>(
+    sameScope ? previousState.emittedIds : undefined,
+  );
+  const newlyVisibleIds: number[] = [];
+
+  for (const tmdbId of presentation?.orderedTmdbIds ?? []) {
+    if (
+      !Number.isSafeInteger(tmdbId) ||
+      tmdbId <= 0 ||
+      emittedIds.has(tmdbId)
+    ) {
+      continue;
+    }
+    emittedIds.add(tmdbId);
+    newlyVisibleIds.push(tmdbId);
+  }
+
+  return {
+    state: {
+      generation: scope.generation,
+      owner: scope.owner,
+      emittedIds,
+    },
+    newlyVisibleIds,
+  };
+}
+
+/**
+ * Build the final /suggest presentation after all committed presentation
+ * inputs (including the async palate cleanser) are available. The palate
+ * cleanser is intentionally placed between crowdPleasers and newReleases,
+ * matching the JSX order.
+ */
+export function buildSuggestPresentation<T extends { id: number }>(
+  sectionItems: SuggestSectionItems | null | undefined,
+  palateCleanser: readonly T[],
+  flags: SuggestSectionVisibilityFlags,
+): SuggestPresentation<T> {
+  const safeSectionItems = sectionItems ?? ({} as SuggestSectionItems);
+  const visibility = computeSuggestSectionVisibility(
+    safeSectionItems,
+    flags,
+  );
+  const presentationOrder: readonly SuggestPresentationSectionKey[] = [
+    "watchlistPicks",
+    "seasonalPicks",
+    "perfectMatches",
+    "recentWatchMatches",
+    "directorMatches",
+    "studioMatches",
+    "actorMatches",
+    "genreMatches",
+    "documentaries",
+    "decadeMatches",
+    "smartDiscovery",
+    "hiddenGems",
+    "cultClassics",
+    "crowdPleasers",
+    "palateCleanser",
+    "newReleases",
+    "recentClassics",
+    "deepCuts",
+    "fromCollections",
+    "multiSourceConsensus",
+    "internationalCinema",
+    "animationPicks",
+    "quickWatches",
+    "epicFilms",
+    "criticallyAcclaimed",
+    "moreRecommendations",
+  ];
+
+  const renderedSectionKeys = presentationOrder.filter((key) =>
+    key === "palateCleanser"
+      ? palateCleanser.length > 0
+      : visibility.shouldRenderSection(key),
+  );
+  const finalized = buildFinalizedPresentation<T>(
+    renderedSectionKeys.map((key) => ({
+      key,
+      items:
+        key === "palateCleanser"
+          ? palateCleanser
+          : (safeSectionItems[key] as readonly T[] | undefined) ?? [],
+    })),
+  );
+
+  return {
+    ...finalized,
+    renderedSectionKeys,
+    shouldRenderSection: (key) =>
+      key === "palateCleanser"
+        ? palateCleanser.length > 0
+        : visibility.shouldRenderSection(key),
+    exploreButtonCount: visibility.exploreButtonCount,
+    smallSectionsButtonCount: visibility.smallSectionsButtonCount,
+  };
+}
+
+/**
+ * Select the TMDB ids of the cards actually presented by the initial /suggest
+ * render, in exact presentation order. Collapsed explore/small sections and
+ * the never-rendered niche section are excluded; duplicated cards keep their
+ * first (earliest rendered) occurrence.
+ */
+export function selectInitialSuggestExposureOrder(
+  sectionItems: SuggestSectionItems,
+): number[] {
+  const { orderedTmdbIds } = buildSuggestPresentation(
+    sectionItems,
+    [],
+    INITIAL_SUGGEST_SECTION_FLAGS,
+  );
+  return [...orderedTmdbIds];
+}
+
 export type V1RecommendationDetails = Readonly<{
   title?: string;
   consensusLevel?: "high" | "medium" | "low";

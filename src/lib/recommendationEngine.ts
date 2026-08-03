@@ -2,6 +2,7 @@ import type { RecommendationContext } from "@/lib/recommendationContext";
 import {
   deriveRecommendationMode,
   MAX_DIAGNOSTIC_COUNT,
+  MAX_RECOMMENDATION_COUNT,
   normalizeRecommendationRequest,
   RECOMMENDATION_ENGINE_VERSION,
   RECOMMENDATION_SOURCE_NAMES,
@@ -83,7 +84,15 @@ export type RecommendationEngineDependencies = Readonly<{
 }>;
 
 export type RecommendationEngineResult = RecommendationResult &
-  Readonly<{ trace: RecommendationTrace }>;
+  Readonly<{
+    trace: RecommendationTrace;
+    /**
+     * 1-based scoring-before-rerank position by final result TMDB id. Only
+     * final result ids are recorded, bounded to the maximum recommendation
+     * count, so exposure telemetry can compare pre/post rerank order.
+     */
+    preRanksById: ReadonlyMap<number, number>;
+  }>;
 
 type CandidateWithId = Readonly<{ tmdbId: number }>;
 
@@ -210,6 +219,28 @@ function buildDiagnostics(params: {
   };
 }
 
+function buildPreRanksById(
+  scoredCandidates: readonly CandidateWithId[],
+  results: readonly CandidateWithId[],
+): ReadonlyMap<number, number> {
+  const scoredPositionById = new Map<number, number>();
+  scoredCandidates.forEach((candidate, index) => {
+    if (!scoredPositionById.has(candidate.tmdbId)) {
+      scoredPositionById.set(candidate.tmdbId, index + 1);
+    }
+  });
+
+  const preRanksById = new Map<number, number>();
+  for (const result of results) {
+    if (preRanksById.size >= MAX_RECOMMENDATION_COUNT) break;
+    const preRank = scoredPositionById.get(result.tmdbId);
+    if (preRank !== undefined && !preRanksById.has(result.tmdbId)) {
+      preRanksById.set(result.tmdbId, preRank);
+    }
+  }
+  return preRanksById;
+}
+
 async function emitTelemetry(
   telemetry: RecommendationTelemetry,
   trace: RecommendationDiagnostics,
@@ -269,6 +300,10 @@ export function createRecommendationEngine(
       assertCandidateIds(reranked, "reranking");
       const eligibleReranked = filterByReason(reranked, request, context);
       const results = eligibleReranked.candidates.slice(0, request.count);
+      const preRanksById = buildPreRanksById(
+        eligibleScored.candidates,
+        results,
+      );
       const diagnostics = buildDiagnostics({
         request,
         context,
@@ -300,7 +335,7 @@ export function createRecommendationEngine(
       });
       await emitTelemetry(dependencies.telemetry, diagnostics);
 
-      return { results, diagnostics, trace };
+      return { results, diagnostics, trace, preRanksById };
     },
   };
 }

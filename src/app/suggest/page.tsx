@@ -43,10 +43,19 @@ import {
 } from "@/lib/genreEnhancement";
 import { saveMovie, getSavedMovies } from "@/lib/lists";
 import {
+  buildSuggestPresentation,
+  createCommittedExposureEmissionState,
+  emitNewCommittedExposureIds,
   selectCanonicalPalateCleanser,
   selectCanonicalWatchlistPicks,
+  SUGGEST_ALL_SECTION_KEYS,
 } from "@/lib/recommendationAdapters";
-import { parseCanonicalWebItems } from "@/lib/canonicalWebResponse";
+import { normalizeProviderFamilies } from "@/lib/recommendationCandidates";
+import { recordRecommendationExposures } from "@/lib/recommendationTelemetry";
+import {
+  parseCanonicalWebItems,
+  parseCanonicalWebPreRanks,
+} from "@/lib/canonicalWebResponse";
 import { isCanonicalWebRecommendationFailure } from "@/lib/recommendationActionTypes";
 import {
   detectGenreFatigue,
@@ -55,6 +64,7 @@ import {
 import { handleNegativeFeedback } from "@/lib/adaptiveLearning";
 import UserQuiz from "@/components/UserQuiz";
 import type { FilmEvent } from "@/lib/normalize";
+import type { RecommendationTrace } from "@/lib/recommendationTypes";
 
 // Global config for suggestions
 const SECTION_ITEM_LIMIT = 24;
@@ -155,73 +165,15 @@ type CategorizedSuggestions = {
   moreRecommendations: MovieItem[];
 };
 
-type SectionKey = Exclude<keyof CategorizedSuggestions, "seasonalConfig">;
-
 type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
 
-const ALL_SECTION_KEYS: SectionKey[] = [
-  "watchlistPicks",
-  "seasonalPicks",
-  "perfectMatches",
-  "recentWatchMatches",
-  "studioMatches",
-  "directorMatches",
-  "actorMatches",
-  "genreMatches",
-  "documentaries",
-  "decadeMatches",
-  "smartDiscovery",
-  "hiddenGems",
-  "cultClassics",
-  "crowdPleasers",
-  "newReleases",
-  "recentClassics",
-  "deepCuts",
-  "fromCollections",
-  "multiSourceConsensus",
-  "internationalCinema",
-  "animationPicks",
-  "quickWatches",
-  "epicFilms",
-  "criticallyAcclaimed",
-  "nicheMatches",
-  "moreRecommendations",
-];
-
-const ALWAYS_VISIBLE_SECTIONS: SectionKey[] = [
-  "watchlistPicks",
-  "perfectMatches",
-  "nicheMatches",
-  "recentWatchMatches",
-  "seasonalPicks",
-  "multiSourceConsensus",
-];
-
-const SECONDARY_SECTIONS: SectionKey[] = [
-  "directorMatches",
-  "actorMatches",
-  "studioMatches",
-  "genreMatches",
-  "smartDiscovery",
-  "hiddenGems",
-];
-
-const EXPLORE_SECTIONS: SectionKey[] = [
-  "animationPicks",
-  "documentaries",
-  "internationalCinema",
-  "quickWatches",
-  "epicFilms",
-  "criticallyAcclaimed",
-  "fromCollections",
-  "cultClassics",
-  "crowdPleasers",
-  "deepCuts",
-  "decadeMatches",
-  "newReleases",
-  "recentClassics",
-  "moreRecommendations",
-];
+type SuggestExposureContext = Readonly<{
+  owner: string;
+  generation: number;
+  trace: RecommendationTrace;
+  preRanksById: ReadonlyMap<number, number>;
+  providerFamiliesByTmdbId: ReadonlyMap<number, readonly string[]>;
+}>;
 
 // Progress stage definitions
 const PROGRESS_STAGES = [
@@ -351,6 +303,8 @@ export default function SuggestPage() {
   const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
   const [categorizedSuggestions, setCategorizedSuggestions] =
     useState<CategorizedSuggestions | null>(null);
+  const [exposureContext, setExposureContext] =
+    useState<SuggestExposureContext | null>(null);
 
   // Ref for focus trap in feedback popup modal (A11y Issue 2)
   const feedbackModalRef = useRef<HTMLDivElement>(null);
@@ -358,6 +312,9 @@ export default function SuggestPage() {
   const storageUidRef = useRef<string | null | undefined>(undefined);
   const authTransitionEpochRef = useRef(0);
   const storageReadyUidRef = useRef<string | null>(null);
+  const exposureEmissionStateRef = useRef(
+    createCommittedExposureEmissionState(),
+  );
 
   const resetUserScopedState = useCallback(() => {
     storageReadyUidRef.current = null;
@@ -402,6 +359,8 @@ export default function SuggestPage() {
     setFeedbackPopup(null);
     setSelectedReasons([]);
     setCategorizedSuggestions(null);
+    setExposureContext(null);
+    exposureEmissionStateRef.current = createCommittedExposureEmissionState();
   }, []);
 
   const updateUid = useCallback(
@@ -1009,6 +968,58 @@ export default function SuggestPage() {
     }
   }, [items, categorizeItems, watchlistPicks]);
 
+  const committedSuggestPresentation = useMemo(
+    () =>
+      buildSuggestPresentation(categorizedSuggestions, palateCleanser, {
+        showAllSections,
+        showCollapsedSmallSections,
+      }),
+    [
+      categorizedSuggestions,
+      palateCleanser,
+      showAllSections,
+      showCollapsedSmallSections,
+    ],
+  );
+
+  useEffect(() => {
+    const context = exposureContext;
+    const currentUid = uid;
+    if (
+      !context ||
+      !currentUid ||
+      context.owner !== currentUid ||
+      context.generation !== runGenerationRef.current ||
+      storageUidRef.current !== currentUid
+    ) {
+      return;
+    }
+
+    const emission = emitNewCommittedExposureIds(
+      exposureEmissionStateRef.current,
+      { generation: context.generation, owner: context.owner },
+      committedSuggestPresentation,
+    );
+    exposureEmissionStateRef.current = emission.state;
+    if (emission.newlyVisibleIds.length === 0) return;
+
+    if (
+      context.generation !== runGenerationRef.current ||
+      storageUidRef.current !== currentUid
+    ) {
+      return;
+    }
+
+    void recordRecommendationExposures({
+      userId: currentUid,
+      trace: context.trace,
+      orderedTmdbIds: emission.newlyVisibleIds,
+      postRanksById: committedSuggestPresentation.postRanksById,
+      preRanksById: context.preRanksById,
+      providerFamiliesByTmdbId: context.providerFamiliesByTmdbId,
+    });
+  }, [committedSuggestPresentation, exposureContext, uid]);
+
   // Section filter mapping for individual section refresh
   const getSectionFilter = useCallback(
     (sectionName: string, seasonalConfig: any) => {
@@ -1561,7 +1572,7 @@ export default function SuggestPage() {
   const personalizedHeaderCount = useMemo(() => {
     if (!categorizedSuggestions) return 0;
     let count = 0;
-    const keys = ALL_SECTION_KEYS.filter(
+    const keys = SUGGEST_ALL_SECTION_KEYS.filter(
       (key) => categorizedSuggestions[key]?.length,
     );
     keys.forEach((key) => {
@@ -1588,6 +1599,8 @@ export default function SuggestPage() {
   const runSuggest = useCallback(async () => {
     const generation = runGenerationRef.current + 1;
     runGenerationRef.current = generation;
+    exposureEmissionStateRef.current = createCommittedExposureEmissionState();
+    setExposureContext(null);
     const currentUid = uid;
     const isCurrentRun = () =>
       runGenerationRef.current === generation &&
@@ -1653,6 +1666,7 @@ export default function SuggestPage() {
       const minimumYear = Number(yearMin) || null;
       const maximumYear = Number(yearMax) || null;
       const canonicalItems = parseCanonicalWebItems(canonical) as MovieItem[];
+      const preRanksById = parseCanonicalWebPreRanks(canonical);
       const details = canonicalItems.filter((item) => {
         const itemYear = item.year ? Number(item.year) : null;
         if (minimumYear && itemYear !== null && itemYear < minimumYear) {
@@ -1665,9 +1679,11 @@ export default function SuggestPage() {
           excludedGenres.has(genre.toLowerCase()),
         );
       });
-      setWatchlistPicks(
-        selectCanonicalWatchlistPicks(details, watchlistTmdbIds),
+      const initialWatchlistPicks = selectCanonicalWatchlistPicks(
+        details,
+        watchlistTmdbIds,
       );
+      setWatchlistPicks(initialWatchlistPicks);
       setSourceLabel("Canonical recommendations from your taste profile");
       setNoCandidatesReason(
         details.length === 0
@@ -1680,6 +1696,21 @@ export default function SuggestPage() {
         return updated;
       });
       setItems(details);
+      if (isCurrentRun()) {
+        const providerFamiliesByTmdbId = new Map(
+          details.map((item) => [
+            item.id,
+            normalizeProviderFamilies(item.sources ?? []),
+          ] as const),
+        );
+        setExposureContext({
+          owner: currentUid,
+          generation,
+          trace: canonical.trace,
+          preRanksById,
+          providerFamiliesByTmdbId,
+        });
+      }
       setProgress({
         current: 3,
         total: 3,
@@ -3767,82 +3798,25 @@ export default function SuggestPage() {
             )}
 
             {(() => {
-              const sectionCounts = ALL_SECTION_KEYS.reduce(
-                (acc, key) => {
-                  acc[key] = categorizedSuggestions[key]?.length ?? 0;
-                  return acc;
-                },
-                {} as Record<SectionKey, number>,
-              );
+              // Single source of truth for section visibility, shared with
+              // the exposure order selection so rendering and telemetry
+              // cannot drift.
+              const {
+                renderedSectionKeys,
+                shouldRenderSection,
+                exploreButtonCount,
+                smallSectionsButtonCount,
+              } = committedSuggestPresentation;
 
-              const prioritySections = ALWAYS_VISIBLE_SECTIONS.filter(
-                (key) => sectionCounts[key] > 0,
-              );
-              const prioritySet = new Set(prioritySections);
-
-              const secondarySections = SECONDARY_SECTIONS.filter(
-                (key) => !prioritySet.has(key) && sectionCounts[key] >= 3,
-              );
-              const visibleSectionKeys = [
-                ...prioritySections,
-                ...secondarySections,
-              ];
-              const visibleSet = new Set(visibleSectionKeys);
-
-              const collapsedSmallSections = ALL_SECTION_KEYS.filter(
-                (key) =>
-                  !visibleSet.has(key) &&
-                  sectionCounts[key] > 0 &&
-                  sectionCounts[key] < 3,
-              );
-              const collapsedSmallSet = new Set(collapsedSmallSections);
-
-              const exploreSections = EXPLORE_SECTIONS.filter(
-                (key) => !collapsedSmallSet.has(key) && sectionCounts[key] > 0,
-              );
-
-              const collapsedExploreSections = exploreSections.filter(
-                (key) => !showAllSections && !visibleSet.has(key),
-              );
-              const collapsedExploreSet = new Set(collapsedExploreSections);
-
-              const collapsedSmallCount = showCollapsedSmallSections
-                ? 0
-                : collapsedSmallSections.length;
               const collapsedCount = showAllSections
-                ? collapsedSmallCount
-                : collapsedSmallCount + collapsedExploreSections.length;
-
-              const visibleCount = ALL_SECTION_KEYS.filter((key) => {
-                if (sectionCounts[key] === 0) return false;
-                if (!showAllSections && collapsedExploreSet.has(key))
-                  return false;
-                if (!showCollapsedSmallSections && collapsedSmallSet.has(key))
-                  return false;
-                return true;
-              }).length;
+                ? smallSectionsButtonCount
+                : smallSectionsButtonCount + exploreButtonCount;
 
               if (process.env.NODE_ENV === "development") {
                 console.log(
-                  `[Suggest] Showing ${visibleCount} sections, ${collapsedCount} collapsed`,
+                  `[Suggest] Showing ${renderedSectionKeys.length} sections, ${collapsedCount} collapsed`,
                 );
               }
-
-              const shouldRenderSection = (key: SectionKey) => {
-                if (sectionCounts[key] === 0) return false;
-                if (!showAllSections && collapsedExploreSet.has(key))
-                  return false;
-                if (!showCollapsedSmallSections && collapsedSmallSet.has(key))
-                  return false;
-                return true;
-              };
-
-              const exploreButtonCount = showAllSections
-                ? 0
-                : collapsedExploreSections.length;
-              const smallSectionsButtonCount = showCollapsedSmallSections
-                ? 0
-                : collapsedSmallSections.length;
 
               return (
                 <>
@@ -4987,7 +4961,8 @@ export default function SuggestPage() {
                   )}
 
                   {/* Palate Cleanser Section */}
-                  {palateCleanser.length > 0 && fatigueDetection && (
+                  {shouldRenderSection("palateCleanser") &&
+                    fatigueDetection && (
                     <section>
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
@@ -5188,7 +5163,7 @@ export default function SuggestPage() {
                   )}
 
                   {/* Deep Cuts Section */}
-                  {categorizedSuggestions.deepCuts.length >= 1 && (
+                  {shouldRenderSection("deepCuts") && (
                     <section>
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">

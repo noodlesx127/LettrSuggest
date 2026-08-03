@@ -19,8 +19,9 @@ import {
   buildRecommendationScoringInputs,
   buildRecommendationPersonalization,
 } from "@/lib/recommendationPersonalization";
-import { scoreRecommendationsWithOverlap } from "@/lib/recommendationScoring";
+import { scoreRecommendationsWithOverlapStaged } from "@/lib/recommendationScoring";
 import type { TMDBMovie } from "@/lib/enrich";
+import type { RecommendationCandidate } from "@/lib/recommendationTypes";
 import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import {
   WEB_METADATA_DEADLINE_MS,
@@ -154,6 +155,24 @@ async function generateCanonicalWebRecommendationsInternal(
       ? WEB_METADATA_DEADLINE_MS
       : Math.max(0, metadataDeadlineAt - Date.now());
 
+  const applySourceMetadata = (
+    candidate: RecommendationCandidate,
+  ): RecommendationCandidate => {
+    const rawSources = sourceMetadata.get(candidate.tmdbId)?.sources;
+    if (!rawSources?.length) return candidate;
+    return {
+      ...candidate,
+      evidence: {
+        ...candidate.evidence,
+        providerFamilies: normalizeProviderFamilies(rawSources),
+        providerOccurrences: rawSources.length,
+      },
+    };
+  };
+  let overlapRerankCandidates:
+    | ((eligibleCandidates: readonly RecommendationCandidate[]) => RecommendationCandidate[])
+    | null = null;
+
   const result = await runCanonicalServerRecommendations(adapted.request, {
     loadContext: async () => canonicalContext,
     retrieveCandidates: async () => {
@@ -194,25 +213,32 @@ async function generateCanonicalWebRecommendationsInternal(
         .map((tmdbId) => ({ tmdbId }));
     },
     scoreCandidates: async (scoreParams) => {
-      const scored = await scoreRecommendationsWithOverlap(
+      const outcome = await scoreRecommendationsWithOverlapStaged(
         scoreParams,
         requestDetails,
         buildRecommendationScoringInputs(personalization, sourceMetadata),
       );
-      return scored.map((candidate) => {
-        const rawSources = sourceMetadata.get(candidate.tmdbId)?.sources;
-        if (!rawSources?.length) return candidate;
-        return {
-          ...candidate,
-          evidence: {
-            ...candidate.evidence,
-            providerFamilies: normalizeProviderFamilies(rawSources),
-            providerOccurrences: rawSources.length,
-          },
-        };
-      });
+      const scored = outcome.candidates.map(applySourceMetadata);
+      const scoredById = new Map(
+        scored.map((candidate) => [candidate.tmdbId, candidate]),
+      );
+      overlapRerankCandidates = (eligibleCandidates) => {
+        const eligibleIds = new Set(
+          eligibleCandidates.map((candidate) => candidate.tmdbId),
+        );
+        return outcome.rerankCandidates()
+          .filter((candidate) => eligibleIds.has(candidate.tmdbId))
+          .map(
+            (candidate) =>
+              scoredById.get(candidate.tmdbId) ?? applySourceMetadata(candidate),
+          );
+      };
+      return scored;
     },
-    rerankCandidates: async ({ candidates }) => candidates,
+    rerankCandidates: async ({ candidates }) =>
+      overlapRerankCandidates
+        ? overlapRerankCandidates(candidates)
+        : [...candidates],
     rng: createDeterministicRng,
     telemetry: () => undefined,
   });
@@ -301,7 +327,13 @@ async function generateCanonicalWebRecommendationsInternal(
 
   // The engine builds and validates this trace via the shared builder, so every
   // successful web result carries the identical canonical diagnostic structure.
-  return { items, diagnostics: result.diagnostics, trace: result.trace };
+  // preRanks serializes the bounded engine pre-rank map into seam-safe tuples.
+  return {
+    items,
+    diagnostics: result.diagnostics,
+    trace: result.trace,
+    preRanks: [...result.preRanksById.entries()],
+  };
 }
 
 export async function generateCanonicalWebRecommendations(

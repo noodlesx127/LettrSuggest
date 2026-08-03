@@ -21,6 +21,7 @@ import {
 } from "@/lib/recommendationScoring";
 import {
   MAX_DIAGNOSTIC_COUNT,
+  MAX_RECOMMENDATION_COUNT,
   validateRecommendationDiagnostics,
   type RecommendationCandidate,
   type RecommendationDiagnostics,
@@ -406,6 +407,77 @@ describe("recommendation engine", () => {
 
     await expect(generate).rejects.toThrow("Invalid reranking candidates");
     expect(telemetry).not.toHaveBeenCalled();
+  });
+
+  it("records 1-based pre-rerank positions for final ids when a custom reranker reorders results", async () => {
+    const scored = [
+      candidate(303, 1.4),
+      candidate(505, 1.3),
+      candidate(707, 1.2),
+      candidate(808, 1.1),
+    ];
+    const result = await createRecommendationEngine({
+      loadContext: async () => context,
+      retrieveCandidates: async () =>
+        scored.map(({ tmdbId }) => ({ tmdbId })),
+      scoreCandidates: async () => scored,
+      rerankCandidates: async () => [
+        scored[3],
+        scored[2],
+        scored[1],
+        scored[0],
+      ],
+      rng: () => () => 0.5,
+      telemetry: () => undefined,
+    }).generate({
+      ...request,
+      count: 2,
+      seeds: [],
+      excludeTmdbIds: [],
+    });
+
+    // The custom reranker flips the final order relative to scoring order.
+    expect(result.results.map((item) => item.tmdbId)).toEqual([808, 707]);
+    // preRanksById keeps the 1-based scoring-before-rerank position, only for
+    // final result ids.
+    expect(result.preRanksById).toBeInstanceOf(Map);
+    expect([...result.preRanksById.entries()]).toEqual([
+      [808, 4],
+      [707, 3],
+    ]);
+  });
+
+  it("bounds preRanksById to the maximum recommendation count", async () => {
+    const manyScored = Array.from({ length: 120 }, (_, index) =>
+      candidate(index + 1, 1),
+    );
+    const result = await createRecommendationEngine({
+      loadContext: async () => context,
+      retrieveCandidates: async () =>
+        manyScored.map(({ tmdbId }) => ({ tmdbId })),
+      scoreCandidates: async () => manyScored,
+      rerankCandidates: async ({ candidates }) => [...candidates].reverse(),
+      rng: () => () => 0.5,
+      telemetry: () => undefined,
+    }).generate({
+      ...request,
+      count: MAX_RECOMMENDATION_COUNT,
+      seeds: [],
+      excludeTmdbIds: [],
+    });
+
+    expect(result.results).toHaveLength(MAX_RECOMMENDATION_COUNT);
+    expect(result.preRanksById.size).toBeLessThanOrEqual(
+      MAX_RECOMMENDATION_COUNT,
+    );
+    expect(result.preRanksById.size).toBe(MAX_RECOMMENDATION_COUNT);
+    const finalIds = new Set(result.results.map((item) => item.tmdbId));
+    for (const [tmdbId, preRank] of result.preRanksById) {
+      expect(finalIds.has(tmdbId)).toBe(true);
+      expect(Number.isSafeInteger(preRank)).toBe(true);
+      expect(preRank).toBeGreaterThanOrEqual(1);
+      expect(preRank).toBeLessThanOrEqual(manyScored.length);
+    }
   });
 
   it("fails closed on malformed final candidates without telemetry", async () => {

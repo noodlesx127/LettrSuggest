@@ -41,6 +41,7 @@ vi.mock("@/lib/recommendationCandidates", () => ({
 
 vi.mock("@/lib/recommendationScoring", () => ({
   scoreRecommendationsWithOverlap: mocks.scoreRecommendationsWithOverlap,
+  scoreRecommendationsWithOverlapStaged: mocks.scoreRecommendationsWithOverlap,
 }));
 
 vi.mock("@/lib/recommendationContext", () => ({
@@ -153,23 +154,29 @@ describe("canonical web standard-genre detail completion", () => {
     mocks.buildTasteProfileServer.mockResolvedValue({ topGenres: [] });
     mocks.scoreRecommendationsWithOverlap.mockImplementation(
       async (params: { candidates: readonly { tmdbId: number }[] }) =>
-        params.candidates.map(({ tmdbId }, index) => ({
-          tmdbId,
-          score: 10 - index,
-          evidence: {
-            seedAnchors: [],
-            providerFamilies: [],
-            providerOccurrences: 0,
-            retrievalScore: 1,
-          },
-          attribution: {
-            retrieval: 1,
-            preference: 0,
-            context: 0,
-            diversity: 0,
-            total: 1,
-          },
-        })),
+        (() => {
+          const candidates = params.candidates.map(({ tmdbId }, index) => ({
+            tmdbId,
+            score: 10 - index,
+            evidence: {
+              seedAnchors: [],
+              providerFamilies: [],
+              providerOccurrences: 0,
+              retrievalScore: 1,
+            },
+            attribution: {
+              retrieval: 1,
+              preference: 0,
+              context: 0,
+              diversity: 0,
+              total: 1,
+            },
+          }));
+          return {
+            candidates,
+            rerankCandidates: () => candidates,
+          };
+        })(),
     );
     mocks.generateServerCandidates.mockResolvedValue({
       candidateIds: [101, 202],
@@ -225,10 +232,20 @@ describe("canonical web standard-genre detail completion", () => {
           typeof (request as { count?: unknown }).count === "number"
             ? (request as { count: number }).count
             : scored.length;
+        const results = scored.slice(0, count);
         return {
-          results: scored.slice(0, count),
+          results,
           diagnostics: {},
           trace: VALID_ENGINE_TRACE,
+          preRanksById: new Map<number, number>(
+            results.map(
+              (candidate, index) =>
+                [
+                  (candidate as { tmdbId: number }).tmdbId,
+                  index + 1,
+                ] as [number, number],
+            ),
+          ),
         };
       },
     );
@@ -268,6 +285,60 @@ describe("canonical web standard-genre detail completion", () => {
     const success = successfulResult(result);
     expect(success.trace).toBeDefined();
     expect(validateRecommendationTrace(success.trace)).toBe(true);
+  });
+
+  it("returns bounded serializable preRanks tuples preserving the engine pre-rank map", async () => {
+    mocks.runCanonicalServerRecommendations.mockImplementation(
+      async (
+        request: unknown,
+        dependencies: {
+          retrieveCandidates: () => Promise<Array<{ tmdbId: number }>>;
+          scoreCandidates: (params: {
+            request: unknown;
+            context: unknown;
+            mode: string;
+            candidates: Array<{ tmdbId: number }>;
+          }) => Promise<readonly unknown[]>;
+        },
+      ) => {
+        const candidates = await dependencies.retrieveCandidates();
+        const scored = await dependencies.scoreCandidates({
+          request,
+          context: {},
+          mode: "personalized",
+          candidates,
+        });
+        return {
+          results: scored,
+          diagnostics: {},
+          trace: VALID_ENGINE_TRACE,
+          preRanksById: new Map<number, number>([
+            [202, 7],
+            [101, 3],
+          ]),
+        };
+      },
+    );
+
+    const success = successfulResult(
+      await generateCanonicalWebRecommendations({
+        accessToken: "pre-ranks-token-1234567890",
+        count: 10,
+        requestSeed: "web-pre-ranks",
+      }),
+    );
+
+    // Bounded serializable tuple form (Map does not survive the server seam).
+    expect(Array.isArray(success.preRanks)).toBe(true);
+    expect(success.preRanks).toEqual([
+      [202, 7],
+      [101, 3],
+    ]);
+    expect(JSON.parse(JSON.stringify(success.preRanks))).toEqual([
+      [202, 7],
+      [101, 3],
+    ]);
+    expect(success.preRanks.length).toBeLessThanOrEqual(100);
   });
 
   it("passes one bounded deadline budget through scoring and final hydration", async () => {
@@ -349,6 +420,7 @@ describe("canonical web standard-genre detail completion", () => {
                 ]
               : [],
           diagnostics: {},
+          preRanksById: new Map<number, number>(),
         };
       },
     );
@@ -523,6 +595,7 @@ describe("canonical web standard-genre detail completion", () => {
         return {
           results: scored.filter(({ tmdbId }) => tmdbId !== 101),
           diagnostics: {},
+          preRanksById: new Map<number, number>(),
         };
       },
     );

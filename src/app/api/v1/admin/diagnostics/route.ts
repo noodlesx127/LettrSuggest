@@ -3,10 +3,22 @@ import { getCacheTableStats } from "../../_lib/adminCache";
 import { requireAdmin } from "../../_lib/permissions";
 import { apiSuccess, ApiError } from "../../_lib/responseEnvelope";
 import { supabaseAdmin } from "../../_lib/supabaseAdmin";
+import { buildBoundedExposureDiagnostics } from "@/lib/recommendationTelemetry";
 import { getBoundedTasteProfileCacheDiagnostics } from "@/lib/recommendationRevision";
+import {
+  DEFAULT_EXPERIMENT_BUCKET,
+  RECOMMENDATION_ENGINE_VERSION,
+} from "@/lib/recommendationTypes";
 
 interface ApiKeyUsageRow {
   user_id: string;
+}
+
+interface BoundedExposureAggregateRow {
+  total_count?: number | null;
+  owner_count?: number | null;
+  current_engine_count?: number | null;
+  default_bucket_count?: number | null;
 }
 
 export async function GET(req: Request) {
@@ -27,7 +39,7 @@ export async function GET(req: Request) {
         cacheTables,
         tasteProfileResult,
         feedbackCountResult,
-        exposureCountResult,
+        exposureAggregateResult,
       ] = await Promise.all([
         supabaseAdmin
           .from("profiles")
@@ -56,11 +68,16 @@ export async function GET(req: Request) {
           .from("user_feature_feedback")
           .select("*", { count: "exact", head: true })
           .eq("user_id", auth.userId),
-        supabaseAdmin
-          .from("suggestion_exposure_log")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", auth.userId),
+        // The restricted RPC returns one fixed row of bounded aggregate counts;
+        // no exposure rows, reasons, histories, or candidate arrays are fetched.
+        supabaseAdmin.rpc("get_bounded_exposure_diagnostics", {
+          p_owner_user_id: auth.userId,
+        }),
       ]);
+
+      const exposureAggregateRow = (Array.isArray(exposureAggregateResult.data)
+        ? exposureAggregateResult.data[0]
+        : exposureAggregateResult.data) as BoundedExposureAggregateRow | null;
 
       const dbStatus = usersResult.error ? "error" : "connected";
       if (
@@ -70,7 +87,7 @@ export async function GET(req: Request) {
         activeUserRows.error ||
         tasteProfileResult.error ||
         feedbackCountResult.error ||
-        exposureCountResult.error
+        exposureAggregateResult.error
       ) {
         console.error("[API v1] Failed to fetch admin diagnostics", {
           usersError: usersResult.error,
@@ -79,7 +96,7 @@ export async function GET(req: Request) {
           activeUsersError: activeUserRows.error,
           tasteProfileError: tasteProfileResult.error,
           feedbackCountError: feedbackCountResult.error,
-          exposureCountError: exposureCountResult.error,
+          exposureAggregateError: exposureAggregateResult.error,
         });
       }
 
@@ -87,7 +104,6 @@ export async function GET(req: Request) {
       const tasteProfileCacheDiagnostics =
         getBoundedTasteProfileCacheDiagnostics(tasteProfileRow);
       const feedbackCount = feedbackCountResult.count;
-      const exposureCount = exposureCountResult.count;
       const activeUsers = new Set(
         ((activeUserRows.data as ApiKeyUsageRow[] | null) ?? []).map(
           (row) => row.user_id,
@@ -97,6 +113,17 @@ export async function GET(req: Request) {
         (sum, table) => sum + table.count,
         0,
       );
+      const exposureDiagnostics = buildBoundedExposureDiagnostics({
+        totalCount: exposureAggregateRow?.total_count,
+        countsByEngineVersion: {
+          [RECOMMENDATION_ENGINE_VERSION]:
+            exposureAggregateRow?.current_engine_count,
+        },
+        countsByExperimentBucket: {
+          [DEFAULT_EXPERIMENT_BUCKET]:
+            exposureAggregateRow?.default_bucket_count,
+        },
+      });
 
       return apiSuccess({
         db: dbStatus,
@@ -121,8 +148,9 @@ export async function GET(req: Request) {
           taste_profile_model_version:
             tasteProfileCacheDiagnostics.modelVersion,
           feedback_signal_count: feedbackCount ?? 0,
-          exposure_log_count: exposureCount ?? 0,
+          exposure_log_count: exposureAggregateRow?.owner_count ?? 0,
         },
+        exposure_diagnostics: exposureDiagnostics,
       });
     } catch (error) {
       console.error("[v1/admin/diagnostics] Error:", error);

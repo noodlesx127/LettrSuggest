@@ -23,6 +23,12 @@ export type CanonicalWebRecommendationSuccess = {
   items: CanonicalWebRecommendationItem[];
   diagnostics: RecommendationDiagnostics;
   trace: RecommendationTrace;
+  /**
+   * Bounded serializable form of the engine's pre-rerank rank map: one
+   * `[tmdbId, preRank]` tuple per final result (max 100). A Map cannot cross
+   * the server action seam, so tuples are the canonical wire shape.
+   */
+  preRanks: ReadonlyArray<readonly [number, number]>;
 };
 
 export type CanonicalWebRecommendationFailure = {

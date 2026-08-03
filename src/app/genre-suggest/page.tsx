@@ -4,7 +4,7 @@ import AuthGate from "@/components/AuthGate";
 import MovieCard, { FeatureEvidenceContext } from "@/components/MovieCard";
 import ProgressIndicator from "@/components/ProgressIndicator";
 import GenreSelector, { ALL_GENRES } from "@/components/GenreSelector";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useImportData } from "@/lib/importStore";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -24,10 +24,21 @@ import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import { saveMovie, getSavedMovies } from "@/lib/lists";
 import { SUBGENRES_BY_PARENT } from "@/lib/subgenreData";
 import { detectSubgenres } from "@/lib/subgenreDetection";
-import { parseCanonicalWebItems } from "@/lib/canonicalWebResponse";
+import {
+  parseCanonicalWebItems,
+  parseCanonicalWebPreRanks,
+} from "@/lib/canonicalWebResponse";
+import { recordRecommendationExposures } from "@/lib/recommendationTelemetry";
 import { isCanonicalWebRecommendationFailure } from "@/lib/recommendationActionTypes";
-import { matchesNicheGenrePresentation } from "@/lib/recommendationAdapters";
+import {
+  buildFinalizedPresentation,
+  createCommittedExposureEmissionState,
+  emitNewCommittedExposureIds,
+  matchesNicheGenrePresentation,
+} from "@/lib/recommendationAdapters";
+import { normalizeProviderFamilies } from "@/lib/recommendationCandidates";
 import type { FilmEvent } from "@/lib/normalize";
+import type { RecommendationTrace } from "@/lib/recommendationTypes";
 
 type MovieItem = {
   id: number;
@@ -73,6 +84,14 @@ type GenreSuggestions = {
 type SubgenreSuggestions = {
   [subgenreKey: string]: MovieItem[];
 };
+
+type GenreExposureContext = Readonly<{
+  owner: string;
+  generation: number;
+  trace: RecommendationTrace;
+  preRanksById: ReadonlyMap<number, number>;
+  providerFamiliesByTmdbId: ReadonlyMap<number, readonly string[]>;
+}>;
 
 const PROGRESS_STAGES = [
   {
@@ -146,6 +165,25 @@ export default function GenreSuggestPage() {
   const [featureEvidence, setFeatureEvidence] = useState<
     Record<string, FeatureEvidenceSummary>
   >({});
+  const [exposureContext, setExposureContext] =
+    useState<GenreExposureContext | null>(null);
+
+  // Generation + UID guards mirror the suggest page so stale or
+  // account-switched runs never record telemetry or commit state.
+  const runGenerationRef = useRef(0);
+  const uidRef = useRef<string | null>(null);
+  const exposureEmissionStateRef = useRef(
+    createCommittedExposureEmissionState(),
+  );
+
+  useEffect(() => {
+    if (uidRef.current !== uid) {
+      runGenerationRef.current += 1;
+      exposureEmissionStateRef.current = createCommittedExposureEmissionState();
+      setExposureContext(null);
+    }
+    uidRef.current = uid;
+  }, [uid]);
 
   // Load selected genres from localStorage
   useEffect(() => {
@@ -251,6 +289,72 @@ export default function GenreSuggestPage() {
     return [...new Set(ids)];
   }, [genreSuggestions, subgenreSuggestions]);
 
+  const committedGenrePresentation = useMemo(
+    () =>
+      buildFinalizedPresentation<MovieItem>([
+        {
+          key: "selectedSubgenres",
+          items: selectedSubgenres.flatMap((subgenreKey) =>
+            (subgenreSuggestions[subgenreKey] ?? []).filter(
+              (movie) => !movie.dismissed,
+            ),
+          ),
+        },
+        {
+          key: "selectedGenres",
+          items: selectedGenres.flatMap((genreId) =>
+            (genreSuggestions[genreId] ?? []).filter(
+              (movie) => !movie.dismissed,
+            ),
+          ),
+        },
+      ]),
+    [
+      genreSuggestions,
+      selectedGenres,
+      selectedSubgenres,
+      subgenreSuggestions,
+    ],
+  );
+
+  useEffect(() => {
+    const context = exposureContext;
+    const currentUid = uid;
+    if (
+      !context ||
+      !currentUid ||
+      context.owner !== currentUid ||
+      context.generation !== runGenerationRef.current ||
+      uidRef.current !== currentUid
+    ) {
+      return;
+    }
+
+    const emission = emitNewCommittedExposureIds(
+      exposureEmissionStateRef.current,
+      { generation: context.generation, owner: context.owner },
+      committedGenrePresentation,
+    );
+    exposureEmissionStateRef.current = emission.state;
+    if (emission.newlyVisibleIds.length === 0) return;
+
+    if (
+      context.generation !== runGenerationRef.current ||
+      uidRef.current !== currentUid
+    ) {
+      return;
+    }
+
+    void recordRecommendationExposures({
+      userId: currentUid,
+      trace: context.trace,
+      orderedTmdbIds: emission.newlyVisibleIds,
+      postRanksById: committedGenrePresentation.postRanksById,
+      preRanksById: context.preRanksById,
+      providerFamiliesByTmdbId: context.providerFamiliesByTmdbId,
+    });
+  }, [committedGenrePresentation, exposureContext, uid]);
+
   const { posters } = usePostersSWR(allMovieIds);
 
   useEffect(() => {
@@ -323,6 +427,15 @@ export default function GenreSuggestPage() {
       return;
     }
 
+    const generation = runGenerationRef.current + 1;
+    runGenerationRef.current = generation;
+    exposureEmissionStateRef.current = createCommittedExposureEmissionState();
+    setExposureContext(null);
+    const currentUid = uid;
+    const isCurrentRun = () =>
+      runGenerationRef.current === generation &&
+      uidRef.current === currentUid;
+
     try {
       setCacheKey(Date.now());
       setGenreSuggestions({});
@@ -336,12 +449,16 @@ export default function GenreSuggestPage() {
         details: "Authenticating your genre recommendation request...",
       });
 
-      if (!supabase || !uid) throw new Error("Not signed in");
+      if (!supabase || !currentUid) throw new Error("Not signed in");
       const { data, error: sessionError } = await supabase.auth.getSession();
       const accessToken = data.session?.access_token;
       if (sessionError || !accessToken) {
         throw new Error("Authentication required");
       }
+      if (data.session?.user?.id !== currentUid) {
+        throw new Error("Authentication changed");
+      }
+      if (!isCurrentRun()) return;
 
       const selectedGenreNames = selectedGenres
         .map(
@@ -363,11 +480,13 @@ export default function GenreSuggestPage() {
         excludeTmdbIds: [...new Set([...blockedIds, ...shownIds])],
         requestSeed: `web-genre-${selectedGenres.join("-")}-${selectedSubgenres.join("-")}-${shownIds.size}`,
       });
+      if (!isCurrentRun()) return;
       if (isCanonicalWebRecommendationFailure(canonical)) {
         setError(canonical.error.message);
         return;
       }
       const validMovies = parseCanonicalWebItems(canonical) as MovieItem[];
+      const preRanksById = parseCanonicalWebPreRanks(canonical);
       if (validMovies.length === 0) {
         setError("No eligible recommendations were found for these genres.");
         return;
@@ -429,6 +548,14 @@ export default function GenreSuggestPage() {
         topMatches.forEach((movie) => assignedIds.add(movie.id));
       }
 
+      const providerFamiliesByTmdbId = new Map(
+        validMovies.map((movie) => [
+          movie.id,
+          normalizeProviderFamilies(movie.sources ?? []),
+        ] as const),
+      );
+      if (!isCurrentRun()) return;
+
       setShownIds((previous) => {
         const next = new Set(previous);
         validMovies.forEach((movie) => next.add(movie.id));
@@ -436,10 +563,19 @@ export default function GenreSuggestPage() {
       });
       setSubgenreSuggestions(subgenreMap);
       setGenreSuggestions(genreMap);
+      setExposureContext({
+        owner: currentUid,
+        generation,
+        trace: canonical.trace,
+        preRanksById,
+        providerFamiliesByTmdbId,
+      });
     } catch (error) {
+      if (!isCurrentRun()) return;
       console.error("[GenreSuggest] Error:", error);
       setError(error instanceof Error ? error.message : "An error occurred");
     } finally {
+      if (!isCurrentRun()) return;
       setLoading(false);
     }
   }, [selectedGenres, selectedSubgenres, uid, blockedIds, shownIds]);

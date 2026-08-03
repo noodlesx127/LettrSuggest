@@ -4873,7 +4873,7 @@ async function getColdStartRecommendations(
   });
 }
 
-export async function suggestByOverlap(params: {
+export type SuggestByOverlapParams = {
   userId: string;
   films: FilmEventLite[];
   mappings: Map<string, number>;
@@ -4991,30 +4991,62 @@ export async function suggestByOverlap(params: {
   // Subgenres that user explicitly selected - these should NEVER be filtered out
   // even if user's historical patterns suggest they avoid them
   allowSubgenres?: string[];
-}): Promise<
-  Array<{
-    tmdbId: number;
-    score: number;
-    reasons: string[];
-    title?: string;
-    release_date?: string;
-    genres?: string[];
-    poster_path?: string | null;
-    voteCategory?: "hidden-gem" | "crowd-pleaser" | "cult-classic" | "standard";
-    voteAverage?: number;
-    voteCount?: number;
-    contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
-    // Phase 3: For diversity filtering
-    directors?: string[];
-    studios?: string[];
-    actors?: string[];
-    // Multi-source recommendation data
-    sources?: string[];
-    consensusLevel?: "high" | "medium" | "low";
-    reliabilityMultiplier?: number;
-    metadataCompleteness?: number;
-  }>
-> {
+};
+
+/**
+ * One scored candidate produced by the overlap scorer, carrying the diversity
+ * metadata the overlap rerank (MMR + niche + diversity stages) requires.
+ */
+export type OverlapScoredResult = {
+  tmdbId: number;
+  score: number;
+  reasons: string[];
+  title?: string;
+  release_date?: string;
+  genres?: string[];
+  poster_path?: string | null;
+  voteCategory?: "hidden-gem" | "crowd-pleaser" | "cult-classic" | "standard";
+  voteAverage?: number;
+  voteCount?: number;
+  contributingFilms?: Record<string, Array<{ id: number; title: string }>>;
+  // Phase 3: For diversity filtering
+  directors?: string[];
+  studios?: string[];
+  actors?: string[];
+  // Multi-source recommendation data
+  sources?: string[];
+  consensusLevel?: "high" | "medium" | "low";
+  reliabilityMultiplier?: number;
+  metadataCompleteness?: number;
+};
+
+/** Input for rerankOverlapResults that reproduces the legacy rerank exactly. */
+export type OverlapRerankInput = Readonly<{
+  count: number;
+  mmrLambda?: number;
+}>;
+
+export type SuggestByOverlapStaged = Readonly<{
+  /** Every scored candidate in stable score order, before any rerank. */
+  scoreOrdered: OverlapScoredResult[];
+  /**
+   * The exact input for rerankOverlapResults used by the legacy path. Null on
+   * the cold-start fallback, which owns no rerank stage: its score order is
+   * already the final order.
+   */
+  rerankInput: OverlapRerankInput | null;
+}>;
+
+/**
+ * Score candidates with the overlap scorer and expose the scoring/rerank
+ * stages separately. scoreOrdered is the pure score order (pre-rerank);
+ * rerankOverlapResults(scoreOrdered, rerankInput) performs the existing
+ * MMR/niche/diversity rerank with identical params/behavior. The legacy
+ * suggestByOverlap wrapper returns only the reranked output.
+ */
+export async function suggestByOverlapStaged(
+  params: SuggestByOverlapParams,
+): Promise<SuggestByOverlapStaged> {
   // Build user profile from liked/highly-rated mapped films.
   // Use as much history as possible, but cap TMDB fetches to avoid huge fan-out
   // for extremely large libraries. We bias towards the most recent entries when
@@ -5544,11 +5576,16 @@ export async function suggestByOverlap(params: {
     // If user has watchlist items, we could use those as weak signals
     // But for now, we'll stick to popular fallback for simplicity
     // Future enhancement: extract genres/directors from watchlist items
-    return getColdStartRecommendations(
-      finalCandidates,
-      params.desiredResults || 20,
-      params.tmdbDetailsCache,
-    );
+    // The cold-start fallback owns no rerank stage: its score order is the
+    // final order, so rerankInput stays null.
+    return {
+      scoreOrdered: await getColdStartRecommendations(
+        finalCandidates,
+        params.desiredResults || 20,
+        params.tmdbDetailsCache,
+      ),
+      rerankInput: null,
+    };
   }
 
   // Identify favorite filmmakers (directors/actors) based on highly-rated films
@@ -7832,22 +7869,38 @@ export async function suggestByOverlap(params: {
     metadataCompleteness?: number;
   }>;
   const scoreOrderedResults = stableScoreOrder(results);
+  return {
+    scoreOrdered: scoreOrderedResults,
+    rerankInput: { count: desired, mmrLambda: params.mmrLambda },
+  };
+}
+
+/**
+ * The overlap seam's existing rerank: MMR ordering, niche prioritization, and
+ * diversity stages with the exact legacy params. Kept separate from scoring so
+ * the canonical engine can receive score-ordered candidates and run this
+ * rerank in its own rerank stage.
+ */
+export function rerankOverlapResults(
+  scoreOrderedResults: readonly OverlapScoredResult[],
+  input: OverlapRerankInput,
+): OverlapScoredResult[] {
   // Legacy callers supplied an exploration-shaped value under the mmrLambda
   // name (more exploration produced a larger value). Convert it to the actual
   // MMR relevance weight so exploration and diversity move together.
   const legacyExplorationWeight = Math.max(
     0,
-    Math.min(1, params.mmrLambda ?? 0.35),
+    Math.min(1, input.mmrLambda ?? 0.35),
   );
   const reranked = rerankRecommendations(scoreOrderedResults, {
-    count: desired,
+    count: input.count,
     lambda: 1 - legacyExplorationWeight,
     nicheRatio: 0.35,
   });
 
   if (process.env.NODE_ENV === "development") {
     console.log("[RecommendationReranking] Applied constrained reranking", {
-      requested: desired,
+      requested: input.count,
       returned: reranked.candidates.length,
       nicheTarget: reranked.diagnostics.nicheTarget,
       nicheSelected: reranked.diagnostics.nicheSelected,
@@ -7860,6 +7913,19 @@ export async function suggestByOverlap(params: {
   }
 
   return [...reranked.candidates];
+}
+
+/**
+ * Legacy overlap seam: score, then apply the existing rerank, returning only
+ * the reranked candidates. Canonical callers should use suggestByOverlapStaged
+ * so the engine sees the score order before this rerank.
+ */
+export async function suggestByOverlap(
+  params: SuggestByOverlapParams,
+): Promise<OverlapScoredResult[]> {
+  const { scoreOrdered, rerankInput } = await suggestByOverlapStaged(params);
+  if (!rerankInput) return scoreOrdered;
+  return rerankOverlapResults(scoreOrdered, rerankInput);
 }
 
 export async function deleteFilmMapping(userId: string, uri: string) {
@@ -8467,75 +8533,6 @@ export async function learnFromHistoricalData(userId: string) {
   } catch (e) {
     console.error("[BatchLearning] Error during batch learning:", e);
     throw e;
-  }
-}
-
-/**
- * Log suggestion exposures for repeat-suggestion tracking and counterfactual analysis
- */
-export async function logSuggestionExposure(params: {
-  userId: string;
-  suggestions: Array<{
-    tmdbId: number;
-    category?: string;
-    baseScore?: number;
-    consensusLevel?: "high" | "medium" | "low";
-    sources?: string[];
-    reasons?: string[];
-    mmrLambda?: number;
-    diversityRank?: number;
-    hasPoster?: boolean;
-    hasTrailer?: boolean;
-    metadataCompleteness?: number;
-  }>;
-  sessionContext?: {
-    discoveryLevel?: number;
-    excludeGenres?: string;
-    yearMin?: string;
-    yearMax?: string;
-    mode?: "quick" | "deep";
-    contextMode?: string;
-  };
-}): Promise<void> {
-  if (!supabase) {
-    console.warn("[ExposureLog] Supabase not available");
-    return;
-  }
-
-  const { userId, suggestions, sessionContext } = params;
-
-  try {
-    const exposureLogs = suggestions.map((s) => ({
-      user_id: userId,
-      tmdb_id: s.tmdbId,
-      category: s.category,
-      session_context: sessionContext,
-      base_score: s.baseScore,
-      consensus_level: s.consensusLevel,
-      sources: s.sources,
-      reasons: s.reasons,
-      mmr_lambda: s.mmrLambda,
-      diversity_rank: s.diversityRank,
-      has_poster: s.hasPoster,
-      has_trailer: s.hasTrailer,
-      metadata_completeness: s.metadataCompleteness,
-    }));
-
-    const { error } = await supabase
-      .from("suggestion_exposure_log")
-      .insert(exposureLogs);
-
-    if (error) {
-      console.error("[ExposureLog] Error logging exposures:", error);
-    } else {
-      console.log(
-        "[ExposureLog] Logged",
-        exposureLogs.length,
-        "suggestion exposures",
-      );
-    }
-  } catch (e) {
-    console.error("[ExposureLog] Exception logging exposures:", e);
   }
 }
 

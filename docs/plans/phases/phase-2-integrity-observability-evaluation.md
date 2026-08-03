@@ -74,7 +74,7 @@
 - Create: `src/lib/importMappings.ts`
 - Create: `src/lib/importPostWork.ts`
 - Create: `tests/integration/importIntegrity.test.ts`
-- Create: `supabase/migrations/20260801000000_reconcile_import_snapshot.sql`
+- Create: `supabase/migrations/20260802013015_reconcile_import_snapshot.sql`
 - Create: `supabase/tests/database/import_snapshot.test.sql`
 - Modify: `src/app/import/page.tsx`
 - Modify: `src/lib/enrich.ts`
@@ -125,22 +125,39 @@
 
 ## Checkpoint 2B.2: Exposure Schema and Diagnostics Integration
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
-- Create: `supabase/migrations/20260723120000_version_recommendation_exposure.sql`
+- Create: `supabase/migrations/20260802120000_version_recommendation_exposure.sql`
 - Create: `tests/integration/recommendationExposure.test.ts`
+- Create: `tests/integration/adminDiagnostics.test.ts`
+- Create: `tests/integration/recommendationPreRank.test.ts`
+- Create: `tests/integration/suggestExposureOrder.test.ts`
+- Create: `supabase/tests/database/recommendation_exposure.test.sql`
+- Modify: `src/app/actions/recommendations.ts`
+- Modify: `src/app/genre-suggest/page.tsx`
+- Modify: `src/app/api/v1/suggestions/generate/route.ts`
 - Modify: `src/lib/recommendationTelemetry.ts`
+- Modify: `src/lib/recommendationEngine.ts`
+- Modify: `src/lib/recommendationScoring.ts`
+- Modify: `src/lib/recommendationAdapters.ts`
+- Modify: `src/lib/canonicalWebResponse.ts`
+- Modify: `src/lib/recommendationActionTypes.ts`
 - Modify: `src/lib/enrich.ts`
 - Modify: `src/app/suggest/page.tsx`
 - Modify: `src/app/api/v1/admin/diagnostics/route.ts`
 
-- [ ] Write tests asserting persisted exposures include engine version, experiment bucket, input revision, pre/post rank, bounded drop reasons, and source-family share, while preserving user ownership and retention limits.
-- [ ] Run tests; expect failure against the existing exposure shape.
-- [ ] Add only required columns/indexes and retention support. Route exposure writes through the telemetry sink after final output so both adapters use one schema.
-- [ ] Extend admin diagnostics with aggregates, never raw private histories.
-- [ ] Run integration/database/API tests and advisors; expect pass.
-- [ ] Commit with `rtk git commit -m "feat: version recommendation exposure telemetry"`.
+- [x] Write tests asserting persisted exposures include engine version, experiment bucket, input revision, pre/post rank, bounded drop reasons, and source-family share, while preserving user ownership and retention limits.
+- [x] Preserve the existing owner-scoped admin exposure count while keeping bounded exposure diagnostics global through one restricted aggregate RPC result.
+- [x] Run tests; expect failure against the existing exposure shape.
+- [x] Add only required columns/indexes and retention support. Route exposure writes through the telemetry sink after final output so both adapters use one schema.
+- [x] Extend admin diagnostics with global aggregates while preserving the owner-scoped health count; never raw private histories.
+- [x] Run integration/database/API tests and available linked validation; expect pass.
+- [x] Commit with `rtk git commit -m "feat: version recommendation exposure telemetry"`.
+
+**Admin count compatibility correction (2026-08-02):** The RED route contract failed because the zero-argument RPC did not receive the authenticated admin owner and `engine_health.exposure_log_count` used the global total. The restricted RPC now accepts `p_owner_user_id`, returns a bounded `owner_count` from the same table scan, and remains SECURITY DEFINER with an empty search path and service-role-only EXECUTE. Focused admin/exposure tests PASS, 53/53; the pgTAP suite was updated but intentionally not executed.
+
+**Execution note (2026-08-02):** COMPLETE. RED fixtures covered versioned/minimized exposure rows, owner isolation, exact pre/post ranks, committed web presentation order (including async palate and expanded sections), exposed-only normalized provider shares, awaited v1 writes, bounded admin aggregates, INSERT/UPDATE sanitization, stable malformed-value rejection, and retention. Independent specification and code-quality reviews APPROVED after correction loops. Fresh local gates PASS: lint, typecheck, full Vitest 603/603 across 38 files, production build (51 pages), and `git diff --check`; existing dynamic-route and stale browser-data build warnings remain non-fatal. The linked migration `20260802120000_version_recommendation_exposure.sql` applied after reconciling the 2A.3 local filename with its actual remote ledger version `20260802013015`. A temporary isolated-user PostgREST fixture verified insert/update legacy-field sanitization, server-controlled 90-day retention, malformed diagnostic rejection with SQLSTATE `22023`, the restricted aggregate RPC shape and owner count, and cascade cleanup. The hosted pgTAP suite remains structurally verified but unexecuted because no local Docker database is available; the Supabase advisor MCP was not exposed in this session, so an advisor rerun is an explicit residual gap. Browser-level Strict Mode/account-switch lifecycle coverage also remains a residual test-depth gap.
 
 ## Checkpoint 2C.1: Offline Quality and Parity Evaluation
 

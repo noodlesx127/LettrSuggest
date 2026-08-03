@@ -13,7 +13,11 @@ import {
   adaptV1RecommendationIntent,
   type V1RecommendationDetails,
 } from "@/lib/recommendationAdapters";
-import { deriveAppliedRelaxation } from "@/lib/recommendationTelemetry";
+import {
+  createLazyExposureWriter,
+  deriveAppliedRelaxation,
+  recordRecommendationExposures,
+} from "@/lib/recommendationTelemetry";
 import {
   createDeterministicRng,
   normalizeProviderFamilies,
@@ -42,6 +46,7 @@ import {
 import { withApiAuth } from "../../_lib/apiKeyAuth";
 import { isRecord } from "../../_lib/pagination";
 import { ApiError, generateRequestId } from "../../_lib/responseEnvelope";
+import { getSupabaseAdmin } from "../../_lib/supabaseAdmin";
 
 interface GenerateSuggestionsBody {
   seed_tmdb_ids: number[];
@@ -558,6 +563,25 @@ export async function POST(req: Request) {
         },
       );
       const data = adaptedResult.data;
+
+      // Record bounded versioned exposures for the final adapted output through
+      // the single telemetry sink. Ownership is the authenticated request user;
+      // the lazy service-role writer keeps client construction inside the
+      // sink's fail-safe boundary, and the sink never throws into the route.
+      // Pre-ranks come from the engine's canonical scoring-before-rerank map.
+      await recordRecommendationExposures({
+        userId: auth.userId,
+        trace: adaptedResult.meta.trace,
+        orderedTmdbIds: data.map((item) => item.tmdb_id),
+        preRanksById: canonicalResult.preRanksById,
+        providerFamiliesByTmdbId: new Map(
+          canonicalResult.results.map((candidate) => [
+            candidate.tmdbId,
+            candidate.evidence.providerFamilies,
+          ]),
+        ),
+        writer: createLazyExposureWriter(() => getSupabaseAdmin()),
+      });
 
       console.log("[v1/suggestions/generate] Generation completed", {
         requestId,

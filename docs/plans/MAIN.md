@@ -1,11 +1,11 @@
 # Recommendation Remediation Program
 
 **Status:** In progress  
-**Current checkpoint:** 2B.2 - Exposure schema and diagnostics integration (Ready)
+**Current checkpoint:** 2C.1 - Offline quality and parity evaluation (Ready)
 
-**Next action:** Mark 2B.2 in progress and write RED exposure persistence fixtures.
+**Next action:** Mark 2C.1 in progress and write the frozen evaluation corpus and RED quality/parity fixtures.
 
-**Safe stopping point:** Checkpoint 2B.1 implementation, verification, and independent reviews are complete; the scoped commit is the current stopping boundary. Checkpoint 2B.2 is ready. Canonical production vector retrieval remains disabled.
+**Safe stopping point:** Checkpoint 2B.2 implementation, independent reviews, local gates, linked migration, and live API validation are complete; its scoped commit is the current stopping boundary. Checkpoint 2C.1 is ready. Canonical production vector retrieval remains disabled.
 
 This file is the sole source of truth for program order, checkpoint status, gates, and audit closure. Phase plans define execution detail but do not override this tracker.
 
@@ -62,8 +62,8 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 2A.2 Import normalization | Complete | 2A.1 | Blank years, watchlist timestamps, and watch-event dedup tests pass | `fix: normalize imported film events consistently` |
 | 2A.3 Atomic snapshot reconciliation | Complete | 2A.2 | Removed rows reconcile; failures cannot report success; revisions invalidate | `fix: reconcile imports as atomic snapshots` |
 | 2B.1 Bounded request diagnostics | Complete | 2A.3 | Stage counts/drop reasons/version/seed emitted without private lists or secrets | `feat: add bounded recommendation diagnostics` |
-| 2B.2 Exposure schema and diagnostics integration | Ready | 2B.1 | Pre/post rank and source-share telemetry persists with bounded retention | Not started |
-| 2C.1 Offline quality and parity evaluation | Not started | 2B.2 | Frozen corpus, rank stability, adapter parity, and regression thresholds pass | Not started |
+| 2B.2 Exposure schema and diagnostics integration | Complete | 2B.1 | Pre/post rank and source-share telemetry persists with bounded retention | `feat: version recommendation exposure telemetry` |
+| 2C.1 Offline quality and parity evaluation | Ready | 2B.2 | Frozen corpus, rank stability, adapter parity, and regression thresholds pass | Not started |
 | 2C.2 Online measurement readiness | Not started | 2C.1 | Experiment assignment and outcome joins are validated | Not started |
 | 3.1 Baseline report and optimization hypothesis | Not started | Phase 2 | Baseline report identifies one bounded, measurable change | Not started |
 | 3.2 Controlled tuning experiment | Not started | 3.1 | Correctness/parity/stability remain green and outcome guardrails pass | Not started |
