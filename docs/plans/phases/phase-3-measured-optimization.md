@@ -1,20 +1,70 @@
 # Phase 3: Measured Optimization and Closure
 
-**Phase state:** Ready  
+**Phase state:** In progress
+
 **Entry condition:** Phase 2 complete with deterministic offline and online measurement gates  
 **Exit condition:** A controlled optimization decision and vector go/no-go are documented, verified, and every audit item is closed.
 
-## Checkpoint 3.1: Baseline Report and Optimization Hypothesis
+## Checkpoint 3.1A: A/A Enrollment Infrastructure
 
-**Checkpoint state:** Ready
+**Checkpoint state:** In progress
+
+**Files:**
+- Reference: `docs/superpowers/specs/2026-08-04-recommendation-aa-baseline-design.md`
+- Create: `supabase/migrations/*_activate_recommendation_experiment_enrollment.sql`
+- Create: `src/lib/recommendationExperimentEnrollment.ts`
+- Modify: `src/lib/recommendationAdapters.ts`
+- Modify: `src/lib/recommendationTelemetry.ts`
+- Modify: `src/lib/serverSuggestionsEngine.ts`
+- Modify: `src/app/actions/recommendations.ts`
+- Modify: `src/app/api/v1/suggestions/generate/route.ts`
+- Modify: `tests/integration/recommendationExperiment.test.ts`
+- Modify: `tests/integration/recommendationExposure.test.ts`
+- Modify: `tests/integration/recommendationAdapters.test.ts`
+- Modify: `tests/recommendation-pages.spec.ts`
+- Modify: `tests/api-v1.spec.ts`
+- Modify: `supabase/tests/database/recommendation_experiment.test.sql`
+- Modify: `docs/plans/MAIN.md`
+
+- [x] Run the frozen versioned offline corpus.
+- [ ] Add failing tests for the approved A/A enrollment control plane, fail-closed assignment resolver, registry persistence, adapter parity, and unchanged arm behavior.
+- [ ] Add the service-owned enrollment table and atomic activation/deactivation RPCs with negative privilege and overlap tests.
+- [ ] Wire one stable 50/50 user-level assignment through the shared canonical web and v1 trace boundary without changing recommendation or vector behavior.
+- [ ] Run focused unit, integration, database, authenticated web/v1 Playwright, corpus, lint, typecheck, and build gates. Complete an independent code-review loop and record its outcome. Verify the release artifact remains inactive without an enrollment row.
+- [ ] Commit code, migration, tests, and tracker evidence with `rtk git commit -m "feat: prepare recommendation baseline enrollment"` before production deployment.
+
+### Execution notes
+
+- 2026-08-04 - Checkpoint 3.1A started. No production enrollment timestamp has been fixed and no production experiment results are claimed, measured, or implied. The enrollment discrepancy is resolved by the approved 50/50 user-level A/A design: registry-backed `control` and `treatment` labels will both execute unchanged `v1-canonical-1`, while recommendation tuning and canonical vector retrieval remain inactive. Production paths still emit only default-bucket assignments until the approved infrastructure is tested, committed, deployed inactive, and atomically activated in checkpoint 3.1B. Frozen versioned offline corpus evaluation ran PASS on 2026-08-04 via `rtk npm run evaluate:recommendations`: corpus `2c.1`, 8/8 cases passed, deterministic repeats and web/v1 parity yes on every case, zero seed, exclusion, genre, attribution, and evidence violations, count fulfillment 100% on all eligible cases with the degraded-inputs case returning its expected fail-closed 0/3 result, and vector results and vector rows activated both zero. The offline corpus performs no production writes and requires no enrollment activation.
+
+## Checkpoint 3.1B: Atomic Production Enrollment Activation
+
+**Checkpoint state:** Not started
 
 **Files:**
 - Modify: `docs/summary/recommendation-baseline.md`
 - Modify: `docs/plans/MAIN.md`
 
-- [ ] Run the versioned offline corpus and collect the minimum accepted production observation window defined in Phase 2.
-- [ ] Record deterministic repeat rate, count fulfillment, seed/exclusion violations, source concentration, diversity, popularity concentration, rank churn, degraded rate, and available outcome metrics by engine version.
-- [ ] Select exactly one bounded hypothesis tied to a measured weakness. Specify the single configuration/code change, expected metric movement, guardrails, sample requirement, and rollback trigger.
+- [ ] Apply the committed enrollment migration and verify effective service-only table and RPC privileges.
+- [ ] Deploy the committed 3.1A revision with no active enrollment row.
+- [ ] Verify production default fallback, web/v1 health, exposure writes, and zero vector activation.
+- [ ] Invoke the activation RPC once and record its returned UTC start, UTC end, experiment key, config version, assignment unit, and 50/50 split.
+- [ ] Verify registry-backed exposures appear in both arms while recommendation behavior remains identical.
+- [ ] Commit production activation evidence with `rtk git commit -m "ops: start recommendation baseline enrollment"`.
+
+## Checkpoint 3.1C: Baseline Report and Optimization Hypothesis
+
+**Checkpoint state:** Not started
+
+**Files:**
+- Modify: `docs/summary/recommendation-baseline.md`
+- Modify: `docs/plans/MAIN.md`
+
+- [ ] Collect the fixed 14-day production observation window and seven-day maturation period defined in Phase 2 without interim outcome analysis.
+- [ ] Require at least 1,000 eligible measured outcomes per arm; otherwise reject the run and restart with a new run-specific experiment key and fixed window.
+- [ ] If the run stops or is underpowered, mark 3.1C `Blocked` and amend `MAIN.md` with new run-specific infrastructure and activation checkpoints before changing the compiled contract, committing, deploying, or activating a replacement run. Never reopen completed checkpoints or extend the original window.
+- [ ] Record deterministic repeat rate, count fulfillment, seed/exclusion violations, source concentration, diversity, popularity concentration, rank churn, degraded rate, and outcome metrics by engine version and arm.
+- [ ] Perform the one final analysis and select exactly one bounded hypothesis tied to a measured weakness. Specify the single configuration/code change, expected metric movement, guardrails, sample requirement, and rollback trigger.
 - [ ] Review audit coverage to confirm no correctness defect is being disguised as tuning.
 - [ ] Commit with `rtk git commit -m "docs: establish recommendation quality baseline"`.
 

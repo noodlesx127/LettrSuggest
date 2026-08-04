@@ -63,9 +63,9 @@ Fix **before** starting any measurement run; never adapt mid-run:
   closes, **no new assignments** are made and the experiment config is
   frozen.
 - **Included-exposure cutoff:** only exposures recorded during the fixed
-  14-day enrollment window are included in this analysis. Already-assigned
-  traffic may continue its arm after the window closes, but post-close
-  exposures are excluded from this analysis entirely.
+  14-day enrollment window are included in this analysis. Stored assignments
+  remain preserved for auditability, but requests revert to the `default`
+  bucket when the window closes; no post-close arm exposures are emitted.
 - **7-day maturation begins at enrollment close**, the final included
   exposure time. After the cutoff the run matures for one full attribution
   window (7 days) so every included exposure can complete its feedback
@@ -75,7 +75,8 @@ Fix **before** starting any measurement run; never adapt mid-run:
 - Minimum measured outcomes per arm: **1,000** (exposure+feedback pairs
   inside the attribution window).
 - If either minimum is unmet at the end of maturation, the run is
-  inconclusive and must be extended or restarted, not interpreted.
+  inconclusive and must not be interpreted or extended. Restart with a new
+  run-specific experiment key, config version, and fixed 14-day window.
 
 ## 5. Guardrails
 

@@ -1,9 +1,9 @@
 # Recommendation Remediation Program
 
 **Status:** In progress  
-**Current checkpoint:** 3.1 - Baseline report and optimization hypothesis (Ready)
+**Current checkpoint:** 3.1A - A/A enrollment infrastructure (In progress)
 
-**Next action:** Mark 3.1 In progress and begin the preregistered 14-day baseline enrollment without activating treatment traffic or vector retrieval.
+**Next action:** Implement and verify the approved 50/50 user-level A/A enrollment infrastructure, including the service-owned activation control plane and shared web/v1 assignment boundary. Commit the inactive infrastructure before any production deployment or activation. The `control` and `treatment` labels must both run unchanged `v1-canonical-1`; recommendation tuning and vector traffic remain inactive.
 
 **Safe stopping point:** Phase 2 is complete. Linked migrations are applied through `20260803130000`, the measurement-readiness boundary is verified, and canonical production vector retrieval remains disabled.
 
@@ -16,6 +16,7 @@ Secure privileged database operations, correct proven recommendation defects, co
 ## References
 
 - Approved design: `docs/superpowers/specs/2026-07-19-recommendation-remediation-design.md`
+- Approved checkpoint 3.1 A/A design: `docs/superpowers/specs/2026-08-04-recommendation-aa-baseline-design.md`
 - Implementation handoff: `docs/superpowers/plans/2026-07-19-recommendation-remediation.md`
 - Audit: `docs/summary/recommendation-algorithm-deep-dive-2026-07-19.md`
 - Build strategy: `docs/plans/build-strategy.md`
@@ -65,8 +66,10 @@ Secure privileged database operations, correct proven recommendation defects, co
 | 2B.2 Exposure schema and diagnostics integration | Complete | 2B.1 | Pre/post rank and source-share telemetry persists with bounded retention | `feat: version recommendation exposure telemetry` |
 | 2C.1 Offline quality and parity evaluation | Complete | 2B.2 | Frozen corpus, rank stability, adapter parity, and regression thresholds pass | `test: add recommendation quality evaluation` |
 | 2C.2 Online measurement readiness | Complete | 2C.1 | Experiment assignment and outcome joins are validated | `feat: prepare recommendation outcome measurement` |
-| 3.1 Baseline report and optimization hypothesis | Ready | Phase 2 | Baseline report identifies one bounded, measurable change | Not started |
-| 3.2 Controlled tuning experiment | Not started | 3.1 | Correctness/parity/stability remain green and outcome guardrails pass | Not started |
+| 3.1A A/A enrollment infrastructure | In progress | Phase 2 | Inactive control plane and shared web/v1 assignment wiring pass security, parity, fallback, and vector-disabled gates | Not started |
+| 3.1B Atomic production enrollment activation | Not started | 3.1A | The committed revision is deployed inactive, default fallback is verified, and one exact 14-day A/A window is atomically activated and recorded | Not started |
+| 3.1C Baseline report and optimization hypothesis | Not started | 3.1B | The fixed window and seven-day maturation complete with at least 1,000 eligible outcomes per arm; one final analysis, audit review, and exactly one bounded hypothesis are recorded | Not started |
+| 3.2 Controlled tuning experiment | Not started | 3.1C | Correctness/parity/stability remain green and outcome guardrails pass | Not started |
 | 3.3 Vector go/no-go | Not started | 3.2 | Capability evidence supports activation or records explicit rejection | Not started |
 | 3.4 Final audit closure | Not started | 3.3 | Every audit item has evidence, gated defer, or rejection rationale | Not started |
 
