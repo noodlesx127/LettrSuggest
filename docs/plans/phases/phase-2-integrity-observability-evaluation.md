@@ -1,6 +1,6 @@
 # Phase 2: Integrity, Observability, and Evaluation
 
-**Phase state:** In progress  
+**Phase state:** Complete  
 **Entry condition:** Phase 1 complete  
 **Exit condition:** Import inputs are user-safe and atomic, request/exposure diagnostics explain output, and offline/online evaluation gates are operational.
 
@@ -195,16 +195,26 @@
 
 ## Checkpoint 2C.2: Online Measurement Readiness
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Create: `tests/integration/recommendationExperiment.test.ts`
 - Modify: `src/lib/abTesting.ts`
 - Modify: `src/lib/recommendationTelemetry.ts`
+- Modify: `src/lib/recommendationTypes.ts`
+- Modify: `src/lib/recommendationRevision.ts`
+- Modify: `tests/integration/recommendationExposure.test.ts`
+- Modify: `tests/integration/adminDiagnostics.test.ts`
+- Modify: `tests/unit/recommendationTelemetry.test.ts`
+- Create: `supabase/migrations/20260803120000_prepare_recommendation_experiments.sql`
+- Create: `supabase/migrations/20260803130000_restrict_exposure_prune.sql`
+- Create: `supabase/tests/database/recommendation_experiment.test.sql`
 - Create: `docs/summary/recommendation-baseline.md`
 
-- [ ] Write tests asserting stable user/request bucket assignment, engine/config version capture, exposure-to-feedback joins, and exclusion of users without valid assignment from experiment comparisons.
-- [ ] Run tests; expect failure where assignment and exposure are not joined canonically.
-- [ ] Implement one stable experiment assignment boundary and telemetry join keys. Document baseline sample requirements, primary metric, guardrails, and stop conditions.
-- [ ] Run the full Phase 2 gate, relevant Playwright tests, database tests, and advisors; expect pass.
-- [ ] Mark Phase 2 complete, make 3.1 ready, and commit with `rtk git commit -m "feat: prepare recommendation outcome measurement"`.
+- [x] Write tests asserting stable user/request bucket assignment, engine/config version capture, exposure-to-feedback joins, and exclusion of users without valid assignment from experiment comparisons.
+- [x] Run tests; expect failure where assignment and exposure are not joined canonically.
+- [x] Implement one stable experiment assignment boundary and telemetry join keys. Document baseline sample requirements, primary metric, guardrails, and stop conditions.
+- [x] Run the full Phase 2 gate, relevant Playwright tests, database tests, and advisors; expect pass.
+- [x] Mark Phase 2 complete, make 3.1 ready, and commit with `rtk git commit -m "feat: prepare recommendation outcome measurement"`.
+
+**Execution note (2026-08-04):** COMPLETE. Strict RED/GREEN coverage now proves deterministic user/request assignment, internally derived config versions, immutable service-owned assignment evidence, exact trace/exposure join keys, forged-assignment exclusion, bounded seven-day exposure-to-feedback attribution, consistent bounded aggregates, server-controlled feedback event time, owner-scoped feedback upserts, and private-free failure behavior. Malformed, cyclic, accessor-backed, proxy-backed, deep, wide, and prototype-sensitive config material fails closed; stored assignments win across config changes and insert races. The readiness protocol records no measured results, activates no treatment traffic, keeps vectors disabled, and preregisters the 14-day enrollment, seven-day maturation, 1,000-outcome-per-arm minimum, numeric guardrails, stop conditions, and no-peeking rule. Linked migrations `20260803120000_prepare_recommendation_experiments` and `20260803130000_restrict_exposure_prune` applied successfully. Live schema/ACL/RLS inspection and a rollback-only two-user fixture proved registry registration, matching active exposure, default browser exposure, forged-active rejection, feedback timestamp control, and cross-owner UPDATE denial; the prune function is no longer executable by anon/authenticated and no longer appears in security advisors. Final gates PASS: focused experiment tests 90/90, full Vitest 722/722 across 42 files, lint, typecheck, offline evaluation 8/8, production build 51 pages, and `git diff --check`. Authenticated recommendation-page Playwright PASS 2/2 and sequential diagnostics/admin API tests PASS 2/2. Independent specification and code-quality reviews APPROVED. The 74-assertion pgTAP suite is structurally verified but unexecuted because the local Docker-backed database is unavailable; the linked rollback fixture covers the critical runtime contract.

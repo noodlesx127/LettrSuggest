@@ -20,7 +20,9 @@ import {
   type RecommendationExposureWriter,
 } from "@/lib/recommendationTelemetry";
 import {
+  DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
   DEFAULT_EXPERIMENT_BUCKET,
+  DEFAULT_EXPERIMENT_CONFIG_VERSION,
   DEFAULT_INPUT_REVISION_HASH,
   MAX_DIAGNOSTIC_COUNT,
   MAX_RECOMMENDATION_COUNT,
@@ -91,6 +93,10 @@ describe("recommendation exposure record builder", () => {
       expect(record.tmdb_id).toBe(FINAL_ORDER[index]);
       expect(record.engine_version).toBe(RECOMMENDATION_ENGINE_VERSION);
       expect(record.experiment_bucket).toBe(DEFAULT_EXPERIMENT_BUCKET);
+      expect(record.experiment_config_version).toBe(
+        DEFAULT_EXPERIMENT_CONFIG_VERSION,
+      );
+      expect(record.assignment_hash).toBe(DEFAULT_EXPERIMENT_ASSIGNMENT_HASH);
       expect(record.input_revision).toBe(trace.inputRevision);
       expect(record.input_revision).toMatch(/^[0-9a-f]{16}$/);
       expect(validateRecommendationExposureRecord(record)).toBe(true);
@@ -313,9 +319,11 @@ describe("recommendation exposure record builder", () => {
 
     expect(Object.keys(record).sort()).toEqual(
       [
+        "assignment_hash",
         "drop_reason_counts",
         "engine_version",
         "experiment_bucket",
+        "experiment_config_version",
         "input_revision",
         "post_rank",
         "pre_rank",
@@ -742,6 +750,8 @@ describe("bounded admin exposure diagnostics", () => {
     });
     expect(diagnostics.by_experiment_bucket).toEqual({
       [DEFAULT_EXPERIMENT_BUCKET]: 42,
+      control: 0,
+      treatment: 0,
     });
     const serialized = JSON.stringify(diagnostics);
     expect(serialized).not.toContain("sk_live");

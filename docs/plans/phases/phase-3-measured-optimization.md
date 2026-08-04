@@ -1,10 +1,12 @@
 # Phase 3: Measured Optimization and Closure
 
-**Phase state:** Not started  
+**Phase state:** Ready  
 **Entry condition:** Phase 2 complete with deterministic offline and online measurement gates  
 **Exit condition:** A controlled optimization decision and vector go/no-go are documented, verified, and every audit item is closed.
 
 ## Checkpoint 3.1: Baseline Report and Optimization Hypothesis
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Modify: `docs/summary/recommendation-baseline.md`

@@ -103,10 +103,15 @@ function canonicalize(value: unknown): unknown {
       .sort()
       .reduce<Record<string, unknown>>((result, key) => {
         if (record[key] !== undefined) {
-          result[key] = canonicalize(record[key]);
+          Object.defineProperty(result, key, {
+            configurable: true,
+            enumerable: true,
+            value: canonicalize(record[key]),
+            writable: true,
+          });
         }
         return result;
-      }, {});
+      }, Object.create(null) as Record<string, unknown>);
   }
 
   return String(value);

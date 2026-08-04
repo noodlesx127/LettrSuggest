@@ -36,12 +36,52 @@ export type RecommendationProviderFamily =
 /**
  * Controlled allowlist of experiment buckets emitted in bounded diagnostics.
  * Only canonical labels are permitted; arbitrary/API-key/user-like values are
- * normalized to the default. Stable assignment is checkpoint 2C.2.
+ * normalized to the default. The default bucket marks traffic with no active
+ * experiment and always pairs with the zero experiment config version; the
+ * control/treatment buckets are active experiment arms and always pair with a
+ * nonzero 16-char lowercase hex config version (checkpoint 2C.2).
  */
-export const RECOMMENDATION_EXPERIMENT_BUCKETS = ["default"] as const;
+export const RECOMMENDATION_EXPERIMENT_BUCKETS = [
+  "default",
+  "control",
+  "treatment",
+] as const;
 
 export type RecommendationExperimentBucket =
   (typeof RECOMMENDATION_EXPERIMENT_BUCKETS)[number];
+
+/**
+ * Assignment units supported by the deterministic experiment assignment
+ * boundary: stable per authenticated user or per request.
+ */
+export const RECOMMENDATION_EXPERIMENT_ASSIGNMENT_UNITS = [
+  "user",
+  "request",
+] as const;
+
+export type RecommendationExperimentAssignmentUnit =
+  (typeof RECOMMENDATION_EXPERIMENT_ASSIGNMENT_UNITS)[number];
+
+/**
+ * Bounded traffic split over exactly the controlled buckets. Weights are
+ * finite, nonnegative, and sum to 1 within the tight tolerance. Assignment
+ * walks the buckets in the canonical allowlist order, never object order.
+ */
+export type RecommendationExperimentTrafficSplit = Readonly<
+  Record<RecommendationExperimentBucket, number>
+>;
+
+/**
+ * Deterministic experiment assignment output. Carries only the controlled
+ * bucket, the 16-char lowercase hex experiment config version, and the
+ * 16-char lowercase hex assignment hash; never the raw assignment key,
+ * experiment key, or config material.
+ */
+export type RecommendationExperimentAssignment = Readonly<{
+  bucket: RecommendationExperimentBucket;
+  configVersion: string;
+  assignmentHash: string;
+}>;
 
 export const REQUIRED_RECOMMENDATION_SOURCES = [
   "films",
@@ -196,6 +236,8 @@ export type RecommendationTrace = Readonly<{
   sourceShares: Readonly<Record<string, number>>;
   relaxation: RecommendationTraceRelaxation;
   experimentBucket: RecommendationExperimentBucket;
+  experimentConfigVersion: string;
+  experimentAssignmentHash: string;
   inputRevision: string;
 }>;
 
@@ -219,6 +261,35 @@ export const MAX_DIAGNOSTIC_STRING_LENGTH = 128;
 export const RECOMMENDATION_REQUEST_SEED_HASH_LENGTH = 16;
 export const DEFAULT_EXPERIMENT_BUCKET = "default";
 export const DEFAULT_INPUT_REVISION_HASH = "0000000000000000";
+export const EXPERIMENT_CONFIG_VERSION_LENGTH = 16;
+/**
+ * Experiment config version for default/no-experiment traffic. Active
+ * experiment arms always carry a nonzero 16-char lowercase hex version.
+ */
+export const DEFAULT_EXPERIMENT_CONFIG_VERSION = "0000000000000000";
+/**
+ * Assignment hash for default/no-experiment traffic. Active experiment arms
+ * always carry a nonzero 16-char lowercase hex assignment hash that matches a
+ * server-owned registry row; the default bucket always pairs with the zero
+ * hash.
+ */
+export const DEFAULT_EXPERIMENT_ASSIGNMENT_HASH = "0000000000000000";
+/**
+ * Tight tolerance for the required traffic-split weight sum of 1. Splits
+ * outside this tolerance fail closed to the default assignment.
+ */
+export const EXPERIMENT_TRAFFIC_SPLIT_SUM_TOLERANCE = 1e-9;
+/**
+ * The default assignment returned whenever no valid active experiment config
+ * applies: the default bucket with the zero config version and zero
+ * assignment hash.
+ */
+export const DEFAULT_EXPERIMENT_ASSIGNMENT: RecommendationExperimentAssignment =
+  Object.freeze({
+    bucket: DEFAULT_EXPERIMENT_BUCKET,
+    configVersion: DEFAULT_EXPERIMENT_CONFIG_VERSION,
+    assignmentHash: DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
+  });
 // Source share keys are restricted to the canonical provider-family allowlist,
 // so the bounded map capacity equals that canonical capacity.
 export const MAX_TRACE_SOURCE_SHARE_KEYS =
@@ -254,7 +325,14 @@ const RECOMMENDATION_TRACE_KEYS = [
   "sourceShares",
   "relaxation",
   "experimentBucket",
+  "experimentConfigVersion",
+  "experimentAssignmentHash",
   "inputRevision",
+] as const;
+const EXPERIMENT_ASSIGNMENT_KEYS = [
+  "bucket",
+  "configVersion",
+  "assignmentHash",
 ] as const;
 const SAFE_REQUEST_SEED = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const JWT_LIKE_STRING =
@@ -704,6 +782,106 @@ function isExperimentBucket(
   );
 }
 
+export function isExperimentConfigVersion(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length === EXPERIMENT_CONFIG_VERSION_LENGTH &&
+    LOWERCASE_HEX.test(value)
+  );
+}
+
+/**
+ * Controlled bucket/config-version pairing invariant shared by the trace
+ * validator, the exposure schema, and the outcome joins: the default bucket
+ * pairs only with the zero config version, and active buckets pair only with
+ * a nonzero 16-char lowercase hex config version.
+ */
+export function isExperimentBucketConfigConsistent(
+  bucket: unknown,
+  configVersion: unknown,
+): boolean {
+  if (!isExperimentBucket(bucket) || !isExperimentConfigVersion(configVersion)) {
+    return false;
+  }
+
+  if (bucket === DEFAULT_EXPERIMENT_BUCKET) {
+    return configVersion === DEFAULT_EXPERIMENT_CONFIG_VERSION;
+  }
+  return configVersion !== DEFAULT_EXPERIMENT_CONFIG_VERSION;
+}
+
+/**
+ * Controlled bucket/config/assignment-hash pairing invariant shared by the
+ * trace validator, the exposure schema, and the outcome joins: the default
+ * bucket pairs only with the zero config version and the zero assignment
+ * hash, and active buckets pair only with a nonzero 16-char lowercase hex
+ * config version and a nonzero 16-char lowercase hex assignment hash.
+ */
+export function isExperimentAssignmentHashConsistent(
+  bucket: unknown,
+  configVersion: unknown,
+  assignmentHash: unknown,
+): boolean {
+  if (
+    !isExperimentBucket(bucket) ||
+    !isExperimentConfigVersion(configVersion) ||
+    !isExperimentConfigVersion(assignmentHash) ||
+    !isExperimentBucketConfigConsistent(bucket, configVersion)
+  ) {
+    return false;
+  }
+
+  if (bucket === DEFAULT_EXPERIMENT_BUCKET) {
+    return assignmentHash === DEFAULT_EXPERIMENT_ASSIGNMENT_HASH;
+  }
+  return assignmentHash !== DEFAULT_EXPERIMENT_ASSIGNMENT_HASH;
+}
+
+export function validateRecommendationExperimentAssignment(
+  value: unknown,
+): value is RecommendationExperimentAssignment {
+  if (!isRecord(value) || !hasExactKeys(value, EXPERIMENT_ASSIGNMENT_KEYS)) {
+    return false;
+  }
+
+  return isExperimentAssignmentHashConsistent(
+    value.bucket,
+    value.configVersion,
+    value.assignmentHash,
+  );
+}
+
+export function validateExperimentTrafficSplit(
+  value: unknown,
+): value is RecommendationExperimentTrafficSplit {
+  if (!isRecord(value)) return false;
+
+  const keys = Object.keys(value);
+  if (
+    keys.length !== RECOMMENDATION_EXPERIMENT_BUCKETS.length ||
+    !RECOMMENDATION_EXPERIMENT_BUCKETS.every((bucket) =>
+      Object.hasOwn(value, bucket),
+    )
+  ) {
+    return false;
+  }
+
+  let sum = 0;
+  for (const bucket of RECOMMENDATION_EXPERIMENT_BUCKETS) {
+    const weight = value[bucket];
+    if (
+      typeof weight !== "number" ||
+      !Number.isFinite(weight) ||
+      weight < 0
+    ) {
+      return false;
+    }
+    sum += weight;
+  }
+
+  return Math.abs(sum - 1) <= EXPERIMENT_TRAFFIC_SPLIT_SUM_TOLERANCE;
+}
+
 function isInputRevisionHash(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -749,7 +927,11 @@ export function validateRecommendationTrace(
     !isValidDropReasonCounts(value.dropReasonCounts) ||
     !isTraceSourceShares(value.sourceShares) ||
     !isTraceRelaxation(value.relaxation) ||
-    !isExperimentBucket(value.experimentBucket) ||
+    !isExperimentAssignmentHashConsistent(
+      value.experimentBucket,
+      value.experimentConfigVersion,
+      value.experimentAssignmentHash,
+    ) ||
     !isInputRevisionHash(value.inputRevision)
   ) {
     return false;

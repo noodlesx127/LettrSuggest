@@ -6,7 +6,9 @@ import {
   stableCanonicalSerialize,
 } from "@/lib/recommendationRevision";
 import {
+  DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
   DEFAULT_EXPERIMENT_BUCKET,
+  DEFAULT_EXPERIMENT_CONFIG_VERSION,
   DEFAULT_INPUT_REVISION_HASH,
   MAX_DIAGNOSTIC_COUNT,
   MAX_RECOMMENDATION_COUNT,
@@ -16,6 +18,10 @@ import {
   RECOMMENDATION_EXPERIMENT_BUCKETS,
   RECOMMENDATION_PROVIDER_FAMILIES,
   RECOMMENDATION_TRACE_RELAXATIONS,
+  isExperimentAssignmentHashConsistent,
+  isExperimentBucketConfigConsistent,
+  isExperimentConfigVersion,
+  validateRecommendationExperimentAssignment,
   validateRecommendationTrace,
   type DropReason,
   type RecommendationEngineVersion,
@@ -147,6 +153,13 @@ export type RecommendationTraceInput = Readonly<{
   result: RecommendationResult;
   relaxation?: unknown;
   experimentBucket?: unknown;
+  /**
+   * Additive active experiment assignment (checkpoint 2C.2). When a valid
+   * assignment is supplied it provides both the experiment bucket and the
+   * experiment config version; malformed assignments fail closed to the
+   * default bucket with the zero config version.
+   */
+  experimentAssignment?: unknown;
   inputRevision?: string | null;
   inputRevisionMaterial?: RecommendationInputRevisionMaterial | null;
 }>;
@@ -161,6 +174,26 @@ function resolveInputRevision(input: RecommendationTraceInput): string {
   return hashInputRevision(input.inputRevisionMaterial ?? null);
 }
 
+function resolveExperimentFields(input: RecommendationTraceInput): {
+  experimentBucket: RecommendationExperimentBucket;
+  experimentConfigVersion: string;
+  experimentAssignmentHash: string;
+} {
+  if (validateRecommendationExperimentAssignment(input.experimentAssignment)) {
+    return {
+      experimentBucket: input.experimentAssignment.bucket,
+      experimentConfigVersion: input.experimentAssignment.configVersion,
+      experimentAssignmentHash: input.experimentAssignment.assignmentHash,
+    };
+  }
+
+  return {
+    experimentBucket: normalizeExperimentBucket(input.experimentBucket),
+    experimentConfigVersion: DEFAULT_EXPERIMENT_CONFIG_VERSION,
+    experimentAssignmentHash: DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
+  };
+}
+
 /**
  * Build the canonical bounded request diagnostics trace. This is the single
  * allowlisted builder shared by the engine and both the v1 and web adapters so
@@ -171,6 +204,7 @@ export function buildRecommendationTrace(
   input: RecommendationTraceInput,
 ): RecommendationTrace {
   const diagnostics = input.result.diagnostics;
+  const experiment = resolveExperimentFields(input);
   const trace: RecommendationTrace = {
     engineVersion: diagnostics.engineVersion,
     mode: diagnostics.mode,
@@ -185,7 +219,9 @@ export function buildRecommendationTrace(
     dropReasonCounts: { ...diagnostics.dropReasonCounts },
     sourceShares: deriveSourceShares(input.result.results),
     relaxation: normalizeTraceRelaxation(input.relaxation),
-    experimentBucket: normalizeExperimentBucket(input.experimentBucket),
+    experimentBucket: experiment.experimentBucket,
+    experimentConfigVersion: experiment.experimentConfigVersion,
+    experimentAssignmentHash: experiment.experimentAssignmentHash,
     inputRevision: resolveInputRevision(input),
   };
 
@@ -219,6 +255,8 @@ const EXPOSURE_RECORD_KEYS = [
   "tmdb_id",
   "engine_version",
   "experiment_bucket",
+  "experiment_config_version",
+  "assignment_hash",
   "input_revision",
   "pre_rank",
   "post_rank",
@@ -231,6 +269,8 @@ export type RecommendationExposureRecord = Readonly<{
   tmdb_id: number;
   engine_version: RecommendationEngineVersion;
   experiment_bucket: RecommendationExperimentBucket;
+  experiment_config_version: string;
+  assignment_hash: string;
   input_revision: string;
   pre_rank: number;
   post_rank: number;
@@ -315,8 +355,10 @@ export function validateRecommendationExposureRecord(
     Number.isSafeInteger(value.tmdb_id) &&
     value.tmdb_id > 0 &&
     value.engine_version === RECOMMENDATION_ENGINE_VERSION &&
-    RECOMMENDATION_EXPERIMENT_BUCKETS.includes(
-      value.experiment_bucket as RecommendationExperimentBucket,
+    isExperimentAssignmentHashConsistent(
+      value.experiment_bucket,
+      value.experiment_config_version,
+      value.assignment_hash,
     ) &&
     typeof value.input_revision === "string" &&
     INPUT_REVISION_PATTERN.test(value.input_revision) &&
@@ -410,6 +452,8 @@ export function buildRecommendationExposureRecords(
       tmdb_id: tmdbId,
       engine_version: input.trace.engineVersion,
       experiment_bucket: input.trace.experimentBucket,
+      experiment_config_version: input.trace.experimentConfigVersion,
+      assignment_hash: input.trace.experimentAssignmentHash,
       input_revision: input.trace.inputRevision,
       pre_rank: isBoundedRank(injectedPreRank) ? injectedPreRank : postRank,
       post_rank: postRank,
@@ -559,4 +603,418 @@ export function buildBoundedExposureDiagnostics(input: {
     by_engine_version: byEngineVersion,
     by_experiment_bucket: byExperimentBucket,
   };
+}
+
+/**
+ * Experiment outcome measurement (checkpoint 2C.2).
+ *
+ * Pure, fail-closed join helpers over bounded exposure, assignment-evidence,
+ * and feedback rows. Only exposures with a valid controlled assignment
+ * (control/treatment bucket paired with a nonzero 16-char lowercase hex
+ * config version and a nonzero 16-char lowercase hex assignment hash), the
+ * current engine version, a parseable exposure timestamp, AND a matching
+ * server-owned assignment evidence row (same assignment hash, owner, engine
+ * version, config version, and bucket) are eligible. Forged, stale, or
+ * mismatched exposures are excluded. Feedback attributes to the same
+ * user+movie, strictly after the exposure, and within the bounded
+ * attribution window. Outcomes and aggregates carry only controlled buckets,
+ * config versions, bounded counts, and rates; never user ids, movie ids, raw
+ * rows, or feedback text.
+ */
+
+export const EXPERIMENT_ATTRIBUTION_WINDOW_DAYS = 7;
+
+/**
+ * Fixed offline readiness bounds for the pure experiment join. Each input
+ * population (exposures, feedback, assignment evidence) is limited to the
+ * diagnostic count, and the outcome list stops at the fixed outcome cap.
+ * Inputs are never silently truncated: any oversized input population fails
+ * closed to no outcomes. Output stops at the cap in deterministic sorted
+ * user/movie order, so repeated runs over the same population always publish
+ * the same bounded prefix.
+ */
+export const MAX_EXPERIMENT_JOIN_EXPOSURES = MAX_DIAGNOSTIC_COUNT;
+export const MAX_EXPERIMENT_JOIN_FEEDBACK = MAX_DIAGNOSTIC_COUNT;
+export const MAX_EXPERIMENT_JOIN_ASSIGNMENTS = MAX_DIAGNOSTIC_COUNT;
+export const MAX_EXPERIMENT_JOIN_OUTCOMES = MAX_DIAGNOSTIC_COUNT;
+
+const EXPERIMENT_OUTCOME_USER_ID_MAX_LENGTH = 64;
+const EXPERIMENT_ATTRIBUTION_WINDOW_MS =
+  EXPERIMENT_ATTRIBUTION_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+export type ExperimentExposureRow = Readonly<{
+  userId: string;
+  tmdbId: number;
+  exposedAt: string;
+  engineVersion: string | null;
+  experimentBucket: string | null;
+  experimentConfigVersion: string | null;
+  assignmentHash: string | null;
+}>;
+
+/**
+ * Server-owned assignment registry evidence row (bounded projection of
+ * recommendation_experiment_assignments). Carries only the assignment hash,
+ * owner, engine version, config version, and bucket; never raw assignment or
+ * experiment keys and never the subject hash.
+ */
+export type ExperimentAssignmentEvidenceRow = Readonly<{
+  userId: string;
+  assignmentHash: string;
+  engineVersion: string | null;
+  configVersion: string | null;
+  bucket: string | null;
+}>;
+
+export type ExperimentFeedbackRow = Readonly<{
+  userId: string;
+  tmdbId: number;
+  feedbackAt: string;
+  positive: boolean;
+}>;
+
+export type ExperimentOutcome = Readonly<{
+  bucket: RecommendationExperimentBucket;
+  configVersion: string;
+  positive: boolean;
+}>;
+
+export type ExperimentBucketOutcomeAggregate = Readonly<{
+  bucket: RecommendationExperimentBucket;
+  configVersion: string;
+  outcomeCount: number;
+  positiveCount: number;
+  positiveRate: number;
+}>;
+
+type EligibleExperimentExposure = Readonly<{
+  userId: string;
+  tmdbId: number;
+  exposedAtMs: number;
+  bucket: RecommendationExperimentBucket;
+  configVersion: string;
+  assignmentHash: string;
+}>;
+
+type EligibleExperimentFeedback = Readonly<{
+  userId: string;
+  tmdbId: number;
+  atMs: number;
+  positive: boolean;
+}>;
+
+function isBoundedExperimentUserId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length <= EXPERIMENT_OUTCOME_USER_ID_MAX_LENGTH
+  );
+}
+
+function isPositiveSafeTmdbId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function parseExperimentTimestamp(value: unknown): number | null {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function isActiveExperimentHash(value: unknown): value is string {
+  return (
+    isExperimentConfigVersion(value) &&
+    value !== DEFAULT_EXPERIMENT_ASSIGNMENT_HASH
+  );
+}
+
+function toEligibleExperimentExposure(
+  row: unknown,
+): EligibleExperimentExposure | null {
+  if (!isExposureRecordObject(row)) return null;
+
+  const exposedAtMs = parseExperimentTimestamp(row.exposedAt);
+  if (
+    !isBoundedExperimentUserId(row.userId) ||
+    !isPositiveSafeTmdbId(row.tmdbId) ||
+    exposedAtMs === null ||
+    row.engineVersion !== RECOMMENDATION_ENGINE_VERSION ||
+    (row.experimentBucket !== "control" && row.experimentBucket !== "treatment")
+  ) {
+    return null;
+  }
+
+  // Enforces the 16-char lowercase hex shapes and the active-bucket pairing
+  // with a nonzero config version and a nonzero assignment hash;
+  // default/unassigned rows never qualify.
+  if (
+    !isExperimentAssignmentHashConsistent(
+      row.experimentBucket,
+      row.experimentConfigVersion,
+      row.assignmentHash,
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    userId: row.userId,
+    tmdbId: row.tmdbId,
+    exposedAtMs,
+    bucket: row.experimentBucket,
+    configVersion: row.experimentConfigVersion as string,
+    assignmentHash: row.assignmentHash as string,
+  };
+}
+
+/**
+ * Validate one server-owned assignment evidence row and reduce it to its
+ * bounded evidence key: owner + assignment hash + config version + bucket.
+ * The current engine version is required. Malformed, default, zero-hash, or
+ * stale rows fail closed to null.
+ */
+function toAssignmentEvidenceKey(row: unknown): string | null {
+  if (!isExposureRecordObject(row)) return null;
+
+  if (
+    !isBoundedExperimentUserId(row.userId) ||
+    !isActiveExperimentHash(row.assignmentHash) ||
+    row.engineVersion !== RECOMMENDATION_ENGINE_VERSION ||
+    (row.bucket !== "control" && row.bucket !== "treatment") ||
+    !isActiveExperimentHash(row.configVersion)
+  ) {
+    return null;
+  }
+
+  return `${row.userId}\u0000${row.assignmentHash}\u0000${row.configVersion}\u0000${row.bucket}`;
+}
+
+function toEligibleExperimentFeedback(
+  row: unknown,
+): EligibleExperimentFeedback | null {
+  if (!isExposureRecordObject(row)) return null;
+
+  const atMs = parseExperimentTimestamp(row.feedbackAt);
+  if (
+    !isBoundedExperimentUserId(row.userId) ||
+    !isPositiveSafeTmdbId(row.tmdbId) ||
+    atMs === null ||
+    typeof row.positive !== "boolean"
+  ) {
+    return null;
+  }
+
+  return { userId: row.userId, tmdbId: row.tmdbId, atMs, positive: row.positive };
+}
+
+function experimentRowKey(userId: string, tmdbId: number): string {
+  return `${userId}\u0000${tmdbId}`;
+}
+
+function compareExposuresLatestFirst(
+  left: EligibleExperimentExposure,
+  right: EligibleExperimentExposure,
+): number {
+  return (
+    right.exposedAtMs - left.exposedAtMs ||
+    (left.configVersion === right.configVersion
+      ? 0
+      : left.configVersion < right.configVersion
+        ? 1
+        : -1) ||
+    (left.bucket < right.bucket ? -1 : left.bucket > right.bucket ? 1 : 0)
+  );
+}
+
+/**
+ * Join bounded exposure rows to bounded feedback rows for experiment
+ * measurement. An exposure is eligible only when a server-owned assignment
+ * evidence row matches its assignment hash, owner, engine version, config
+ * version, and bucket; exposures without matching evidence (forged, stale,
+ * or mismatched) are excluded. For each user+movie pair with at least one
+ * eligible exposure and at least one eligible feedback row, the latest
+ * eligible exposure with feedback strictly after it and within the
+ * attribution window is chosen deterministically (latest timestamp, then
+ * config version, then bucket); the outcome is positive when any in-window
+ * feedback for that exposure is positive. Default/unassigned, malformed,
+ * engine-mismatched, user/movie mismatches, and out-of-window rows are
+ * excluded fail-closed.
+ *
+ * Offline readiness bounds: each input population is limited by
+ * MAX_EXPERIMENT_JOIN_EXPOSURES, MAX_EXPERIMENT_JOIN_FEEDBACK, and
+ * MAX_EXPERIMENT_JOIN_ASSIGNMENTS. Oversized inputs are never silently
+ * truncated; if any input array exceeds its fixed limit the join fails
+ * closed and returns no outcomes. Output stops at
+ * MAX_EXPERIMENT_JOIN_OUTCOMES in deterministic sorted user/movie order, so
+ * repeated runs over the same population publish the same bounded prefix.
+ * Outcomes carry only controlled buckets, config versions, and positivity;
+ * user ids, movie ids, and raw rows never enter the output.
+ */
+export function joinExperimentExposureFeedback(input: {
+  exposures: readonly ExperimentExposureRow[];
+  feedback: readonly ExperimentFeedbackRow[];
+  assignments: readonly ExperimentAssignmentEvidenceRow[];
+}): ExperimentOutcome[] {
+  if (
+    !input ||
+    !Array.isArray(input.exposures) ||
+    !Array.isArray(input.feedback) ||
+    !Array.isArray(input.assignments)
+  ) {
+    return [];
+  }
+
+  // Fixed offline readiness bounds: any oversized input population fails
+  // closed to no outcomes instead of being silently truncated.
+  if (
+    input.exposures.length > MAX_EXPERIMENT_JOIN_EXPOSURES ||
+    input.feedback.length > MAX_EXPERIMENT_JOIN_FEEDBACK ||
+    input.assignments.length > MAX_EXPERIMENT_JOIN_ASSIGNMENTS
+  ) {
+    return [];
+  }
+
+  const evidenceKeys = new Set<string>();
+  for (const row of input.assignments) {
+    const evidenceKey = toAssignmentEvidenceKey(row);
+    if (evidenceKey) evidenceKeys.add(evidenceKey);
+  }
+
+  const exposuresByKey = new Map<string, EligibleExperimentExposure[]>();
+  for (const row of input.exposures) {
+    const eligible = toEligibleExperimentExposure(row);
+    if (!eligible) continue;
+    // Require matching server-owned assignment evidence: assignment hash +
+    // owner + engine version + config version + bucket. Without it the
+    // exposure shape alone is never trusted.
+    const evidenceKey = `${eligible.userId}\u0000${eligible.assignmentHash}\u0000${eligible.configVersion}\u0000${eligible.bucket}`;
+    if (!evidenceKeys.has(evidenceKey)) continue;
+    const key = experimentRowKey(eligible.userId, eligible.tmdbId);
+    const group = exposuresByKey.get(key);
+    if (group) {
+      group.push(eligible);
+    } else {
+      exposuresByKey.set(key, [eligible]);
+    }
+  }
+
+  const feedbackByKey = new Map<string, EligibleExperimentFeedback[]>();
+  for (const row of input.feedback) {
+    const eligible = toEligibleExperimentFeedback(row);
+    if (!eligible) continue;
+    const key = experimentRowKey(eligible.userId, eligible.tmdbId);
+    const group = feedbackByKey.get(key);
+    if (group) {
+      group.push(eligible);
+    } else {
+      feedbackByKey.set(key, [eligible]);
+    }
+  }
+
+  const outcomes: ExperimentOutcome[] = [];
+  // Keys iterate in deterministic sorted user/movie order; stop at the fixed
+  // outcome cap so oversized populations publish a bounded, stable prefix.
+  for (const key of [...exposuresByKey.keys()].sort()) {
+    if (outcomes.length >= MAX_EXPERIMENT_JOIN_OUTCOMES) break;
+    const feedbackRows = feedbackByKey.get(key);
+    if (!feedbackRows || feedbackRows.length === 0) continue;
+
+    const exposures = [...(exposuresByKey.get(key) ?? [])].sort(
+      compareExposuresLatestFirst,
+    );
+    for (const exposure of exposures) {
+      const inWindow = feedbackRows.filter(
+        (feedback) =>
+          feedback.atMs > exposure.exposedAtMs &&
+          feedback.atMs <= exposure.exposedAtMs + EXPERIMENT_ATTRIBUTION_WINDOW_MS,
+      );
+      if (inWindow.length === 0) continue;
+
+      outcomes.push({
+        bucket: exposure.bucket,
+        configVersion: exposure.configVersion,
+        positive: inWindow.some((feedback) => feedback.positive),
+      });
+      break;
+    }
+  }
+
+  return outcomes;
+}
+
+function isValidExperimentOutcome(value: unknown): value is ExperimentOutcome {
+  if (!isExposureRecordObject(value)) return false;
+
+  return (
+    value.bucket !== DEFAULT_EXPERIMENT_BUCKET &&
+    isExperimentBucketConfigConsistent(value.bucket, value.configVersion) &&
+    typeof value.positive === "boolean"
+  );
+}
+
+/**
+ * Aggregate experiment outcomes for one caller-specified nonzero config
+ * version, grouped by controlled bucket. Emits at most the control and
+ * treatment groups in canonical bucket order. Every published field is
+ * computed from exactly one deterministic bounded population per bucket: the
+ * first MAX_DIAGNOSTIC_COUNT valid outcomes for the requested config in
+ * input order. Outcomes beyond that bounded population never contribute, so
+ * outcomeCount, positiveCount, and positiveRate always describe the same
+ * bounded population and can never diverge. Outcomes from other config
+ * versions, the default bucket, and malformed outcomes are ignored; a zero,
+ * malformed, or missing config version fails closed to no aggregates. Output
+ * carries no ids or raw rows.
+ */
+export function aggregateExperimentOutcomes(
+  outcomes: readonly ExperimentOutcome[],
+  configVersion: unknown,
+): ExperimentBucketOutcomeAggregate[] {
+  if (!Array.isArray(outcomes)) return [];
+  if (
+    typeof configVersion !== "string" ||
+    !isExperimentConfigVersion(configVersion) ||
+    configVersion === DEFAULT_EXPERIMENT_CONFIG_VERSION
+  ) {
+    return [];
+  }
+
+  const groups = new Map<
+    RecommendationExperimentBucket,
+    { total: number; positive: number }
+  >();
+
+  for (const outcome of outcomes) {
+    if (!isValidExperimentOutcome(outcome)) continue;
+    if (outcome.configVersion !== configVersion) continue;
+
+    const group = groups.get(outcome.bucket) ?? { total: 0, positive: 0 };
+    // Deterministic bounded population: only the first MAX_DIAGNOSTIC_COUNT
+    // valid outcomes per bucket (input order) contribute. Counts and the
+    // positive rate are all derived from exactly this same population so the
+    // published fields can never diverge from it.
+    if (group.total >= MAX_DIAGNOSTIC_COUNT) continue;
+    group.total += 1;
+    if (outcome.positive) group.positive += 1;
+    groups.set(outcome.bucket, group);
+  }
+
+  const aggregates: ExperimentBucketOutcomeAggregate[] = [];
+  for (const bucket of RECOMMENDATION_EXPERIMENT_BUCKETS) {
+    if (bucket === DEFAULT_EXPERIMENT_BUCKET) continue;
+    const group = groups.get(bucket);
+    if (!group) continue;
+
+    aggregates.push({
+      bucket,
+      configVersion,
+      // group.total is already bounded by construction (contributions stop at
+      // MAX_DIAGNOSTIC_COUNT) and group.positive can never exceed it, so all
+      // three fields describe exactly the same bounded population.
+      outcomeCount: group.total,
+      positiveCount: group.positive,
+      positiveRate: group.total > 0 ? group.positive / group.total : 0,
+    });
+  }
+
+  return aggregates;
 }

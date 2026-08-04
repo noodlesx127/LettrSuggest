@@ -332,7 +332,10 @@ describe("recommendation telemetry trace builder", () => {
   it("normalizes the experiment bucket to a controlled allowlist with a clear default", () => {
     expect(normalizeExperimentBucket(undefined)).toBe(DEFAULT_EXPERIMENT_BUCKET);
     expect(normalizeExperimentBucket("default")).toBe("default");
-    // Arbitrary labels are not canonical until stable assignment lands (2C.2).
+    // Controlled experiment buckets became canonical with stable assignment (2C.2).
+    expect(normalizeExperimentBucket("control")).toBe("control");
+    expect(normalizeExperimentBucket("treatment")).toBe("treatment");
+    // Arbitrary labels remain normalized to the default.
     expect(normalizeExperimentBucket("variant_a")).toBe(DEFAULT_EXPERIMENT_BUCKET);
     expect(normalizeExperimentBucket("bucket_a")).toBe(DEFAULT_EXPERIMENT_BUCKET);
     expect(normalizeExperimentBucket("")).toBe(DEFAULT_EXPERIMENT_BUCKET);
@@ -341,6 +344,17 @@ describe("recommendation telemetry trace builder", () => {
     expect(
       buildRecommendationTrace({ result: makeResult() }).experimentBucket,
     ).toBe(DEFAULT_EXPERIMENT_BUCKET);
+    // Traces carry the zero experiment config version until an active
+    // assignment is supplied additively (2C.2).
+    expect(
+      buildRecommendationTrace({ result: makeResult() }).experimentConfigVersion,
+    ).toBe(DEFAULT_INPUT_REVISION_HASH);
+    // Traces carry the zero assignment hash until an active assignment is
+    // supplied additively (2C.2).
+    expect(
+      buildRecommendationTrace({ result: makeResult() })
+        .experimentAssignmentHash,
+    ).toBe(DEFAULT_INPUT_REVISION_HASH);
   });
 
   it("fails closed for API-key, user-id, UUID-like, and unknown experiment buckets", () => {

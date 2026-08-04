@@ -160,7 +160,7 @@ describe("admin diagnostics exposure aggregate", () => {
     expect(body.data.exposure_diagnostics).toEqual({
       total_count: 42,
       by_engine_version: { "v1-canonical-1": 40 },
-      by_experiment_bucket: { default: 42 },
+      by_experiment_bucket: { default: 42, control: 0, treatment: 0 },
     });
     expect(body.data.engine_health.exposure_log_count).toBe(7);
   });
@@ -182,7 +182,7 @@ describe("admin diagnostics exposure aggregate", () => {
       expect(body.data.exposure_diagnostics).toEqual({
         total_count: 0,
         by_engine_version: { "v1-canonical-1": 0 },
-        by_experiment_bucket: { default: 0 },
+        by_experiment_bucket: { default: 0, control: 0, treatment: 0 },
       });
       expect(body.data.engine_health.exposure_log_count).toBe(0);
       expect(mocks.rpc).toHaveBeenCalledTimes(1);

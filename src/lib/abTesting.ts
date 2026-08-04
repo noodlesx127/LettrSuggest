@@ -1,14 +1,525 @@
 /**
  * A/B Testing Infrastructure
- * 
+ *
  * Enables controlled experiments on recommendation algorithm parameters:
  * - MMR lambda (diversity vs relevance tradeoff)
  * - Exploration rate (how often to show exploratory picks)
  * - Source reliability weights
  * - Quality gate thresholds
+ *
+ * Checkpoint 2C.2 adds the pure deterministic assignment boundary used for
+ * online measurement readiness (`assignRecommendationExperiment`). It never
+ * uses Math.random, never persists anything, and never returns raw
+ * assignment/experiment keys.
  */
 
 import { supabase } from './supabaseClient';
+import {
+  hashCanonicalRevision,
+  stableCanonicalSerialize,
+} from './recommendationRevision';
+import {
+  DEFAULT_EXPERIMENT_ASSIGNMENT,
+  DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
+  DEFAULT_EXPERIMENT_BUCKET,
+  DEFAULT_EXPERIMENT_CONFIG_VERSION,
+  RECOMMENDATION_EXPERIMENT_ASSIGNMENT_UNITS,
+  RECOMMENDATION_EXPERIMENT_BUCKETS,
+  validateExperimentTrafficSplit,
+  type RecommendationExperimentAssignment,
+  type RecommendationExperimentAssignmentUnit,
+  type RecommendationExperimentBucket,
+  type RecommendationExperimentTrafficSplit,
+} from './recommendationTypes';
+
+// ---------------------------------------------------------------------------
+// Deterministic experiment assignment (checkpoint 2C.2).
+// ---------------------------------------------------------------------------
+
+/**
+ * Hex digits of the assignment hash consumed to derive the [0, 1) assignment
+ * interval: 13 hex digits = 52 bits, exactly representable as a double.
+ */
+export const EXPERIMENT_ASSIGNMENT_INTERVAL_HEX_DIGITS = 13;
+export const EXPERIMENT_ASSIGNMENT_INTERVAL_SCALE = 2 ** 52;
+
+const SAFE_EXPERIMENT_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const JWT_LIKE_STRING =
+  /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+/**
+ * Active experiment config supplied to the assignment boundary. The config
+ * version is ALWAYS derived internally from the canonical operative config -
+ * experiment key, assignment unit, exact traffic split, and algorithm/config
+ * `material` - through stableCanonicalSerialize/hashCanonicalRevision. Any
+ * explicit config-version override in the input is ignored. `trafficSplit`
+ * must cover exactly the controlled buckets with finite nonnegative weights
+ * summing to 1 within the tight tolerance; derivation and assignment are
+ * independent of split/material object key order. `material` must be bounded
+ * JSON-like data (see the EXPERIMENT_MATERIAL_* bounds); malformed material
+ * fails closed to the default assignment.
+ */
+export type RecommendationExperimentConfigInput = Readonly<{
+  active?: boolean;
+  material?: unknown;
+  trafficSplit: unknown;
+}>;
+
+function isBoundedExperimentKey(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    SAFE_EXPERIMENT_KEY.test(value) &&
+    !JWT_LIKE_STRING.test(value)
+  );
+}
+
+/**
+ * Bounds applied to experiment-config `material` before canonicalization.
+ * Material must be bounded JSON-like data: plain objects, arrays, booleans,
+ * finite numbers, null/undefined, and bounded strings. Cycles, accessor
+ * properties, throwing or descriptor-divergent property reads, non-JSON-like
+ * values (functions, symbols, bigint, Date, non-finite numbers), and
+ * structures beyond these limits fail closed to the default assignment; raw
+ * material never appears in failed-closed output.
+ */
+export const EXPERIMENT_MATERIAL_MAX_DEPTH = 8;
+export const EXPERIMENT_MATERIAL_MAX_NODES = 1024;
+export const EXPERIMENT_MATERIAL_MAX_STRING_LENGTH = 512;
+
+/** Sentinel returned when experiment material cannot be safely snapshotted. */
+const EXPERIMENT_MATERIAL_INVALID: unique symbol = Symbol(
+  "experiment-material-invalid",
+);
+
+const EXPERIMENT_INPUT_INVALID: unique symbol = Symbol(
+  "experiment-input-invalid",
+);
+
+type StablePropertyRead =
+  | Readonly<{ ok: true; present: boolean; value: unknown }>
+  | Readonly<{ ok: false }>;
+
+function readStableOwnDataProperty(
+  object: object,
+  key: PropertyKey,
+): StablePropertyRead {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (!descriptor) return { ok: true, present: false, value: undefined };
+    if (isAccessorDescriptor(descriptor)) return { ok: false };
+    return { ok: true, present: true, value: descriptor.value };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function isAccessorDescriptor(
+  descriptor: PropertyDescriptor | undefined,
+): boolean {
+  return !!descriptor && ("get" in descriptor || "set" in descriptor);
+}
+
+/**
+ * Builds the single safe snapshot of bounded JSON-like material that config
+ * derivation hashes, so raw material is observed exactly once and can never
+ * diverge during canonicalization. Own property descriptors are inspected
+ * with guarded lookups and accessor properties are rejected without ever
+ * evaluating a getter; each remaining property is read exactly once, must
+ * match its reported descriptor value, and is snapshotted into a plain
+ * object/array copy. Throwing descriptor/read traps, cycles, non-JSON-like
+ * values, and structures beyond the bounds fail closed. Recursion never
+ * exceeds EXPERIMENT_MATERIAL_MAX_DEPTH frames, so excessive nesting cannot
+ * exhaust the validator's own stack. Ordinary bounded plain objects/arrays
+ * snapshot to structurally identical copies, so derivation stays independent
+ * of key insertion order.
+ */
+function snapshotBoundedJsonLikeMaterial(value: unknown): unknown {
+  const activePath = new Set<object>();
+  let nodes = 0;
+
+  const snapshot = (current: unknown, depth: number): unknown => {
+    nodes += 1;
+    if (
+      nodes > EXPERIMENT_MATERIAL_MAX_NODES ||
+      depth > EXPERIMENT_MATERIAL_MAX_DEPTH
+    ) {
+      return EXPERIMENT_MATERIAL_INVALID;
+    }
+
+    if (current === null || current === undefined) return current;
+    if (typeof current === "boolean") return current;
+    if (typeof current === "number") {
+      return Number.isFinite(current) ? current : EXPERIMENT_MATERIAL_INVALID;
+    }
+    if (typeof current === "string") {
+      return current.length <= EXPERIMENT_MATERIAL_MAX_STRING_LENGTH
+        ? current
+        : EXPERIMENT_MATERIAL_INVALID;
+    }
+    if (typeof current !== "object") return EXPERIMENT_MATERIAL_INVALID;
+
+    if (activePath.has(current)) return EXPERIMENT_MATERIAL_INVALID;
+    activePath.add(current);
+
+    try {
+      if (Array.isArray(current)) {
+      let length: number;
+      try {
+        length = current.length;
+      } catch {
+        return EXPERIMENT_MATERIAL_INVALID;
+      }
+      if (!Number.isSafeInteger(length) || length < 0) {
+        return EXPERIMENT_MATERIAL_INVALID;
+      }
+      const items: unknown[] = new Array(length);
+      for (let index = 0; index < length; index += 1) {
+        let descriptor: PropertyDescriptor | undefined;
+        try {
+          descriptor = Object.getOwnPropertyDescriptor(current, index);
+        } catch {
+          return EXPERIMENT_MATERIAL_INVALID;
+        }
+        if (isAccessorDescriptor(descriptor)) return EXPERIMENT_MATERIAL_INVALID;
+        let child: unknown;
+        try {
+          child = (current as unknown[])[index];
+        } catch {
+          return EXPERIMENT_MATERIAL_INVALID;
+        }
+        if (descriptor && !Object.is(descriptor.value, child)) {
+          // The live read diverges from the reported descriptor value.
+          return EXPERIMENT_MATERIAL_INVALID;
+        }
+        const snapshotted = snapshot(child, depth + 1);
+        if (snapshotted === EXPERIMENT_MATERIAL_INVALID) {
+          return EXPERIMENT_MATERIAL_INVALID;
+        }
+        // Only present indices are written, so array holes stay holes.
+        if (descriptor) items[index] = snapshotted;
+      }
+        return items;
+      }
+
+    // Only plain JSON-like objects qualify: Date, Map, Set, class
+    // instances, and every other exotic object fail closed.
+    const prototype = Object.getPrototypeOf(current) as unknown;
+    if (prototype !== Object.prototype && prototype !== null) {
+      return EXPERIMENT_MATERIAL_INVALID;
+    }
+
+    let keys: string[];
+    try {
+      keys = Object.keys(current);
+    } catch {
+      return EXPERIMENT_MATERIAL_INVALID;
+    }
+
+    const record = Object.create(null) as Record<string, unknown>;
+    for (const key of keys) {
+      let descriptor: PropertyDescriptor | undefined;
+      try {
+        descriptor = Object.getOwnPropertyDescriptor(current, key);
+      } catch {
+        return EXPERIMENT_MATERIAL_INVALID;
+      }
+      if (isAccessorDescriptor(descriptor)) return EXPERIMENT_MATERIAL_INVALID;
+      let child: unknown;
+      try {
+        child = (current as Record<string, unknown>)[key];
+      } catch {
+        return EXPERIMENT_MATERIAL_INVALID;
+      }
+      if (descriptor && !Object.is(descriptor.value, child)) {
+        // The live read diverges from the reported descriptor value.
+        return EXPERIMENT_MATERIAL_INVALID;
+      }
+      const snapshotted = snapshot(child, depth + 1);
+      if (snapshotted === EXPERIMENT_MATERIAL_INVALID) {
+        return EXPERIMENT_MATERIAL_INVALID;
+      }
+      Object.defineProperty(record, key, {
+        configurable: true,
+        enumerable: true,
+        value: snapshotted,
+        writable: true,
+      });
+    }
+      return record;
+    } finally {
+      activePath.delete(current);
+    }
+  };
+
+  return snapshot(value, 0);
+}
+
+type SnapshottedExperimentConfig = Readonly<{
+  material: unknown;
+  trafficSplit: RecommendationExperimentTrafficSplit;
+}>;
+
+function snapshotExperimentTrafficSplit(
+  value: unknown,
+): RecommendationExperimentTrafficSplit | typeof EXPERIMENT_INPUT_INVALID {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return EXPERIMENT_INPUT_INVALID;
+  }
+
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      return EXPERIMENT_INPUT_INVALID;
+    }
+    const keys = Object.keys(value).sort();
+    if (
+      keys.length !== RECOMMENDATION_EXPERIMENT_BUCKETS.length ||
+      keys.some((key, index) => key !== [...RECOMMENDATION_EXPERIMENT_BUCKETS].sort()[index])
+    ) {
+      return EXPERIMENT_INPUT_INVALID;
+    }
+
+    const weights: Record<RecommendationExperimentBucket, unknown> = {
+      default: undefined,
+      control: undefined,
+      treatment: undefined,
+    };
+    for (const bucket of RECOMMENDATION_EXPERIMENT_BUCKETS) {
+      const read = readStableOwnDataProperty(value, bucket);
+      if (!read.ok || !read.present) return EXPERIMENT_INPUT_INVALID;
+      weights[bucket] = read.value;
+    }
+
+    const snapshot = Object.freeze({
+      default: weights.default,
+      control: weights.control,
+      treatment: weights.treatment,
+    });
+    return validateExperimentTrafficSplit(snapshot)
+      ? snapshot
+      : EXPERIMENT_INPUT_INVALID;
+  } catch {
+    return EXPERIMENT_INPUT_INVALID;
+  }
+}
+
+function snapshotExperimentConfig(
+  value: unknown,
+): SnapshottedExperimentConfig | typeof EXPERIMENT_INPUT_INVALID {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return EXPERIMENT_INPUT_INVALID;
+  }
+
+  const active = readStableOwnDataProperty(value, "active");
+  const split = readStableOwnDataProperty(value, "trafficSplit");
+  const material = readStableOwnDataProperty(value, "material");
+  if (!active.ok || !split.ok || !material.ok || !split.present) {
+    return EXPERIMENT_INPUT_INVALID;
+  }
+  if (active.present && active.value === false) return EXPERIMENT_INPUT_INVALID;
+  if (active.present && active.value !== undefined && active.value !== true) {
+    return EXPERIMENT_INPUT_INVALID;
+  }
+
+  const trafficSplit = snapshotExperimentTrafficSplit(split.value);
+  if (trafficSplit === EXPERIMENT_INPUT_INVALID) {
+    return EXPERIMENT_INPUT_INVALID;
+  }
+
+  let materialSnapshot: unknown = null;
+  if (material.present && material.value !== undefined) {
+    materialSnapshot = snapshotBoundedJsonLikeMaterial(material.value);
+    if (materialSnapshot === EXPERIMENT_MATERIAL_INVALID) {
+      return EXPERIMENT_INPUT_INVALID;
+    }
+  }
+
+  return Object.freeze({ material: materialSnapshot, trafficSplit });
+}
+
+function deriveConfigVersionFromSnapshot(input: {
+  unit: RecommendationExperimentAssignmentUnit;
+  experimentKey: string;
+  config: SnapshottedExperimentConfig;
+}): string {
+  return hashCanonicalRevision(
+    stableCanonicalSerialize({
+      experimentKey: input.experimentKey,
+      material: input.config.material,
+      trafficSplit: input.config.trafficSplit,
+      unit: input.unit,
+    }),
+  );
+}
+
+/**
+ * Derive the bounded 16-char lowercase hex experiment config version from the
+ * canonical operative config. Changing any operative field (experiment key,
+ * assignment unit, any split weight, or material) changes the version; split
+ * and material key insertion order never does. Material is observed exactly
+ * once through a single safe snapshot, which is what gets canonicalized and
+ * hashed, so no getter or unstable property is ever evaluated twice.
+ * Malformed material (cycles, accessor properties, throwing or
+ * descriptor-divergent reads, non-JSON-like values, excessive nesting/size)
+ * and any canonicalization/hash failure fail closed to the zero config
+ * version; raw material is never exposed.
+ */
+export function deriveRecommendationExperimentConfigVersion(input: {
+  unit: RecommendationExperimentAssignmentUnit;
+  experimentKey: string;
+  trafficSplit: RecommendationExperimentTrafficSplit;
+  material?: unknown;
+}): string {
+  try {
+    const unit = readStableOwnDataProperty(input, "unit");
+    const experimentKey = readStableOwnDataProperty(input, "experimentKey");
+    const split = readStableOwnDataProperty(input, "trafficSplit");
+    const material = readStableOwnDataProperty(input, "material");
+    if (
+      !unit.ok ||
+      !unit.present ||
+      !RECOMMENDATION_EXPERIMENT_ASSIGNMENT_UNITS.includes(
+        unit.value as RecommendationExperimentAssignmentUnit,
+      ) ||
+      !experimentKey.ok ||
+      !experimentKey.present ||
+      !isBoundedExperimentKey(experimentKey.value) ||
+      !split.ok ||
+      !split.present ||
+      !material.ok
+    ) {
+      return DEFAULT_EXPERIMENT_CONFIG_VERSION;
+    }
+    const config = snapshotExperimentConfig({
+      active: true,
+      material: material.present ? material.value : undefined,
+      trafficSplit: split.value,
+    });
+    if (config === EXPERIMENT_INPUT_INVALID) {
+      return DEFAULT_EXPERIMENT_CONFIG_VERSION;
+    }
+    return deriveConfigVersionFromSnapshot({
+      unit: unit.value as RecommendationExperimentAssignmentUnit,
+      experimentKey: experimentKey.value,
+      config,
+    });
+  } catch {
+    // Canonicalization/hash failure: fail closed without exposing raw input.
+    return DEFAULT_EXPERIMENT_CONFIG_VERSION;
+  }
+}
+
+/**
+ * Pure deterministic experiment assignment boundary.
+ *
+ * Accepts the assignment unit (`user` or `request`), an opaque bounded
+ * assignment key, a bounded experiment key, the algorithm/config material,
+ * and an order-independent bounded traffic split over exactly the controlled
+ * buckets. The config version is always derived internally from the
+ * canonical operative config (experiment key, unit, exact split, material);
+ * the assignment hash is the canonical hash of the unit plus both keys plus
+ * the derived config version. Its first 13 hex digits divided by 2^52 yield
+ * the [0, 1) interval walked against the cumulative split in canonical
+ * bucket order.
+ *
+ * Returns only the bucket, config version, and assignment hash - never the
+ * raw keys or material. Traffic landing on the default arm, and any invalid
+ * unit/key/config/split/material, fails closed to the default assignment
+ * (default bucket, zero config version, zero assignment hash). Malformed
+ * material (cycles, accessor properties, throwing or descriptor-divergent
+ * reads, non-JSON-like values, excessive nesting/size) and any
+ * canonicalization/hash failure also fail closed; raw values are never
+ * exposed. Never uses Math.random.
+ */
+export function assignRecommendationExperiment(input: {
+  unit: unknown;
+  assignmentKey: unknown;
+  experimentKey: unknown;
+  config?: RecommendationExperimentConfigInput | null;
+}): RecommendationExperimentAssignment {
+  try {
+    const unit = readStableOwnDataProperty(input, "unit");
+    const assignmentKey = readStableOwnDataProperty(input, "assignmentKey");
+    const experimentKey = readStableOwnDataProperty(input, "experimentKey");
+    const rawConfig = readStableOwnDataProperty(input, "config");
+    if (
+      !unit.ok ||
+      !unit.present ||
+      !RECOMMENDATION_EXPERIMENT_ASSIGNMENT_UNITS.includes(
+        unit.value as RecommendationExperimentAssignmentUnit,
+      ) ||
+      !assignmentKey.ok ||
+      !assignmentKey.present ||
+      !isBoundedExperimentKey(assignmentKey.value) ||
+      !experimentKey.ok ||
+      !experimentKey.present ||
+      !isBoundedExperimentKey(experimentKey.value) ||
+      !rawConfig.ok ||
+      !rawConfig.present
+    ) {
+      return DEFAULT_EXPERIMENT_ASSIGNMENT;
+    }
+    const config = snapshotExperimentConfig(rawConfig.value);
+    if (config === EXPERIMENT_INPUT_INVALID) {
+      return DEFAULT_EXPERIMENT_ASSIGNMENT;
+    }
+
+    const configVersion = deriveConfigVersionFromSnapshot({
+      unit: unit.value as RecommendationExperimentAssignmentUnit,
+      experimentKey: experimentKey.value,
+      config,
+    });
+    if (configVersion === DEFAULT_EXPERIMENT_CONFIG_VERSION) {
+      return DEFAULT_EXPERIMENT_ASSIGNMENT;
+    }
+
+    const assignmentHash = hashCanonicalRevision(
+      stableCanonicalSerialize({
+        assignmentKey: assignmentKey.value,
+        configVersion,
+        experimentKey: experimentKey.value,
+        unit: unit.value,
+      }),
+    );
+    if (assignmentHash === DEFAULT_EXPERIMENT_ASSIGNMENT_HASH) {
+      return DEFAULT_EXPERIMENT_ASSIGNMENT;
+    }
+
+    const unitInterval =
+      parseInt(
+        assignmentHash.slice(0, EXPERIMENT_ASSIGNMENT_INTERVAL_HEX_DIGITS),
+        16,
+      ) / EXPERIMENT_ASSIGNMENT_INTERVAL_SCALE;
+
+    let cumulative = 0;
+    let selected: RecommendationExperimentBucket | null = null;
+    let lastPositiveBucket: RecommendationExperimentBucket | null = null;
+    for (const bucket of RECOMMENDATION_EXPERIMENT_BUCKETS) {
+      const weight = config.trafficSplit[bucket];
+      if (weight > 0) {
+        lastPositiveBucket = bucket;
+      }
+      cumulative += weight;
+      if (unitInterval < cumulative) {
+        selected = bucket;
+        break;
+      }
+    }
+
+    const bucket = selected ?? lastPositiveBucket;
+    // Holdout traffic and any float-edge residue stays on the default
+    // assignment so the default bucket always pairs with the zero config
+    // version.
+    if (!bucket || bucket === DEFAULT_EXPERIMENT_BUCKET) {
+      return DEFAULT_EXPERIMENT_ASSIGNMENT;
+    }
+
+    return { bucket, configVersion, assignmentHash };
+  } catch {
+    // Canonicalization/hash failure: fail closed without exposing raw input.
+    return DEFAULT_EXPERIMENT_ASSIGNMENT;
+  }
+}
 
 export type ABTestVariant = {
   name: string;
@@ -81,91 +592,213 @@ export async function getActiveABTests(): Promise<ABTestConfig[]> {
 }
 
 /**
- * Get user's variant assignment for a test (or assign if not yet assigned)
+ * Narrow assignment-store client seam used by getABTestVariant. The browser
+ * Supabase client satisfies this shape structurally; tests inject fakes.
+ */
+export type ABTestAssignmentFilter = Readonly<{
+  eq: (column: string, value: unknown) => ABTestAssignmentFilter;
+  maybeSingle: () => PromiseLike<{ data: unknown; error: unknown }>;
+}>;
+
+export type ABTestAssignmentClient = Readonly<{
+  from: (table: string) => Readonly<{
+    select: (columns: string) => ABTestAssignmentFilter;
+    insert: (row: Record<string, unknown>) => PromiseLike<{ error: unknown }>;
+  }>;
+}>;
+
+/**
+ * Map a legacy A/B test traffic split onto the controlled buckets. Only
+ * splits whose keys are a subset of the controlled buckets and that cover
+ * both active arms map; anything else fails closed. The mapped split must
+ * still satisfy the bounded sum validation.
+ */
+function toControlledExperimentTrafficSplit(
+  trafficSplit: unknown,
+): RecommendationExperimentTrafficSplit | null {
+  if (
+    typeof trafficSplit !== "object" ||
+    trafficSplit === null ||
+    Array.isArray(trafficSplit)
+  ) {
+    return null;
+  }
+
+  try {
+    const prototype = Object.getPrototypeOf(trafficSplit);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const keys = Object.keys(trafficSplit);
+    if (keys.length === 0) return null;
+    for (const key of keys) {
+      if (
+        !RECOMMENDATION_EXPERIMENT_BUCKETS.includes(
+          key as RecommendationExperimentBucket,
+        )
+      ) {
+        return null;
+      }
+    }
+    const defaultWeight = readStableOwnDataProperty(trafficSplit, "default");
+    const controlWeight = readStableOwnDataProperty(trafficSplit, "control");
+    const treatmentWeight = readStableOwnDataProperty(trafficSplit, "treatment");
+    if (
+      !defaultWeight.ok ||
+      !controlWeight.ok ||
+      !controlWeight.present ||
+      !treatmentWeight.ok ||
+      !treatmentWeight.present
+    ) {
+      return null;
+    }
+
+    const candidate = Object.freeze({
+      default: defaultWeight.present ? defaultWeight.value : 0,
+      control: controlWeight.value,
+      treatment: treatmentWeight.value,
+    });
+    return validateExperimentTrafficSplit(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get user's variant assignment for a test (or assign if not yet assigned).
+ *
+ * Assignment is fully deterministic: it is routed through
+ * assignRecommendationExperiment using the testId/userId and the controlled
+ * buckets, never Math.random. An already stored assignment always wins. On a
+ * persistence failure or race the stored assignment is refetched and
+ * returned; a losing local choice is never returned. Configs that cannot be
+ * mapped onto the controlled buckets fail closed (no assignment).
  */
 export async function getABTestVariant(params: {
   userId: string;
   testId: number;
   variants: ABTestVariant[];
   trafficSplit: Record<string, number>;
+  client?: ABTestAssignmentClient | null;
 }): Promise<ABTestVariant | null> {
-  if (!supabase) {
+  const { userId, testId, variants, trafficSplit } = params;
+  const client: ABTestAssignmentClient | null | undefined =
+    params.client ?? (supabase as unknown as ABTestAssignmentClient | undefined);
+  if (!client) {
     return null;
   }
 
-  const { userId, testId, variants, trafficSplit } = params;
+  if (typeof userId !== "string" || userId.trim().length === 0) return null;
+  if (
+    typeof testId !== "number" ||
+    !Number.isSafeInteger(testId) ||
+    testId <= 0
+  ) {
+    return null;
+  }
+
+  const readStoredVariantName = async (): Promise<
+    { ok: boolean; variantName: string | null }
+  > => {
+    const { data, error } = await client
+      .from("ab_test_assignments")
+      .select("variant_name")
+      .eq("test_id", testId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (
+      error &&
+      (error as { code?: string } | null)?.code !== "PGRST116"
+    ) {
+      console.error("[ABTest] Error fetching assignment:", error);
+      return { ok: false, variantName: null };
+    }
+    const variantName =
+      data &&
+      typeof (data as { variant_name?: unknown }).variant_name === "string"
+        ? (data as { variant_name: string }).variant_name
+        : null;
+    return { ok: true, variantName };
+  };
+
+  const resolveStoredVariant = (
+    variantName: string | null,
+  ): ABTestVariant | null => {
+    if (variantName !== "control" && variantName !== "treatment") {
+      return null;
+    }
+    return variants.find((variant) => variant.name === variantName) ?? null;
+  };
 
   try {
-    // Check if user already assigned
-    const { data: existing, error: fetchError } = await supabase
-      .from('ab_test_assignments')
-      .select('variant_name')
-      .eq('test_id', testId)
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      console.error('[ABTest] Error fetching assignment:', fetchError);
-      return null;
+    // A stored assignment always wins before current config validation. This
+    // keeps enrollment stable when a split changes, becomes invalid, moves a
+    // user into holdout, or removes the opposite arm.
+    const stored = await readStoredVariantName();
+    if (!stored.ok) return null;
+    if (stored.variantName !== null) {
+      return resolveStoredVariant(stored.variantName);
     }
 
-    if (existing) {
-      const variant = variants.find(v => v.name === existing.variant_name);
-      return variant || null;
-    }
+    const controlledSplit = toControlledExperimentTrafficSplit(trafficSplit);
+    if (!controlledSplit) return null;
 
-    // Assign user to a variant based on traffic split
-    const variantName = assignVariant(trafficSplit);
-    const variant = variants.find(v => v.name === variantName);
+    const controlVariant = variants.find((variant) => variant.name === "control");
+    const treatmentVariant = variants.find(
+      (variant) => variant.name === "treatment",
+    );
+    if (!controlVariant || !treatmentVariant) return null;
 
-    if (!variant) {
-      console.warn('[ABTest] No variant found for:', variantName);
-      return null;
-    }
+    const assignment = assignRecommendationExperiment({
+      unit: "user",
+      assignmentKey: userId,
+      experimentKey: `ab-test-${testId}`,
+      config: {
+        active: true,
+        material: {
+          testId,
+          trafficSplit: controlledSplit,
+          variants: variants
+            .map((variant) => ({
+              name: variant.name,
+              params: variant.params ?? null,
+            }))
+            .sort((left, right) => left.name.localeCompare(right.name)),
+        },
+        trafficSplit: controlledSplit,
+      },
+    });
 
-    // Record assignment
-    const { error: insertError } = await supabase
-      .from('ab_test_assignments')
+    // Holdout traffic stays unassigned only when there was no stored winner.
+    if (assignment.bucket === DEFAULT_EXPERIMENT_BUCKET) return null;
+    const localVariant =
+      assignment.bucket === "control" ? controlVariant : treatmentVariant;
+
+    const { error: insertError } = await client
+      .from("ab_test_assignments")
       .insert({
         test_id: testId,
         user_id: userId,
-        variant_name: variantName,
+        variant_name: assignment.bucket,
       });
 
-    if (insertError) {
-      console.error('[ABTest] Error recording assignment:', insertError);
-      // Return variant anyway (assignment might have been created by race condition)
+    if (!insertError) {
+      console.log("[ABTest] Assigned user to variant:", {
+        testId,
+        userId: userId.slice(0, 8),
+        variant: assignment.bucket,
+      });
+      return localVariant;
     }
 
-    console.log('[ABTest] Assigned user to variant:', {
-      testId,
-      userId: userId.slice(0, 8),
-      variant: variantName,
-    });
-
-    return variant;
+    // Persistence failed (likely a race): refetch and return the winning
+    // stored assignment. Never return the losing local choice.
+    console.error("[ABTest] Error recording assignment:", insertError);
+    const winner = await readStoredVariantName();
+    if (!winner.ok || winner.variantName === null) return null;
+    return resolveStoredVariant(winner.variantName);
   } catch (e) {
-    console.error('[ABTest] Exception getting variant:', e);
+    console.error("[ABTest] Exception getting variant:", e);
     return null;
   }
-}
-
-/**
- * Randomly assign a variant based on traffic split
- */
-function assignVariant(trafficSplit: Record<string, number>): string {
-  const rand = Math.random();
-  let cumulative = 0;
-
-  for (const [variantName, weight] of Object.entries(trafficSplit)) {
-    cumulative += weight;
-    if (rand <= cumulative) {
-      return variantName;
-    }
-  }
-
-  // Fallback to first variant if weights don't sum to 1.0
-  return Object.keys(trafficSplit)[0];
 }
 
 /**
