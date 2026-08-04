@@ -1,28 +1,21 @@
 "use server";
 
 import {
-  adaptWebRecommendationIntent,
   adaptCanonicalResultToWeb,
   extractCachedWebRecommendationMetadata,
-  getWebTmdbGenreFilterNames,
-  getWebTmdbRetrievalGenreNames,
-  matchesWebTmdbGenreFilter,
   normalizeWebRecommendationCount,
 } from "@/lib/recommendationAdapters";
 import type { WebRecommendationDetails } from "@/lib/recommendationAdapters";
-import {
-  createDeterministicRng,
-  normalizeProviderFamilies,
-} from "@/lib/recommendationCandidates";
+import { createDeterministicRng } from "@/lib/recommendationCandidates";
 import { loadRecommendationContext } from "@/lib/recommendationContext";
 import {
-  buildRecommendationScoringInputs,
-  buildRecommendationPersonalization,
-} from "@/lib/recommendationPersonalization";
+  buildWebRecommendationDependencies,
+  RecommendationMetadataUnavailableError,
+  runWebRecommendationGeneration,
+} from "@/lib/recommendationGeneration";
 import { scoreRecommendationsWithOverlapStaged } from "@/lib/recommendationScoring";
+import { decideRecommendationInputPreflight } from "@/lib/recommendationTypes";
 import type { TMDBMovie } from "@/lib/enrich";
-import type { RecommendationCandidate } from "@/lib/recommendationTypes";
-import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import {
   WEB_METADATA_DEADLINE_MS,
   buildTasteProfileServer,
@@ -32,7 +25,6 @@ import {
   isMetadataCompletionHealthy,
   loadCachedTmdbDetails,
   loadUserContext,
-  runCanonicalServerRecommendations,
 } from "@/lib/serverSuggestionsEngine";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import {
@@ -41,15 +33,6 @@ import {
   type CanonicalWebRecommendationSuccess,
   type CanonicalWebRecommendationResult,
 } from "@/lib/recommendationActionTypes";
-
-class MetadataUnavailableError extends Error {
-  constructor() {
-    super(
-      "Movie metadata is temporarily unavailable. Please retry suggestions.",
-    );
-    this.name = "MetadataUnavailableError";
-  }
-}
 
 type GenerateCanonicalWebRecommendationsParams = {
   accessToken: string;
@@ -79,10 +62,11 @@ async function generateCanonicalWebRecommendationsInternal(
   const userId = data.user.id;
   const userContext = await loadUserContext(userId);
   const contextDiagnostics = getUserContextDiagnostics(userContext);
-  if (
-    contextDiagnostics.mode === "degraded" ||
-    contextDiagnostics.inputHealth.blocked.health === "failed"
-  ) {
+  const preflight = decideRecommendationInputPreflight({
+    mode: contextDiagnostics.mode,
+    blockedHealth: contextDiagnostics.inputHealth.blocked.health,
+  });
+  if (preflight.web.rejected) {
     throw new Error("Recommendation inputs are temporarily unavailable");
   }
   const canonicalContext = await loadRecommendationContext(
@@ -90,11 +74,7 @@ async function generateCanonicalWebRecommendationsInternal(
     userId,
   );
   const tasteProfile = await buildTasteProfileServer(userId, userContext);
-  const personalization = buildRecommendationPersonalization(
-    userContext,
-    tasteProfile,
-  );
-  const adapted = adaptWebRecommendationIntent({
+  const webIntent = {
     userId,
     seedTmdbIds: params.seedTmdbIds ?? [],
     limit: normalizeWebRecommendationCount(params.count),
@@ -102,166 +82,46 @@ async function generateCanonicalWebRecommendationsInternal(
     genreNames: params.genreNames ?? [],
     context: { mode: "neutral", localHour: null },
     requestSeed: params.requestSeed,
-  });
-  const scoringWindowSize = Math.min(
-    300,
-    Math.max(adapted.request.count * 3, 100),
-  );
-  let requestDetails = new Map<number, TMDBMovie>();
-  const excludedCandidateIds = new Set<number>([
-    ...adapted.request.seeds.map((seed) => seed.tmdbId),
-    ...adapted.request.excludeTmdbIds,
-    ...canonicalContext.watchedTmdbIds,
-    ...canonicalContext.blockedTmdbIds,
-  ]);
-  const requestedGenreFilterNames = getWebTmdbGenreFilterNames(
-    adapted.request.genres,
-  );
-  const requestedRetrievalGenreNames = getWebTmdbRetrievalGenreNames(
-    adapted.request.genres,
-  );
-  const requestedTopGenres = Object.entries(TMDB_GENRE_MAP)
-    .filter(([, name]) =>
-      requestedRetrievalGenreNames.includes(name.toLowerCase()),
-    )
-    .map(([id, name]) => ({
-      id: Number(id),
-      name,
-      weight: 1,
-      count: 1,
-    }));
-  const requestedGenreIds = new Set(
-    requestedTopGenres.map((genre) => genre.id),
-  );
-  const retrievalTasteProfile =
-    requestedTopGenres.length > 0
-      ? {
-          ...tasteProfile,
-          topGenres: [
-            ...requestedTopGenres,
-            ...tasteProfile.topGenres.filter(
-              (genre) => !requestedGenreIds.has(genre.id),
-            ),
-          ],
-        }
-      : tasteProfile;
-  let sourceMetadata = new Map<
-    number,
-    { sources: string[]; consensusLevel: "high" | "medium" | "low" }
-  >();
-  let metadataDeadlineAt: number | undefined;
-  const getRemainingMetadataMs = () =>
-    metadataDeadlineAt === undefined
-      ? WEB_METADATA_DEADLINE_MS
-      : Math.max(0, metadataDeadlineAt - Date.now());
-
-  const applySourceMetadata = (
-    candidate: RecommendationCandidate,
-  ): RecommendationCandidate => {
-    const rawSources = sourceMetadata.get(candidate.tmdbId)?.sources;
-    if (!rawSources?.length) return candidate;
-    return {
-      ...candidate,
-      evidence: {
-        ...candidate.evidence,
-        providerFamilies: normalizeProviderFamilies(rawSources),
-        providerOccurrences: rawSources.length,
-      },
-    };
-  };
-  let overlapRerankCandidates:
-    | ((eligibleCandidates: readonly RecommendationCandidate[]) => RecommendationCandidate[])
-    | null = null;
-
-  const result = await runCanonicalServerRecommendations(adapted.request, {
-    loadContext: async () => canonicalContext,
-    retrieveCandidates: async () => {
-      const generated = await generateServerCandidates(
-        userId,
-        userContext,
+  } as const;
+  const preparation = buildWebRecommendationDependencies({
+    intent: webIntent,
+    context: canonicalContext,
+    userContext,
+    tasteProfile,
+    retrieveCandidates: ({
+      userId: retrievalUserId,
+      userContext: retrievalUserContext,
+      tasteProfile: retrievalTasteProfile,
+      seeds,
+      requestSeed,
+    }) =>
+      generateServerCandidates(
+        retrievalUserId,
+        retrievalUserContext,
         retrievalTasteProfile,
-        adapted.request.seeds,
-        { requestSeed: params.requestSeed },
-      );
-      sourceMetadata = generated.sourceMetadata;
-      const scoringWindowIds = Array.from(new Set(generated.candidateIds))
-        .filter((tmdbId) => !excludedCandidateIds.has(tmdbId))
-        .slice(0, scoringWindowSize);
-      metadataDeadlineAt = Date.now() + WEB_METADATA_DEADLINE_MS;
-      const cachedCandidateDetails =
-        await loadCachedTmdbDetails(scoringWindowIds);
-      const completion = await ensureCompleteTmdbDetails(
-        scoringWindowIds,
-        cachedCandidateDetails,
-        { deadlineMs: getRemainingMetadataMs() },
-      );
-      if (!isMetadataCompletionHealthy(completion, adapted.request.count)) {
-        throw new MetadataUnavailableError();
-      }
-      requestDetails = completion.details;
-      return scoringWindowIds
-        .filter((tmdbId) => requestDetails.has(tmdbId))
-        .filter((tmdbId) => {
-          if (requestedGenreFilterNames.length === 0) return true;
-          return matchesWebTmdbGenreFilter(
-            (requestDetails.get(tmdbId)?.genres ?? []).map(
-              (genre) => genre.name,
-            ),
-            requestedGenreFilterNames,
-          );
-        })
-        .map((tmdbId) => ({ tmdbId }));
-    },
-    scoreCandidates: async (scoreParams) => {
-      const outcome = await scoreRecommendationsWithOverlapStaged(
-        scoreParams,
-        requestDetails,
-        buildRecommendationScoringInputs(personalization, sourceMetadata),
-      );
-      const scored = outcome.candidates.map(applySourceMetadata);
-      const scoredById = new Map(
-        scored.map((candidate) => [candidate.tmdbId, candidate]),
-      );
-      overlapRerankCandidates = (eligibleCandidates) => {
-        const eligibleIds = new Set(
-          eligibleCandidates.map((candidate) => candidate.tmdbId),
-        );
-        return outcome.rerankCandidates()
-          .filter((candidate) => eligibleIds.has(candidate.tmdbId))
-          .map(
-            (candidate) =>
-              scoredById.get(candidate.tmdbId) ?? applySourceMetadata(candidate),
-          );
-      };
-      return scored;
-    },
-    rerankCandidates: async ({ candidates }) =>
-      overlapRerankCandidates
-        ? overlapRerankCandidates(candidates)
-        : [...candidates],
+        seeds,
+        { requestSeed },
+      ),
+    loadCachedDetails: loadCachedTmdbDetails,
+    ensureCompleteDetails: ensureCompleteTmdbDetails,
+    isMetadataCompletionHealthy,
+    metadataDeadlineMs: WEB_METADATA_DEADLINE_MS,
+    scoreCandidates: scoreRecommendationsWithOverlapStaged,
     rng: createDeterministicRng,
     telemetry: () => undefined,
   });
+
+  const result = await runWebRecommendationGeneration(
+    webIntent,
+    preparation.dependencies,
+  );
 
   if (!result || !Array.isArray(result.results)) {
     throw new Error("Canonical recommendation result is invalid");
   }
 
-  const finalTmdbIds = result.results.map((candidate) => candidate.tmdbId);
-  const unresolvedFinalTmdbIds = finalTmdbIds.filter(
-    (tmdbId) => !requestDetails.has(tmdbId),
-  );
-  if (unresolvedFinalTmdbIds.length > 0) {
-    const cachedDetails = await loadCachedTmdbDetails(unresolvedFinalTmdbIds);
-    const completedDetails = await ensureCompleteTmdbDetails(
-      unresolvedFinalTmdbIds,
-      cachedDetails,
-      { deadlineMs: getRemainingMetadataMs() },
-    );
-    for (const [tmdbId, movie] of completedDetails.details) {
-      requestDetails.set(tmdbId, movie);
-    }
-  }
+  const { details: requestDetails, sourceMetadata } =
+    await preparation.completeResult(result);
   const detailsForWeb = new Map<number, WebRecommendationDetails>();
   for (const candidate of result.results) {
     const movie = requestDetails.get(candidate.tmdbId);
@@ -342,7 +202,7 @@ export async function generateCanonicalWebRecommendations(
   try {
     return await generateCanonicalWebRecommendationsInternal(params);
   } catch (error) {
-    if (error instanceof MetadataUnavailableError) {
+    if (error instanceof RecommendationMetadataUnavailableError) {
       return createMetadataUnavailableRecommendationResult();
     }
     throw error;

@@ -1,45 +1,31 @@
 import { NextResponse } from "next/server";
 
-import {
-  applyNegativeFiltering,
-  filterCandidatesByGenre,
-  type FilterRelaxation,
-} from "@/lib/advancedFiltering";
-import { suggestByOverlap, type TMDBMovie } from "@/lib/enrich";
-import type { EnhancedTasteProfile } from "@/lib/enhancedProfile";
+import type { FilterRelaxation } from "@/lib/advancedFiltering";
+import { suggestByOverlap } from "@/lib/enrich";
 import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
-import {
-  adaptCanonicalResultToV1,
-  adaptV1RecommendationIntent,
-  type V1RecommendationDetails,
-} from "@/lib/recommendationAdapters";
+import { adaptCanonicalResultToV1 } from "@/lib/recommendationAdapters";
 import {
   createLazyExposureWriter,
   deriveAppliedRelaxation,
   recordRecommendationExposures,
 } from "@/lib/recommendationTelemetry";
-import {
-  createDeterministicRng,
-  normalizeProviderFamilies,
-} from "@/lib/recommendationCandidates";
+import { createDeterministicRng } from "@/lib/recommendationCandidates";
 import { loadRecommendationContext } from "@/lib/recommendationContext";
+import {
+  buildV1RecommendationDependencies,
+  runV1RecommendationGeneration,
+} from "@/lib/recommendationGeneration";
 import {
   buildTasteProfileServer,
   generateServerCandidates,
   getUserContextDiagnostics,
   loadCachedTmdbDetails,
   loadUserContext,
-  runCanonicalServerRecommendations,
 } from "@/lib/serverSuggestionsEngine";
-import {
-  buildRecommendationPersonalization,
-  buildRecommendationScoringInputs,
-} from "@/lib/recommendationPersonalization";
 import {
   buildBlockedSourceFailureResponse,
   buildGenerationDiagnostics,
   deriveGenerateRequestSeed,
-  filterGeneratedCandidateIds,
   validateFilterRelaxationRequest,
 } from "@/app/api/v1/suggestions/generate/routeHelpers";
 
@@ -167,122 +153,6 @@ async function parseGenerateSuggestionsBody(
   };
 }
 
-function buildMinimalEnhancedTasteProfile(params: {
-  tasteProfile: Awaited<ReturnType<typeof buildTasteProfileServer>>;
-  watchedFilms: Array<{ rating?: number; liked?: boolean | null }>;
-}): EnhancedTasteProfile {
-  const { tasteProfile, watchedFilms } = params;
-
-  const genreProfile: EnhancedTasteProfile["genreProfile"] = {
-    coreGenres: (tasteProfile.topGenres ?? []).map((genre) => ({
-      id: genre.id,
-      name: genre.name,
-      weight: genre.weight,
-      source: "tmdb" as const,
-    })),
-    holidayGenres: [],
-    nicheGenres: [],
-    avoidedGenres: (tasteProfile.avoidGenres ?? []).map((genre) => ({
-      id: genre.id,
-      name: genre.name,
-      reason: "User avoidance signal",
-    })),
-    avoidedHolidays: [],
-    currentSeason: "unknown",
-    seasonalGenres: [],
-  };
-
-  return {
-    topGenres: (tasteProfile.topGenres ?? []).map((genre) => ({
-      id: genre.id,
-      name: genre.name,
-      weight: genre.weight,
-      source: "tmdb" as const,
-    })),
-    topKeywords: (tasteProfile.topKeywords ?? []).map((keyword) => ({
-      id: keyword.id,
-      name: keyword.name,
-      weight: keyword.weight,
-    })),
-    topDirectors: (tasteProfile.topDirectors ?? []).map((director) => ({
-      id: director.id,
-      name: director.name,
-      weight: director.weight,
-    })),
-    topCast: (tasteProfile.topActors ?? []).map((actor) => ({
-      id: actor.id,
-      name: actor.name,
-      weight: actor.weight,
-    })),
-    genreProfile,
-    preferredEras: (tasteProfile.topDecades ?? []).map((decade) => ({
-      decade: `${decade.decade}s`,
-      weight: decade.weight,
-    })),
-    runtimePreferences: { min: 0, max: 0, avg: 0 },
-    languagePreferences: (tasteProfile.topLanguages ?? []).map((language) => ({
-      language: language.name,
-      weight: language.count,
-    })),
-    avoidedGenres: new Set(
-      (tasteProfile.avoidGenres ?? []).map((genre) => genre.name.toLowerCase()),
-    ),
-    avoidedKeywords: new Set(
-      (tasteProfile.avoidKeywords ?? []).map((keyword) =>
-        keyword.name.toLowerCase(),
-      ),
-    ),
-    avoidedGenreCombos: new Set<string>(),
-    seasonalBoost: { genres: [], weight: 1 },
-    holidayPreferences: {
-      likesHolidays: false,
-      likedHolidays: [],
-      avoidHolidays: [],
-    },
-    nichePreferences: {
-      likesAnime: tasteProfile.nichePreferences?.likesAnime ?? false,
-      likesStandUp: tasteProfile.nichePreferences?.likesStandUp ?? false,
-      likesFoodDocs: tasteProfile.nichePreferences?.likesFoodDocs ?? false,
-      likesTravelDocs: tasteProfile.nichePreferences?.likesTravelDocs ?? false,
-    },
-    watchlistGenres: tasteProfile.watchlistGenres ?? [],
-    watchlistDirectors: tasteProfile.watchlistDirectors ?? [],
-    subgenrePatterns: new Map(),
-    crossGenrePatterns: new Map(),
-    totalWatched: tasteProfile.userStats?.totalFilms ?? watchedFilms.length,
-    totalRated: watchedFilms.filter((film) => film.rating != null).length,
-    totalLiked: watchedFilms.filter((film) => film.liked === true).length,
-    avgRating: tasteProfile.userStats?.avgRating ?? 0,
-    highlyRatedCount: tasteProfile.tasteBins?.highlyRated ?? 0,
-    absoluteFavorites: tasteProfile.tasteBins?.absoluteFavorites ?? 0,
-  };
-}
-
-function buildFilteringCandidate(
-  item: {
-    tmdbId: number;
-    title?: string;
-    genres?: string[];
-  },
-  tmdbDetailsCache: Map<number, TMDBMovie>,
-): TMDBMovie {
-  const cachedMovie = tmdbDetailsCache.get(item.tmdbId);
-
-  if (cachedMovie) {
-    return cachedMovie;
-  }
-
-  return {
-    id: item.tmdbId,
-    title: item.title ?? "",
-    genres: (item.genres ?? []).map((genreName) => ({
-      id: 0,
-      name: genreName,
-    })),
-    keywords: { results: [] },
-  };
-}
-
 export async function POST(req: Request) {
   return withApiAuth(req, async (auth) => {
     try {
@@ -337,7 +207,7 @@ export async function POST(req: Request) {
         );
       }
 
-      const adaptedIntent = adaptV1RecommendationIntent({
+      const v1Intent = {
         userId: auth.userId,
         seedTmdbIds: body.seed_tmdb_ids,
         limit: body.limit,
@@ -350,7 +220,7 @@ export async function POST(req: Request) {
         filterRelaxation: body.filter_relaxation,
         debug,
         requestSeed,
-      });
+      } as const;
       const canonicalContext = await loadRecommendationContext(
         { loadUserContext: async () => userContext },
         auth.userId,
@@ -360,204 +230,48 @@ export async function POST(req: Request) {
         auth.userId,
         userContext,
       );
-      const personalization = buildRecommendationPersonalization(
+      const preparation = await buildV1RecommendationDependencies({
+        intent: v1Intent,
+        context: canonicalContext,
         userContext,
         tasteProfile,
-      );
-      const { candidateIds, sourceMetadata } = await generateServerCandidates(
-        auth.userId,
-        userContext,
-        tasteProfile,
-        body.seed_tmdb_ids,
-        { requestSeed },
-      );
-
-      const filteredCandidates = filterGeneratedCandidateIds({
-        candidateIds,
-        seedTmdbIds: body.seed_tmdb_ids,
-        excludeTmdbIds: body.exclude_tmdb_ids,
-        blockedIds: userContext.blockedIds,
+        retrieveCandidates: ({
+          userId,
+          userContext: retrievalUserContext,
+          tasteProfile: retrievalTasteProfile,
+          seeds,
+          requestSeed: retrievalRequestSeed,
+        }) =>
+          generateServerCandidates(
+            userId,
+            retrievalUserContext,
+            retrievalTasteProfile,
+            seeds,
+            { requestSeed: retrievalRequestSeed },
+          ),
+        loadCachedDetails: loadCachedTmdbDetails,
+        scoreCandidates: suggestByOverlap,
+        rng: createDeterministicRng,
+        telemetry: () => undefined,
       });
-
-      // Batch pre-load TMDB details for candidates + user's mapped films to avoid N+1 fetches
-      // Covers: candidate scoring loop, subgenre analysis loop, liked/disliked movie fetches
-      const allIdsToCache = [
-        ...new Set([
-          ...filteredCandidates,
-          ...Array.from(userContext.mappings.values()),
-        ]),
-      ];
-      const candidateTmdbCache = await loadCachedTmdbDetails(allIdsToCache);
-
-      const warning =
-        filteredCandidates.length === 0
-          ? candidateIds.length === 0
-            ? "no_candidates_generated"
-            : "all_candidates_excluded"
-          : undefined;
+      const { filterDiagnostics, warning } = preparation;
       if (warning) {
         console.warn("[v1/suggestions/generate] No candidates available", {
           requestId,
-          candidateIds: candidateIds.length,
+          candidateIds: preparation.candidateIds.length,
           warning,
         });
       }
-
-      const liteFilms = userContext.films.map((film) => ({
-        uri: film.uri,
-        title: film.title,
-        year: film.year,
-        ...(film.rating != null ? { rating: film.rating } : {}),
-        ...(film.liked != null ? { liked: film.liked } : {}),
-        ...(film.last_date != null ? { lastDate: film.last_date } : {}),
-      }));
-
-      const minimalEnhancedProfile = buildMinimalEnhancedTasteProfile({
-        tasteProfile,
-        watchedFilms: userContext.films.map((film) => ({
-          rating: film.rating ?? undefined,
-          liked: film.liked,
-        })),
-      });
-
-      const scored = await suggestByOverlap({
-        userId: auth.userId,
-        films: liteFilms,
-        mappings: userContext.mappings,
-        candidates: filteredCandidates,
-        ...buildRecommendationScoringInputs(personalization, sourceMetadata),
-        maxCandidates: Math.min(filteredCandidates.length, 1200),
-        concurrency: 6,
-        excludeWatchedIds: new Set(userContext.mappings.values()),
-        desiredResults: Math.min(body.limit * 4, 200),
-        sourceMetadata,
-        mmrTopKFactor: 2.5,
-        context: {
-          mode: "neutral" as const,
-          localHour: null,
-        },
-        tmdbDetailsCache: candidateTmdbCache,
-      });
-
-      // Apply a minimum score to candidates that arrived ONLY via genre discovery
-      // (no seed-similar or trending backing). Prevents low-relevance genre matches
-      // like "A Dog's Will" from passing through in default (no genre filter) runs.
-      const MIN_DISCOVERY_SCORE = 15.0;
-      const qualityFiltered = scored.filter((item) => {
-        const meta = sourceMetadata.get(item.tmdbId);
-        if (!meta) return true; // No metadata — pass through conservatively
-
-        const isDiscoveryOnly = meta.sources.every(
-          (s) => s === "discover-top-genres",
-        );
-        return isDiscoveryOnly ? item.score >= MIN_DISCOVERY_SCORE : true;
-      });
-
-      // suggestByOverlap owns scoring-stage boosts and post-score ordering;
-      // apply only the route's canonical negative eligibility filter here.
-      const personalizationCandidates = qualityFiltered.filter((item) => {
-        const candidate = buildFilteringCandidate(item, candidateTmdbCache);
-        return !applyNegativeFiltering(candidate, minimalEnhancedProfile)
-          .shouldFilter;
-      });
-
-      const genreFilterResult = filterCandidatesByGenre(
-        personalizationCandidates,
-        {
-          requestedGenreNames:
-            body.genre_ids?.map(
-              (genreId) => TMDB_GENRE_MAP[genreId] ?? `unknown:${genreId}`,
-            ) ?? [],
-          requestedCount: body.limit,
-          filterRelaxation: body.filter_relaxation,
-        },
-      );
-      const personalizationFiltered = genreFilterResult.candidates;
-      const filterDiagnostics = {
-        reasons: [...genreFilterResult.diagnostics.reasons],
-        applied_stages: [...genreFilterResult.diagnostics.appliedStages],
-        strict_count: genreFilterResult.diagnostics.strictCount,
-        threshold_count: genreFilterResult.diagnostics.thresholdCount,
-        genre_count: genreFilterResult.diagnostics.genreCount,
-      };
-
-      // Debug: summarize candidate counts by source
-      const sourceDebugSummary = debug
-        ? (() => {
-            const counts: Record<string, number> = {};
-            for (const [, meta] of sourceMetadata.entries()) {
-              for (const source of meta.sources) {
-                counts[source] = (counts[source] ?? 0) + 1;
-              }
-            }
-            return counts;
-          })()
-        : undefined;
-
-      const richCandidates = new Map(
-        personalizationFiltered.map((item) => [item.tmdbId, item]),
-      );
-      const canonicalResult = await runCanonicalServerRecommendations(
-        adaptedIntent.request,
-        {
-          loadContext: async () => canonicalContext,
-          retrieveCandidates: async () =>
-            personalizationFiltered.map((item) => ({ tmdbId: item.tmdbId })),
-          scoreCandidates: async ({ candidates }) =>
-            candidates.map(({ tmdbId }) => {
-              const item = richCandidates.get(tmdbId);
-              if (!item) {
-                throw new Error("Missing scored v1 recommendation candidate");
-              }
-              const rawSources =
-                sourceMetadata.get(tmdbId)?.sources ??
-                item.sources ??
-                ["overlap"];
-              return {
-                tmdbId,
-                score: item.score,
-                evidence: {
-                  seedAnchors: [...body.seed_tmdb_ids],
-                  providerFamilies: normalizeProviderFamilies(rawSources),
-                  providerOccurrences: rawSources.length,
-                  retrievalScore: item.score,
-                },
-                attribution: {
-                  retrieval: item.score,
-                  preference: 0,
-                  context: 0,
-                  diversity: 0,
-                  total: item.score,
-                },
-              };
-            }),
-          rerankCandidates: async ({ candidates }) => candidates,
-          rng: createDeterministicRng,
-          telemetry: () => undefined,
-        },
-      );
-      const responseDetails = new Map<number, V1RecommendationDetails>(
-        personalizationFiltered.map((item) => [
-          item.tmdbId,
-          {
-            title: item.title,
-            consensusLevel: item.consensusLevel,
-            sources:
-              sourceMetadata.get(item.tmdbId)?.sources ?? item.sources ?? [],
-            reasons: item.reasons,
-            genres: item.genres,
-            releaseDate: item.release_date,
-            posterPath: item.poster_path,
-            voteCategory: item.voteCategory,
-          },
-        ]),
+      const canonicalResult = await runV1RecommendationGeneration(
+        v1Intent,
+        preparation.dependencies,
       );
       const adaptedResult = adaptCanonicalResultToV1(
         canonicalResult,
-        responseDetails,
+        preparation.responseDetails,
         {
           relaxation: deriveAppliedRelaxation(
-            genreFilterResult.diagnostics.appliedStages,
+            filterDiagnostics.applied_stages,
           ),
           inputRevisionMaterial: canonicalContext.revisionMaterial,
         },
@@ -585,7 +299,7 @@ export async function POST(req: Request) {
 
       console.log("[v1/suggestions/generate] Generation completed", {
         requestId,
-        candidateCount: filteredCandidates.length,
+        candidateCount: preparation.filteredCandidateIds.length,
         requestedLimit: body.limit,
         resultCount: data.length,
       });
@@ -597,7 +311,7 @@ export async function POST(req: Request) {
            requestId,
            seed_count: body.seed_tmdb_ids.length,
            result_count: data.length,
-           candidate_count: filteredCandidates.length,
+            candidate_count: preparation.filteredCandidateIds.length,
            engine: "personalized",
            ...generationDiagnostics,
            ...adaptedResult.meta,
@@ -605,15 +319,17 @@ export async function POST(req: Request) {
            ...(warning ? { warning } : {}),
            ...(debug
              ? {
-                 source_candidate_counts: sourceDebugSummary,
+                  source_candidate_counts: preparation.sourceCandidateCounts,
                  seeds_used: body.seed_tmdb_ids,
                  genre_filter_applied: body.genre_ids?.length
                    ? body.genre_ids
                    : null,
-                 candidates_before_genre_filter: scored.length,
-                 candidates_after_genre_filter: personalizationFiltered.length,
-                 candidates_after_personalization_filter:
-                   personalizationFiltered.length,
+                  candidates_before_genre_filter:
+                    preparation.scoredCandidates.length,
+                  candidates_after_genre_filter:
+                    preparation.personalizationFiltered.length,
+                  candidates_after_personalization_filter:
+                    preparation.personalizationFiltered.length,
                }
              : {}),
         },

@@ -1,18 +1,10 @@
-import pLimit from "p-limit";
 import { fetchTmdb } from "@/app/api/v1/_lib/tmdb";
 import {
   buildTasteProfile,
   getAvoidedFeatures,
   type TMDBMovie,
 } from "@/lib/enrich";
-import {
-  classifyPreferenceProbability,
-  normalizeFeatureKey,
-} from "@/lib/recommendationPreference";
-import {
-  hasGenuineWatchEvidence,
-  sortByFilmRecency,
-} from "@/lib/recommendationNormalization";
+import { sortByFilmRecency } from "@/lib/recommendationNormalization";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   createRecommendationRevision,
@@ -23,21 +15,29 @@ import {
   type RecommendationRevisionQuizState,
 } from "@/lib/recommendationRevision";
 import {
-  applySourceIntentQuotas,
-  createDeterministicRng,
-  normalizeProviderFamilies,
-  stableSortCandidates,
   type WeightedRecommendationSeed,
 } from "@/lib/recommendationCandidates";
 import {
-  createRecommendationEngine,
   type RecommendationEngineDependencies,
   type RecommendationEngineResult,
 } from "@/lib/recommendationEngine";
-import type {
-  RecommendationRequestInput,
-  RecommendationResult,
-} from "@/lib/recommendationTypes";
+import { runCanonicalRecommendation } from "@/lib/recommendationGeneration";
+import type { FeatureFeedbackRow } from "@/lib/recommendationFeedback";
+import {
+  retrieveServerCandidates,
+  type ServerCandidateProvider,
+  type ServerCandidateProviderRequest,
+  type ServerCandidateRetrievalOptions,
+  type ServerSeedInput,
+  type SourceMetadata,
+} from "@/lib/recommendationRetrieval";
+import type { RecommendationRequestInput } from "@/lib/recommendationTypes";
+
+export {
+  buildAdjacentGenreMap,
+  buildFeatureFeedbackFromRows,
+} from "@/lib/recommendationFeedback";
+export type { FeatureFeedbackRow } from "@/lib/recommendationFeedback";
 
 export type TasteProfile = Awaited<ReturnType<typeof buildTasteProfile>>;
 export type FeatureFeedback = Awaited<ReturnType<typeof getAvoidedFeatures>>;
@@ -61,15 +61,6 @@ export type FilmEventRow = {
 export type FilmMappingRow = {
   uri: string;
   tmdb_id: number;
-};
-
-export type FeatureFeedbackRow = {
-  feature_id: number;
-  feature_name: string;
-  feature_type: string;
-  inferred_preference: number | string | null;
-  positive_count: number;
-  negative_count: number;
 };
 
 export type AdjacentGenreRow = {
@@ -148,8 +139,7 @@ export async function runCanonicalServerRecommendations(
   request: RecommendationRequestInput,
   dependencies: RecommendationEngineDependencies,
 ): Promise<RecommendationEngineResult> {
-  const engine = createRecommendationEngine(dependencies);
-  return engine.generate(request);
+  return runCanonicalRecommendation(request, dependencies);
 }
 
 type CachedTasteProfileRow = {
@@ -192,41 +182,17 @@ type TmdbListResult = {
   results?: Array<{
     id: number;
     genre_ids?: number[];
+    source?: string;
+    intent?: string;
+    confidence?: number;
+    reason?: string;
+    title?: string;
   }>;
 };
 
-type SourceMetadataEntry = {
-  sources: string[];
-  consensusLevel: "high" | "medium" | "low";
-  intents?: string[];
-};
-
-type SourceMetadata = Map<
-  number,
-  SourceMetadataEntry
->;
-
-type ServerSeedInput =
-  | number
-  | Readonly<{
-      tmdbId: number;
-      weight?: number;
-      source?: WeightedRecommendationSeed["source"];
-      intent?: string;
-    }>;
-
-type CandidateSourceResult = Readonly<{
-  source: string;
-  ids: number[];
-  intent?: string;
-}>;
-
 const TMDB_BATCH_SIZE = 200;
-const CANDIDATE_PROVIDER_CONCURRENCY = 5;
 const TMDB_METADATA_CONCURRENCY = 5;
 /** Minimum positive signal count for explicit feedback to override a pattern-analysis "avoid" classification. */
-const SUBGENRE_POSITIVE_OVERRIDE_MIN = 10;
-
 export type TmdbMetadataCompletion = {
   details: Map<number, TMDBMovie>;
   requested: number;
@@ -257,22 +223,6 @@ export function isMetadataCompletionHealthy(
   );
 }
 
-function createEmptyFeatureFeedback(): FeatureFeedback {
-  return {
-    avoidActors: [],
-    avoidKeywords: [],
-    avoidFranchises: [],
-    avoidDirectors: [],
-    avoidGenres: [],
-    avoidSubgenres: [],
-    preferActors: [],
-    preferKeywords: [],
-    preferDirectors: [],
-    preferGenres: [],
-    preferSubgenres: [],
-  };
-}
-
 function chunkArray<T>(items: T[], size: number): T[][] {
   if (items.length === 0) return [];
 
@@ -286,46 +236,6 @@ function chunkArray<T>(items: T[], size: number): T[][] {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
-}
-
-function buildWeight(
-  row: FeatureFeedbackRow,
-  direction: "positive" | "negative",
-): number {
-  const signal = row.inferred_preference;
-  const signalDirection = classifyPreferenceProbability(signal);
-  const numericSignal =
-    typeof signal === "number"
-      ? signal
-      : typeof signal === "string" && signal.trim() !== ""
-        ? Number(signal)
-        : Number.NaN;
-
-  if (
-    Number.isFinite(numericSignal) &&
-    numericSignal >= 0 &&
-    numericSignal <= 1 &&
-    signalDirection === direction
-  ) {
-    return direction === "positive" ? numericSignal : 1 - numericSignal;
-  }
-
-  if (signalDirection === direction) {
-    return 1;
-  }
-
-  const delta = Math.abs(row.positive_count - row.negative_count);
-  const directionalCount =
-    direction === "positive" ? row.positive_count : row.negative_count;
-
-  return Math.max(0.25, delta, directionalCount);
-}
-
-function buildCount(
-  row: FeatureFeedbackRow,
-  direction: "positive" | "negative",
-): number {
-  return direction === "positive" ? row.positive_count : row.negative_count;
 }
 
 function isTmdbProfileComplete(
@@ -361,46 +271,6 @@ function buildExposureMap(
   return map;
 }
 
-function addCandidateSource(
-  sourceMetadata: SourceMetadata,
-  candidateOrder: number[],
-  candidateSet: Set<number>,
-  tmdbId: number,
-  source: string,
-  options?: {
-    allowSeen?: boolean;
-    seenIds?: Set<number>;
-    intent?: string;
-  },
-): void {
-  if (!isFiniteNumber(tmdbId) || tmdbId <= 0) return;
-
-  if (!options?.allowSeen && options?.seenIds?.has(tmdbId)) {
-    return;
-  }
-
-  if (!candidateSet.has(tmdbId)) {
-    candidateSet.add(tmdbId);
-    candidateOrder.push(tmdbId);
-  }
-
-  const existing = sourceMetadata.get(tmdbId);
-  const sources = new Set(existing?.sources ?? []);
-  sources.add(source);
-
-  const sourceCount = normalizeProviderFamilies([...sources]).length;
-  const consensusLevel: "high" | "medium" | "low" =
-    sourceCount >= 3 ? "high" : sourceCount >= 2 ? "medium" : "low";
-  const intents = new Set(existing?.intents ?? []);
-  if (options?.intent) intents.add(options.intent);
-
-  sourceMetadata.set(tmdbId, {
-    sources: Array.from(sources).sort(),
-    consensusLevel,
-    ...(intents.size > 0 ? { intents: Array.from(intents).sort() } : {}),
-  });
-}
-
 function scoreSeedFilm(film: FilmEventRow, now: number): number {
   const ratingScore = film.rating ?? 0;
   const likedBonus = film.liked ? 1.5 : 0;
@@ -427,21 +297,6 @@ function parseFilmDate(value: string | null): number | null {
 
   const timestamp = new Date(value).getTime();
   return Number.isNaN(timestamp) ? null : timestamp;
-}
-
-function getWatchedTmdbIds(userContext: UserContext): number[] {
-  return userContext.films
-    .filter((film) =>
-      hasGenuineWatchEvidence({
-        watchDate: film.last_date,
-        rating: film.rating,
-        liked: film.liked,
-        rewatch: film.rewatch,
-        watchCount: film.watch_count,
-      }),
-    )
-    .map((film) => userContext.mappings.get(film.uri))
-    .filter((tmdbId): tmdbId is number => isFiniteNumber(tmdbId));
 }
 
 function compareSeedFilms(
@@ -761,128 +616,6 @@ export async function ensureCompleteTmdbDetails(
     failed: requestedIds.length - completed,
     deadlineExpired,
   };
-}
-
-export function buildFeatureFeedbackFromRows(
-  rows: FeatureFeedbackRow[],
-): FeatureFeedback {
-  const feedback = createEmptyFeatureFeedback();
-
-  for (const row of rows) {
-    const preference = classifyPreferenceProbability(row.inferred_preference);
-    if (preference === "neutral") continue;
-
-    const isPositive = preference === "positive";
-    const normalizedType = normalizeFeatureKey(
-      row.feature_type,
-      row.feature_id,
-    ).type;
-    const featureKey = normalizeFeatureKey(
-      normalizedType,
-      normalizedType === "subgenre"
-        ? row.feature_name
-        : row.feature_id,
-    );
-
-    if (featureKey.type === "subgenre") {
-      // If explicit positive signals are strong (≥ threshold), never place in avoidSubgenres
-      // even if inferred_preference (pattern analysis) says negative.
-      const hasStrongPositive =
-        row.positive_count >= SUBGENRE_POSITIVE_OVERRIDE_MIN;
-      const effectiveIsPositive = hasStrongPositive
-        ? true
-        : (isPositive ?? false);
-      const effectiveDirection = effectiveIsPositive ? "positive" : "negative";
-      const weight = buildWeight(row, effectiveDirection);
-      const count = buildCount(row, effectiveDirection);
-
-      const target = effectiveIsPositive
-        ? feedback.preferSubgenres
-        : feedback.avoidSubgenres;
-      target.push({
-        key: featureKey.id,
-        weight,
-        count,
-      });
-      continue;
-    }
-
-    const direction = isPositive ? "positive" : "negative";
-    const weight = buildWeight(row, direction);
-    const count = buildCount(row, direction);
-
-    const numericId = Number(featureKey.id);
-    if (!isFiniteNumber(numericId)) continue;
-
-    const item = {
-      id: numericId,
-      name: row.feature_name,
-      weight,
-      count,
-    };
-
-    switch (featureKey.type) {
-      case "actor":
-        if (isPositive) feedback.preferActors.push(item);
-        else feedback.avoidActors.push(item);
-        break;
-      case "keyword":
-        if (isPositive) feedback.preferKeywords.push(item);
-        else feedback.avoidKeywords.push(item);
-        break;
-      case "director":
-        if (isPositive) feedback.preferDirectors.push(item);
-        else feedback.avoidDirectors.push(item);
-        break;
-      case "genre":
-        if (isPositive) feedback.preferGenres.push(item);
-        else feedback.avoidGenres.push(item);
-        break;
-      // franchise/collection: only negative (avoid) preference is supported
-      case "franchise":
-      case "collection":
-        if (!isPositive) {
-          feedback.avoidFranchises.push(item);
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  feedback.avoidActors.sort((a, b) => b.weight - a.weight);
-  feedback.avoidKeywords.sort((a, b) => b.weight - a.weight);
-  feedback.avoidFranchises.sort((a, b) => b.weight - a.weight);
-  feedback.avoidDirectors.sort((a, b) => b.weight - a.weight);
-  feedback.avoidGenres.sort((a, b) => b.weight - a.weight);
-  feedback.avoidSubgenres.sort((a, b) => b.weight - a.weight);
-  feedback.preferActors.sort((a, b) => b.weight - a.weight);
-  feedback.preferKeywords.sort((a, b) => b.weight - a.weight);
-  feedback.preferDirectors.sort((a, b) => b.weight - a.weight);
-  feedback.preferGenres.sort((a, b) => b.weight - a.weight);
-  feedback.preferSubgenres.sort((a, b) => b.weight - a.weight);
-
-  return feedback;
-}
-
-export function buildAdjacentGenreMap(
-  rows: Array<{
-    from_genre_name: string;
-    to_genre_name: string;
-    success_rate: number;
-  }>,
-): Map<string, Array<{ genre: string; weight: number }>> {
-  const map = new Map<string, Array<{ genre: string; weight: number }>>();
-
-  for (const row of rows) {
-    if (!map.has(row.from_genre_name)) map.set(row.from_genre_name, []);
-    map.get(row.from_genre_name)!.push({
-      genre: row.to_genre_name,
-      weight: row.success_rate,
-    });
-  }
-
-  return map;
 }
 
 const CONTEXT_DIAGNOSTIC_ROW_LIMIT = 10_000;
@@ -1670,255 +1403,61 @@ export async function generateServerCandidates(
   userContext: UserContext,
   tasteProfile: TasteProfile,
   seedTmdbIds: readonly ServerSeedInput[] = [],
-  options: {
-    requestSeed?: string;
-    provider?: typeof fetchTmdb;
-    now?: () => number;
-  } = {},
+  options: ServerCandidateGenerationOptions = {},
 ): Promise<{ candidateIds: number[]; sourceMetadata: SourceMetadata }> {
-  const currentTime = options.now?.() ?? Date.now();
-  console.log("[ServerEngine] generateServerCandidates", {
-    userId,
-    seedCount: seedTmdbIds.length,
-  });
-
-  const sourceMetadata: SourceMetadata = new Map();
-  const candidateOrder: number[] = [];
-  const candidateSet = new Set<number>();
-  const explicitSeedsById = new Map<number, WeightedRecommendationSeed>();
-  for (const seed of seedTmdbIds) {
-    const tmdbId = typeof seed === "number" ? seed : seed.tmdbId;
-    if (!isFiniteNumber(tmdbId) || tmdbId <= 0) continue;
-
-    const weightedSeed: WeightedRecommendationSeed =
-      typeof seed === "number"
-        ? { tmdbId, weight: 2, source: "explicit" }
-        : {
-            tmdbId,
-            weight:
-              typeof seed.weight === "number" && seed.weight > 0
-                ? seed.weight
-                : 2,
-            source: seed.source ?? "explicit",
-            ...(seed.intent ? { intent: seed.intent } : {}),
-          };
-    const existing = explicitSeedsById.get(tmdbId);
-    if (existing === undefined || weightedSeed.weight > existing.weight) {
-      explicitSeedsById.set(tmdbId, weightedSeed);
-    }
-  }
-
-  const explicitSeeds = [...explicitSeedsById.values()].sort(
-    (left, right) => left.tmdbId - right.tmdbId,
-  );
-  const explicitSeedTmdbIds = explicitSeeds.map((seed) => seed.tmdbId);
-  const seenIds = new Set<number>([
-    ...getWatchedTmdbIds(userContext),
-    ...Array.from(userContext.blockedIds.values()),
-    ...explicitSeedTmdbIds,
-  ]);
-  const random = createDeterministicRng(
-    options.requestSeed ?? `${userId}:${explicitSeedTmdbIds.join(",")}`,
-  );
   const provider = options.provider ?? fetchTmdb;
-  const providerLimit = pLimit(CANDIDATE_PROVIDER_CONCURRENCY);
-  const limitedProvider = <T>(
-    path: string,
-    params?: Record<string, string | number | undefined>,
-  ): Promise<T> => providerLimit(() => provider<T>(path, params));
+  const providerRows =
+    options.providerRows ??
+    (async ({ path, params, source, intent }: ServerCandidateProviderRequest) => {
+      const result = await provider<TmdbListResult>(path, params);
+      return (result.results ?? []).map((movie) => ({
+        tmdbId: movie.id,
+        source: movie.source ?? source,
+        ...(movie.intent ?? intent
+          ? { intent: movie.intent ?? intent }
+          : {}),
+        ...(movie.title ? { title: movie.title } : {}),
+        ...(movie.confidence !== undefined
+          ? { confidence: movie.confidence }
+          : {}),
+        ...(movie.reason ? { reason: movie.reason } : {}),
+      }));
+    });
 
-  const topSeedTmdbIds = getTopSeedTmdbIds(
+  const retrieved = await retrieveServerCandidates(
+    userId,
     userContext,
-    12,
-    currentTime,
-  );
-  const neighborhoodSeedsById = new Map<number, WeightedRecommendationSeed>();
-  for (const seed of [...explicitSeeds, ...topSeedTmdbIds]) {
-    if (!neighborhoodSeedsById.has(seed.tmdbId)) {
-      neighborhoodSeedsById.set(seed.tmdbId, seed);
-    }
-  }
-  const neighborhoodSeeds = [...neighborhoodSeedsById.values()];
-  const discoverGenreIds = tasteProfile.topGenres
-    .slice(0, 3)
-    .map((genre) => genre.id);
-
-  const requests: Array<Promise<CandidateSourceResult>> = [];
-  const useDayTrending = random() > 0.5;
-
-  requests.push(
-    limitedProvider<TmdbListResult>(
-      useDayTrending ? "/trending/movie/day" : "/trending/movie/week",
-    )
-      .then((result) => ({
-        source: useDayTrending ? "trending-day" : "trending-week",
-        ids: (result.results ?? []).map((movie) => movie.id),
-        intent: "exploration",
-      }))
-      .catch((error) => {
-        console.error("[ServerEngine] trending error:", error);
-          return {
-            source: useDayTrending ? "trending-day" : "trending-week",
-            ids: [],
-            intent: "exploration",
-          };
-      }),
-  );
-
-  if (topSeedTmdbIds.length < 4) {
-    requests.push(
-      limitedProvider<TmdbListResult>(
-        useDayTrending ? "/trending/movie/week" : "/trending/movie/day",
-      )
-        .then((result) => ({
-          source: useDayTrending ? "trending-week" : "trending-day",
-          ids: (result.results ?? []).map((movie) => movie.id),
-          intent: "exploration",
-        }))
-        .catch((error) => {
-          console.error("[ServerEngine] trending alternate error:", error);
-            return {
-              source: useDayTrending ? "trending-week" : "trending-day",
-              ids: [],
-              intent: "exploration",
-            };
-        }),
-    );
-  }
-
-  if (discoverGenreIds.length > 0) {
-    requests.push(
-      limitedProvider<TmdbListResult>("/discover/movie", {
-        with_genres: discoverGenreIds.join("|"),
-        include_adult: "false",
-        sort_by: "vote_average.desc",
-        "vote_count.gte": 200,
-        page: String(Math.floor(random() * 5) + 1),
-      })
-        .then((result) => ({
-          source: "discover-top-genres",
-          ids: (result.results ?? []).map((movie) => movie.id),
-          intent: "exploration",
-        }))
-        .catch((error) => {
-          console.error("[ServerEngine] discover error:", error);
-          return { source: "discover-top-genres", ids: [] };
-        }),
-    );
-  }
-
-  for (const seed of neighborhoodSeeds) {
-    const { tmdbId } = seed;
-    const intent = seed.intent ?? seed.source ?? "history";
-    requests.push(
-      limitedProvider<TmdbListResult>(
-        `/movie/${tmdbId}/recommendations`,
-        { page: 1 },
-      )
-        .catch(() => ({ results: [] as Array<{ id: number }> }))
-        .then(async (result) => {
-          const ids = (result.results ?? []).map((movie) => movie.id);
-          // /recommendations returns fewer results for obscure films.
-          // Fall back to /similar only when recommendations is empty.
-          if (ids.length === 0) {
-            const fallback = await limitedProvider<TmdbListResult>(
-              `/movie/${tmdbId}/similar`,
-              { page: 1 },
-            ).catch(() => ({ results: [] as Array<{ id: number }> }));
-            return {
-              source: `similar:${tmdbId}`,
-              ids: (fallback.results ?? []).map((movie) => movie.id),
-              intent,
-            };
-          }
-          // Keep label as `similar:` for backward compatibility — downstream consumers depend on this label.
-          return { source: `similar:${tmdbId}`, ids, intent };
-        })
-        .catch((error) => {
-          console.error("[ServerEngine] recommendations fetch error:", {
-            tmdbId,
-            error,
-          });
-          return { source: `similar:${tmdbId}`, ids: [], intent };
-        }),
-    );
-  }
-
-  const settled = await Promise.allSettled(requests);
-
-  for (const result of settled) {
-    if (result.status === "rejected") {
-      console.error("[ServerEngine] candidate source failed:", result.reason);
-      continue;
-    }
-
-    for (const tmdbId of result.value.ids) {
-      if (userContext.blockedIds.has(tmdbId)) continue;
-      addCandidateSource(
-        sourceMetadata,
-        candidateOrder,
-        candidateSet,
-        tmdbId,
-        result.value.source,
-        { seenIds, intent: result.value.intent },
-      );
-    }
-  }
-
-  const orderedCandidates = stableSortCandidates(
-    candidateOrder.map((tmdbId) => {
-      const metadata = sourceMetadata.get(tmdbId);
-      return {
-        tmdbId,
-        score: metadata?.sources.length ?? 0,
-        sources: metadata?.sources ?? [],
-      };
-    }),
-  ).map((candidate) => candidate.tmdbId);
-
-  const SOURCE_CAPS: Record<string, number> = {
-    "trending-day": 10,
-    "trending-week": 10,
-    "discover-top-genres": 15,
-  };
-
-  const intentQuotas: Record<string, number> = {};
-  for (const tmdbId of orderedCandidates) {
-    const intents = sourceMetadata.get(tmdbId)?.intents ?? [];
-    for (const intent of intents) {
-      if (intent === "explicit" || intent === "history" || intent === "watchlist") {
-        intentQuotas[intent] = (intentQuotas[intent] ?? 0) + 1;
-      }
-    }
-  }
-
-  const cappedCandidateOrder = applySourceIntentQuotas(
-    orderedCandidates.map((tmdbId) => {
-      const metadata = sourceMetadata.get(tmdbId);
-      return {
-        tmdbId,
-        score: metadata?.sources.length ?? 0,
-        sources: metadata?.sources ?? [],
-        intents: metadata?.intents ?? [],
-      };
-    }),
+    tasteProfile,
+    seedTmdbIds,
     {
-      limit: orderedCandidates.length,
-      sourceQuotas: SOURCE_CAPS,
-      intentQuotas,
+      requestSeed: options.requestSeed,
+      providerRows,
+      now: options.now,
+      limits: options.limits,
     },
-  ).map((candidate) => candidate.tmdbId);
-
-  console.log("[ServerEngine] source caps applied", {
-    before: orderedCandidates.length,
-    after: cappedCandidateOrder.length,
-    dropped: orderedCandidates.length - cappedCandidateOrder.length,
-  });
+  );
 
   return {
-    candidateIds: cappedCandidateOrder,
-    sourceMetadata,
+    candidateIds: retrieved.candidateIds,
+    sourceMetadata: retrieved.sourceMetadata,
   };
 }
 
-export type { SourceMetadata };
+export type {
+  ServerCandidateProvider,
+  ServerCandidateProviderRequest,
+  ServerCandidateProviderRow,
+  ServerCandidateRetrievalLimits,
+  ServerCandidateRetrievalOptions,
+  ServerCandidateRetrievalResult,
+  ServerSeedInput,
+  SourceMetadata,
+} from "@/lib/recommendationRetrieval";
+
+export type ServerCandidateGenerationOptions = Omit<
+  ServerCandidateRetrievalOptions,
+  "providerRows"
+> & {
+  provider?: typeof fetchTmdb;
+  providerRows?: ServerCandidateProvider;
+};

@@ -180,6 +180,7 @@ describe("scoreRecommendationsWithOverlap", () => {
         sourceMetadata,
         mmrLambda: personalization.mmrLambda,
         mmrTopKFactor: 2.5,
+        desiredResults: 1,
       }),
     );
     expect(result).toEqual([

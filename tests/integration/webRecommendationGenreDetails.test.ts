@@ -48,6 +48,27 @@ vi.mock("@/lib/recommendationContext", () => ({
   loadRecommendationContext: mocks.loadRecommendationContext,
 }));
 
+vi.mock("@/lib/recommendationGeneration", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/lib/recommendationGeneration")
+  >("@/lib/recommendationGeneration");
+  const { adaptWebRecommendationIntent } =
+    await vi.importActual<typeof import("@/lib/recommendationAdapters")>(
+      "@/lib/recommendationAdapters",
+    );
+  return {
+    ...actual,
+    runWebRecommendationGeneration: (
+      intent: Parameters<typeof adaptWebRecommendationIntent>[0],
+      dependencies: unknown,
+    ) =>
+      mocks.runCanonicalServerRecommendations(
+        adaptWebRecommendationIntent(intent).request,
+        dependencies,
+      ),
+  };
+});
+
 vi.mock("@/lib/enrich", async () => {
   const actual =
     await vi.importActual<typeof import("@/lib/enrich")>("@/lib/enrich");

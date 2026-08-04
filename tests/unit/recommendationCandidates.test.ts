@@ -5,6 +5,7 @@ import {
   type TasteProfile,
   type UserContext,
 } from "@/lib/serverSuggestionsEngine";
+import { retrieveServerCandidates } from "@/lib/recommendationRetrieval";
 import { discoverMoviesByProfile } from "@/lib/trending";
 
 type ProviderCall = {
@@ -56,6 +57,77 @@ function createProvider(calls: ProviderCall[]) {
 }
 
 describe("deterministic recommendation retrieval", () => {
+  it("lets explicit seeds change production retrieval through the injected network seam", async () => {
+    const run = async (seedTmdbId: number) => {
+      const paths: string[] = [];
+      const result = await retrieveServerCandidates(
+        "seed-retrieval-user",
+        emptyContext,
+        tasteProfile,
+        [seedTmdbId],
+        {
+          requestSeed: "same-retrieval-request",
+          providerRows: async ({ path }) => {
+            paths.push(path);
+            const match = path.match(/^\/movie\/(\d+)\/recommendations$/);
+            return match
+              ? [{ tmdbId: Number(match[1]) + 9_000, source: "tmdb" }]
+              : [];
+          },
+        },
+      );
+
+      return { paths, result };
+    };
+
+    const first = await run(101);
+    const second = await run(202);
+
+    expect(first.paths).toContain("/movie/101/recommendations");
+    expect(second.paths).toContain("/movie/202/recommendations");
+    expect(first.result.candidateIds).toContain(9_101);
+    expect(second.result.candidateIds).toContain(9_202);
+    expect(first.result.candidateIds).not.toEqual(second.result.candidateIds);
+  });
+
+  it("falls back to similar when recommendations rejects", async () => {
+    const calls: string[] = [];
+    const result = await retrieveServerCandidates(
+      "similar-fallback-user",
+      emptyContext,
+      tasteProfile,
+      [123],
+      {
+        requestSeed: "similar-fallback",
+        providerRows: async ({ path }) => {
+          calls.push(path);
+          if (path === "/movie/123/recommendations") {
+            throw new Error("recommendations unavailable");
+          }
+          if (path === "/movie/123/similar") {
+            return [{ tmdbId: 456, source: "similar:123" }];
+          }
+          return [];
+        },
+      },
+    );
+
+    expect(calls.indexOf("/movie/123/recommendations")).toBeLessThan(
+      calls.indexOf("/movie/123/similar"),
+    );
+    expect(result.candidateIds).toEqual([456]);
+    expect(result.sourceMetadata.get(456)).toEqual({
+      sources: ["similar:123"],
+      consensusLevel: "low",
+      intents: ["explicit"],
+    });
+    expect(result.evidence.get(456)).toEqual({
+      familyCount: 1,
+      providerOccurrences: 1,
+      providerFamilies: ["tmdb"],
+    });
+  });
+
   it("uses the request seed instead of ambient randomness for provider pages", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -107,6 +179,79 @@ describe("deterministic recommendation retrieval", () => {
     );
 
     expect(result.candidateIds).toEqual([7001, 7002]);
+  });
+
+  it("matches legacy raw-source ordering and consensus semantics", async () => {
+    const result = await retrieveServerCandidates(
+      "legacy-source-semantics-user",
+      emptyContext,
+      tasteProfile,
+      [123],
+      {
+        requestSeed: "legacy-source-semantics",
+        providerRows: async ({ source }) => {
+          if (source === "trending-day") {
+            return [
+              { tmdbId: 101, source: "trending-day" },
+              { tmdbId: 101, source: "trending-day" },
+              { tmdbId: 202, source: "trending-day" },
+              { tmdbId: 404, source: "trending-day" },
+              { tmdbId: 505, source: "tmdb" },
+            ];
+          }
+          if (source === "trending-week") {
+            return [
+              { tmdbId: 404, source: "trending-week" },
+              { tmdbId: 505, source: "tastedive" },
+            ];
+          }
+          if (source === "similar:123") {
+            return [
+              { tmdbId: 202, source: "similar:123" },
+              { tmdbId: 404, source: "similar:123" },
+              { tmdbId: 505, source: "watchmode" },
+            ];
+          }
+          return [];
+        },
+      },
+    );
+
+    // HEAD ordered candidates by the number of unique raw source labels.
+    expect(result.candidateIds).toEqual([404, 505, 202, 101]);
+    expect(result.sourceMetadata.get(101)).toEqual({
+      sources: ["trending-day"],
+      consensusLevel: "low",
+      intents: ["exploration"],
+    });
+    expect(result.sourceMetadata.get(202)).toEqual({
+      sources: ["similar:123", "trending-day"],
+      consensusLevel: "low",
+      intents: ["explicit", "exploration"],
+    });
+    expect(result.sourceMetadata.get(404)).toEqual({
+      sources: ["similar:123", "trending-day", "trending-week"],
+      consensusLevel: "low",
+      intents: ["explicit", "exploration"],
+    });
+    expect(result.sourceMetadata.get(505)).toEqual({
+      sources: ["tastedive", "tmdb", "watchmode"],
+      consensusLevel: "high",
+      intents: ["explicit", "exploration"],
+    });
+
+    // Normalized evidence remains separate: all three raw labels for 404 are
+    // one TMDB family, while raw duplicate rows remain occurrences.
+    expect(result.evidence.get(404)).toEqual({
+      familyCount: 1,
+      providerOccurrences: 3,
+      providerFamilies: ["tmdb"],
+    });
+    expect(result.evidence.get(101)).toEqual({
+      familyCount: 1,
+      providerOccurrences: 2,
+      providerFamilies: ["tmdb"],
+    });
   });
 
   it("uses weights when choosing a bounded seed subset", async () => {

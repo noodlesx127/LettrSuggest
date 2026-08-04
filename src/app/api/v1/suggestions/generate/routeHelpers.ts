@@ -5,6 +5,7 @@ import {
   type UserContextSourceHealth,
   type UserContextSourceName,
 } from "@/lib/serverSuggestionsEngine";
+import { decideRecommendationInputPreflight } from "@/lib/recommendationTypes";
 import type { FilterRelaxation } from "@/lib/advancedFiltering";
 
 type GenerateRequestSeedInput = {
@@ -105,7 +106,11 @@ export function buildBlockedSourceFailureResponse(
   diagnostics: GenerationDiagnostics,
   trace?: GenerationTraceMetadata,
 ): GenerationFailureResponse | null {
-  if (diagnostics.input_health.blocked.health !== "failed") return null;
+  const preflight = decideRecommendationInputPreflight({
+    mode: diagnostics.mode,
+    blockedHealth: diagnostics.input_health.blocked.health,
+  });
+  if (!preflight.v1.rejected) return null;
 
   return {
     status: 503,

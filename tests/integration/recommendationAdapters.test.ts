@@ -764,20 +764,22 @@ describe("web canonical recommendation adapter", () => {
     expect(genrePage).not.toMatch(/matchingMovies\.sort\s*\(/);
     expect(action).toMatch(/getUser\s*\(.*accessToken/s);
     expect(action).toMatch(/typeof params\.accessToken !== "string"/);
-    expect(action).toContain('contextDiagnostics.mode === "degraded"');
-    expect(action).toContain("getWebTmdbGenreFilterNames");
-    expect(action).toContain("matchesWebTmdbGenreFilter");
-    expect(action).toContain("retrievalTasteProfile");
-    expect(action).toMatch(/runCanonicalServerRecommendations\s*\(/);
-    expect(action).toContain("buildRecommendationPersonalization");
+    expect(action).toContain("decideRecommendationInputPreflight");
+    expect(action).toContain("preflight.web.rejected");
+    expect(action).toMatch(/buildWebRecommendationDependencies\s*\(/);
+    expect(action).toContain("retrieveCandidates:");
+    expect(action).toContain(
+      "scoreCandidates: scoreRecommendationsWithOverlapStaged",
+    );
+    expect(action).toMatch(/runWebRecommendationGeneration\s*\(/);
     expect(action).toMatch(
       /scoreRecommendationsWithOverlap[\s\S]*from "@\/lib\/recommendationScoring"/,
     );
-    expect(v1Route).toContain("buildRecommendationPersonalization");
+    expect(v1Route).toMatch(/buildV1RecommendationDependencies\s*\(/);
     expect(action).not.toMatch(/\bmmrLambda\s*=/);
     expect(v1Route).not.toMatch(/\bmmrLambda\s*=/);
     expect(action).toContain("normalizeWebRecommendationCount(params.count)");
-    expect(action).toContain("adapted.request.seeds");
+    expect(action).toContain("seeds,");
     expect(action).not.toMatch(/params\.userId/);
     expect(action).not.toMatch(/\bgetAggregatedRecommendations\b/);
     expect(action).not.toMatch(/\baggregateRecommendations\b/);
@@ -785,6 +787,34 @@ describe("web canonical recommendation adapter", () => {
     expect(trending).not.toMatch(/\bgenerateSmartCandidates\b/);
     expect(trending).not.toMatch(/\bgetAggregatedRecommendations\b/);
     expect(page.match(/\bvoid runSuggest\(\);/g) ?? []).toHaveLength(1);
+  });
+
+  it("routes v1 preparation through the reusable production dependency builder", () => {
+    const v1Route = readFileSync(
+      resolve(process.cwd(), "src/app/api/v1/suggestions/generate/route.ts"),
+      "utf8",
+    );
+
+    expect(v1Route).toMatch(/buildV1RecommendationDependencies\s*\(/);
+    expect(v1Route).toMatch(/runV1RecommendationGeneration\s*\(/);
+    expect(v1Route).toContain("generateServerCandidates");
+    expect(v1Route).toContain("loadCachedTmdbDetails");
+    expect(v1Route).toContain("suggestByOverlap");
+    expect(v1Route).toContain("createDeterministicRng");
+    expect(v1Route).toMatch(/filterDiagnostics\.applied_stages/);
+
+    for (const duplicatePreparation of [
+      "buildMinimalEnhancedTasteProfile",
+      "buildFilteringCandidate",
+      "buildRecommendationPersonalization",
+      "buildRecommendationScoringInputs",
+      "filterGeneratedCandidateIds",
+      "filterCandidatesByGenre",
+      "applyNegativeFiltering",
+      "adaptV1RecommendationIntent",
+    ]) {
+      expect(v1Route).not.toMatch(new RegExp(`\\b${duplicatePreparation}\\b`));
+    }
   });
 
   it("scans all production TS and TSX for legacy orchestration imports and calls", () => {

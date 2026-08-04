@@ -2,8 +2,10 @@ import type { suggestByOverlap } from "@/lib/enrich";
 import {
   buildAdjacentGenreMap,
   buildFeatureFeedbackFromRows,
-  type TasteProfile,
-  type UserContext,
+} from "@/lib/recommendationFeedback";
+import type {
+  TasteProfile,
+  UserContext,
 } from "@/lib/serverSuggestionsEngine";
 
 type OverlapScoringParams = Parameters<typeof suggestByOverlap>[0];

@@ -161,22 +161,41 @@
 
 ## Checkpoint 2C.1: Offline Quality and Parity Evaluation
 
+**Checkpoint state:** Complete
+
 **Files:**
 - Create: `tests/fixtures/recommendations/evaluationCorpus.ts`
 - Create: `tests/integration/recommendationEvaluation.test.ts`
+- Create: `tests/integration/recommendationGeneration.test.ts`
+- Create: `tests/unit/recommendationRetrieval.test.ts`
 - Create: `scripts/evaluate-recommendations.ts`
+- Create: `scripts/evaluate-recommendations-node20.mjs`
+- Create: `src/lib/recommendationFeedback.ts`
+- Create: `src/lib/recommendationGeneration.ts`
+- Create: `src/lib/recommendationRetrieval.ts`
+- Modify: `src/app/actions/recommendations.ts`
+- Modify: `src/app/api/v1/suggestions/generate/route.ts`
+- Modify: `src/app/api/v1/suggestions/generate/routeHelpers.ts`
+- Modify: `src/lib/adaptiveLearning.ts`
+- Modify: `src/lib/recommendationPersonalization.ts`
+- Modify: `src/lib/recommendationTypes.ts`
+- Modify: `src/lib/serverSuggestionsEngine.ts`
 - Modify: `package.json`
 - Replace or retire: `scripts/verify_algo.ts`
 - Replace or retire: `scripts/counterfactual_replay.ts`
 
-- [ ] Define a versioned corpus covering sparse history, broad history, strong negatives, explicit seeds, strict genres, provider duplication, degraded inputs, and large requested counts. Each case includes accepted ordered IDs or invariant thresholds.
-- [ ] Write assertions for deterministic repeats, seed/exclusion violations, count fulfillment, source concentration, diversity, popularity concentration, rank churn, attribution, and web/v1 parity.
-- [ ] Run the evaluation; expect at least one failure until all real engine dependencies use the canonical deterministic seams.
-- [ ] Fix only wiring defects exposed by the corpus; do not tune quality weights. Make the script exit nonzero on threshold failure and output bounded JSON/Markdown results.
-- [ ] Run `rtk npm run test` and the evaluation script; expect pass.
-- [ ] Commit with `rtk git commit -m "test: add recommendation quality evaluation"`.
+- [x] Define a versioned corpus covering sparse history, broad history, strong negatives, explicit seeds, strict genres, provider duplication, degraded inputs, and large requested counts. Each case includes accepted ordered IDs or invariant thresholds.
+- [x] Write assertions for deterministic repeats, seed/exclusion violations, count fulfillment, source concentration, diversity, popularity concentration, rank churn, attribution, and web/v1 parity.
+- [x] Run the evaluation; expect at least one failure until all real engine dependencies use the canonical deterministic seams.
+- [x] Fix only wiring defects exposed by the corpus; do not tune quality weights. Make the script exit nonzero on threshold failure and output bounded JSON/Markdown results.
+- [x] Run `rtk npm run test` and the evaluation script; expect pass.
+- [x] Commit with `rtk git commit -m "test: add recommendation quality evaluation"`.
+
+**Execution note (2026-08-03):** COMPLETE. The versioned `2c.1` eight-case corpus runs independent web/v1 production preparation boundaries using frozen raw provider/context inputs, pure retrieval and feedback seams, production personalization/scoring/reranking, strict filtering, canonical diagnostics, and deterministic repeat runs. Review-driven RED/GREEN corrections removed synthetic scoring and double-adaptation parity, restored legacy retrieval/fallback/source semantics, added true negative/vector/degraded-input gates, and protected bounded output from arbitrary exception data. No recommendation quality weights changed and vector production activation remains false. The Node 20-compatible Vite launcher emits bounded JSON/Markdown and exits nonzero on forced threshold failure. Final focused suites PASS, 89/89; full Vitest PASS, 632/632 across 41 files; lint, typecheck, evaluation, production build (51 pages), and `git diff --check` PASS. Existing dynamic-route and stale browser-data warnings remain non-fatal. Independent specification and final code-quality reviews APPROVED. Live authenticated/provider parity and direct host execution under Node 20 remain residual test-depth gaps.
 
 ## Checkpoint 2C.2: Online Measurement Readiness
+
+**Checkpoint state:** Ready
 
 **Files:**
 - Create: `tests/integration/recommendationExperiment.test.ts`

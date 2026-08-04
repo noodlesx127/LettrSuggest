@@ -584,6 +584,55 @@ export function deriveRecommendationMode(input: {
   return input.hasPersonalizedEvidence ? "personalized" : "cold_start";
 }
 
+export const RECOMMENDATION_PREFLIGHT_REJECTION_REASONS = [
+  "degraded_mode",
+  "blocked_failed",
+] as const;
+
+export type RecommendationPreflightRejectionReason =
+  (typeof RECOMMENDATION_PREFLIGHT_REJECTION_REASONS)[number];
+
+export type RecommendationPreflightOutcome = Readonly<{
+  rejected: boolean;
+  reason: RecommendationPreflightRejectionReason | null;
+}>;
+
+export type RecommendationPreflightDecision = Readonly<{
+  web: RecommendationPreflightOutcome;
+  v1: RecommendationPreflightOutcome;
+}>;
+
+/**
+ * Pure shared input-health preflight decision used by the web Action, the v1
+ * route, and the offline evaluator. It models the existing production
+ * rejection semantics exactly, without changing behavior: web rejects
+ * generation on degraded mode or a failed blocked source, while the v1
+ * bounded failure response rejects only a failed blocked source. Surfaces
+ * keep owning their own error/envelope presentation.
+ */
+export function decideRecommendationInputPreflight(input: {
+  mode: RecommendationEngineMode;
+  blockedHealth: SourceHealthState;
+}): RecommendationPreflightDecision {
+  const degraded = input.mode === "degraded";
+  const blockedFailed = input.blockedHealth === "failed";
+
+  return {
+    web: {
+      rejected: degraded || blockedFailed,
+      reason: degraded
+        ? "degraded_mode"
+        : blockedFailed
+          ? "blocked_failed"
+          : null,
+    },
+    v1: {
+      rejected: blockedFailed,
+      reason: blockedFailed ? "blocked_failed" : null,
+    },
+  };
+}
+
 export function validateRecommendationDiagnostics(
   value: unknown,
 ): value is RecommendationDiagnostics {

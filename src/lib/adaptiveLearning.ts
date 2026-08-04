@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { FilmEvent } from './normalize';
+import type { FilmEvent } from './normalize';
 
 // Types for our stats
 type ExplorationStats = {

@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration"
+    "test:integration": "vitest run tests/integration",
+    "evaluate:recommendations": "node scripts/evaluate-recommendations-node20.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,6 +13,11 @@ import {
   type UserContext,
 } from "@/lib/serverSuggestionsEngine";
 import { deriveContextMode } from "@/lib/enrich";
+import {
+  decideRecommendationInputPreflight,
+  deriveRecommendationMode,
+  type RecommendationInputHealth,
+} from "@/lib/recommendationTypes";
 import {
   buildBlockedSourceFailureResponse,
   buildGenerationDiagnostics,
@@ -389,6 +397,154 @@ describe("recommendation input health", () => {
     expect(cutoff).toBe(
       new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString(),
     );
+  });
+});
+
+function preflightHealth(
+  overrides: Partial<RecommendationInputHealth> = {},
+): RecommendationInputHealth {
+  return {
+    films: { health: "ok", rowCount: 1 },
+    mappings: { health: "ok", rowCount: 1 },
+    feedback: { health: "empty", rowCount: 0 },
+    exploration: { health: "empty", rowCount: 0 },
+    adjacent_genres: { health: "empty", rowCount: 0 },
+    exposures: { health: "empty", rowCount: 0 },
+    blocked: { health: "ok", rowCount: 0 },
+    ...overrides,
+  };
+}
+
+describe("shared recommendation input-health preflight", () => {
+  it("models the web rejection on degraded mode before blocked failure", () => {
+    expect(
+      decideRecommendationInputPreflight({
+        mode: "degraded",
+        blockedHealth: "ok",
+      }).web,
+    ).toEqual({ rejected: true, reason: "degraded_mode" });
+    expect(
+      decideRecommendationInputPreflight({
+        mode: "personalized",
+        blockedHealth: "failed",
+      }).web,
+    ).toEqual({ rejected: true, reason: "blocked_failed" });
+    expect(
+      decideRecommendationInputPreflight({
+        mode: "degraded",
+        blockedHealth: "failed",
+      }).web,
+    ).toEqual({ rejected: true, reason: "degraded_mode" });
+  });
+
+  it("models the v1 bounded failure response rejecting only blocked failure", () => {
+    expect(
+      decideRecommendationInputPreflight({
+        mode: "degraded",
+        blockedHealth: "ok",
+      }).v1,
+    ).toEqual({ rejected: false, reason: null });
+    expect(
+      decideRecommendationInputPreflight({
+        mode: "personalized",
+        blockedHealth: "failed",
+      }).v1,
+    ).toEqual({ rejected: true, reason: "blocked_failed" });
+    expect(
+      decideRecommendationInputPreflight({
+        mode: "degraded",
+        blockedHealth: "failed",
+      }).v1,
+    ).toEqual({ rejected: true, reason: "blocked_failed" });
+  });
+
+  it("allows healthy and cold-start inputs on both surfaces", () => {
+    for (const mode of ["personalized", "cold_start"] as const) {
+      for (const blockedHealth of ["ok", "empty"] as const) {
+        const decision = decideRecommendationInputPreflight({
+          mode,
+          blockedHealth,
+        });
+        expect(decision.web).toEqual({ rejected: false, reason: null });
+        expect(decision.v1).toEqual({ rejected: false, reason: null });
+      }
+    }
+  });
+
+  it("matches the mode derived from the same input health", () => {
+    const blockedFailed = preflightHealth({
+      blocked: { health: "failed", rowCount: 0 },
+    });
+    const filmsFailed = preflightHealth({
+      films: { health: "failed", rowCount: 0 },
+    });
+    const healthy = preflightHealth();
+
+    const blockedDecision = decideRecommendationInputPreflight({
+      mode: deriveRecommendationMode({
+        inputHealth: blockedFailed,
+        hasPersonalizedEvidence: true,
+      }),
+      blockedHealth: blockedFailed.blocked.health,
+    });
+    expect(blockedDecision.web.rejected).toBe(true);
+    expect(blockedDecision.v1.rejected).toBe(true);
+
+    const filmsDecision = decideRecommendationInputPreflight({
+      mode: deriveRecommendationMode({
+        inputHealth: filmsFailed,
+        hasPersonalizedEvidence: true,
+      }),
+      blockedHealth: filmsFailed.blocked.health,
+    });
+    expect(filmsDecision.web.rejected).toBe(true);
+    expect(filmsDecision.v1.rejected).toBe(false);
+
+    const healthyDecision = decideRecommendationInputPreflight({
+      mode: deriveRecommendationMode({
+        inputHealth: healthy,
+        hasPersonalizedEvidence: true,
+      }),
+      blockedHealth: healthy.blocked.health,
+    });
+    expect(healthyDecision.web.rejected).toBe(false);
+    expect(healthyDecision.v1.rejected).toBe(false);
+  });
+
+  it("keeps the v1 bounded failure response absent for degraded non-blocked inputs", async () => {
+    const context = await loadUserContext("user-1", {
+      sourceLoader: sourceLoader({ films: failed() }),
+    });
+    const diagnostics = buildGenerationDiagnostics({
+      context: getUserContextDiagnostics(context),
+      requestSeed: "fixed-request-seed",
+      contextMode: "neutral",
+    });
+
+    expect(diagnostics.mode).toBe("degraded");
+    expect(buildBlockedSourceFailureResponse(diagnostics)).toBeNull();
+  });
+
+  it("routes both production surfaces through the shared preflight decision", () => {
+    const action = readFileSync(
+      resolve(process.cwd(), "src/app/actions/recommendations.ts"),
+      "utf8",
+    );
+    const routeHelpers = readFileSync(
+      resolve(
+        process.cwd(),
+        "src/app/api/v1/suggestions/generate/routeHelpers.ts",
+      ),
+      "utf8",
+    );
+
+    expect(action).toContain("decideRecommendationInputPreflight");
+    expect(action).toContain("preflight.web.rejected");
+    expect(action).toContain(
+      "Recommendation inputs are temporarily unavailable",
+    );
+    expect(routeHelpers).toContain("decideRecommendationInputPreflight");
+    expect(routeHelpers).toContain("preflight.v1.rejected");
   });
 });
 
