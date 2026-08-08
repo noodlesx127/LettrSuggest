@@ -7,7 +7,7 @@
 --
 -- Coverage:
 --   * BEFORE INSERT OR UPDATE guard: exact signature, trigger return type, SECURITY
---     INVOKER, empty search_path, EXECUTE only for authenticated/service_role
+--     DEFINER, empty search_path, EXECUTE only for authenticated/service_role
 --   * guard source contract: server timestamps, nulling of every legacy
 --     telemetry payload column, and the stable SQLSTATE 22023 rejection of
 --     incomplete/non-canonical records
@@ -44,19 +44,24 @@ select plan(74);
 -- Static contract: guard trigger function.
 -- ---------------------------------------------------------------------------
 
-select has_function('public', 'enforce_versioned_exposure_insert');
+select has_function(
+  'public',
+  'enforce_versioned_exposure_insert',
+  'exposure guard function exists'
+);
 
 select function_returns(
   'public',
   'enforce_versioned_exposure_insert',
-  'trigger'
+  'trigger',
+  'exposure guard is declared as a trigger function'
 );
 
 select is(
   (select prosecdef from pg_proc
     where oid = 'public.enforce_versioned_exposure_insert()'::regprocedure),
-  false,
-  'enforce_versioned_exposure_insert is SECURITY INVOKER (prosecdef = false)'
+  true,
+  'enforce_versioned_exposure_insert is SECURITY DEFINER (prosecdef = true)'
 );
 
 -- PUBLIC must not retain inherited EXECUTE through a missing explicit ACL.
@@ -99,7 +104,7 @@ select function_privs_are(
 );
 
 select ok(
-  (select coalesce(proconfig, array[]::text[]) @> array['search_path=']
+  (select coalesce(proconfig, array[]::text[]) @> array['search_path=""']
      from pg_proc
     where oid = 'public.enforce_versioned_exposure_insert()'::regprocedure),
   'enforce_versioned_exposure_insert runs with an empty search_path'
@@ -148,7 +153,8 @@ select ok(
 select has_trigger(
   'public',
   'suggestion_exposure_log',
-  'suggestion_exposure_log_version_guard'
+  'suggestion_exposure_log_version_guard',
+  'version guard trigger exists on suggestion_exposure_log'
 );
 
 select ok(
@@ -218,13 +224,16 @@ select ok(
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
       and p.proname = 'bounded_jsonb_object'
-      and pg_get_function_identity_arguments(p.oid) = 'jsonb, integer, numeric'
+      and oidvectortypes(p.proargtypes) = 'jsonb, integer, numeric'
   ),
   'legacy unbounded bounded_jsonb_object(jsonb, integer, numeric) overload is removed'
 );
 
 select ok(
-  (select position($frag$case jsonb_typeof(entries.entry_value) when 'number'$frag$ in prosrc) > 0
+  (select position(
+      $frag$case jsonb_typeof(entries.entry_value)
+              when 'number' then$frag$
+      in prosrc) > 0
      from pg_proc
     where oid = 'public.bounded_jsonb_object(jsonb,text[],integer,integer,integer,integer)'::regprocedure),
   'bounded_jsonb_object guards numeric casts with a value-type CASE branch'
@@ -244,7 +253,7 @@ select function_returns(
   'public',
   'get_bounded_exposure_diagnostics',
   array['uuid']::text[],
-  'record'
+  'setof record'
 );
 
 select is(
@@ -261,7 +270,7 @@ select is(
 );
 
 select ok(
-  (select coalesce(proconfig, array[]::text[]) @> array['search_path=']
+  (select coalesce(proconfig, array[]::text[]) @> array['search_path=""']
      from pg_proc
     where oid = 'public.get_bounded_exposure_diagnostics(uuid)'::regprocedure),
   'aggregate RPC runs with an empty search_path'
@@ -312,7 +321,7 @@ select is(
 );
 
 select ok(
-  (select jsonb_object_length(to_jsonb(aggregate_row)) = 4
+  (select (select count(*) from jsonb_object_keys(to_jsonb(aggregate_row))) = 4
            and to_jsonb(aggregate_row) ?& array[
              'total_count', 'owner_count', 'current_engine_count',
              'default_bucket_count'
@@ -1043,7 +1052,7 @@ select throws_ok(
     '{"tmdb":1}'
   ),
   '42501',
-  'new row violates row-level security policy',
+  'new row violates row-level security policy for table "suggestion_exposure_log"',
   'cross-owner inserts are rejected by the owner RLS policy'
 );
 

@@ -19,7 +19,13 @@ try {
     logLevel: "error",
     root: repositoryRoot,
     resolve: {
-      alias: { "@": sourceRoot },
+      alias: {
+        "@": sourceRoot,
+        // Mirror the Vitest alias: the shared server engine now reaches the
+        // server-only enrollment resolver through the canonical generation
+        // chain; the corpus runner exercises it outside the bundler guard.
+        "server-only": resolve(repositoryRoot, "tests/helpers/serverOnly.ts"),
+      },
     },
     server: { middlewareMode: true, hmr: false },
   });

@@ -5,6 +5,7 @@ import { basename, join, resolve } from "node:path";
 import {
   adaptCanonicalResultToV1,
   adaptCanonicalResultToWeb,
+  adaptCanonicalResultToWebEnvelope,
   adaptV1RecommendationIntent,
   adaptWebRecommendationIntent,
   classifyVoteCategory,
@@ -16,16 +17,24 @@ import {
   normalizeWebRecommendationCount,
   selectCanonicalPalateCleanser,
   selectCanonicalWatchlistPicks,
+  type V1RecommendationDetails,
+  type WebRecommendationDetails,
 } from "@/lib/recommendationAdapters";
 import {
   buildRecommendationPersonalization,
   buildRecommendationScoringInputs,
 } from "@/lib/recommendationPersonalization";
-import type {
-  RecommendationCandidate,
-  RecommendationResult,
+import {
+  DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
+  DEFAULT_EXPERIMENT_BUCKET,
+  DEFAULT_EXPERIMENT_CONFIG_VERSION,
+  validateRecommendationTrace,
+  type RecommendationCandidate,
+  type RecommendationExperimentAssignment,
+  type RecommendationResult,
 } from "@/lib/recommendationTypes";
 import type { TasteProfile, UserContext } from "@/lib/serverSuggestionsEngine";
+import { canonicalFixture } from "../fixtures/recommendations/canonicalFixture";
 
 const candidate = (tmdbId: number, score: number): RecommendationCandidate => ({
   tmdbId,
@@ -908,5 +917,169 @@ describe("web canonical recommendation adapter", () => {
     expect(saveMovieHandler).toMatch(
       /const result = await saveMovie\([\s\S]*?\);\s*if \(!isActiveUid\(activeUid, activeEpoch\)\) return;[\s\S]*?setSavedMovieIds\(/,
     );
+  });
+});
+
+describe("canonical adapter experiment assignment trace parity", () => {
+  const CONTROL_ASSIGNMENT: RecommendationExperimentAssignment = {
+    bucket: "control",
+    configVersion: "37ed98ccebd44c08",
+    assignmentHash: "abcdef0123456789",
+  };
+  const TREATMENT_ASSIGNMENT: RecommendationExperimentAssignment = {
+    bucket: "treatment",
+    configVersion: "37ed98ccebd44c08",
+    assignmentHash: "fedcba9876543210",
+  };
+
+  const v1Details = new Map<number, V1RecommendationDetails>([
+    [
+      303,
+      {
+        title: "Three Oh Three",
+        consensusLevel: "high",
+        sources: ["tmdb"],
+        reasons: ["Strong provider consensus"],
+        genres: ["Mystery"],
+        releaseDate: "2024-04-03",
+        posterPath: "/303.jpg",
+        voteCategory: "hidden-gem",
+      },
+    ],
+  ]);
+  const webDetails = new Map<number, WebRecommendationDetails>([
+    [
+      303,
+      {
+        title: "Three Oh Three",
+        releaseDate: "2024-04-03",
+        posterPath: "/303.jpg",
+        genres: ["Mystery"],
+        runtime: 121,
+        originalLanguage: "en",
+        criticScore: 81,
+      },
+    ],
+  ]);
+
+  it("carries one validated assignment identically through both shared trace adapters", () => {
+    const v1 = adaptCanonicalResultToV1(canonicalFixture.result, v1Details, {
+      experimentAssignment: CONTROL_ASSIGNMENT,
+    });
+    const web = adaptCanonicalResultToWebEnvelope(
+      canonicalFixture.result,
+      webDetails,
+      { experimentAssignment: CONTROL_ASSIGNMENT },
+    );
+
+    for (const trace of [v1.meta.trace, web.trace]) {
+      expect(trace.experimentBucket).toBe(CONTROL_ASSIGNMENT.bucket);
+      expect(trace.experimentConfigVersion).toBe(
+        CONTROL_ASSIGNMENT.configVersion,
+      );
+      expect(trace.experimentAssignmentHash).toBe(
+        CONTROL_ASSIGNMENT.assignmentHash,
+      );
+      expect(validateRecommendationTrace(trace)).toBe(true);
+    }
+    // Both adapters share one bounded builder, so the emitted traces match.
+    expect(web.trace).toEqual(v1.meta.trace);
+  });
+
+  it("keeps result ids, order, scores, and presentation byte-for-byte identical across buckets", () => {
+    const controlV1 = adaptCanonicalResultToV1(
+      canonicalFixture.result,
+      v1Details,
+      { experimentAssignment: CONTROL_ASSIGNMENT },
+    );
+    const treatmentV1 = adaptCanonicalResultToV1(
+      canonicalFixture.result,
+      v1Details,
+      { experimentAssignment: TREATMENT_ASSIGNMENT },
+    );
+    const controlWeb = adaptCanonicalResultToWebEnvelope(
+      canonicalFixture.result,
+      webDetails,
+      { experimentAssignment: CONTROL_ASSIGNMENT },
+    );
+    const treatmentWeb = adaptCanonicalResultToWebEnvelope(
+      canonicalFixture.result,
+      webDetails,
+      { experimentAssignment: TREATMENT_ASSIGNMENT },
+    );
+
+    // Result payloads are byte-for-byte unchanged across assignments.
+    expect(JSON.stringify(treatmentV1.data)).toBe(
+      JSON.stringify(controlV1.data),
+    );
+    expect(JSON.stringify(treatmentWeb.items)).toBe(
+      JSON.stringify(controlWeb.items),
+    );
+    expect(controlV1.data.map((item) => item.tmdb_id)).toEqual(
+      canonicalFixture.result.results.map((candidate) => candidate.tmdbId),
+    );
+
+    // Only the trace assignment fields differ; every other trace field is
+    // identical between the two assignments.
+    for (const [controlTrace, treatmentTrace] of [
+      [controlV1.meta.trace, treatmentV1.meta.trace],
+      [controlWeb.trace, treatmentWeb.trace],
+    ] as const) {
+      expect(treatmentTrace.experimentBucket).toBe(
+        TREATMENT_ASSIGNMENT.bucket,
+      );
+      expect(treatmentTrace.experimentConfigVersion).toBe(
+        TREATMENT_ASSIGNMENT.configVersion,
+      );
+      expect(treatmentTrace.experimentAssignmentHash).toBe(
+        TREATMENT_ASSIGNMENT.assignmentHash,
+      );
+      expect({
+        ...treatmentTrace,
+        experimentBucket: CONTROL_ASSIGNMENT.bucket,
+        experimentAssignmentHash: CONTROL_ASSIGNMENT.assignmentHash,
+      }).toEqual(controlTrace);
+    }
+  });
+
+  it("fails closed to the default trace triple for malformed assignments", () => {
+    const malformedAssignments: unknown[] = [
+      null,
+      "control",
+      { bucket: "variant_a", configVersion: "37ed98ccebd44c08", assignmentHash: "abcdef0123456789" },
+      { bucket: "control", configVersion: "NOT-HEX", assignmentHash: "abcdef0123456789" },
+      { bucket: "control", configVersion: "37ed98ccebd44c08" },
+      { ...CONTROL_ASSIGNMENT, assignmentHash: DEFAULT_EXPERIMENT_ASSIGNMENT_HASH },
+    ];
+
+    for (const malformed of malformedAssignments) {
+      const v1 = adaptCanonicalResultToV1(
+        canonicalFixture.result,
+        v1Details,
+        {
+          experimentAssignment:
+            malformed as RecommendationExperimentAssignment | null,
+        },
+      );
+      const web = adaptCanonicalResultToWebEnvelope(
+        canonicalFixture.result,
+        webDetails,
+        {
+          experimentAssignment:
+            malformed as RecommendationExperimentAssignment | null,
+        },
+      );
+
+      for (const trace of [v1.meta.trace, web.trace]) {
+        expect(trace.experimentBucket).toBe(DEFAULT_EXPERIMENT_BUCKET);
+        expect(trace.experimentConfigVersion).toBe(
+          DEFAULT_EXPERIMENT_CONFIG_VERSION,
+        );
+        expect(trace.experimentAssignmentHash).toBe(
+          DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
+        );
+        expect(validateRecommendationTrace(trace)).toBe(true);
+      }
+    }
   });
 });

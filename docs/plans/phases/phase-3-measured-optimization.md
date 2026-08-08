@@ -7,7 +7,7 @@
 
 ## Checkpoint 3.1A: A/A Enrollment Infrastructure
 
-**Checkpoint state:** In progress
+**Checkpoint state:** Complete
 
 **Files:**
 - Reference: `docs/superpowers/specs/2026-08-04-recommendation-aa-baseline-design.md`
@@ -27,25 +27,26 @@
 - Modify: `docs/plans/MAIN.md`
 
 - [x] Run the frozen versioned offline corpus.
-- [ ] Add failing tests for the approved A/A enrollment control plane, fail-closed assignment resolver, registry persistence, adapter parity, and unchanged arm behavior.
-- [ ] Add the service-owned enrollment table and atomic activation/deactivation RPCs with negative privilege and overlap tests.
-- [ ] Wire one stable 50/50 user-level assignment through the shared canonical web and v1 trace boundary without changing recommendation or vector behavior.
-- [ ] Run focused unit, integration, database, authenticated web/v1 Playwright, corpus, lint, typecheck, and build gates. Complete an independent code-review loop and record its outcome. Verify the release artifact remains inactive without an enrollment row.
-- [ ] Commit code, migration, tests, and tracker evidence with `rtk git commit -m "feat: prepare recommendation baseline enrollment"` before production deployment.
+- [x] Add failing tests for the approved A/A enrollment control plane, fail-closed assignment resolver, registry persistence, adapter parity, and unchanged arm behavior.
+- [x] Add the service-owned enrollment table and atomic activation/deactivation RPCs with negative privilege and overlap tests.
+- [x] Wire one stable 50/50 user-level assignment through the shared canonical web and v1 trace boundary without changing recommendation or vector behavior.
+- [x] Run focused unit, integration, database, authenticated web/v1 Playwright, corpus, lint, typecheck, and build gates. Complete an independent code-review loop and record its outcome. Verify the release artifact remains inactive without an enrollment row.
+- [x] Commit code, migration, tests, and tracker evidence with `rtk git commit -m "feat: prepare recommendation baseline enrollment"` before production deployment.
 
 ### Execution notes
 
 - 2026-08-04 - Checkpoint 3.1A started. No production enrollment timestamp has been fixed and no production experiment results are claimed, measured, or implied. The enrollment discrepancy is resolved by the approved 50/50 user-level A/A design: registry-backed `control` and `treatment` labels will both execute unchanged `v1-canonical-1`, while recommendation tuning and canonical vector retrieval remain inactive. Production paths still emit only default-bucket assignments until the approved infrastructure is tested, committed, deployed inactive, and atomically activated in checkpoint 3.1B. Frozen versioned offline corpus evaluation ran PASS on 2026-08-04 via `rtk npm run evaluate:recommendations`: corpus `2c.1`, 8/8 cases passed, deterministic repeats and web/v1 parity yes on every case, zero seed, exclusion, genre, attribution, and evidence violations, count fulfillment 100% on all eligible cases with the degraded-inputs case returning its expected fail-closed 0/3 result, and vector results and vector rows activated both zero. The offline corpus performs no production writes and requires no enrollment activation.
+- 2026-08-08 - Checkpoint 3.1A complete. The shared server boundary resolves one registry-backed assignment for authenticated web and v1 generation, carries the complete assignment into traces before exposure writes, and fails closed to the default bucket on invalid, failed, inactive, or timed-out enrollment RPCs. Review-driven RED/GREEN cycles covered missing runtime wiring (6 expected failures) and lifecycle/timeout gaps (5 expected failures), then closed atomic lifecycle locking, exact frozen-config validation, half-open window enforcement, controlled-exposure revalidation, and bounded RPC waits. The remote-only Supabase migration was applied inactive as ledger version `20260808210726` (`activate_recommendation_experiment_enrollment`) before the Git checkpoint commit; the local migration filename now uses the same version and `rtk npx supabase migration list` pairs the local and remote histories. Effective service-only RPC/table privileges, RLS, constraints, trigger security, zero enrollment rows, and an inactive resolver with no registry mutation were verified. Remote rollback-only pgTAP passed 147/147 for enrollment and 74/74 for exposure twice each with zero persisted fixtures or activation. Full Vitest passed 774/774, the frozen corpus passed 8/8 with deterministic web/v1 parity and zero vector results/rows, authenticated Playwright passed 2/2 for protected web rendering and v1 generation, and lint, typecheck, build, and diff checks passed. Independent reviews approved with no material findings; true concurrent two-session race execution remains a test-depth risk. Checkpoint 3.1B remains unstarted: no enrollment row, production start/end timestamp, measured result, recommendation tuning, or vector activation is claimed.
 
 ## Checkpoint 3.1B: Atomic Production Enrollment Activation
 
-**Checkpoint state:** Not started
+**Checkpoint state:** Ready
 
 **Files:**
 - Modify: `docs/summary/recommendation-baseline.md`
 - Modify: `docs/plans/MAIN.md`
 
-- [ ] Apply the committed enrollment migration and verify effective service-only table and RPC privileges.
+- [ ] Verify the already-applied inactive enrollment migration matches the committed revision and retains effective service-only table and RPC privileges.
 - [ ] Deploy the committed 3.1A revision with no active enrollment row.
 - [ ] Verify production default fallback, web/v1 health, exposure writes, and zero vector activation.
 - [ ] Invoke the activation RPC once and record its returned UTC start, UTC end, experiment key, config version, assignment unit, and 50/50 split.

@@ -27,7 +27,9 @@ import {
   normalizeTraceRelaxation,
 } from "@/lib/recommendationTelemetry";
 import {
+  DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
   DEFAULT_EXPERIMENT_BUCKET,
+  DEFAULT_EXPERIMENT_CONFIG_VERSION,
   DEFAULT_INPUT_REVISION_HASH,
   MAX_TRACE_SOURCE_SHARE_KEYS,
   RECOMMENDATION_ENGINE_VERSION,
@@ -35,6 +37,7 @@ import {
   RECOMMENDATION_TRACE_RELAXATIONS,
   validateRecommendationTrace,
   type RecommendationCandidate,
+  type RecommendationExperimentAssignment,
   type RecommendationInputHealth,
   type RecommendationResult,
   type RecommendationTrace,
@@ -577,16 +580,21 @@ describe("recommendation telemetry parity and engine emission", () => {
     const details = new Map<number, V1RecommendationDetails>([
       [303, { title: "Three Oh Three", sources: ["tmdb"] }],
     ]);
+    const assignment: RecommendationExperimentAssignment = {
+      bucket: "control",
+      configVersion: "37ed98ccebd44c08",
+      assignmentHash: "abcdef0123456789",
+    };
 
     const adapted = adaptCanonicalResultToV1(result, details, {
       relaxation: "threshold",
-      experimentBucket: "bucket_a",
+      experimentAssignment: assignment,
       inputRevisionMaterial: revisionMaterial,
     });
     const expected = buildRecommendationTrace({
       result,
       relaxation: "threshold",
-      experimentBucket: "bucket_a",
+      experimentAssignment: assignment,
       inputRevisionMaterial: revisionMaterial,
     });
 
@@ -597,7 +605,7 @@ describe("recommendation telemetry parity and engine emission", () => {
     const webTrace = buildRecommendationTrace({
       result,
       relaxation: "threshold",
-      experimentBucket: "bucket_a",
+      experimentAssignment: assignment,
       inputRevisionMaterial: revisionMaterial,
     });
     expect(webTrace).toEqual(adapted.meta.trace);
@@ -608,9 +616,14 @@ describe("recommendation telemetry parity and engine emission", () => {
     const details = new Map<number, WebRecommendationDetails>([
       [303, { title: "Three Oh Three", sources: ["tmdb"] }],
     ]);
+    const assignment: RecommendationExperimentAssignment = {
+      bucket: "control",
+      configVersion: "37ed98ccebd44c08",
+      assignmentHash: "abcdef0123456789",
+    };
 
     const envelope = adaptCanonicalResultToWebEnvelope(result, details, {
-      experimentBucket: "bucket_a",
+      experimentAssignment: assignment,
       inputRevisionMaterial: revisionMaterial,
     });
 
@@ -620,14 +633,14 @@ describe("recommendation telemetry parity and engine emission", () => {
     expect(envelope.trace).toEqual(
       buildRecommendationTrace({
         result,
-        experimentBucket: "bucket_a",
+        experimentAssignment: assignment,
         inputRevisionMaterial: revisionMaterial,
       }),
     );
 
     // Same canonical structure as the v1 adapter for identical options.
     const v1 = adaptCanonicalResultToV1(result, new Map(), {
-      experimentBucket: "bucket_a",
+      experimentAssignment: assignment,
       inputRevisionMaterial: revisionMaterial,
     });
     expect(envelope.trace).toEqual(v1.meta.trace);
@@ -641,5 +654,83 @@ describe("recommendation telemetry parity and engine emission", () => {
     expect(adapted.meta.engine_version).toBe(RECOMMENDATION_ENGINE_VERSION);
     expect(adapted.meta.trace).toEqual(buildRecommendationTrace({ result }));
     expect(validateRecommendationTrace(adapted.meta.trace)).toBe(true);
+  });
+
+  it("fails closed to the default triple for typed-null and malformed assignments", () => {
+    const result = makeResult();
+
+    // A typed null assignment is an explicit no-experiment input.
+    const nullTrace = buildRecommendationTrace({
+      result,
+      experimentAssignment: null,
+    });
+    expect(nullTrace.experimentBucket).toBe(DEFAULT_EXPERIMENT_BUCKET);
+    expect(nullTrace.experimentConfigVersion).toBe(
+      DEFAULT_EXPERIMENT_CONFIG_VERSION,
+    );
+    expect(nullTrace.experimentAssignmentHash).toBe(
+      DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
+    );
+    expect(validateRecommendationTrace(nullTrace)).toBe(true);
+
+    // Runtime-malformed values (only reachable past the typed seam through
+    // unsafe casts) still fail closed to the default triple.
+    const malformed: unknown[] = [
+      undefined,
+      "control",
+      123,
+      { bucket: "control" },
+      {
+        bucket: "control",
+        configVersion: "37ed98ccebd44c08",
+        assignmentHash: "abcdef0123456789",
+        extra: true,
+      },
+      {
+        bucket: "variant_a",
+        configVersion: "37ed98ccebd44c08",
+        assignmentHash: "abcdef0123456789",
+      },
+      {
+        bucket: "control",
+        configVersion: "NOT-HEX",
+        assignmentHash: "abcdef0123456789",
+      },
+      // Default bucket must pair with the zero config version and hash.
+      {
+        bucket: "default",
+        configVersion: "37ed98ccebd44c08",
+        assignmentHash: "abcdef0123456789",
+      },
+    ];
+    for (const experimentAssignment of malformed) {
+      const trace = buildRecommendationTrace({
+        result,
+        experimentAssignment:
+          experimentAssignment as RecommendationExperimentAssignment | null,
+      });
+      expect(trace.experimentBucket).toBe(DEFAULT_EXPERIMENT_BUCKET);
+      expect(trace.experimentConfigVersion).toBe(
+        DEFAULT_EXPERIMENT_CONFIG_VERSION,
+      );
+      expect(trace.experimentAssignmentHash).toBe(
+        DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
+      );
+      expect(validateRecommendationTrace(trace)).toBe(true);
+    }
+
+    // A valid active assignment supplies the full triple unchanged.
+    const validTrace = buildRecommendationTrace({
+      result,
+      experimentAssignment: {
+        bucket: "treatment",
+        configVersion: "37ed98ccebd44c08",
+        assignmentHash: "abcdef0123456789",
+      },
+    });
+    expect(validTrace.experimentBucket).toBe("treatment");
+    expect(validTrace.experimentConfigVersion).toBe("37ed98ccebd44c08");
+    expect(validTrace.experimentAssignmentHash).toBe("abcdef0123456789");
+    expect(validateRecommendationTrace(validTrace)).toBe(true);
   });
 });

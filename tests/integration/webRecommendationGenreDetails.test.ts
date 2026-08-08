@@ -1,38 +1,53 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  it,
+  vi,
+} from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  buildAdjacentGenreMap: vi.fn(() => new Map()),
-  buildFeatureFeedbackFromRows: vi.fn(() => ({
-    avoidActors: [],
-    avoidKeywords: [],
-    avoidFranchises: [],
-    avoidDirectors: [],
-    avoidGenres: [],
-    avoidSubgenres: [],
-    preferActors: [],
-    preferKeywords: [],
-    preferDirectors: [],
-    preferGenres: [],
-    preferSubgenres: [],
-  })),
-  buildTasteProfileServer: vi.fn(),
-  createDeterministicRng: vi.fn(),
-  ensureCompleteTmdbDetails: vi.fn(),
-  generateServerCandidates: vi.fn(),
-  getUser: vi.fn(),
-  getUserContextDiagnostics: vi.fn(),
-  loadCachedTmdbDetails: vi.fn(),
-  loadRecommendationContext: vi.fn(),
-  loadUserContext: vi.fn(),
-  isMetadataCompletionHealthy: vi.fn(() => true),
-  runCanonicalServerRecommendations: vi.fn(),
-  scoreRecommendationsWithOverlap: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const getUser = vi.fn();
+  // Stable service-role client identity so tests can prove the resolver
+  // receives the exact admin client the Action authenticated with.
+  const adminClient = { auth: { getUser }, rpc: vi.fn() };
+  return {
+    adminClient,
+    buildAdjacentGenreMap: vi.fn(() => new Map()),
+    buildFeatureFeedbackFromRows: vi.fn(() => ({
+      avoidActors: [],
+      avoidKeywords: [],
+      avoidFranchises: [],
+      avoidDirectors: [],
+      avoidGenres: [],
+      avoidSubgenres: [],
+      preferActors: [],
+      preferKeywords: [],
+      preferDirectors: [],
+      preferGenres: [],
+      preferSubgenres: [],
+    })),
+    buildTasteProfileServer: vi.fn(),
+    createDeterministicRng: vi.fn(),
+    ensureCompleteTmdbDetails: vi.fn(),
+    generateServerCandidates: vi.fn(),
+    getUser,
+    getUserContextDiagnostics: vi.fn(),
+    loadCachedTmdbDetails: vi.fn(),
+    loadRecommendationContext: vi.fn(),
+    loadUserContext: vi.fn(),
+    isMetadataCompletionHealthy: vi.fn(() => true),
+    recordRecommendationExposures: vi.fn(),
+    resolveRecommendationExperimentAssignment: vi.fn(),
+    runCanonicalServerRecommendations: vi.fn(),
+    scoreRecommendationsWithOverlap: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/supabaseAdmin", () => ({
-  getSupabaseAdmin: () => ({
-    auth: { getUser: mocks.getUser },
-  }),
+  getSupabaseAdmin: () => mocks.adminClient,
 }));
 
 vi.mock("@/lib/recommendationCandidates", () => ({
@@ -47,6 +62,21 @@ vi.mock("@/lib/recommendationScoring", () => ({
 vi.mock("@/lib/recommendationContext", () => ({
   loadRecommendationContext: mocks.loadRecommendationContext,
 }));
+
+vi.mock("@/lib/recommendationExperimentEnrollment", () => ({
+  resolveRecommendationExperimentAssignment:
+    mocks.resolveRecommendationExperimentAssignment,
+}));
+
+vi.mock("@/lib/recommendationTelemetry", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/lib/recommendationTelemetry")
+  >("@/lib/recommendationTelemetry");
+  return {
+    ...actual,
+    recordRecommendationExposures: mocks.recordRecommendationExposures,
+  };
+});
 
 vi.mock("@/lib/recommendationGeneration", async () => {
   const actual = await vi.importActual<
@@ -89,6 +119,8 @@ vi.mock("@/lib/serverSuggestionsEngine", () => ({
   isMetadataCompletionHealthy: mocks.isMetadataCompletionHealthy,
   loadCachedTmdbDetails: mocks.loadCachedTmdbDetails,
   loadUserContext: mocks.loadUserContext,
+  resolveServerRecommendationExperimentAssignment:
+    mocks.resolveRecommendationExperimentAssignment,
   runCanonicalServerRecommendations: mocks.runCanonicalServerRecommendations,
 }));
 
@@ -100,9 +132,14 @@ import {
 import { suggestByOverlap, type TMDBMovie } from "@/lib/enrich";
 import { buildRecommendationTrace } from "@/lib/recommendationTelemetry";
 import {
+  DEFAULT_EXPERIMENT_ASSIGNMENT,
+  DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
+  DEFAULT_EXPERIMENT_BUCKET,
+  DEFAULT_EXPERIMENT_CONFIG_VERSION,
   RECOMMENDATION_ENGINE_VERSION,
   validateRecommendationTrace,
   type RecommendationDiagnostics,
+  type RecommendationExperimentAssignment,
 } from "@/lib/recommendationTypes";
 
 const successfulResult = (result: CanonicalWebRecommendationResult) => {
@@ -156,6 +193,9 @@ describe("canonical web standard-genre detail completion", () => {
       data: { user: { id: "genre-user" } },
       error: null,
     });
+    mocks.resolveRecommendationExperimentAssignment.mockResolvedValue(
+      DEFAULT_EXPERIMENT_ASSIGNMENT,
+    );
     mocks.loadUserContext.mockResolvedValue({
       films: [],
       mappings: new Map(),
@@ -256,7 +296,7 @@ describe("canonical web standard-genre detail completion", () => {
         const results = scored.slice(0, count);
         return {
           results,
-          diagnostics: {},
+          diagnostics: WEB_MOCK_DIAGNOSTICS,
           trace: VALID_ENGINE_TRACE,
           preRanksById: new Map<number, number>(
             results.map(
@@ -331,7 +371,7 @@ describe("canonical web standard-genre detail completion", () => {
         });
         return {
           results: scored,
-          diagnostics: {},
+          diagnostics: WEB_MOCK_DIAGNOSTICS,
           trace: VALID_ENGINE_TRACE,
           preRanksById: new Map<number, number>([
             [202, 7],
@@ -440,7 +480,7 @@ describe("canonical web standard-genre detail completion", () => {
                   },
                 ]
               : [],
-          diagnostics: {},
+          diagnostics: WEB_MOCK_DIAGNOSTICS,
           preRanksById: new Map<number, number>(),
         };
       },
@@ -615,7 +655,7 @@ describe("canonical web standard-genre detail completion", () => {
         });
         return {
           results: scored.filter(({ tmdbId }) => tmdbId !== 101),
-          diagnostics: {},
+          diagnostics: WEB_MOCK_DIAGNOSTICS,
           preRanksById: new Map<number, number>(),
         };
       },
@@ -846,5 +886,124 @@ describe("canonical web standard-genre detail completion", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("forwards the resolved experiment assignment into the returned canonical trace", async () => {
+    const controlledAssignment: RecommendationExperimentAssignment = {
+      bucket: "control",
+      configVersion: "37ed98ccebd44c08",
+      assignmentHash: "abcdef0123456789",
+    };
+    mocks.resolveRecommendationExperimentAssignment.mockResolvedValue(
+      controlledAssignment,
+    );
+
+    const success = successfulResult(
+      await generateCanonicalWebRecommendations({
+        accessToken: "genre-action-token-1234567890",
+        count: 10,
+        genreNames: ["Action"],
+        requestSeed: "web-experiment-assignment-forwarding",
+      }),
+    );
+
+    // Resolved exactly once after auth for the authenticated user.
+    expect(
+      mocks.resolveRecommendationExperimentAssignment,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.resolveRecommendationExperimentAssignment,
+    ).toHaveBeenCalledWith("genre-user");
+
+    expect(success.trace.experimentBucket).toBe("control");
+    expect(success.trace.experimentConfigVersion).toBe("37ed98ccebd44c08");
+    expect(success.trace.experimentAssignmentHash).toBe("abcdef0123456789");
+    expect(validateRecommendationTrace(success.trace)).toBe(true);
+    // Items, ordering, scores, and pre-ranks survive alongside the assignment.
+    expect(success.items.map((item) => item.id)).toEqual([101]);
+    expect(success.preRanks).toEqual([[101, 1]]);
+  });
+
+  it("keeps generating with default assignment fields when enrollment resolution falls closed", async () => {
+    mocks.resolveRecommendationExperimentAssignment.mockResolvedValue(
+      DEFAULT_EXPERIMENT_ASSIGNMENT,
+    );
+
+    const success = successfulResult(
+      await generateCanonicalWebRecommendations({
+        accessToken: "genre-action-token-1234567890",
+        count: 10,
+        genreNames: ["Action"],
+        requestSeed: "web-experiment-default-fallback",
+      }),
+    );
+
+    expect(mocks.resolveRecommendationExperimentAssignment).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(success.items.map((item) => item.id)).toEqual([101]);
+    expect(success.trace.experimentBucket).toBe(DEFAULT_EXPERIMENT_BUCKET);
+    expect(success.trace.experimentConfigVersion).toBe(
+      DEFAULT_EXPERIMENT_CONFIG_VERSION,
+    );
+    expect(success.trace.experimentAssignmentHash).toBe(
+      DEFAULT_EXPERIMENT_ASSIGNMENT_HASH,
+    );
+    expect(validateRecommendationTrace(success.trace)).toBe(true);
+  });
+
+  it("keeps canonical web payloads identical across control and treatment assignments", async () => {
+    const controlAssignment: RecommendationExperimentAssignment = {
+      bucket: "control",
+      configVersion: "37ed98ccebd44c08",
+      assignmentHash: "abcdef0123456789",
+    };
+    const treatmentAssignment: RecommendationExperimentAssignment = {
+      bucket: "treatment",
+      configVersion: "37ed98ccebd44c08",
+      assignmentHash: "fedcba9876543210",
+    };
+
+    const generateWith = async (
+      assignment: RecommendationExperimentAssignment,
+    ) => {
+      mocks.resolveRecommendationExperimentAssignment.mockResolvedValue(
+        assignment,
+      );
+      return successfulResult(
+        await generateCanonicalWebRecommendations({
+          accessToken: "genre-action-token-1234567890",
+          count: 10,
+          genreNames: ["Action"],
+          requestSeed: "web-aa-arm-parity",
+        }),
+      );
+    };
+
+    const control = await generateWith(controlAssignment);
+    const treatment = await generateWith(treatmentAssignment);
+
+    // A/A invariant: the arm label never changes the canonical payload.
+    expect(JSON.stringify(treatment.items)).toBe(
+      JSON.stringify(control.items),
+    );
+    expect(JSON.stringify(treatment.preRanks)).toBe(
+      JSON.stringify(control.preRanks),
+    );
+    expect(JSON.stringify(treatment.diagnostics)).toBe(
+      JSON.stringify(control.diagnostics),
+    );
+
+    // Only the trace assignment fields differ; every other trace field is
+    // identical between the two arms.
+    expect(treatment.trace.experimentBucket).toBe("treatment");
+    expect(treatment.trace.experimentAssignmentHash).toBe(
+      treatmentAssignment.assignmentHash,
+    );
+    expect({
+      ...treatment.trace,
+      experimentBucket: controlAssignment.bucket,
+      experimentAssignmentHash: controlAssignment.assignmentHash,
+    }).toEqual(control.trace);
   });
 });

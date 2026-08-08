@@ -6,6 +6,10 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 vi.mock("@/lib/supabaseClient", () => ({ supabase: undefined }));
 
 import {
+  adaptCanonicalResultToV1,
+  adaptCanonicalResultToWebEnvelope,
+} from "@/lib/recommendationAdapters";
+import {
   buildBoundedExposureDiagnostics,
   buildRecommendationExposureRecords,
   buildRecommendationTrace,
@@ -29,6 +33,7 @@ import {
   RECOMMENDATION_DROP_REASONS,
   RECOMMENDATION_ENGINE_VERSION,
   RECOMMENDATION_PROVIDER_FAMILIES,
+  type RecommendationExperimentAssignment,
   type RecommendationTrace,
   type SourceHealth,
 } from "@/lib/recommendationTypes";
@@ -599,6 +604,47 @@ describe("web and v1 adapter exposure parity", () => {
     });
 
     expect(v1).toEqual(web);
+  });
+
+  it("copies the active adapter assignment triple exactly into every web and v1 row", () => {
+    const assignment: RecommendationExperimentAssignment = {
+      bucket: "control",
+      configVersion: "37ed98ccebd44c08",
+      assignmentHash: "abcdef0123456789",
+    };
+
+    const v1Trace = adaptCanonicalResultToV1(
+      canonicalFixture.result,
+      new Map(),
+      { experimentAssignment: assignment },
+    ).meta.trace;
+    const webTrace = adaptCanonicalResultToWebEnvelope(
+      canonicalFixture.result,
+      new Map(),
+      { experimentAssignment: assignment },
+    ).trace;
+
+    const webRecords = buildRecommendationExposureRecords({
+      userId: USER_ID,
+      trace: webTrace,
+      orderedTmdbIds: FINAL_ORDER,
+    });
+    const v1Records = buildRecommendationExposureRecords({
+      userId: USER_ID,
+      trace: v1Trace,
+      orderedTmdbIds: FINAL_ORDER,
+    });
+
+    expect(webRecords).toHaveLength(FINAL_ORDER.length);
+    expect(v1Records).toHaveLength(FINAL_ORDER.length);
+    for (const record of [...webRecords, ...v1Records]) {
+      expect(record.experiment_bucket).toBe(assignment.bucket);
+      expect(record.experiment_config_version).toBe(assignment.configVersion);
+      expect(record.assignment_hash).toBe(assignment.assignmentHash);
+      expect(validateRecommendationExposureRecord(record)).toBe(true);
+    }
+    // Same adapter traces and same final order produce identical records.
+    expect(v1Records).toEqual(webRecords);
   });
 
   it("routes both production adapters through the shared sink and removes the legacy writer", () => {

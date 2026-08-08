@@ -21,6 +21,7 @@ import {
   getUserContextDiagnostics,
   loadCachedTmdbDetails,
   loadUserContext,
+  resolveServerRecommendationExperimentAssignment,
 } from "@/lib/serverSuggestionsEngine";
 import {
   buildBlockedSourceFailureResponse,
@@ -187,6 +188,12 @@ export async function POST(req: Request) {
         limit: body.limit,
       });
 
+      // Checkpoint 3.1A: resolve the frozen A/A assignment once after auth.
+      // The resolver fails closed to the default assignment and never throws,
+      // so recommendation generation always continues unchanged.
+      const experimentAssignment =
+        await resolveServerRecommendationExperimentAssignment(auth.userId);
+
       const userContext = await loadUserContext(auth.userId);
       const generationDiagnostics = buildGenerationDiagnostics({
         context: getUserContextDiagnostics(userContext),
@@ -273,6 +280,7 @@ export async function POST(req: Request) {
           relaxation: deriveAppliedRelaxation(
             filterDiagnostics.applied_stages,
           ),
+          experimentAssignment,
           inputRevisionMaterial: canonicalContext.revisionMaterial,
         },
       );

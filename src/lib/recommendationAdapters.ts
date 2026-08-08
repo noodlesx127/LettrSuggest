@@ -4,6 +4,7 @@ import { TMDB_GENRE_MAP } from "@/lib/genreEnhancement";
 import type { RecommendationInputRevisionMaterial } from "@/lib/recommendationContext";
 import { buildRecommendationTrace } from "@/lib/recommendationTelemetry";
 import type {
+  RecommendationExperimentAssignment,
   RecommendationRequest,
   RecommendationResult,
   RecommendationTrace,
@@ -864,7 +865,13 @@ export type V1RecommendationDetails = Readonly<{
 
 export type V1RecommendationTraceOptions = Readonly<{
   relaxation?: RecommendationTraceRelaxation;
-  experimentBucket?: string;
+  /**
+   * The complete validated experiment assignment (checkpoint 3.1A). The
+   * assignment triple is forwarded unchanged to the shared trace builder;
+   * malformed or missing assignments fail closed there to the default
+   * bucket with the zero config version and zero assignment hash.
+   */
+  experimentAssignment?: RecommendationExperimentAssignment | null;
   inputRevisionMaterial?: RecommendationInputRevisionMaterial | null;
 }>;
 
@@ -974,7 +981,7 @@ export function adaptCanonicalResultToV1(
       trace: buildRecommendationTrace({
         result,
         relaxation: options?.relaxation,
-        experimentBucket: options?.experimentBucket,
+        experimentAssignment: options?.experimentAssignment ?? null,
         inputRevisionMaterial: options?.inputRevisionMaterial ?? null,
       }),
     },
@@ -1066,7 +1073,7 @@ export function adaptCanonicalResultToWebEnvelope(
     trace: buildRecommendationTrace({
       result,
       relaxation: options?.relaxation,
-      experimentBucket: options?.experimentBucket,
+      experimentAssignment: options?.experimentAssignment ?? null,
       inputRevisionMaterial: options?.inputRevisionMaterial ?? null,
     }),
   };

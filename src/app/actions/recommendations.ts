@@ -1,7 +1,7 @@
 "use server";
 
 import {
-  adaptCanonicalResultToWeb,
+  adaptCanonicalResultToWebEnvelope,
   extractCachedWebRecommendationMetadata,
   normalizeWebRecommendationCount,
 } from "@/lib/recommendationAdapters";
@@ -25,11 +25,11 @@ import {
   isMetadataCompletionHealthy,
   loadCachedTmdbDetails,
   loadUserContext,
+  resolveServerRecommendationExperimentAssignment,
 } from "@/lib/serverSuggestionsEngine";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   createMetadataUnavailableRecommendationResult,
-  type CanonicalWebRecommendationItem,
   type CanonicalWebRecommendationSuccess,
   type CanonicalWebRecommendationResult,
 } from "@/lib/recommendationActionTypes";
@@ -60,6 +60,11 @@ async function generateCanonicalWebRecommendationsInternal(
   }
 
   const userId = data.user.id;
+  // Checkpoint 3.1A: resolve the frozen A/A assignment once after auth. The
+  // resolver fails closed to the default assignment and never throws, so
+  // recommendation generation always continues unchanged.
+  const experimentAssignment =
+    await resolveServerRecommendationExperimentAssignment(userId);
   const userContext = await loadUserContext(userId);
   const contextDiagnostics = getUserContextDiagnostics(userContext);
   const preflight = decideRecommendationInputPreflight({
@@ -180,18 +185,23 @@ async function generateCanonicalWebRecommendationsInternal(
       ).map((keyword) => keyword.name),
     });
   }
-  const items: CanonicalWebRecommendationItem[] = adaptCanonicalResultToWeb(
+  const { items, trace } = adaptCanonicalResultToWebEnvelope(
     result,
     detailsForWeb,
+    {
+      experimentAssignment,
+      inputRevisionMaterial: canonicalContext.revisionMaterial,
+    },
   );
 
-  // The engine builds and validates this trace via the shared builder, so every
-  // successful web result carries the identical canonical diagnostic structure.
+  // The envelope builds and validates this trace via the shared builder, so
+  // every successful web result carries the identical canonical diagnostic
+  // structure plus the complete experiment assignment.
   // preRanks serializes the bounded engine pre-rank map into seam-safe tuples.
   return {
     items,
     diagnostics: result.diagnostics,
-    trace: result.trace,
+    trace,
     preRanks: [...result.preRanksById.entries()],
   };
 }

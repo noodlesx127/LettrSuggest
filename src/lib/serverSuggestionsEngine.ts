@@ -21,6 +21,7 @@ import {
   type RecommendationEngineDependencies,
   type RecommendationEngineResult,
 } from "@/lib/recommendationEngine";
+import { resolveRecommendationExperimentAssignment } from "@/lib/recommendationExperimentEnrollment";
 import { runCanonicalRecommendation } from "@/lib/recommendationGeneration";
 import type { FeatureFeedbackRow } from "@/lib/recommendationFeedback";
 import {
@@ -31,7 +32,10 @@ import {
   type ServerSeedInput,
   type SourceMetadata,
 } from "@/lib/recommendationRetrieval";
-import type { RecommendationRequestInput } from "@/lib/recommendationTypes";
+import type {
+  RecommendationExperimentAssignment,
+  RecommendationRequestInput,
+} from "@/lib/recommendationTypes";
 
 export {
   buildAdjacentGenreMap,
@@ -140,6 +144,22 @@ export async function runCanonicalServerRecommendations(
   dependencies: RecommendationEngineDependencies,
 ): Promise<RecommendationEngineResult> {
   return runCanonicalRecommendation(request, dependencies);
+}
+
+/**
+ * Checkpoint 3.1A shared web/v1 experiment assignment boundary.
+ *
+ * Both authenticated production surfaces resolve the frozen A/A assignment
+ * exactly once per request through the fail-closed enrollment resolver. This
+ * boundary only forwards the authenticated user id: it never chooses an arm,
+ * caches, randomizes, or touches recommendation behavior. The resolver
+ * absorbs every failure and returns DEFAULT_EXPERIMENT_ASSIGNMENT, so this
+ * call can never block recommendation generation.
+ */
+export async function resolveServerRecommendationExperimentAssignment(
+  userId: string | null | undefined,
+): Promise<RecommendationExperimentAssignment> {
+  return resolveRecommendationExperimentAssignment({ userId });
 }
 
 type CachedTasteProfileRow = {

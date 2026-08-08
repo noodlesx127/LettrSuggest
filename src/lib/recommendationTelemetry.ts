@@ -25,6 +25,7 @@ import {
   validateRecommendationTrace,
   type DropReason,
   type RecommendationEngineVersion,
+  type RecommendationExperimentAssignment,
   type RecommendationExperimentBucket,
   type RecommendationProviderFamily,
   type RecommendationResult,
@@ -152,14 +153,22 @@ export function deriveAppliedRelaxation(
 export type RecommendationTraceInput = Readonly<{
   result: RecommendationResult;
   relaxation?: unknown;
+  /**
+   * Low-level legacy bucket fallback (pre-2C.2 seam). Kept as an untyped
+   * boundary so malformed runtime values are normalized fail-closed by
+   * {@link normalizeExperimentBucket}; only used when no valid
+   * `experimentAssignment` is supplied.
+   */
   experimentBucket?: unknown;
   /**
    * Additive active experiment assignment (checkpoint 2C.2). When a valid
    * assignment is supplied it provides both the experiment bucket and the
    * experiment config version; malformed assignments fail closed to the
-   * default bucket with the zero config version.
+   * default bucket with the zero config version. The runtime validator still
+   * guards this field so values smuggled past the typed seam through unsafe
+   * casts cannot reach a trace.
    */
-  experimentAssignment?: unknown;
+  experimentAssignment?: RecommendationExperimentAssignment | null;
   inputRevision?: string | null;
   inputRevisionMaterial?: RecommendationInputRevisionMaterial | null;
 }>;
