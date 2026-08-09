@@ -1,23 +1,44 @@
-# Recommendation Baseline Readiness Protocol
+# Recommendation Baseline Protocol and Active Window
 
-**Status:** Readiness protocol only. **No production experiment results are
-claimed, measured, or implied by this document.**
+**Status:** Enrollment active. **No production outcome result is claimed,
+measured, or implied by this document.**
+
+## Active Production Enrollment
+
+- Experiment key: `phase-3-1-canonical-aa-baseline-r1`
+- Config version: `37ed98ccebd44c08`
+- Engine version: `v1-canonical-1` in both labels
+- Assignment unit: `user`
+- Traffic split: `control=0.5`, `treatment=0.5`
+- Enrollment window: `[2026-08-09 00:45:21.379590+00, 2026-08-23 00:45:21.379590+00)`
+- Attribution maturation ends: `2026-08-30 00:45:21.379590+00`
+- Canonical vector retrieval: disabled
+
+The service-owned activation RPC returned this row from its single production
+invocation. The committed 3.1A build was deployed and smoke-tested while the
+control plane was still inactive before activation. Post-activation production
+checks verified a registry-backed real `control` exposure, exact window
+persistence, canonical engine-only traffic, no orphan assignment evidence, and
+zero vector-share activation. The available real test identity deterministically
+belongs to `control`; a rollback-only remote transaction verified that exact
+registry evidence permits one controlled exposure in each arm while active and
+left no fixture users, profiles, assignments, or exposures. This is operational
+integrity evidence, not baseline outcome analysis.
 
 Checkpoint 2C.2 prepared the measurement boundary (deterministic assignment,
 server-owned assignment registry, versioned exposure telemetry, and bounded
-exposure-to-feedback outcome joins). This document fixes the rules any future
-baseline measurement or controlled experiment must follow before tuning is
-permitted (Phase 3).
+exposure-to-feedback outcome joins). It also fixed the rules this active
+baseline and any later controlled experiment must follow before tuning is
+permitted.
 
 ## Scope of checkpoint 2C.2
 
-Checkpoint 2C.2 **prepares** the assignment, registry, and exposure-to-feedback
-join boundaries only. It **does not activate control/treatment traffic** in
-production, assigns no real user to an arm, and changes no recommendation
-quality weights. Activation/orchestration of a controlled experiment and the
-accepted treatment are owned by Phase 3.1 (baseline report and optimization
-hypothesis) and the later Phase 3 checkpoints. This document preregisters
-protocol only; it claims no measured results.
+Checkpoint 2C.2 prepared the assignment, registry, and exposure-to-feedback
+join boundaries without activating traffic or changing recommendation quality
+weights. Checkpoint 3.1B subsequently activated the frozen A/A baseline recorded
+above. The preregistered protocol remains binding for this run; this document
+still claims no measured outcome result before checkpoint 3.1C's one permitted
+post-maturation analysis.
 
 ## 1. Population
 

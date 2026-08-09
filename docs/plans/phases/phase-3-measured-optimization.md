@@ -40,22 +40,26 @@
 
 ## Checkpoint 3.1B: Atomic Production Enrollment Activation
 
-**Checkpoint state:** Ready
+**Checkpoint state:** Complete
 
 **Files:**
 - Modify: `docs/summary/recommendation-baseline.md`
 - Modify: `docs/plans/MAIN.md`
 
-- [ ] Verify the already-applied inactive enrollment migration matches the committed revision and retains effective service-only table and RPC privileges.
-- [ ] Deploy the committed 3.1A revision with no active enrollment row.
-- [ ] Verify production default fallback, web/v1 health, exposure writes, and zero vector activation.
-- [ ] Invoke the activation RPC once and record its returned UTC start, UTC end, experiment key, config version, assignment unit, and 50/50 split.
-- [ ] Verify registry-backed exposures appear in both arms while recommendation behavior remains identical.
-- [ ] Commit production activation evidence with `rtk git commit -m "ops: start recommendation baseline enrollment"`.
+- [x] Verify the already-applied inactive enrollment migration matches the committed revision and retains effective service-only table and RPC privileges.
+- [x] Deploy the committed 3.1A revision with no active enrollment row.
+- [x] Verify production default fallback, web/v1 health, exposure writes, and zero vector activation.
+- [x] Invoke the activation RPC once and record its returned UTC start, UTC end, experiment key, config version, assignment unit, and 50/50 split.
+- [x] Verify registry-backed exposures appear in both arms while recommendation behavior remains identical.
+- [x] Commit production activation evidence with `rtk git commit -m "ops: start recommendation baseline enrollment"`.
+
+### Execution notes
+
+- 2026-08-09 UTC - Checkpoint 3.1B complete. Remote preflight verified migration ledger versions `20260803120000` and `20260808210726` exactly once, zero enrollment and frozen-assignment rows, service-role-only enrollment RPC execution, RLS-protected RPC-only enrollment storage, the enabled exposure guard, the partial user-assignment uniqueness index, and zero historical vector-share activation. Clean detached commit `b31c3b45484587c0271beca4ef031e4e519afd8f` was manually deployed to Netlify production as deploy `6a77c7c3bec049fb6f0cae50`; Netlify reported `ready`, production context, published status, title `b31c3b4 feat: prepare recommendation baseline enrollment`, and HTTP 200. Manual upload metadata left `commit_ref` empty, so the clean checkout SHA plus deploy title are the revision evidence. Before activation, authenticated production Playwright passed 2/2, one fresh v1 exposure persisted with the default zero assignment, controlled exposures remained zero, and vector-share exposures remained zero. The service-owned activation RPC was then invoked exactly once and returned key `phase-3-1-canonical-aa-baseline-r1`, config `37ed98ccebd44c08`, engine `v1-canonical-1`, user assignment, 0.5/0.5 traffic, start `2026-08-09 00:45:21.379590+00`, end `2026-08-23 00:45:21.379590+00`, and no deactivation timestamp. Post-activation authenticated v1 generation passed and persisted one registry-backed `control` exposure with no orphan, noncanonical-engine, or vector-share exposure. Because only one real test identity exists and its deterministic arm is control, a rollback-only production transaction verified one registry-backed exposure in each arm and zero vector share; follow-up inspection proved zero probe users, profiles, assignments, or exposures persisted. Identical recommendation behavior remains established by the frozen A/A contract and the 3.1A web/v1 parity and corpus gates. These checks are activation/integrity evidence only and are not an interim outcome analysis.
 
 ## Checkpoint 3.1C: Baseline Report and Optimization Hypothesis
 
-**Checkpoint state:** Not started
+**Checkpoint state:** Ready
 
 **Files:**
 - Modify: `docs/summary/recommendation-baseline.md`
