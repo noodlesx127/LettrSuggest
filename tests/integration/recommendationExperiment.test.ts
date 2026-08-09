@@ -3161,13 +3161,18 @@ describe("recommendation baseline protocol", () => {
     expect(baseline).toMatch(/final included\s+exposure/i);
   });
 
-  it("states 2C.2 prepares boundaries only and defers activation to Phase 3.1", () => {
-    expect(baseline).toMatch(/does not activate/i);
-    expect(baseline).toMatch(/control\/treatment traffic/i);
-    expect(baseline).toMatch(/activation\/orchestration/i);
-    expect(baseline).toMatch(/accepted treatment/i);
-    expect(baseline).toMatch(/phase 3\.1/i);
-    expect(baseline).toMatch(/claims no measured results/i);
+  it("records the active frozen A/A window without claiming an outcome result", () => {
+    expect(baseline).toMatch(/status:\*\* enrollment active/i);
+    expect(baseline).toContain("phase-3-1-canonical-aa-baseline-r1");
+    expect(baseline).toContain("37ed98ccebd44c08");
+    expect(baseline).toContain(
+      "[2026-08-09 00:45:21.379590+00, 2026-08-23 00:45:21.379590+00)",
+    );
+    expect(baseline).toContain("2026-08-30 00:45:21.379590+00");
+    expect(baseline).toMatch(/engine version: `v1-canonical-1` in both labels/i);
+    expect(baseline).toMatch(/canonical vector retrieval: disabled/i);
+    expect(baseline).toMatch(/no production outcome result is claimed/i);
+    expect(baseline).toMatch(/rollback-only remote transaction/i);
   });
 });
 
